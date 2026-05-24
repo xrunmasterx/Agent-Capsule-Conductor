@@ -159,3 +159,39 @@ All graph edits must validate before save. Dangerous permission escalation must 
 ## Testing rule
 
 Keep all previous acceptance tests passing. Add new tests for capsule scaffolding, workflow graph validation, graph runner, API endpoints, and web build. Default tests must remain hermetic.
+
+# Phase 4: Graph Workbench Rules
+
+This repository already has a working headless Agent Capsule runtime and an editable workbench prototype. In this phase, implement a graph-first workbench.
+
+## Must preserve
+
+- Do not rewrite `acc run`.
+- Do not rewrite existing adapters.
+- Do not break existing MVP tests.
+- Default tests must remain hermetic.
+- Do not require real Codex/Claude credentials for default tests.
+- `--emit-conductor-json` stdout contract must remain unchanged.
+
+## UX priorities
+
+1. UI must be Chinese-first.
+2. The workflow builder must show actual node dependencies as a DAG.
+3. Users must be able to add capsules as graph nodes.
+4. Users must be able to connect nodes by dragging edges.
+5. The graph must support serial and parallel structure visually.
+6. Each node must show status, runtime, capsule id, and important warnings.
+7. Node input/output/artifact inspection must be reachable from the graph.
+8. Keep the UI practical and clean. Avoid decorative features.
+
+## Forbidden in this phase
+
+- No full Dify clone.
+- No custom LLM agent loop.
+- No autonomous graph scheduler.
+- No AI auto-apply graph mutation without validation and human confirmation.
+- No complex collaboration, permissions, cloud deployment, or marketplace.
+
+## Recommended frontend direction
+
+Prefer React Flow + ELK/Dagre layout for the graph canvas, unless the existing project has already committed to a different graph library. Keep the graph schema independent from the UI library.

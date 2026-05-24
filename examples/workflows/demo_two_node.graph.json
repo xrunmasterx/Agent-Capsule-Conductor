@@ -16,8 +16,10 @@
       "id": "fake",
       "capsule_id": "fake-agent.generic",
       "input": {
-        "topic": "{{ nodes.echo.output.summary }}",
         "notes": "generated from the previous echo node"
+      },
+      "input_mapping": {
+        "topic": "{{ nodes.echo.output.summary }}"
       },
       "position": {"x": 360, "y": 0}
     }

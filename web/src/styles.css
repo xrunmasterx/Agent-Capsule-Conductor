@@ -637,11 +637,244 @@ small {
   font-size: 13px;
 }
 
+.graph-workbench {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: calc(100vh - 36px);
+}
+
+.graph-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: 72px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #d7dde2;
+}
+
+.graph-toolbar h2,
+.node-library h3,
+.graph-inspector h3 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.graph-toolbar p {
+  margin: 4px 0 0;
+  color: #61707d;
+  font-size: 13px;
+}
+
+.toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.toolbar-actions button,
+.node-library button,
+.graph-inspector button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 7px 10px;
+  border: 1px solid #b8d8d1;
+  border-radius: 7px;
+  background: #f8fafb;
+  color: #0f5f59;
+  font-weight: 700;
+}
+
+.graph-layout {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr) 360px;
+  min-height: 0;
+}
+
+.node-library,
+.graph-inspector {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding: 14px;
+  min-width: 0;
+  overflow: auto;
+}
+
+.node-library {
+  border-right: 1px solid #d7dde2;
+  background: #fbfcfd;
+}
+
+.node-library header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.node-library header span {
+  color: #61707d;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.search-box {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 8px;
+  border: 1px solid #c6d0d7;
+  border-radius: 7px;
+  background: #ffffff;
+}
+
+.search-box select,
+.graph-inspector input,
+.graph-inspector textarea {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+}
+
+.workflow-list {
+  display: grid;
+  gap: 8px;
+}
+
+.workflow-list h4 {
+  margin: 8px 0 0;
+  color: #61707d;
+  font-size: 13px;
+}
+
+.graph-canvas {
+  min-width: 0;
+  min-height: 560px;
+  background: #f7fafb;
+}
+
+.capsule-flow-node {
+  display: grid;
+  gap: 6px;
+  width: 230px;
+  padding: 12px;
+  border: 1px solid #b9c6cf;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 8px 22px rgb(24 32 38 / 8%);
+}
+
+.capsule-flow-node.selected {
+  border-color: #0f766e;
+  box-shadow: 0 0 0 2px rgb(15 118 110 / 18%);
+}
+
+.capsule-flow-node header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.capsule-flow-node strong,
+.capsule-flow-node p,
+.capsule-flow-node small {
+  overflow-wrap: anywhere;
+}
+
+.capsule-flow-node p {
+  margin: 0;
+  color: #45545f;
+  font-size: 13px;
+}
+
+.capsule-flow-node small {
+  color: #61707d;
+}
+
+.warning-text {
+  color: #9b2525 !important;
+}
+
+.graph-inspector {
+  border-left: 1px solid #d7dde2;
+  background: #ffffff;
+}
+
+.inspector-section {
+  display: grid;
+  gap: 12px;
+}
+
+.inspector-section label {
+  display: grid;
+  gap: 5px;
+  color: #61707d;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.inspector-section input,
+.inspector-section textarea {
+  border: 1px solid #c6d0d7;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #182026;
+}
+
+.inspector-section input {
+  min-height: 34px;
+  padding: 6px 8px;
+}
+
+.inspector-section textarea {
+  min-height: 120px;
+  padding: 8px;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.definition-grid.compact {
+  grid-template-columns: 96px minmax(0, 1fr);
+  font-size: 13px;
+}
+
+.path-grid.single {
+  grid-template-columns: 1fr;
+}
+
+.graph-bottom-panel {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 10px 14px;
+  border-top: 1px solid #d7dde2;
+  background: #fbfcfd;
+  color: #45545f;
+  font-size: 13px;
+}
+
+.graph-bottom-panel strong {
+  color: #182026;
+}
+
 @media (max-width: 980px) {
   .shell,
   .split,
   .split.compact,
-  .inspector-grid {
+  .inspector-grid,
+  .graph-layout {
     grid-template-columns: 1fr;
   }
 

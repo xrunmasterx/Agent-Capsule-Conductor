@@ -69,6 +69,14 @@ const routes: Record<string, unknown> = {
   '/api/capsules': {
     capsules: [
       {
+        id: 'echo-test.generic',
+        version: '0.1.0',
+        name: 'Echo Test',
+        description: 'Echo fixture capsule',
+        runtime: 'generic_cli',
+        workspace: 'existing_dir',
+      },
+      {
         id: 'fake-agent.generic',
         version: '0.1.0',
         name: 'Fake Agent',
@@ -77,6 +85,26 @@ const routes: Record<string, unknown> = {
         workspace: 'existing_dir',
       },
     ],
+  },
+  '/api/capsules/echo-test.generic': {
+    id: 'echo-test.generic',
+    version: '0.1.0',
+    name: 'Echo Test',
+    description: 'Echo fixture capsule',
+    runtime: 'generic_cli',
+    workspace: 'existing_dir',
+    yaml_path: 'capsules/echo-test.generic/capsule.yaml',
+    prompt_template: 'prompt_template.md',
+    input_schema: 'input_schema.json',
+    output_schema: 'output_schema.json',
+    artifact_manifest: 'artifact_manifest.yaml',
+    permissions: { sandbox: 'read-only', network: false },
+  },
+  '/api/capsules/echo-test.generic/files/prompt_template.md': {
+    capsule_id: 'echo-test.generic',
+    file: 'prompt_template.md',
+    path: 'capsules/echo-test.generic/prompt_template.md',
+    content: 'Echo {{ input.message }}.',
   },
   '/api/capsules/fake-agent.generic': {
     id: 'fake-agent.generic',
@@ -101,49 +129,106 @@ const routes: Record<string, unknown> = {
   '/api/workflows': {
     workflows: [
       {
-        workflow_id: 'engine-architecture-research-v2',
-        file_id: 'engine-architecture-research.v2',
-        name: 'engine-architecture-research-v2',
-        description: 'Fixture workflow',
+        workflow_id: 'demo_serial',
+        file_id: 'demo_serial',
+        name: '串行 Demo 工作流',
+        description: 'Fixture graph workflow',
         version: '0.2.0',
-        path: 'workflows/engine-architecture-research.v2.yaml',
-        task_count: 1,
+        path: 'workflows/demo_serial.graph.json',
+        task_count: 2,
+        type: 'graph',
       },
     ],
   },
-  '/api/workflows/engine-architecture-research-v2': {
-    workflow_id: 'engine-architecture-research-v2',
-    file_id: 'engine-architecture-research.v2',
-    path: 'workflows/engine-architecture-research.v2.yaml',
+  '/api/workflows/demo_serial': {
+    workflow_id: 'demo_serial',
+    file_id: 'demo_serial',
+    path: 'workflows/demo_serial.graph.json',
+    type: 'graph',
     workflow: {
-      name: 'engine-architecture-research-v2',
-      description: 'Fixture workflow',
+      id: 'demo_serial',
+      name: '串行 Demo 工作流',
+      description: 'Fixture graph workflow',
       version: '0.2.0',
-      tasks: [
+      nodes: [
         {
-          name: 'source_reality_check',
-          type: 'script',
-          command: [
-            'uv',
-            'run',
-            'acc',
-            'run',
-            'fake-agent.generic',
-            '--run-dir',
-            'runs/ui_acceptance_fake',
-          ],
+          id: 'echo',
+          capsule_id: 'echo-test.generic',
+          label: '输入回显',
+          input: { message: 'hello' },
+          input_mapping: {},
+          position: { x: 80, y: 160 },
+        },
+        {
+          id: 'fake',
+          capsule_id: 'fake-agent.generic',
+          label: '下游处理',
+          input: {},
+          input_mapping: { topic: '{{ nodes.echo.output.summary }}' },
+          position: { x: 420, y: 160 },
         },
       ],
+      edges: [{ id: 'edge_echo_fake', from: 'echo', to: 'fake', label: '输出给下游' }],
     },
+    graph: {
+      id: 'demo_serial',
+      name: '串行 Demo 工作流',
+      description: 'Fixture graph workflow',
+      version: '0.2.0',
+      nodes: [
+        {
+          id: 'echo',
+          capsule_id: 'echo-test.generic',
+          label: '输入回显',
+          input: { message: 'hello' },
+          input_mapping: {},
+          position: { x: 80, y: 160 },
+        },
+        {
+          id: 'fake',
+          capsule_id: 'fake-agent.generic',
+          label: '下游处理',
+          input: {},
+          input_mapping: { topic: '{{ nodes.echo.output.summary }}' },
+          position: { x: 420, y: 160 },
+        },
+      ],
+      edges: [{ id: 'edge_echo_fake', from: 'echo', to: 'fake', label: '输出给下游' }],
+    },
+  },
+  'POST /api/workflows': { status: 'saved', workflow_id: 'demo_serial' },
+  'POST /api/workflows/demo_serial/validate': { status: 'valid', workflow_id: 'demo_serial' },
+  'POST /api/workflows/demo_serial/run': {
+    workflow_id: 'demo_serial',
+    status: 'success',
+    run_dir: 'runs/ui_workflow_demo_serial',
+    nodes: [
+      {
+        node_id: 'echo',
+        capsule_id: 'echo-test.generic',
+        status: 'success',
+        run_dir: 'runs/ui_workflow_demo_serial/nodes/echo',
+        input_path: 'runs/ui_workflow_demo_serial/nodes/echo/input.json',
+        prompt_path: 'runs/ui_workflow_demo_serial/nodes/echo/resolved_prompt.md',
+        output_path: 'runs/ui_workflow_demo_serial/nodes/echo/output.json',
+        artifact_dir: 'runs/ui_workflow_demo_serial/nodes/echo/artifacts',
+        event_log: 'runs/ui_workflow_demo_serial/nodes/echo/events.jsonl',
+        stdout_log: 'runs/ui_workflow_demo_serial/nodes/echo/stdout.log',
+        stderr_log: 'runs/ui_workflow_demo_serial/nodes/echo/stderr.log',
+      },
+    ],
+    edges: [{ id: 'edge_echo_fake', from: 'echo', to: 'fake' }],
+    errors: [],
   },
 };
 
 beforeEach(() => {
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (input: RequestInfo | URL) => {
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input.toString();
-      const payload = routes[url];
+      const method = init?.method || 'GET';
+      const payload = routes[`${method} ${url}`] ?? routes[url];
       if (!payload) {
         return new Response(JSON.stringify({ detail: `Missing route ${url}` }), {
           status: 404,
@@ -168,7 +253,7 @@ describe('Agent Capsule Workbench editable UI', () => {
 
     expect(await screen.findByText('ui_acceptance_fake')).toBeInTheDocument();
     expect(await screen.findByText('fake-agent.generic')).toBeInTheDocument();
-    expect(screen.getByLabelText('Run Inspector')).toHaveTextContent('session_fixture');
+    expect(screen.getByLabelText('运行检查器')).toHaveTextContent('session_fixture');
   });
 
   test('Run Inspector can view JSON output through artifact API', async () => {
@@ -176,7 +261,7 @@ describe('Agent Capsule Workbench editable UI', () => {
     render(<App />);
 
     await screen.findByText('ui_acceptance_fake');
-    await user.click(await screen.findByRole('button', { name: /Output/i }));
+    await user.click(await screen.findByRole('button', { name: /输出/i }));
 
     expect(await screen.findByLabelText('runs/ui_acceptance_fake/output.json')).toHaveTextContent(
       '"summary": "ok"',
@@ -187,7 +272,7 @@ describe('Agent Capsule Workbench editable UI', () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(await screen.findByRole('button', { name: /Artifacts/i }));
+    await user.click(await screen.findByRole('button', { name: /产物/i }));
     await user.click(await screen.findByRole('button', { name: /report.md/i }));
 
     expect(await screen.findByLabelText('report.md')).toHaveTextContent(
@@ -199,10 +284,10 @@ describe('Agent Capsule Workbench editable UI', () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(await screen.findByRole('button', { name: /Capsules/i }));
+    await user.click(await screen.findByRole('button', { name: /节点库/i }));
 
-    const browser = await screen.findByLabelText('Capsule Browser');
-    expect(within(browser).getByRole('heading', { name: 'Fake Agent' })).toBeInTheDocument();
+    const browser = await screen.findByLabelText('节点库');
+    expect(within(browser).getByRole('heading', { name: 'Echo Test' })).toBeInTheDocument();
     expect(browser).toHaveTextContent('"sandbox": "read-only"');
   });
 
@@ -210,36 +295,70 @@ describe('Agent Capsule Workbench editable UI', () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(await screen.findByRole('button', { name: /Workflows/i }));
+    await user.click(await screen.findByRole('button', { name: /工作流/i }));
 
-    expect(await screen.findByLabelText('Workflow DAG')).toHaveTextContent('source_reality_check');
-    expect(screen.getByLabelText('Workflow DAG')).toHaveTextContent('Capsule: fake-agent.generic');
+    expect(await screen.findByLabelText('图谱画布')).toHaveTextContent('输入回显');
+    expect(screen.getByLabelText('图谱画布')).toHaveTextContent('fake-agent.generic');
   });
 
   test('Capsule Library exposes create, edit, validate, and test controls', async () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(await screen.findByRole('button', { name: /Capsules/i }));
+    await user.click(await screen.findByRole('button', { name: /节点库/i }));
 
-    expect(await screen.findByLabelText('Create Capsule')).toBeInTheDocument();
-    expect(await screen.findByLabelText('Capsule Editor')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Save/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Validate/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Test/i })).toBeInTheDocument();
+    expect(await screen.findByLabelText('创建 Capsule')).toBeInTheDocument();
+    expect(await screen.findByLabelText('Capsule 编辑器')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /保存/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /校验/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /测试/i })).toBeInTheDocument();
   });
 
   test('Workflow Builder exposes graph authoring controls', async () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(await screen.findByRole('button', { name: /Workflows/i }));
+    await user.click(await screen.findByRole('button', { name: /工作流/i }));
 
-    expect(await screen.findByLabelText('Capsule Palette')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Add Node/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Connect Last Two/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Save Graph/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Validate Graph/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Run Graph/i })).toBeInTheDocument();
+    expect(await screen.findByLabelText('节点库')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /添加节点/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Connect Last Two/i })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /保存/i }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: /校验/i }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: /运行/i }).length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: /自动布局/i })).toBeInTheDocument();
+  });
+
+  test('Workflow Builder saves, validates, runs, and can load a parallel graph', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: /工作流/i }));
+
+    const toolbar = await screen.findByLabelText('工作流工具栏');
+    await user.click(within(toolbar).getByRole('button', { name: /^保存$/i }));
+    await user.click(within(toolbar).getByRole('button', { name: /^校验$/i }));
+    await user.click(within(toolbar).getByRole('button', { name: /^运行$/i }));
+
+    const calls = vi.mocked(fetch).mock.calls;
+    const saveCall = calls.find(([url, init]) => url === '/api/workflows' && init?.method === 'POST');
+    const validateCall = calls.find(
+      ([url, init]) => url === '/api/workflows/demo_serial/validate' && init?.method === 'POST',
+    );
+    const runCall = calls.find(
+      ([url, init]) => url === '/api/workflows/demo_serial/run' && init?.method === 'POST',
+    );
+    expect(saveCall).toBeTruthy();
+    expect(validateCall).toBeTruthy();
+    expect(runCall).toBeTruthy();
+    const savedPayload = JSON.parse(String(saveCall?.[1]?.body));
+    expect(savedPayload.graph.nodes).toHaveLength(2);
+    expect(savedPayload.graph.edges).toHaveLength(1);
+
+    await user.click(within(toolbar).getByRole('button', { name: /加载 Demo 并行/i }));
+    const canvas = screen.getByLabelText('图谱画布');
+    expect(canvas).toHaveTextContent('分支 A');
+    expect(canvas).toHaveTextContent('分支 B');
+    expect(canvas).toHaveTextContent('结果汇总');
   });
 });

@@ -46,7 +46,7 @@ async def run_workflow_graph(
         node = node_by_id[node_id]
         node_run_dir = nodes_dir / node_id
         try:
-            input_payload = render_node_input(node.get("input", {}), context)
+            input_payload = resolve_node_input(node, context)
             conductor_output = await runner.run(node["capsule_id"], input_payload, node_run_dir)
             node_summary = load_node_summary(node_run_dir, conductor_output)
             node_summaries.append(node_summary)
@@ -123,6 +123,16 @@ def render_node_input(value: Any, context: dict[str, Any]) -> Any:
     if isinstance(value, dict):
         return {key: render_node_input(item, context) for key, item in value.items()}
     return value
+
+
+def resolve_node_input(node: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    static_input = node.get("input", {})
+    mapped_input = render_node_input(node.get("input_mapping", {}), context)
+    if not isinstance(static_input, dict):
+        raise AccError(f"Node {node['id']} input must be an object")
+    if not isinstance(mapped_input, dict):
+        raise AccError(f"Node {node['id']} input_mapping must render to an object")
+    return {**static_input, **mapped_input}
 
 
 def load_node_summary(run_dir: Path, conductor_output: dict[str, Any]) -> NodeRunSummary:

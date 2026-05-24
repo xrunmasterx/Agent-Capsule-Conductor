@@ -72,18 +72,18 @@ export function RunInspector({ runId }: Props) {
   }
 
   return (
-    <section className="panel inspector" aria-label="Run Inspector">
+    <section className="panel inspector" aria-label="运行检查器">
       <header className="panel-header">
         <div>
-          <h2>Run Inspector</h2>
-          <p>{run ? run.run_id : 'No run selected'}</p>
+          <h2>运行检查器</h2>
+          <p>{run ? run.run_id : '未选择运行'}</p>
         </div>
         {run ? <span className={`pill ${statusTone(run.status)}`}>{run.status}</span> : null}
       </header>
-      {error ? <div className="notice">Run error: {error}</div> : null}
+      {error ? <div className="notice">运行错误: {error}</div> : null}
       {run ? (
         <div className="inspector-grid">
-          <div className="dag-list" aria-label="Run node list">
+          <div className="dag-list" aria-label="运行节点列表">
             {run.nodes.map((node, index) => (
               <button
                 key={node.node_id}
@@ -110,7 +110,7 @@ export function RunInspector({ runId }: Props) {
           ) : null}
         </div>
       ) : (
-        <div className="empty-state">Select a run to inspect its Session and Artifact Bundle.</div>
+        <div className="empty-state">选择一个运行来检查它的 Session 和 Artifact Bundle。</div>
       )}
     </section>
   );
@@ -125,9 +125,9 @@ type NodeDetailProps = {
 
 function NodeDetail({ node, artifacts, content, onReadPath }: NodeDetailProps) {
   const paths = [
-    { label: 'Input', icon: FileJson, path: node.input_path },
+    { label: '输入', icon: FileJson, path: node.input_path },
     { label: 'Prompt', icon: FileText, path: node.prompt_path },
-    { label: 'Output', icon: FileJson, path: node.output_path },
+    { label: '输出', icon: FileJson, path: node.output_path },
     { label: 'Events', icon: ScrollText, path: node.event_log },
     { label: 'Stdout', icon: Terminal, path: node.stdout_log },
     { label: 'Stderr', icon: Terminal, path: node.stderr_log },
@@ -140,11 +140,11 @@ function NodeDetail({ node, artifacts, content, onReadPath }: NodeDetailProps) {
           <strong>{node.session_id || 'n/a'}</strong>
         </div>
         <div>
-          <span>Duration</span>
+          <span>耗时</span>
           <strong>{formatDuration(node.duration_ms)}</strong>
         </div>
         <div>
-          <span>Summary</span>
+          <span>摘要</span>
           <strong>{node.summary || 'n/a'}</strong>
         </div>
       </div>
@@ -167,9 +167,9 @@ function NodeDetail({ node, artifacts, content, onReadPath }: NodeDetailProps) {
           );
         })}
       </div>
-      <section className="artifact-list" aria-label="Node artifacts">
-        <h3>Artifacts</h3>
-        {artifacts.length === 0 ? <p className="muted">No visible artifacts.</p> : null}
+      <section className="artifact-list" aria-label="节点产物">
+        <h3>产物</h3>
+        {artifacts.length === 0 ? <p className="muted">暂无可见产物。</p> : null}
         {artifacts.map((artifact) => (
           <button
             key={artifact.path}
@@ -185,9 +185,8 @@ function NodeDetail({ node, artifacts, content, onReadPath }: NodeDetailProps) {
       {content ? (
         <CodeBlock title={content.path} content={content.content} variant={content.type} />
       ) : (
-        <div className="empty-state">Choose input, output, logs, events, or an artifact.</div>
+        <div className="empty-state">选择输入、输出、日志、事件或产物。</div>
       )}
     </div>
   );
 }
-

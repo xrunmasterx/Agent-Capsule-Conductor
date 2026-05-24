@@ -1,0 +1,37 @@
+{
+  "id": "demo_serial",
+  "version": "0.2.0",
+  "name": "串行 Demo 工作流",
+  "description": "两个节点串行连接的最小 Demo。",
+  "nodes": [
+    {
+      "id": "echo",
+      "capsule_id": "echo-test.generic",
+      "label": "输入回显",
+      "position": { "x": 100, "y": 160 },
+      "input": { "message": "hello from graph" },
+      "input_mapping": {},
+      "notes": "第一个节点"
+    },
+    {
+      "id": "fake",
+      "capsule_id": "fake-agent.generic",
+      "label": "下游处理",
+      "position": { "x": 480, "y": 160 },
+      "input": {},
+      "input_mapping": { "topic": "{{ nodes.echo.output.summary }}" },
+      "notes": "读取上游 output.summary"
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge_echo_fake",
+      "from": "echo",
+      "to": "fake",
+      "label": "输出给下游",
+      "mapping": { "topic": "{{ nodes.echo.output.summary }}" },
+      "condition": null
+    }
+  ],
+  "metadata": { "layout": "left-to-right" }
+}

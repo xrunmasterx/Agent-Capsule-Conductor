@@ -7,13 +7,14 @@ import { CapsuleBrowser } from './components/CapsuleBrowser';
 import { RunInspector } from './components/RunInspector';
 import { RunList } from './components/RunList';
 import { WorkflowViewer } from './components/WorkflowViewer';
+import { zhCN as t } from './i18n/zh-CN';
 import type { CapsuleSummary, RunSummary, ViewKey, WorkflowSummary } from './types';
 
 const navigation = [
-  { key: 'runs', label: 'Runs', icon: Database },
-  { key: 'capsules', label: 'Capsules', icon: Box },
-  { key: 'artifacts', label: 'Artifacts', icon: FileText },
-  { key: 'workflows', label: 'Workflows', icon: GitBranch },
+  { key: 'runs', label: t.runs, icon: Database },
+  { key: 'capsules', label: t.capsuleLibrary, icon: Box },
+  { key: 'artifacts', label: t.artifacts, icon: FileText },
+  { key: 'workflows', label: t.workflow, icon: GitBranch },
 ] as const;
 
 export function App() {
@@ -75,8 +76,8 @@ export function App() {
         <div className="brand">
           <Workflow aria-hidden="true" size={22} />
           <div>
-            <h1>Agent Capsule Workbench</h1>
-            <p>Read-only local inspector</p>
+            <h1>{t.appTitle}</h1>
+            <p>{t.appSubtitle}</p>
           </div>
         </div>
         <nav className="nav">
@@ -97,7 +98,7 @@ export function App() {
           })}
         </nav>
         <div className={`server-state ${apiState}`}>
-          <span>{apiState === 'ready' ? 'API connected' : apiState}</span>
+          <span>{apiState === 'ready' ? t.apiConnected : apiState}</span>
         </div>
       </aside>
 
@@ -133,7 +134,7 @@ export function App() {
         ) : null}
         <div className="read-only-bar">
           <Layers aria-hidden="true" size={16} />
-          Editable mode: all reads and writes go through acc-server APIs.
+          编辑模式：所有读取和写入都通过 acc-server API。
         </div>
       </section>
     </main>

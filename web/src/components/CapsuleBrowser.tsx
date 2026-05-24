@@ -72,7 +72,7 @@ export function CapsuleBrowser({ capsules, selectedCapsuleId, onSelect, onChange
       template: 'simple',
       force: true,
     });
-    setMessage(`Created ${result.capsule_id}`);
+    setMessage(`已创建 ${result.capsule_id}`);
     onSelect(result.capsule_id);
     onChanged?.();
   }
@@ -82,7 +82,7 @@ export function CapsuleBrowser({ capsules, selectedCapsuleId, onSelect, onChange
       return;
     }
     await api.saveCapsuleFile(selectedCapsuleId, selectedFile, fileContent);
-    setMessage(`Saved ${selectedFile}`);
+    setMessage(`已保存 ${selectedFile}`);
   }
 
   async function validateCapsule() {
@@ -90,7 +90,7 @@ export function CapsuleBrowser({ capsules, selectedCapsuleId, onSelect, onChange
       return;
     }
     const result = await api.validateCapsule(selectedCapsuleId);
-    setMessage(`Validate ${selectedCapsuleId}: ${result.status}`);
+    setMessage(`校验 ${selectedCapsuleId}: ${result.status}`);
   }
 
   async function testCapsule() {
@@ -103,29 +103,29 @@ export function CapsuleBrowser({ capsules, selectedCapsuleId, onSelect, onChange
       input,
       run_dir: `runs/ui_capsule_test_${selectedCapsuleId.replaceAll('.', '_')}`,
     });
-    setMessage(`Test ${selectedCapsuleId}: ${result.status}`);
+    setMessage(`测试 ${selectedCapsuleId}: ${result.status}`);
   }
 
   return (
-    <section className="panel capsule-browser" aria-label="Capsule Browser">
+    <section className="panel capsule-browser" aria-label="节点库">
       <header className="panel-header">
         <div>
-          <h2>Capsule Library</h2>
-          <p>{capsules.length} Capsule Templates</p>
+          <h2>节点库</h2>
+          <p>{capsules.length} 个 Capsule Template</p>
         </div>
       </header>
       <div className="split compact">
         <div className="list-stack">
-          <section className="inline-form" aria-label="Create Capsule">
-            <h3>Create Capsule</h3>
+          <section className="inline-form" aria-label="创建 Capsule">
+            <h3>创建 Capsule</h3>
             <input
-              aria-label="New capsule id"
+              aria-label="新 Capsule id"
               value={newCapsuleId}
               onChange={(event) => setNewCapsuleId(event.target.value)}
             />
             <button type="button" className="primary-action" onClick={createCapsule}>
               <WandSparkles aria-hidden="true" size={16} />
-              Create
+              创建
             </button>
           </section>
           {capsules.map((capsule) => (
@@ -143,21 +143,21 @@ export function CapsuleBrowser({ capsules, selectedCapsuleId, onSelect, onChange
         </div>
         {detail ? (
           <div className="detail-surface">
-            <h3>Capsule Editor</h3>
+            <h3>Capsule 编辑器</h3>
             <h3>{detail.name}</h3>
             <p>{detail.description}</p>
             {message ? <div className="notice neutral">{message}</div> : null}
             <div className="metric-strip">
               <div>
-                <span>Runtime</span>
+                <span>运行时</span>
                 <strong>{detail.runtime}</strong>
               </div>
               <div>
-                <span>Workspace</span>
+                <span>工作区</span>
                 <strong>{detail.workspace}</strong>
               </div>
               <div>
-                <span>Version</span>
+                <span>版本</span>
                 <strong>{detail.version}</strong>
               </div>
             </div>
@@ -168,20 +168,20 @@ export function CapsuleBrowser({ capsules, selectedCapsuleId, onSelect, onChange
               <dd>{detail.input_schema}</dd>
               <dt>Output schema</dt>
               <dd>{detail.output_schema}</dd>
-              <dt>Artifacts</dt>
+              <dt>产物</dt>
               <dd>{detail.artifact_manifest}</dd>
             </dl>
             <section className="permission-box">
               <h4>
                 <ShieldCheck aria-hidden="true" size={16} />
-                Permissions
+                权限
               </h4>
               <pre>{JSON.stringify(detail.permissions, null, 2)}</pre>
             </section>
-            <section className="editor-panel" aria-label="Capsule Editor">
+            <section className="editor-panel" aria-label="Capsule 编辑器">
               <div className="editor-toolbar">
                 <label>
-                  File
+                  文件
                   <select
                     aria-label="Capsule file"
                     value={selectedFile}
@@ -196,26 +196,26 @@ export function CapsuleBrowser({ capsules, selectedCapsuleId, onSelect, onChange
                 </label>
                 <button type="button" onClick={saveFile}>
                   <Save aria-hidden="true" size={16} />
-                  Save
+                  保存
                 </button>
                 <button type="button" onClick={validateCapsule}>
                   <TestTube aria-hidden="true" size={16} />
-                  Validate
+                  校验
                 </button>
                 <button type="button" onClick={testCapsule}>
                   <Play aria-hidden="true" size={16} />
-                  Test
+                  测试
                 </button>
               </div>
               <textarea
-                aria-label="Capsule file editor"
+                aria-label="Capsule 文件编辑器"
                 value={fileContent}
                 onChange={(event) => setFileContent(event.target.value)}
               />
             </section>
           </div>
         ) : (
-          <div className="empty-state">Select a Capsule Template.</div>
+          <div className="empty-state">选择一个 Capsule Template。</div>
         )}
       </div>
     </section>

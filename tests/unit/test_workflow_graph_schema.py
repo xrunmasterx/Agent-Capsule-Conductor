@@ -96,6 +96,60 @@ def test_cycle_detection_works(tmp_path: Path) -> None:
         validate_workflow_graph(path)
 
 
+def test_self_edge_fails(tmp_path: Path) -> None:
+    graph = valid_graph()
+    graph["edges"][0] = {"id": "edge_echo_echo", "from": "echo", "to": "echo"}
+    path = tmp_path / "graph.json"
+    write_graph(path, graph)
+
+    with pytest.raises(AccError, match="cannot connect node 'echo' to itself"):
+        validate_workflow_graph(path)
+
+
+def test_missing_required_input_fails(tmp_path: Path) -> None:
+    graph = valid_graph()
+    graph["nodes"][1]["input"] = {}
+    graph["nodes"][1].pop("input_mapping", None)
+    path = tmp_path / "graph.json"
+    write_graph(path, graph)
+
+    with pytest.raises(AccError, match="missing required input: topic"):
+        validate_workflow_graph(path)
+
+
+def test_invalid_mapping_expression_unknown_root_fails(tmp_path: Path) -> None:
+    graph = valid_graph()
+    graph["nodes"][1]["input"] = {}
+    graph["nodes"][1]["input_mapping"] = {"topic": "{{ unknown.value }}"}
+    path = tmp_path / "graph.json"
+    write_graph(path, graph)
+
+    with pytest.raises(AccError, match="unknown root unknown"):
+        validate_workflow_graph(path)
+
+
+def test_mapping_expression_must_reference_upstream_node(tmp_path: Path) -> None:
+    graph = valid_graph()
+    graph["nodes"][0]["input"] = {}
+    graph["nodes"][0]["input_mapping"] = {"message": "{{ nodes.fake.output.summary }}"}
+    path = tmp_path / "graph.json"
+    write_graph(path, graph)
+
+    with pytest.raises(AccError, match="node 'fake' is not upstream"):
+        validate_workflow_graph(path)
+
+
+def test_static_input_rejects_template_expressions(tmp_path: Path) -> None:
+    graph = valid_graph()
+    graph["nodes"][1]["input"] = {"topic": "{{ nodes.echo.output.summary }}"}
+    graph["nodes"][1].pop("input_mapping", None)
+    path = tmp_path / "graph.json"
+    write_graph(path, graph)
+
+    with pytest.raises(AccError, match="use input_mapping for template expressions"):
+        validate_workflow_graph(path)
+
+
 def test_position_is_optional(tmp_path: Path) -> None:
     graph = valid_graph()
     for node in graph["nodes"]:

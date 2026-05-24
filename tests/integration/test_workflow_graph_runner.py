@@ -29,6 +29,37 @@ def test_template_mapping_passes_previous_output_to_next_node(tmp_path: Path) ->
 
     fake_input = load_json(run_dir / "nodes" / "fake" / "input.json")
     assert fake_input["topic"] == "Echoed message: hello from editable workbench"
+    assert set(fake_input) == {"notes", "topic"}
+
+
+def test_graph_metadata_does_not_pollute_node_input_or_prompt(tmp_path: Path) -> None:
+    graph = load_json(Path("examples/workflows/demo_two_node.graph.json"))
+    graph["metadata"] = {
+        "global_instruction": "DO NOT LEAK INTO NODE",
+        "debug_context": {"unrelated": "outside graph state"},
+    }
+    graph["nodes"][1]["label"] = "Noisy UI label that should stay outside agent prompt"
+    graph["nodes"][1]["notes"] = "Noisy node notes that should stay outside agent prompt"
+    graph["edges"][0]["mapping"] = {"unused": "Noisy edge mapping"}
+    graph_path = tmp_path / "isolated.graph.json"
+    graph_path.write_text(json.dumps(graph), encoding="utf-8")
+    run_dir = tmp_path / "isolated_graph"
+
+    result = run_workflow_graph_sync(graph_path, run_dir)
+
+    assert result["status"] == "success"
+    fake_input_text = (run_dir / "nodes" / "fake" / "input.json").read_text(encoding="utf-8")
+    fake_prompt_text = (run_dir / "nodes" / "fake" / "resolved_prompt.md").read_text(
+        encoding="utf-8"
+    )
+    assert "DO NOT LEAK INTO NODE" not in fake_input_text
+    assert "DO NOT LEAK INTO NODE" not in fake_prompt_text
+    assert "Noisy UI label" not in fake_input_text
+    assert "Noisy UI label" not in fake_prompt_text
+    assert "Noisy node notes" not in fake_input_text
+    assert "Noisy node notes" not in fake_prompt_text
+    assert "Noisy edge mapping" not in fake_input_text
+    assert "Noisy edge mapping" not in fake_prompt_text
 
 
 def test_cli_emit_json_stdout_contract(tmp_path: Path) -> None:
@@ -55,7 +86,8 @@ def test_cli_emit_json_stdout_contract(tmp_path: Path) -> None:
 
 def test_failed_node_marks_workflow_failed(tmp_path: Path) -> None:
     graph = load_json(Path("examples/workflows/demo_two_node.graph.json"))
-    graph["nodes"][1]["input"] = {"missing": "field"}
+    graph["nodes"][1]["input"] = {"topic": 123}
+    graph["nodes"][1].pop("input_mapping", None)
     graph_path = tmp_path / "bad.graph.json"
     graph_path.write_text(json.dumps(graph), encoding="utf-8")
     run_dir = tmp_path / "bad_graph"

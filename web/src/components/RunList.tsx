@@ -11,19 +11,19 @@ type Props = {
 
 export function RunList({ runs, selectedRunId, onSelect }: Props) {
   return (
-    <section className="panel run-list" aria-label="Run List">
+    <section className="panel run-list" aria-label="运行记录">
       <header className="panel-header">
         <div>
-          <h2>Run List</h2>
-          <p>{runs.length} indexed sessions</p>
+          <h2>运行记录</h2>
+          <p>{runs.length} 个已索引 Session</p>
         </div>
       </header>
       <div className="table">
         <div className="table-row table-head">
-          <span>Run</span>
-          <span>Status</span>
-          <span>Duration</span>
-          <span>Failed</span>
+          <span>运行</span>
+          <span>状态</span>
+          <span>耗时</span>
+          <span>失败</span>
         </div>
         {runs.map((run) => (
           <button
@@ -34,7 +34,7 @@ export function RunList({ runs, selectedRunId, onSelect }: Props) {
           >
             <span>
               <strong>{run.run_id}</strong>
-              <small>{run.workflow_id || 'single capsule session'}</small>
+              <small>{run.workflow_id || '单 Capsule Session'}</small>
             </span>
             <span className={`pill ${statusTone(run.status)}`}>
               {run.status === 'success' ? (
@@ -55,4 +55,3 @@ export function RunList({ runs, selectedRunId, onSelect }: Props) {
     </section>
   );
 }
-

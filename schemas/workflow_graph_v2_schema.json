@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "WorkflowGraphV2",
+  "type": "object",
+  "required": ["id", "version", "name", "nodes", "edges"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-zA-Z0-9_.-]+$" },
+    "version": { "type": "string" },
+    "name": { "type": "string" },
+    "description": { "type": "string" },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "capsule_id", "position"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-zA-Z0-9_.-]+$" },
+          "capsule_id": { "type": "string" },
+          "label": { "type": "string" },
+          "position": {
+            "type": "object",
+            "required": ["x", "y"],
+            "properties": {
+              "x": { "type": "number" },
+              "y": { "type": "number" }
+            }
+          },
+          "input": { "type": "object" },
+          "input_mapping": { "type": "object" },
+          "notes": { "type": "string" },
+          "ui": { "type": "object" }
+        }
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "from", "to"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-zA-Z0-9_.-]+$" },
+          "from": { "type": "string" },
+          "to": { "type": "string" },
+          "label": { "type": "string" },
+          "mapping": { "type": "object" },
+          "condition": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "metadata": { "type": "object" }
+  },
+  "additionalProperties": false
+}

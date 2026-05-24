@@ -8,6 +8,7 @@ import type {
   RunSummary,
   WorkflowDetail,
   WorkflowGraph,
+  WorkflowRunResult,
   WorkflowSummary,
 } from './types';
 
@@ -94,7 +95,7 @@ export const api = {
       {},
     ),
   runWorkflow: (workflowId: string, runDir: string) =>
-    sendJson<{ status: string; workflow_id: string }>(
+    sendJson<WorkflowRunResult>(
       'POST',
       `/api/workflows/${encodeURIComponent(workflowId)}/run`,
       { run_dir: runDir },

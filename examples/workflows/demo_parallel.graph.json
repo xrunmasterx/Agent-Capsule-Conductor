@@ -1,0 +1,53 @@
+{
+  "id": "demo_parallel",
+  "version": "0.2.0",
+  "name": "并行 Demo 工作流",
+  "description": "一个上游节点扇出到两个并行节点，再汇入最终节点。",
+  "nodes": [
+    {
+      "id": "plan",
+      "capsule_id": "echo-test.generic",
+      "label": "任务规划",
+      "position": { "x": 80, "y": 240 },
+      "input": { "message": "plan research task" },
+      "input_mapping": {},
+      "notes": "上游规划节点"
+    },
+    {
+      "id": "branch_a",
+      "capsule_id": "fake-agent.generic",
+      "label": "分支 A",
+      "position": { "x": 420, "y": 120 },
+      "input": {},
+      "input_mapping": { "topic": "{{ nodes.plan.output.summary }}" },
+      "notes": "并行分支 A"
+    },
+    {
+      "id": "branch_b",
+      "capsule_id": "fake-agent.generic",
+      "label": "分支 B",
+      "position": { "x": 420, "y": 360 },
+      "input": {},
+      "input_mapping": { "topic": "{{ nodes.plan.output.summary }}" },
+      "notes": "并行分支 B"
+    },
+    {
+      "id": "merge",
+      "capsule_id": "fake-agent.generic",
+      "label": "结果汇总",
+      "position": { "x": 800, "y": 240 },
+      "input": {},
+      "input_mapping": {
+        "topic": "A={{ nodes.branch_a.output.summary }}; B={{ nodes.branch_b.output.summary }}"
+      },
+      "notes": "等待两个分支完成"
+    }
+  ],
+  "edges": [
+    { "id": "edge_plan_a", "from": "plan", "to": "branch_a", "label": "并行 A", "mapping": {}, "condition": null },
+    { "id": "edge_plan_b", "from": "plan", "to": "branch_b", "label": "并行 B", "mapping": {}, "condition": null },
+    { "id": "edge_a_merge", "from": "branch_a", "to": "merge", "label": "汇入", "mapping": {}, "condition": null },
+    { "id": "edge_b_merge", "from": "branch_b", "to": "merge", "label": "汇入", "mapping": {}, "condition": null }
+  ],
+  "metadata": { "layout": "left-to-right" }
+}

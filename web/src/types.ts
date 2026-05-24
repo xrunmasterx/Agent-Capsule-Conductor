@@ -111,14 +111,24 @@ export type WorkflowDetail = {
 export type WorkflowGraphNode = {
   id: string;
   capsule_id: string;
+  label?: string;
   input?: Record<string, unknown>;
+  input_mapping?: Record<string, unknown>;
+  notes?: string;
   position?: { x: number; y: number };
+  ui?: {
+    collapsed?: boolean;
+    color?: string;
+  };
 };
 
 export type WorkflowGraphEdge = {
   id: string;
   from: string;
   to: string;
+  label?: string;
+  mapping?: Record<string, unknown>;
+  condition?: string | null;
 };
 
 export type WorkflowGraph = {
@@ -129,4 +139,16 @@ export type WorkflowGraph = {
   input?: Record<string, unknown>;
   nodes: WorkflowGraphNode[];
   edges: WorkflowGraphEdge[];
+  metadata?: Record<string, unknown>;
+};
+
+export type WorkflowRunResult = {
+  workflow_id: string;
+  status: string;
+  run_dir: string;
+  started_at?: string;
+  ended_at?: string;
+  nodes: NodeRunSummary[];
+  edges: WorkflowGraphEdge[];
+  errors?: string[];
 };

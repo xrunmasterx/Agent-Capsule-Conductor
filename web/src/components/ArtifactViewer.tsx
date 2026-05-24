@@ -35,11 +35,11 @@ export function ArtifactViewer({ run }: Props) {
   }
 
   return (
-    <section className="panel artifact-viewer" aria-label="Artifact Viewer">
+    <section className="panel artifact-viewer" aria-label="产物查看器">
       <header className="panel-header">
         <div>
-          <h2>Artifact Viewer</h2>
-          <p>{run ? `${run.run_id} / ${firstNode?.node_id || 'no node'}` : 'No run selected'}</p>
+          <h2>产物查看器</h2>
+          <p>{run ? `${run.run_id} / ${firstNode?.node_id || '无节点'}` : '未选择运行'}</p>
         </div>
         <FileCode2 aria-hidden="true" size={20} />
       </header>
@@ -56,15 +56,14 @@ export function ArtifactViewer({ run }: Props) {
               <small>{artifact.path}</small>
             </button>
           ))}
-          {artifacts.length === 0 ? <div className="empty-state">No artifacts available.</div> : null}
+          {artifacts.length === 0 ? <div className="empty-state">暂无可用产物。</div> : null}
         </div>
         {content ? (
           <CodeBlock title={content.name} content={content.content} variant={content.type} />
         ) : (
-          <div className="empty-state">Select an artifact to view markdown, JSON, text, logs, or patches.</div>
+          <div className="empty-state">选择一个产物查看 markdown、JSON、文本、日志或 patch。</div>
         )}
       </div>
     </section>
   );
 }
-

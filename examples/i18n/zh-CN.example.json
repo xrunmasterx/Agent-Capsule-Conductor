@@ -1,0 +1,18 @@
+{
+  "app.workflow": "工作流",
+  "app.capsuleLibrary": "节点库",
+  "app.canvas": "画布",
+  "app.inspector": "属性面板",
+  "action.save": "保存",
+  "action.validate": "校验",
+  "action.run": "运行",
+  "action.autoLayout": "自动布局",
+  "node.input": "输入",
+  "node.output": "输出",
+  "node.artifacts": "产物",
+  "node.logs": "日志",
+  "status.notRun": "未运行",
+  "status.running": "运行中",
+  "status.success": "成功",
+  "status.failed": "失败"
+}
