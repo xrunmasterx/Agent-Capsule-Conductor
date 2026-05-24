@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +39,10 @@ def get_project_root(request: Request) -> Path:
 
 def project_path(request: Request, *parts: str) -> Path:
     return get_project_root(request).joinpath(*parts)
+
+
+def configured_project_dir(project_root: Path, env_name: str, default_value: str) -> Path:
+    return resolve_inside_project(project_root, os.environ.get(env_name, default_value))
 
 
 def resolve_inside_project(project_root: Path, value: str | Path) -> Path:
@@ -104,4 +109,3 @@ def infer_artifact_type(path: Path) -> str:
     if suffix in {".patch", ".diff"}:
         return "patch"
     return "text"
-

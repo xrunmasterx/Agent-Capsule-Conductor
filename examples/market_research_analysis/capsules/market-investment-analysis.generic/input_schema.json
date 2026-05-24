@@ -1,0 +1,25 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "objective": {
+      "type": "string"
+    },
+    "research_artifact_dir": {
+      "type": "string"
+    },
+    "risk_tolerance": {
+      "enum": [
+        "低",
+        "中",
+        "高"
+      ],
+      "type": "string"
+    }
+  },
+  "required": [
+    "research_artifact_dir",
+    "objective",
+    "risk_tolerance"
+  ],
+  "type": "object"
+}

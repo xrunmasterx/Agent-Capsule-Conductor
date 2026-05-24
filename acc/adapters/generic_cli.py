@@ -21,6 +21,7 @@ class GenericCliAdapter:
                 "ACC_INPUT_PATH": str(request.run_dir / "input.json"),
                 "ACC_RUN_DIR": str(request.run_dir),
                 "ACC_OUTPUT_JSON": str(request.output_json_path),
+                "ACC_OUTPUT_SCHEMA_PATH": str(request.output_schema_path),
                 "ACC_ARTIFACT_DIR": str(request.artifacts_dir),
                 "ACC_PROMPT_PATH": str(request.prompt_path),
                 "ACC_EVENTS_JSONL": str(request.events_log_path),
@@ -126,4 +127,3 @@ def maybe_write_json_stdout(stdout: bytes, output_path) -> None:
 def write_event(request: AgentRunRequest, payload: dict) -> None:
     with request.events_log_path.open("a", encoding="utf-8") as file:
         file.write(json.dumps(payload, sort_keys=True) + "\n")
-

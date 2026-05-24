@@ -1,5 +1,5 @@
 import { Box, Database, FileText, GitBranch, Layers, Workflow } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { api } from './api';
 import { ArtifactViewer } from './components/ArtifactViewer';
@@ -27,9 +27,8 @@ export function App() {
   const [apiState, setApiState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = useState<string>('');
 
-  useEffect(() => {
-    let ignore = false;
-    async function loadInitialData() {
+  const loadInitialData = useCallback(
+    async (ignore?: () => boolean) => {
       setApiState('loading');
       try {
         const [runIndex, capsuleIndex, workflowIndex] = await Promise.all([
@@ -37,7 +36,7 @@ export function App() {
           api.capsules(),
           api.workflows(),
         ]);
-        if (ignore) {
+        if (ignore?.()) {
           return;
         }
         setRuns(runIndex.runs);
@@ -48,17 +47,22 @@ export function App() {
         setSelectedWorkflowId((current) => current || workflowIndex.workflows[0]?.workflow_id || '');
         setApiState('ready');
       } catch (requestError) {
-        if (!ignore) {
+        if (!ignore?.()) {
           setError(requestError instanceof Error ? requestError.message : String(requestError));
           setApiState('error');
         }
       }
-    }
-    loadInitialData();
+    },
+    [],
+  );
+
+  useEffect(() => {
+    let ignore = false;
+    loadInitialData(() => ignore);
     return () => {
       ignore = true;
     };
-  }, []);
+  }, [loadInitialData]);
 
   const selectedRun = useMemo(
     () => runs.find((run) => run.run_id === selectedRunId) || runs[0],
@@ -114,22 +118,24 @@ export function App() {
             capsules={capsules}
             selectedCapsuleId={selectedCapsuleId}
             onSelect={setSelectedCapsuleId}
+            onChanged={() => loadInitialData()}
           />
         ) : null}
         {view === 'artifacts' ? <ArtifactViewer run={selectedRun} /> : null}
         {view === 'workflows' ? (
           <WorkflowViewer
             workflows={workflows}
+            capsules={capsules}
             selectedWorkflowId={selectedWorkflowId}
             onSelect={setSelectedWorkflowId}
+            onChanged={() => loadInitialData()}
           />
         ) : null}
         <div className="read-only-bar">
           <Layers aria-hidden="true" size={16} />
-          Read-only mode: inspection uses acc-server APIs only.
+          Editable mode: all reads and writes go through acc-server APIs.
         </div>
       </section>
     </main>
   );
 }
-

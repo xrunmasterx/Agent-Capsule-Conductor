@@ -11,7 +11,7 @@ class AccError(Exception):
 
 
 def dump_json(data: Any) -> str:
-    return json.dumps(data, indent=2, sort_keys=True)
+    return json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True)
 
 
 def load_json(path: Path) -> Any:
@@ -29,4 +29,3 @@ def log_stderr(message: str) -> None:
 
 def repo_root() -> Path:
     return Path.cwd()
-

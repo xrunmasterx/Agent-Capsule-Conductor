@@ -1,0 +1,25 @@
+id: market-investment-analysis.generic
+version: "0.1.0"
+name: 市场投资分析
+description: 读取市场调研 Artifact Bundle，并生成中文确定性分析备忘录。
+runtime:
+  type: generic_cli
+  command: python
+  args_base:
+    - examples/market_research_analysis/market_demo_agents.py
+    - analysis
+workspace:
+  mode: existing_dir
+permissions:
+  sandbox: read-only
+  network: false
+  write_files: true
+  timeout_seconds: 30
+  allow_dangerous: false
+prompt:
+  template: prompt_template.md
+schema:
+  input: input_schema.json
+  output: output_schema.json
+artifacts:
+  manifest: artifact_manifest.yaml

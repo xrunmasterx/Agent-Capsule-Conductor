@@ -1,0 +1,28 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "artifacts": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "recommendation": {
+      "type": "string"
+    },
+    "status": {
+      "const": "success"
+    },
+    "summary": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "status",
+    "summary",
+    "recommendation",
+    "artifacts"
+  ],
+  "type": "object"
+}
+

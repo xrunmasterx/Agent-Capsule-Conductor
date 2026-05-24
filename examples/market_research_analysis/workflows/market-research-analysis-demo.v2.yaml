@@ -1,0 +1,38 @@
+name: market-research-analysis-demo-v2
+description: 中文演示：两个 generic capsule 串联完成市场调研与投资分析，并通过 artifact handoff 传递资料。
+version: "0.1.0"
+tasks:
+  - name: market_news_research
+    type: script
+    command:
+      - uv
+      - run
+      - acc
+      - run
+      - market-news-research.generic
+      - --capsules-dir
+      - examples/market_research_analysis/capsules
+      - --input
+      - examples/market_research_analysis/capsules/market-news-research.generic/examples/input.json
+      - --run-dir
+      - runs/market_research_demo
+      - --emit-conductor-json
+    stdout_contract: single_json_object
+  - name: market_investment_analysis
+    type: script
+    depends_on:
+      - market_news_research
+    command:
+      - uv
+      - run
+      - acc
+      - run
+      - market-investment-analysis.generic
+      - --capsules-dir
+      - examples/market_research_analysis/capsules
+      - --input
+      - examples/market_research_analysis/capsules/market-investment-analysis.generic/examples/input.json
+      - --run-dir
+      - runs/market_analysis_demo
+      - --emit-conductor-json
+    stdout_contract: single_json_object

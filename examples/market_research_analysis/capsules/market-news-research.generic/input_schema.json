@@ -1,0 +1,36 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "as_of_date": {
+      "type": "string"
+    },
+    "focus": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "horizon": {
+      "type": "string"
+    },
+    "sector": {
+      "type": "string"
+    },
+    "tickers": {
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "type": "array"
+    }
+  },
+  "required": [
+    "as_of_date",
+    "sector",
+    "tickers",
+    "horizon",
+    "focus"
+  ],
+  "type": "object"
+}
+

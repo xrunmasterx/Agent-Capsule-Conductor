@@ -13,17 +13,22 @@ from acc.graphops import apply_patch_request, validate_patch_file
 from acc.registry import CapsuleRegistry, validate_capsule_files
 from acc.run_index import load_or_rebuild_run_index, load_run_summary, load_run_summary_by_id
 from acc.runner import CapsuleRunner, load_input
+from acc.scaffold import scaffold_capsule
 from acc.utils import AccError, dump_json, load_json, log_stderr
+from acc.workflow_graph import validate_workflow_graph
+from acc.workflow_runner import run_workflow_graph_sync, workflow_json
 
 app = typer.Typer(help="Agent Capsule Conductor CLI.")
 session_app = typer.Typer(help="Session commands.")
 graphops_app = typer.Typer(help="GraphOps control plane commands.")
 runs_app = typer.Typer(help="Run discovery and inspection commands.")
 capsule_app = typer.Typer(help="Capsule authoring commands.")
+workflow_app = typer.Typer(help="Workflow graph commands.")
 app.add_typer(session_app, name="session")
 app.add_typer(graphops_app, name="graphops")
 app.add_typer(runs_app, name="runs")
 app.add_typer(capsule_app, name="capsule")
+app.add_typer(workflow_app, name="workflow")
 
 
 @app.callback()
@@ -34,8 +39,12 @@ def callback() -> None:
 @app.command("list")
 def list_capsules(
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
+    capsules_dir: Annotated[
+        Path | None,
+        typer.Option("--capsules-dir", help="Capsule registry directory."),
+    ] = None,
 ) -> None:
-    registry = CapsuleRegistry()
+    registry = CapsuleRegistry(capsules_dir)
     try:
         capsules = [capsule.to_metadata() for capsule in registry.discover()]
     except AccError as exc:
@@ -51,8 +60,14 @@ def list_capsules(
 
 
 @app.command()
-def show(capsule_id: str) -> None:
-    registry = CapsuleRegistry()
+def show(
+    capsule_id: str,
+    capsules_dir: Annotated[
+        Path | None,
+        typer.Option("--capsules-dir", help="Capsule registry directory."),
+    ] = None,
+) -> None:
+    registry = CapsuleRegistry(capsules_dir)
     try:
         capsule = registry.get(capsule_id)
     except AccError as exc:
@@ -62,8 +77,14 @@ def show(capsule_id: str) -> None:
 
 
 @app.command()
-def validate(capsule_id: str) -> None:
-    registry = CapsuleRegistry()
+def validate(
+    capsule_id: str,
+    capsules_dir: Annotated[
+        Path | None,
+        typer.Option("--capsules-dir", help="Capsule registry directory."),
+    ] = None,
+) -> None:
+    registry = CapsuleRegistry(capsules_dir)
     try:
         capsule = registry.get(capsule_id)
         errors = validate_capsule_files(capsule)
@@ -76,7 +97,13 @@ def validate(capsule_id: str) -> None:
             log_stderr(error)
         raise typer.Exit(1)
 
-    typer.echo(json.dumps({"status": "valid", "capsule_id": capsule.spec.id}, sort_keys=True))
+    typer.echo(
+        json.dumps(
+            {"status": "valid", "capsule_id": capsule.spec.id},
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
 
 
 @app.command()
@@ -92,15 +119,20 @@ def run(
         bool,
         typer.Option("--emit-conductor-json", help="Print exactly one Conductor JSON object."),
     ] = False,
+    capsules_dir: Annotated[
+        Path | None,
+        typer.Option("--capsules-dir", help="Capsule registry directory."),
+    ] = None,
 ) -> None:
     try:
         payload = load_input(input_path, input_json)
-        conductor_output = asyncio.run(CapsuleRunner().run(capsule_id, payload, run_dir))
+        runner = CapsuleRunner(registry=CapsuleRegistry(capsules_dir))
+        conductor_output = asyncio.run(runner.run(capsule_id, payload, run_dir))
     except (AccError, json.JSONDecodeError) as exc:
         log_stderr(str(exc))
         raise typer.Exit(1) from exc
 
-    typer.echo(json.dumps(conductor_output, sort_keys=True))
+    typer.echo(json.dumps(conductor_output, ensure_ascii=False, sort_keys=True))
     if conductor_output["status"] != "success":
         raise typer.Exit(1)
     if not emit_conductor_json:
@@ -185,13 +217,18 @@ def batch_run_command(
         bool,
         typer.Option("--emit-conductor-json", help="Print exactly one Conductor JSON object."),
     ] = False,
+    capsules_dir: Annotated[
+        Path | None,
+        typer.Option("--capsules-dir", help="Capsule registry directory."),
+    ] = None,
 ) -> None:
     try:
-        conductor_output = asyncio.run(run_batch(spec, run_dir, max_concurrency))
+        runner = CapsuleRunner(registry=CapsuleRegistry(capsules_dir))
+        conductor_output = asyncio.run(run_batch(spec, run_dir, max_concurrency, runner=runner))
     except AccError as exc:
         log_stderr(str(exc))
         raise typer.Exit(1) from exc
-    typer.echo(json.dumps(conductor_output, sort_keys=True))
+    typer.echo(json.dumps(conductor_output, ensure_ascii=False, sort_keys=True))
     if conductor_output["status"] != "success":
         raise typer.Exit(1)
     if not emit_conductor_json:
@@ -264,15 +301,20 @@ def capsule_test(
         bool,
         typer.Option("--emit-conductor-json", help="Print exactly one Conductor JSON object."),
     ] = False,
+    capsules_dir: Annotated[
+        Path | None,
+        typer.Option("--capsules-dir", help="Capsule registry directory."),
+    ] = None,
 ) -> None:
     try:
+        runner = CapsuleRunner(registry=CapsuleRegistry(capsules_dir))
         conductor_output = asyncio.run(
-            CapsuleRunner().run(capsule_id, load_json(input_path), run_dir)
+            runner.run(capsule_id, load_json(input_path), run_dir)
         )
     except AccError as exc:
         log_stderr(str(exc))
         raise typer.Exit(1) from exc
-    typer.echo(json.dumps(conductor_output, sort_keys=True))
+    typer.echo(json.dumps(conductor_output, ensure_ascii=False, sort_keys=True))
     if conductor_output["status"] != "success":
         raise typer.Exit(1)
     if not emit_conductor_json:
@@ -280,9 +322,16 @@ def capsule_test(
 
 
 @capsule_app.command("clone")
-def capsule_clone(source_id: str, new_id: str) -> None:
+def capsule_clone(
+    source_id: str,
+    new_id: str,
+    capsules_dir: Annotated[
+        Path | None,
+        typer.Option("--capsules-dir", help="Capsule registry directory."),
+    ] = None,
+) -> None:
     try:
-        result = clone_capsule(source_id, new_id)
+        result = clone_capsule(source_id, new_id, registry=CapsuleRegistry(capsules_dir))
     except AccError as exc:
         log_stderr(str(exc))
         raise typer.Exit(1) from exc
@@ -290,11 +339,95 @@ def capsule_clone(source_id: str, new_id: str) -> None:
 
 
 @capsule_app.command("doctor")
-def capsule_doctor(capsule_id: str) -> None:
-    result = doctor_capsule(capsule_id)
+def capsule_doctor(
+    capsule_id: str,
+    capsules_dir: Annotated[
+        Path | None,
+        typer.Option("--capsules-dir", help="Capsule registry directory."),
+    ] = None,
+) -> None:
+    result = doctor_capsule(capsule_id, registry=CapsuleRegistry(capsules_dir))
     typer.echo(dump_json(result))
     if result["status"] != "valid":
         raise typer.Exit(1)
+
+
+@capsule_app.command("scaffold")
+def capsule_scaffold(
+    blueprint: Annotated[
+        Path | None,
+        typer.Option("--blueprint", help="Capsule blueprint JSON path."),
+    ] = None,
+    capsule_id: Annotated[
+        str | None,
+        typer.Option("--id", help="Capsule id for template scaffolding."),
+    ] = None,
+    runtime: Annotated[str, typer.Option("--runtime", help="Runtime type.")] = "generic_cli",
+    template: Annotated[str, typer.Option("--template", help="Scaffold template.")] = "simple",
+    force: Annotated[bool, typer.Option("--force", help="Overwrite an existing capsule.")] = False,
+    capsules_dir: Annotated[
+        Path,
+        typer.Option("--capsules-dir", help="Capsule registry directory."),
+    ] = Path("capsules"),
+) -> None:
+    try:
+        result = scaffold_capsule(
+            blueprint_path=blueprint,
+            capsule_id=capsule_id,
+            runtime=runtime,
+            template=template,
+            capsules_dir=capsules_dir,
+            force=force,
+        )
+    except AccError as exc:
+        log_stderr(str(exc))
+        raise typer.Exit(1) from exc
+    typer.echo(dump_json(result))
+
+
+@workflow_app.command("validate")
+def workflow_validate(
+    graph_path: Path,
+    capsules_dir: Annotated[
+        Path | None,
+        typer.Option("--capsules-dir", help="Capsule registry directory."),
+    ] = None,
+) -> None:
+    try:
+        result = validate_workflow_graph(graph_path, registry=CapsuleRegistry(capsules_dir))
+    except AccError as exc:
+        log_stderr(str(exc))
+        raise typer.Exit(1) from exc
+    typer.echo(dump_json(result))
+
+
+@workflow_app.command("run")
+def workflow_run(
+    graph_path: Path,
+    run_dir: Annotated[Path, typer.Option("--run-dir", help="Workflow run directory.")],
+    emit_json: Annotated[
+        bool,
+        typer.Option("--emit-json", help="Print exactly one workflow JSON object."),
+    ] = False,
+    capsules_dir: Annotated[
+        Path | None,
+        typer.Option("--capsules-dir", help="Capsule registry directory."),
+    ] = None,
+) -> None:
+    try:
+        result = run_workflow_graph_sync(
+            graph_path,
+            run_dir,
+            registry=CapsuleRegistry(capsules_dir),
+        )
+    except AccError as exc:
+        log_stderr(str(exc))
+        raise typer.Exit(1) from exc
+    typer.echo(workflow_json(result))
+    if result["status"] != "success":
+        raise typer.Exit(1)
+    if not emit_json:
+        return
 
 
 def main() -> None:

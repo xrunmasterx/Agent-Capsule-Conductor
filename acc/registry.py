@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -46,8 +47,9 @@ class CapsuleDefinition:
 
 
 class CapsuleRegistry:
-    def __init__(self, capsules_dir: Path | str = "capsules") -> None:
-        self.capsules_dir = Path(capsules_dir)
+    def __init__(self, capsules_dir: Path | str | None = None) -> None:
+        registry_dir = capsules_dir or os.environ.get("ACC_CAPSULES_DIR", "capsules")
+        self.capsules_dir = Path(registry_dir)
 
     def discover(self) -> list[CapsuleDefinition]:
         if not self.capsules_dir.exists():

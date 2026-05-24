@@ -21,7 +21,7 @@ Run the CLI through the project environment:
 uv run acc list
 ```
 
-The optional read-only Workbench UI lives in `web/` and uses Node.js/npm:
+The optional Workbench UI lives in `web/` and uses Node.js/npm:
 
 ```bash
 cd web
@@ -178,8 +178,38 @@ Open:
 http://127.0.0.1:5173
 ```
 
-The UI is read-only. It consumes `acc-server` APIs for Run List, Run Inspector, Capsule Browser,
-Artifact Viewer, and Workflow Viewer.
+The UI consumes `acc-server` APIs for Run List, Run Inspector, Capsule Library, Capsule Editor,
+Artifact Viewer, and Workflow Builder. It does not parse repository files directly.
+
+## Editable Workbench
+
+Scaffold a hermetic demo capsule:
+
+```bash
+uv run acc capsule scaffold --blueprint examples/blueprints/simple_research_capsule.json --force
+uv run acc validate demo-research.generic
+uv run acc run demo-research.generic \
+  --input capsules/demo-research.generic/examples/input.json \
+  --run-dir runs/acceptance_demo_capsule \
+  --emit-conductor-json
+```
+
+Validate and run a deterministic workflow graph:
+
+```bash
+uv run acc workflow validate examples/workflows/demo_two_node.graph.json
+uv run acc workflow run examples/workflows/demo_two_node.graph.json \
+  --run-dir runs/acceptance_demo_graph \
+  --emit-json
+```
+
+In the web UI:
+
+```text
+Capsules -> Create Capsule -> edit prompt/schema/artifacts -> Validate/Test
+Workflows -> Add Node -> Connect Last Two -> Save Graph -> Validate Graph -> Run Graph
+Runs -> inspect node input, prompt, output, artifacts, events, stdout, stderr
+```
 
 Run UI checks:
 

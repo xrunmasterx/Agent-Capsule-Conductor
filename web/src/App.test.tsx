@@ -92,6 +92,12 @@ const routes: Record<string, unknown> = {
     artifact_manifest: 'artifact_manifest.yaml',
     permissions: { sandbox: 'read-only', network: false },
   },
+  '/api/capsules/fake-agent.generic/files/prompt_template.md': {
+    capsule_id: 'fake-agent.generic',
+    file: 'prompt_template.md',
+    path: 'capsules/fake-agent.generic/prompt_template.md',
+    content: 'Write about {{ input.topic }}.',
+  },
   '/api/workflows': {
     workflows: [
       {
@@ -156,7 +162,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('Agent Capsule Workbench read-only UI', () => {
+describe('Agent Capsule Workbench editable UI', () => {
   test('Run List and Run Inspector render fixture run from acc-server APIs', async () => {
     render(<App />);
 
@@ -200,7 +206,7 @@ describe('Agent Capsule Workbench read-only UI', () => {
     expect(browser).toHaveTextContent('"sandbox": "read-only"');
   });
 
-  test('Workflow Viewer renders read-only workflow nodes and capsule link text', async () => {
+  test('Workflow Builder renders workflow nodes and capsule link text', async () => {
     const user = userEvent.setup();
     render(<App />);
 
@@ -210,12 +216,30 @@ describe('Agent Capsule Workbench read-only UI', () => {
     expect(screen.getByLabelText('Workflow DAG')).toHaveTextContent('Capsule: fake-agent.generic');
   });
 
-  test('UI exposes no mutation controls', async () => {
+  test('Capsule Library exposes create, edit, validate, and test controls', async () => {
+    const user = userEvent.setup();
     render(<App />);
 
-    await screen.findByText('ui_acceptance_fake');
-    expect(screen.queryByRole('button', { name: /save/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /edit/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /apply/i })).not.toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: /Capsules/i }));
+
+    expect(await screen.findByLabelText('Create Capsule')).toBeInTheDocument();
+    expect(await screen.findByLabelText('Capsule Editor')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Save/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Validate/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Test/i })).toBeInTheDocument();
+  });
+
+  test('Workflow Builder exposes graph authoring controls', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: /Workflows/i }));
+
+    expect(await screen.findByLabelText('Capsule Palette')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Add Node/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Connect Last Two/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Save Graph/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Validate Graph/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Run Graph/i })).toBeInTheDocument();
   });
 });

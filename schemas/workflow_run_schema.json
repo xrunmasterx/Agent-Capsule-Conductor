@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "WorkflowRunSummary",
+  "type": "object",
+  "required": ["workflow_id", "status", "nodes"],
+  "properties": {
+    "workflow_id": {"type": "string"},
+    "status": {"type": "string", "enum": ["success", "failed", "partial"]},
+    "run_dir": {"type": "string"},
+    "started_at": {"type": "string"},
+    "ended_at": {"type": "string"},
+    "nodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["node_id", "capsule_id", "status"],
+        "properties": {
+          "node_id": {"type": "string"},
+          "capsule_id": {"type": "string"},
+          "status": {"type": "string"},
+          "summary": {"type": "string"},
+          "output_path": {"type": ["string", "null"]},
+          "artifact_dir": {"type": ["string", "null"]},
+          "event_log": {"type": ["string", "null"]},
+          "error": {"type": ["string", "null"]}
+        },
+        "additionalProperties": true
+      }
+    },
+    "errors": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": true
+}

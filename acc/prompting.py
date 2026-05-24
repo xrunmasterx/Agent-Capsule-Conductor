@@ -21,7 +21,7 @@ def render_prompt(template_path: Path, input_payload: dict[str, Any]) -> str:
         return template.render(
             input=input_payload,
             input_json=json.dumps(input_payload, indent=2, sort_keys=True),
+            **input_payload,
         )
     except TemplateError as exc:
         raise AccError(f"Failed to render prompt {template_path}: {exc}") from exc
-

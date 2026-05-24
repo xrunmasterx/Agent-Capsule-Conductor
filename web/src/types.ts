@@ -104,5 +104,29 @@ export type WorkflowDetail = {
       command?: unknown;
     }>;
   };
+  graph?: WorkflowGraph;
+  type?: 'graph' | string;
 };
 
+export type WorkflowGraphNode = {
+  id: string;
+  capsule_id: string;
+  input?: Record<string, unknown>;
+  position?: { x: number; y: number };
+};
+
+export type WorkflowGraphEdge = {
+  id: string;
+  from: string;
+  to: string;
+};
+
+export type WorkflowGraph = {
+  id: string;
+  version: string;
+  name?: string;
+  description?: string;
+  input?: Record<string, unknown>;
+  nodes: WorkflowGraphNode[];
+  edges: WorkflowGraphEdge[];
+};

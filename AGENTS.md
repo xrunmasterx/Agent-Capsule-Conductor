@@ -125,3 +125,37 @@ proposal -> validation -> dry-run -> human approval -> apply
 ```
 
 Never allow an LLM to directly apply workflow/capsule patches by default.
+
+# Phase 3: Editable Workbench MVP rules
+
+The previous MVP and read-only workbench are the baseline. Do not rewrite `acc run`, core adapters, or existing acceptance behavior unless a test proves it is necessary.
+
+## New phase objective
+
+Build the smallest useful editable workbench:
+
+1. Capsule Scaffold: create a custom capsule without hand-writing every file.
+2. Capsule Editor: edit prompt/schema/artifact manifest safely.
+3. Workflow Graph: add capsule nodes, connect nodes, save a graph file.
+4. Local Graph Runner: run a simple deterministic graph for demos.
+5. Workbench UI: minimal read/write UI for capsule creation, graph editing, workflow run, and artifact inspection.
+
+## Boundaries
+
+Do not build:
+
+- a full Dify/LangGraph replacement;
+- a new LLM agent loop;
+- a complex database backend;
+- cloud deployment;
+- multi-user/team permissions;
+- AI auto-apply workflow editing;
+- real external agent calls in default tests.
+
+## Core safety rule
+
+All graph edits must validate before save. Dangerous permission escalation must be blocked or explicitly marked as a warning.
+
+## Testing rule
+
+Keep all previous acceptance tests passing. Add new tests for capsule scaffolding, workflow graph validation, graph runner, API endpoints, and web build. Default tests must remain hermetic.

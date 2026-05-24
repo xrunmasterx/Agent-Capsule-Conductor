@@ -1,0 +1,25 @@
+id: market-news-research.generic
+version: "0.1.0"
+name: 市场消息面调研
+description: 生成中文确定性市场调研 Artifact Bundle，用于演示和可视化检查。
+runtime:
+  type: generic_cli
+  command: python
+  args_base:
+    - examples/market_research_analysis/market_demo_agents.py
+    - research
+workspace:
+  mode: existing_dir
+permissions:
+  sandbox: read-only
+  network: false
+  write_files: true
+  timeout_seconds: 30
+  allow_dangerous: false
+prompt:
+  template: prompt_template.md
+schema:
+  input: input_schema.json
+  output: output_schema.json
+artifacts:
+  manifest: artifact_manifest.yaml

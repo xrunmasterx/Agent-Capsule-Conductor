@@ -1,0 +1,5 @@
+{
+  "objective": "基于调研资料包，选择风险调整后最强的演示候选标的。",
+  "research_artifact_dir": "runs/market_research_demo/artifacts",
+  "risk_tolerance": "中"
+}

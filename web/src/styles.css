@@ -19,6 +19,7 @@ body {
 
 button,
 input,
+select,
 textarea {
   font: inherit;
 }
@@ -86,7 +87,9 @@ small {
 .path-button,
 .list-item,
 .table-row,
-.artifact-row {
+.artifact-row,
+.primary-action,
+.node-select {
   border: 1px solid transparent;
   background: transparent;
   color: inherit;
@@ -108,6 +111,55 @@ small {
   background: #e9f3f1;
   border-color: #b8d8d1;
   color: #0f5f59;
+}
+
+.primary-action,
+.editor-toolbar button,
+.inline-form button,
+.editor-panel button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 7px 10px;
+  border: 1px solid #b8d8d1;
+  border-radius: 7px;
+  background: #e9f3f1;
+  color: #0f5f59;
+  font-weight: 700;
+}
+
+.inline-form {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #d7dde2;
+  border-radius: 8px;
+  background: #f8fafb;
+}
+
+.inline-form h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.inline-form input,
+.inline-form select,
+.editor-toolbar select,
+.editor-panel textarea {
+  width: 100%;
+  border: 1px solid #c6d0d7;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #182026;
+}
+
+.inline-form input,
+.inline-form select,
+.editor-toolbar select {
+  min-height: 34px;
+  padding: 6px 8px;
 }
 
 .server-state {
@@ -526,6 +578,56 @@ small {
   background: #fff1f1;
 }
 
+.notice.neutral {
+  color: #45545f;
+  border-color: #c6d0d7;
+  background: #f7f9fa;
+}
+
+.editor-panel {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.editor-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px;
+}
+
+.editor-toolbar label {
+  display: grid;
+  gap: 4px;
+  min-width: 220px;
+  color: #61707d;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.editor-panel textarea {
+  min-height: 260px;
+  padding: 10px;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.workflow-node.selected {
+  border-color: #85b5d4;
+  background: #eef6fb;
+}
+
+.node-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+}
+
 .read-only-bar {
   display: flex;
   align-items: center;
@@ -584,4 +686,3 @@ small {
     grid-column: 2;
   }
 }
-

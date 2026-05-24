@@ -1,0 +1,23 @@
+version: "2.0"
+required:
+  - path: market_brief.md
+    name: 市场调研简报
+    type: markdown
+    viewer: markdown
+    display: primary
+  - path: news_dossier.md
+    name: 消息面资料包
+    type: markdown
+    viewer: markdown
+    display: primary
+  - path: catalysts.json
+    name: 催化因素信号
+    type: json
+    viewer: json
+    display: secondary
+  - path: risk_signals.md
+    name: 风险信号
+    type: markdown
+    viewer: markdown
+    display: secondary
+optional: []

@@ -1,0 +1,18 @@
+{
+  "id": "demo-research.generic",
+  "name": "Demo Research Capsule",
+  "runtime": "generic_cli",
+  "workspace_mode": "existing_dir",
+  "description": "A simple scaffolded capsule for demo research notes.",
+  "input_fields": [
+    {"name": "topic", "type": "string", "required": true, "description": "Research topic"}
+  ],
+  "output_fields": [
+    {"name": "summary", "type": "string", "required": true},
+    {"name": "recommendation", "type": "string", "required": true}
+  ],
+  "artifacts": [
+    {"name": "report", "path": "report.md", "type": "markdown", "required": true}
+  ],
+  "prompt": "Write a concise engineering research note about {{ topic }}. Output a short summary and recommendation."
+}

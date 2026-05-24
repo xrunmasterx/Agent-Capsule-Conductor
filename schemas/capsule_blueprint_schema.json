@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CapsuleBlueprint",
+  "type": "object",
+  "required": ["id", "name", "runtime", "workspace_mode", "input_fields", "output_fields", "prompt"],
+  "properties": {
+    "id": {"type": "string", "pattern": "^[a-zA-Z0-9_.-]+$"},
+    "name": {"type": "string"},
+    "runtime": {"type": "string", "enum": ["generic_cli", "codex_cli", "claude_sdk"]},
+    "workspace_mode": {"type": "string", "enum": ["existing_dir", "git_worktree_readonly", "git_worktree_write"]},
+    "description": {"type": "string"},
+    "input_fields": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/field"}
+    },
+    "output_fields": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/field"}
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "path", "type"],
+        "properties": {
+          "name": {"type": "string"},
+          "path": {"type": "string"},
+          "type": {"type": "string", "enum": ["markdown", "json", "text", "patch", "log"]},
+          "required": {"type": "boolean", "default": false}
+        },
+        "additionalProperties": false
+      }
+    },
+    "prompt": {"type": "string"}
+  },
+  "$defs": {
+    "field": {
+      "type": "object",
+      "required": ["name", "type"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"},
+        "type": {"type": "string", "enum": ["string", "number", "integer", "boolean", "object", "array"]},
+        "required": {"type": "boolean", "default": false},
+        "description": {"type": "string"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

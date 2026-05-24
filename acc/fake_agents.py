@@ -34,7 +34,10 @@ def main() -> None:
     else:
         raise SystemExit(f"Unknown fake agent mode: {mode}")
 
-    output_path.write_text(json.dumps(output, indent=2, sort_keys=True), encoding="utf-8")
+    output_path.write_text(
+        json.dumps(output, ensure_ascii=False, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
     print(json.dumps({"event": "fake_agent_completed", "mode": mode}, sort_keys=True))
     print(f"fake agent {mode} completed", file=sys.stderr)
 
@@ -56,4 +59,3 @@ def required_env(name: str) -> str:
 
 if __name__ == "__main__":
     main()
-
