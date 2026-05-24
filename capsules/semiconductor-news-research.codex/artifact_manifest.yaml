@@ -1,0 +1,6 @@
+required:
+  - path: news_dossier.md
+  - path: sources.json
+  - path: company_events.json
+  - path: risk_signals.md
+optional: []

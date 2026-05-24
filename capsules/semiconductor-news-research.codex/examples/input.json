@@ -1,0 +1,8 @@
+{
+  "market": "US equities",
+  "sector": "semiconductors",
+  "lookback_days": 14,
+  "tickers": ["NVDA", "AMD", "AVGO", "TSM", "ASML", "MU", "SMH"],
+  "research_question": "What recent semiconductor news, policy, earnings, and supply-chain signals matter most for investors?",
+  "as_of_date": "2026-05-24"
+}

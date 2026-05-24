@@ -1,0 +1,19 @@
+{
+  "patch_id": "patch_add_review_node",
+  "author": "workflow-editor.codex",
+  "target_type": "workflow",
+  "target_path": "workflows/engine-architecture-research.v2.yaml",
+  "rationale": "Add a reviewer node before final synthesis.",
+  "operations": [
+    {
+      "op": "add_node",
+      "node_id": "critical_review",
+      "capsule_id": "critical-review.claude"
+    },
+    {
+      "op": "connect_nodes",
+      "from": "source_reality_check",
+      "to": "critical_review"
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+id: fake-agent.generic
+version: "0.1.0"
+name: Fake Agent
+description: Produces deterministic output and a required artifact for tests.
+runtime:
+  type: generic_cli
+  command: python
+  args_base:
+    - -m
+    - acc.fake_agents
+    - fake
+workspace:
+  mode: existing_dir
+permissions:
+  sandbox: read-only
+  network: false
+  write_files: true
+  timeout_seconds: 30
+  allow_dangerous: false
+prompt:
+  template: prompt_template.md
+schema:
+  input: input_schema.json
+  output: output_schema.json
+artifacts:
+  manifest: artifact_manifest.yaml
+

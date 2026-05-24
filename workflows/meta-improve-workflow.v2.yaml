@@ -1,0 +1,46 @@
+name: meta-improve-workflow-v2
+description: Example workflow where a capsule proposes, validates, and previews a GraphOps patch.
+version: "0.2.0"
+tasks:
+  - name: propose_graph_patch
+    type: script
+    command:
+      - uv
+      - run
+      - acc
+      - run
+      - workflow-editor.codex
+      - --input
+      - capsules/workflow-editor.codex/examples/input.json
+      - --run-dir
+      - runs/workflow_editor
+      - --emit-conductor-json
+    stdout_contract: single_json_object
+  - name: validate_graph_patch
+    type: script
+    depends_on:
+      - propose_graph_patch
+    command:
+      - uv
+      - run
+      - acc
+      - graphops
+      - validate-patch
+      - examples/graphops/add-review-node.patch.json
+  - name: preview_graph_patch
+    type: script
+    depends_on:
+      - validate_graph_patch
+    command:
+      - uv
+      - run
+      - acc
+      - graphops
+      - apply-patch
+      - examples/graphops/add-review-node.patch.json
+      - --dry-run
+  - name: human_gate
+    type: human_approval
+    depends_on:
+      - preview_graph_patch
+    description: Human approval is required before any real apply.

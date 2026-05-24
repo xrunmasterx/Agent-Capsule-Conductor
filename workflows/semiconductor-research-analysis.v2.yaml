@@ -1,0 +1,34 @@
+name: semiconductor-research-analysis-v2
+description: Example two-Codex-capsule workflow with artifact handoff.
+version: "0.1.0"
+tasks:
+  - name: semiconductor_news_research
+    type: script
+    command:
+      - uv
+      - run
+      - acc
+      - run
+      - semiconductor-news-research.codex
+      - --input
+      - capsules/semiconductor-news-research.codex/examples/input.json
+      - --run-dir
+      - runs/semiconductor_news
+      - --emit-conductor-json
+    stdout_contract: single_json_object
+  - name: semiconductor_investment_analysis
+    type: script
+    depends_on:
+      - semiconductor_news_research
+    command:
+      - uv
+      - run
+      - acc
+      - run
+      - semiconductor-investment-analysis.codex
+      - --input
+      - capsules/semiconductor-investment-analysis.codex/examples/input.json
+      - --run-dir
+      - runs/semiconductor_analysis
+      - --emit-conductor-json
+    stdout_contract: single_json_object

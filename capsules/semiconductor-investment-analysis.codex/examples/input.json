@@ -1,0 +1,8 @@
+{
+  "research_artifact_dir": "runs/semiconductor_news/artifacts",
+  "investor_profile": {
+    "time_horizon": "3-6 months",
+    "risk_tolerance": "medium"
+  },
+  "analysis_question": "Given the research bundle, what is the best semiconductor-related investment stance and what risks could invalidate it?"
+}

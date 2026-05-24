@@ -1,0 +1,149 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
+import pytest
+import yaml
+from fastapi.testclient import TestClient
+
+from acc.run_index import NodeRunSummary, RunIndex, RunSummary
+from acc.server.app import create_app
+
+
+@pytest.fixture()
+def project_root(tmp_path: Path) -> Path:
+    create_capsule(tmp_path)
+    create_run(tmp_path)
+    create_workflow(tmp_path)
+    (tmp_path / ".env").write_text("TOKEN=secret\n", encoding="utf-8")
+    return tmp_path
+
+
+@pytest.fixture()
+def client(project_root: Path) -> TestClient:
+    return TestClient(create_app(project_root))
+
+
+def create_capsule(root: Path) -> None:
+    capsule_dir = root / "capsules" / "echo-test.generic"
+    capsule_dir.mkdir(parents=True)
+    write_yaml(
+        capsule_dir / "capsule.yaml",
+        {
+            "id": "echo-test.generic",
+            "version": "0.1.0",
+            "name": "Echo Test",
+            "description": "Hermetic echo capsule for server tests.",
+            "runtime": {
+                "type": "generic_cli",
+                "command": "python",
+                "args_base": [
+                    "-c",
+                    (
+                        "import json, os, pathlib; "
+                        "data=json.load(open(os.environ['ACC_INPUT_PATH'], encoding='utf-8')); "
+                        "pathlib.Path(os.environ['ACC_OUTPUT_JSON']).write_text("
+                        "json.dumps({'status':'success','summary':data['message']}), "
+                        "encoding='utf-8')"
+                    ),
+                ],
+            },
+            "workspace": {"mode": "existing_dir"},
+            "permissions": {
+                "sandbox": "read-only",
+                "network": False,
+                "write_files": False,
+                "timeout_seconds": 30,
+                "allow_dangerous": False,
+            },
+            "prompt": {"template": "prompt_template.md"},
+            "schema": {"input": "input_schema.json", "output": "output_schema.json"},
+            "artifacts": {"manifest": "artifact_manifest.yaml"},
+        },
+    )
+    (capsule_dir / "prompt_template.md").write_text(
+        "Message: {{ input.message }}\n",
+        encoding="utf-8",
+    )
+    write_json(
+        capsule_dir / "input_schema.json",
+        {
+            "type": "object",
+            "required": ["message"],
+            "properties": {"message": {"type": "string"}},
+            "additionalProperties": False,
+        },
+    )
+    write_json(
+        capsule_dir / "output_schema.json",
+        {
+            "type": "object",
+            "required": ["status", "summary"],
+            "properties": {"status": {"type": "string"}, "summary": {"type": "string"}},
+            "additionalProperties": False,
+        },
+    )
+    write_yaml(capsule_dir / "artifact_manifest.yaml", {"version": "2.0", "required": []})
+    examples_dir = capsule_dir / "examples"
+    examples_dir.mkdir()
+    write_json(examples_dir / "input.json", {"message": "hello server"})
+
+
+def create_run(root: Path) -> None:
+    run_dir = root / "runs" / "server_run"
+    artifact_dir = run_dir / "artifacts"
+    artifact_dir.mkdir(parents=True)
+    (artifact_dir / "report.md").write_text("# Report\n\nhello\n", encoding="utf-8")
+    (artifact_dir / "secret-token.txt").write_text("hidden\n", encoding="utf-8")
+    (run_dir / "output.json").write_text(
+        json.dumps({"status": "success", "summary": "ok"}),
+        encoding="utf-8",
+    )
+    node = NodeRunSummary(
+        node_id="server_node",
+        capsule_id="echo-test.generic",
+        session_id="session_test",
+        status="success",
+        summary="ok",
+        run_dir=str(run_dir.resolve()),
+        output_path=str((run_dir / "output.json").resolve()),
+        artifact_dir=str(artifact_dir.resolve()),
+        event_log=str((run_dir / "events.jsonl").resolve()),
+        stderr_log=str((run_dir / "stderr.log").resolve()),
+    )
+    summary = RunSummary(
+        run_id="server_run",
+        status="success",
+        run_dir=str(run_dir.resolve()),
+        node_count=1,
+        output_path=node.output_path,
+        artifact_dir=node.artifact_dir,
+        nodes=[node],
+    )
+    write_json(run_dir / "node_summary.json", node.model_dump())
+    write_json(run_dir / "run_summary.json", summary.model_dump())
+    write_json(root / "runs" / "index.json", RunIndex(runs=[summary]).model_dump())
+
+
+def create_workflow(root: Path) -> None:
+    workflows_dir = root / "workflows"
+    workflows_dir.mkdir()
+    write_yaml(
+        workflows_dir / "demo-workflow.yaml",
+        {
+            "name": "demo-workflow",
+            "description": "Read-only test workflow.",
+            "version": "0.1.0",
+            "tasks": [{"name": "server_node", "type": "script"}],
+        },
+    )
+
+
+def write_json(path: Path, payload: Any) -> None:
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def write_yaml(path: Path, payload: Any) -> None:
+    path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")

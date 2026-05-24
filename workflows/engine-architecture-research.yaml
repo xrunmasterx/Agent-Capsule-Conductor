@@ -1,0 +1,32 @@
+name: engine-architecture-research
+description: Example Conductor workflow using Agent Capsule Conductor script steps.
+version: "0.1.0"
+tasks:
+  - name: fake_agent_research
+    type: script
+    command:
+      - uv
+      - run
+      - acc
+      - run
+      - fake-agent.generic
+      - --input
+      - capsules/fake-agent.generic/examples/input.json
+      - --run-dir
+      - runs/workflow_fake_agent
+      - --emit-conductor-json
+    stdout_contract: single_json_object
+  - name: source_reality_check
+    type: script
+    command:
+      - uv
+      - run
+      - acc
+      - run
+      - source-reality-check.codex
+      - --input
+      - capsules/source-reality-check.codex/examples/input.json
+      - --run-dir
+      - runs/workflow_source_check
+      - --emit-conductor-json
+    stdout_contract: single_json_object

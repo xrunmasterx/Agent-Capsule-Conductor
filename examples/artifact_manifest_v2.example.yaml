@@ -1,0 +1,31 @@
+version: "2"
+required:
+  - name: output
+    path: output.json
+    type: json
+    schema: output_schema.json
+    display: hidden
+    viewer: json
+    description: Structured output consumed by downstream nodes.
+
+  - name: report
+    path: artifacts/report.md
+    type: markdown
+    display: primary
+    viewer: markdown
+    description: Human-readable primary report.
+
+optional:
+  - name: code_refs
+    path: artifacts/code_refs.json
+    type: json
+    display: secondary
+    viewer: json
+    description: Source references found by the agent.
+
+  - name: patch
+    path: artifacts/diff.patch
+    type: patch
+    display: optional
+    viewer: patch
+    description: Optional code changes produced by the capsule.

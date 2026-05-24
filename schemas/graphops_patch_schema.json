@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["patch_id", "author", "target_type", "target_path", "rationale", "operations"],
+  "properties": {
+    "patch_id": { "type": "string", "minLength": 1 },
+    "author": { "type": "string", "minLength": 1 },
+    "target_type": {
+      "type": "string",
+      "enum": ["workflow", "capsule_template", "prompt_template", "artifact_manifest", "schema"]
+    },
+    "target_path": { "type": "string", "minLength": 1 },
+    "rationale": { "type": "string", "minLength": 1 },
+    "operations": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["op"],
+        "properties": {
+          "op": {
+            "type": "string",
+            "enum": [
+              "add_node",
+              "remove_node",
+              "connect_nodes",
+              "update_node_input",
+              "update_capsule_prompt",
+              "update_capsule_permission",
+              "add_artifact_requirement",
+              "replace_schema",
+              "enable_danger_full_access",
+              "remove_human_gate",
+              "disable_tests",
+              "write_secret_files",
+              "change_git_remote",
+              "remove_schema_validation"
+            ]
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": false
+}

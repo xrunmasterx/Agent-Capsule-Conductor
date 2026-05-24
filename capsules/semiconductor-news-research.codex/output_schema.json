@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "status",
+    "summary",
+    "dossier_path",
+    "sources_path",
+    "company_events_path",
+    "risk_signals_path"
+  ],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["success"]
+    },
+    "summary": {
+      "type": "string"
+    },
+    "dossier_path": {
+      "type": "string"
+    },
+    "sources_path": {
+      "type": "string"
+    },
+    "company_events_path": {
+      "type": "string"
+    },
+    "risk_signals_path": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true
+}

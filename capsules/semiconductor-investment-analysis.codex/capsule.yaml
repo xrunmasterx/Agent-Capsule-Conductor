@@ -1,0 +1,24 @@
+id: semiconductor-investment-analysis.codex
+version: "0.1.0"
+name: Semiconductor Investment Analysis
+description: Uses Codex CLI to analyze a semiconductor research artifact bundle and write an investment memo.
+runtime:
+  type: codex_cli
+  command: codex
+  args_base:
+    - exec
+workspace:
+  mode: existing_dir
+permissions:
+  sandbox: read-only
+  network: false
+  write_files: false
+  timeout_seconds: 180
+  allow_dangerous: false
+prompt:
+  template: prompt_template.md
+schema:
+  input: input_schema.json
+  output: output_schema.json
+artifacts:
+  manifest: artifact_manifest.yaml

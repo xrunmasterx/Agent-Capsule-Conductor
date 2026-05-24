@@ -1,0 +1,24 @@
+id: workflow-editor.codex
+version: "0.1.0"
+name: Workflow Editor
+description: Proposes GraphOps patches for workflow and capsule assets without applying them.
+runtime:
+  type: codex_cli
+  command: codex
+  args_base:
+    - exec
+workspace:
+  mode: existing_dir
+permissions:
+  sandbox: read-only
+  network: false
+  write_files: false
+  timeout_seconds: 120
+  allow_dangerous: false
+prompt:
+  template: prompt_template.md
+schema:
+  input: input_schema.json
+  output: output_schema.json
+artifacts:
+  manifest: artifact_manifest.yaml

@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "NodeRunSummary",
+  "type": "object",
+  "required": ["node_id", "capsule_id", "status", "run_dir"],
+  "properties": {
+    "node_id": { "type": "string" },
+    "capsule_id": { "type": "string" },
+    "session_id": { "type": ["string", "null"] },
+    "status": { "type": "string" },
+    "summary": { "type": "string" },
+    "duration_ms": { "type": ["integer", "null"], "minimum": 0 },
+    "run_dir": { "type": "string" },
+    "input_path": { "type": ["string", "null"] },
+    "prompt_path": { "type": ["string", "null"] },
+    "output_path": { "type": ["string", "null"] },
+    "artifact_dir": { "type": ["string", "null"] },
+    "event_log": { "type": ["string", "null"] },
+    "stdout_log": { "type": ["string", "null"] },
+    "stderr_log": { "type": ["string", "null"] },
+    "errors": { "type": "array", "items": { "type": "object" } }
+  },
+  "additionalProperties": true
+}

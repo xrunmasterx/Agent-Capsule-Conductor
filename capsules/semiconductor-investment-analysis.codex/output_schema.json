@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "status",
+    "summary",
+    "recommendation",
+    "confidence",
+    "memo_path",
+    "recommendation_path"
+  ],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["success"]
+    },
+    "summary": {
+      "type": "string"
+    },
+    "recommendation": {
+      "type": "string",
+      "enum": ["buy", "hold", "avoid", "watch"]
+    },
+    "confidence": {
+      "type": "string",
+      "enum": ["low", "medium", "high"]
+    },
+    "memo_path": {
+      "type": "string"
+    },
+    "recommendation_path": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true
+}

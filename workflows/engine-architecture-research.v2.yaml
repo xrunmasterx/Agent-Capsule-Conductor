@@ -1,0 +1,39 @@
+name: engine-architecture-research-v2
+description: Example V2 workflow using ACC sessions as deterministic Conductor script steps.
+version: "0.2.0"
+tasks:
+  - name: source_reality_check
+    type: script
+    command:
+      - uv
+      - run
+      - acc
+      - run
+      - source-reality-check.codex
+      - --input
+      - capsules/source-reality-check.codex/examples/input.json
+      - --run-dir
+      - runs/workflow_source_check
+      - --emit-conductor-json
+    stdout_contract: single_json_object
+  - name: critical_review
+    type: script
+    depends_on:
+      - source_reality_check
+    command:
+      - uv
+      - run
+      - acc
+      - run
+      - critical-review.claude
+      - --input
+      - capsules/critical-review.claude/examples/input.json
+      - --run-dir
+      - runs/workflow_critical_review
+      - --emit-conductor-json
+    stdout_contract: single_json_object
+  - name: human_gate
+    type: human_approval
+    depends_on:
+      - critical_review
+    description: Human reviews artifacts before downstream use.

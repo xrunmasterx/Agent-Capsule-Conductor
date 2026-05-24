@@ -1,0 +1,17 @@
+{
+  "node_id": "fake-agent.generic",
+  "capsule_id": "fake-agent.generic",
+  "session_id": null,
+  "status": "success",
+  "summary": "Fake agent completed successfully.",
+  "duration_ms": 1234,
+  "run_dir": "runs/workbench_acceptance_fake",
+  "input_path": "runs/workbench_acceptance_fake/input.json",
+  "prompt_path": "runs/workbench_acceptance_fake/resolved_prompt.md",
+  "output_path": "runs/workbench_acceptance_fake/output.json",
+  "artifact_dir": "runs/workbench_acceptance_fake/artifacts",
+  "event_log": "runs/workbench_acceptance_fake/events.jsonl",
+  "stdout_log": "runs/workbench_acceptance_fake/stdout.log",
+  "stderr_log": "runs/workbench_acceptance_fake/stderr.log",
+  "errors": []
+}

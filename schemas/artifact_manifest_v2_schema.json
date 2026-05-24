@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ArtifactManifestV2",
+  "type": "object",
+  "properties": {
+    "version": { "type": "string" },
+    "required": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/artifact" }
+    },
+    "optional": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/artifact" }
+    }
+  },
+  "$defs": {
+    "artifact": {
+      "type": "object",
+      "required": ["name", "path", "type"],
+      "properties": {
+        "name": { "type": "string" },
+        "path": { "type": "string" },
+        "type": { "type": "string" },
+        "schema": { "type": ["string", "null"] },
+        "display": { "type": "string", "enum": ["primary", "secondary", "optional", "hidden"] },
+        "viewer": { "type": "string", "enum": ["markdown", "json", "text", "log", "patch", "diff", "none"] },
+        "description": { "type": "string" }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}

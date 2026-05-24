@@ -1,0 +1,6 @@
+required:
+  - path: investment_memo.md
+  - path: recommendation.md
+  - path: assumptions.md
+  - path: risks.md
+optional: []

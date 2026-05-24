@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["target_path", "change_request"],
+  "properties": {
+    "target_path": {
+      "type": "string"
+    },
+    "change_request": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true
+}

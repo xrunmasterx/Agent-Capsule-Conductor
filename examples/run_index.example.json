@@ -1,0 +1,16 @@
+{
+  "version": "1",
+  "runs": [
+    {
+      "run_id": "workbench_acceptance_fake",
+      "workflow_id": null,
+      "status": "success",
+      "started_at": "2026-05-24T10:00:00Z",
+      "ended_at": "2026-05-24T10:00:03Z",
+      "duration_ms": 3000,
+      "run_dir": "runs/workbench_acceptance_fake",
+      "node_count": 1,
+      "failed_nodes": []
+    }
+  ]
+}

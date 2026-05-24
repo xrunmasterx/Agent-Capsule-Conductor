@@ -1,0 +1,18 @@
+{
+  "tasks": [
+    {
+      "capsule_id": "fake-agent.generic",
+      "input": "input1.json"
+    },
+    {
+      "capsule_id": "fake-agent.generic",
+      "input": "input2.json"
+    },
+    {
+      "capsule_id": "fake-agent.generic",
+      "input": "input3.json"
+    }
+  ],
+  "max_concurrency": 2
+}
+

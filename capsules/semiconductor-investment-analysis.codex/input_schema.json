@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["research_artifact_dir", "investor_profile", "analysis_question"],
+  "properties": {
+    "research_artifact_dir": {
+      "type": "string"
+    },
+    "investor_profile": {
+      "type": "object",
+      "required": ["time_horizon", "risk_tolerance"],
+      "properties": {
+        "time_horizon": {
+          "type": "string"
+        },
+        "risk_tolerance": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "analysis_question": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true
+}
