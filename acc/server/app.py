@@ -4,7 +4,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 
-from acc.server.routes import artifacts, capsules, health, runs, workflows
+from acc.server.routes import artifacts, capsules, debugger, graphops, health, runs, workflows
 
 
 def create_app(project_root: Path | str | None = None) -> FastAPI:
@@ -15,8 +15,9 @@ def create_app(project_root: Path | str | None = None) -> FastAPI:
     app.include_router(runs.router, prefix="/api")
     app.include_router(artifacts.router, prefix="/api")
     app.include_router(workflows.router, prefix="/api")
+    app.include_router(debugger.router, prefix="/api")
+    app.include_router(graphops.router, prefix="/api")
     return app
 
 
 app = create_app()
-

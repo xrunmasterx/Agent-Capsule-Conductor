@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "required": ["status", "summary", "child_workflow_id", "child_workflow_status"],
+  "properties": {
+    "status": { "type": "string" },
+    "summary": { "type": "string" },
+    "child_workflow_id": { "type": "string" },
+    "child_workflow_status": { "type": "string" }
+  },
+  "additionalProperties": true
+}

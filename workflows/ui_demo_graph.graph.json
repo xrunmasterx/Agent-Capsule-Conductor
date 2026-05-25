@@ -1,0 +1,49 @@
+{
+  "description": "可编辑工作流图",
+  "edges": [
+    {
+      "condition": null,
+      "from": "echo_test_1",
+      "id": "edge_echo_test_1_fake_agent_2",
+      "label": "依赖",
+      "mapping": {},
+      "to": "fake_agent_2"
+    }
+  ],
+  "id": "ui_demo_graph",
+  "metadata": {
+    "layout": "manual"
+  },
+  "name": "UI Demo 工作流",
+  "nodes": [
+    {
+      "capsule_id": "echo-test.generic",
+      "id": "echo_test_1",
+      "input": {
+        "message": "hello from browser e2e"
+      },
+      "input_mapping": {},
+      "label": "Echo Test",
+      "notes": "",
+      "position": {
+        "x": 120,
+        "y": 180
+      }
+    },
+    {
+      "capsule_id": "fake-agent.generic",
+      "id": "fake_agent_2",
+      "input": {},
+      "input_mapping": {
+        "topic": "{{ nodes.echo_test_1.output.summary }}"
+      },
+      "label": "Fake Agent",
+      "notes": "",
+      "position": {
+        "x": 400,
+        "y": 180
+      }
+    }
+  ],
+  "version": "0.2.0"
+}

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
+from collections import deque
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from acc.run_index import NodeRunSummary, load_or_rebuild_run_index, load_run_summary_by_id
 from acc.server.context import (
@@ -66,6 +68,45 @@ def list_node_artifacts(run_id: str, node_id: str, request: Request) -> dict[str
     return {"run_id": run_id, "node_id": node_id, "artifacts": artifacts}
 
 
+@router.get("/{run_id}/events")
+def get_run_events(
+    run_id: str,
+    request: Request,
+    limit: int = Query(200, ge=1, le=1000),
+) -> dict[str, Any]:
+    project_root = get_project_root(request)
+    run_dir = resolve_run_dir_or_404(run_id, request)
+    event_log = run_dir / "workflow_events.jsonl"
+    return {
+        "run_id": run_id,
+        "event_log": relative_project_path(project_root, event_log),
+        "events": read_jsonl_tolerant(event_log, limit=limit),
+    }
+
+
+@router.get("/{run_id}/nodes/{node_id}/events")
+def get_node_events(
+    run_id: str,
+    node_id: str,
+    request: Request,
+    limit: int = Query(200, ge=1, le=1000),
+) -> dict[str, Any]:
+    project_root = get_project_root(request)
+    run_dir = resolve_run_dir_or_404(run_id, request)
+    validate_path_component(node_id, "node_id")
+    event_log = run_dir / "node_runs" / node_id / "events.jsonl"
+    if not event_log.exists():
+        legacy_event_log = run_dir / "nodes" / node_id / "events.jsonl"
+        if legacy_event_log.exists():
+            event_log = legacy_event_log
+    return {
+        "run_id": run_id,
+        "node_id": node_id,
+        "event_log": relative_project_path(project_root, event_log),
+        "events": read_jsonl_tolerant(event_log, limit=limit),
+    }
+
+
 def load_run_or_404(run_id: str, request: Request):
     try:
         return load_run_summary_by_id(run_id, get_project_root(request) / "runs")
@@ -80,3 +121,42 @@ def find_node_or_404(run_id: str, node_id: str, request: Request) -> NodeRunSumm
             return node
     raise HTTPException(status_code=404, detail=f"Node not found: {node_id}")
 
+
+def resolve_run_dir_or_404(run_id: str, request: Request) -> Path:
+    validate_path_component(run_id, "run_id")
+    project_root = get_project_root(request)
+    run_dir = (project_root / "runs" / run_id).resolve()
+    runs_root = (project_root / "runs").resolve()
+    if not run_dir.is_relative_to(runs_root) or not run_dir.exists() or not run_dir.is_dir():
+        raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
+    return run_dir
+
+
+def validate_path_component(value: str, label: str) -> None:
+    if value in {"", ".", ".."} or Path(value).name != value or "/" in value or "\\" in value:
+        raise HTTPException(status_code=400, detail=f"Invalid {label}: {value}")
+
+
+def read_jsonl_tolerant(path: Path, limit: int = 200) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    events: deque[dict[str, Any]] = deque(maxlen=limit)
+    with path.open(encoding="utf-8", errors="replace") as file:
+        lines = enumerate(file, start=1)
+        for line_number, line in lines:
+            event = parse_jsonl_event(line, line_number)
+            if event is not None:
+                events.append(event)
+    return list(events)
+
+
+def parse_jsonl_event(line: str, line_number: int) -> dict[str, Any] | None:
+    if not line.strip():
+        return None
+    try:
+        payload = json.loads(line)
+    except json.JSONDecodeError:
+        return {"type": "raw_log", "line": line_number, "payload": {"text": line.rstrip("\n")}}
+    if isinstance(payload, dict):
+        return payload
+    return {"type": "raw_log", "line": line_number, "payload": {"text": line.rstrip("\n")}}

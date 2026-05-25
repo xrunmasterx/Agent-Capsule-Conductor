@@ -1,0 +1,35 @@
+{
+  "id": "workflow_capsule_nested_demo",
+  "version": "0.1.0",
+  "name": "Workflow Capsule Nested Demo",
+  "nodes": [
+    {
+      "id": "subworkflow_node",
+      "capsule_id": "acc-subworkflow-capsule.example",
+      "input": {
+        "message": "nested workflow input"
+      }
+    },
+    {
+      "id": "final_review",
+      "capsule_id": "fake-agent.generic",
+      "input": {
+        "notes": "consumes nested workflow output"
+      }
+    }
+  ],
+  "control_edges": [
+    { "id": "edge_subworkflow_final", "from": "subworkflow_node", "to": "final_review" }
+  ],
+  "data_edges": [
+    {
+      "id": "edge_subworkflow_summary",
+      "from": { "node": "subworkflow_node", "output": "summary" },
+      "to": { "node": "final_review", "input": "topic" }
+    }
+  ],
+  "policy": {
+    "failure_mode": "fail_fast",
+    "max_concurrency": 1
+  }
+}

@@ -76,7 +76,20 @@ def test_codex_command_and_capture(monkeypatch, tmp_path: Path) -> None:
     assert "--output-schema" in command
     assert "-o" in command
     assert result.status == "success"
-    assert request.events_log_path.read_text(encoding="utf-8") == '{"event":"codex"}\n'
+    assert request.stdout_log_path.read_text(encoding="utf-8") == '{"event":"codex"}\n'
+    events = [
+        json.loads(line)
+        for line in request.events_log_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert events == [
+        {
+            "exit_code": 0,
+            "runtime": "codex_cli",
+            "stderr_bytes": 7,
+            "stdout_bytes": 18,
+            "type": "adapter_event",
+        }
+    ]
     assert request.stderr_log_path.read_text(encoding="utf-8") == "stderr\n"
 
 

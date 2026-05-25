@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "required": ["status", "summary"],
+  "properties": {
+    "status": { "type": "string" },
+    "summary": { "type": "string" }
+  },
+  "additionalProperties": true
+}

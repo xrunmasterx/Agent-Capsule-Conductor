@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
 from pathlib import Path
 from typing import Any
 
 import yaml
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from acc.capsule_authoring import doctor_capsule
@@ -75,15 +76,24 @@ def list_capsules(request: Request) -> dict[str, Any]:
 def get_capsule(capsule_id: str, request: Request) -> dict[str, Any]:
     capsule = load_capsule_or_404(capsule_id, request)
     payload = capsule.to_metadata()
+    prompt_template = None if capsule.spec.prompt is None else capsule.spec.prompt.template
+    behavior_pack = (
+        None if capsule.spec.behavior_pack is None else capsule.spec.behavior_pack.model_dump()
+    )
+    workflow = None if capsule.spec.workflow is None else capsule.spec.workflow.model_dump()
+    lifecycle = None if capsule.spec.lifecycle is None else capsule.spec.lifecycle.model_dump()
     payload.update(
         {
             "capsule_dir": relative_project_path(get_project_root(request), capsule.capsule_dir),
             "yaml_path": relative_project_path(get_project_root(request), capsule.yaml_path),
-            "prompt_template": capsule.spec.prompt.template,
+            "prompt_template": prompt_template,
             "input_schema": capsule.spec.schemas.input,
             "output_schema": capsule.spec.schemas.output,
             "artifact_manifest": capsule.spec.artifacts.manifest,
             "permissions": capsule.spec.permissions.model_dump(),
+            "behavior_pack": behavior_pack,
+            "workflow": workflow,
+            "lifecycle": lifecycle,
         }
     )
     return payload
@@ -171,6 +181,37 @@ def test_capsule(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.delete("/{capsule_id}")
+def delete_capsule(
+    capsule_id: str,
+    request: Request,
+    force: bool = Query(False),
+) -> dict[str, Any]:
+    capsule = load_capsule_or_404(capsule_id, request)
+    project_root = get_project_root(request)
+    references = find_capsule_references(project_root, capsule_id)
+    if references and not force:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Capsule is referenced by workflow files",
+                "capsule_id": capsule_id,
+                "references": references,
+            },
+        )
+    root = capsules_dir(project_root).resolve()
+    target = capsule.capsule_dir.resolve()
+    if not target.is_relative_to(root):
+        raise HTTPException(status_code=400, detail="Capsule directory is outside capsules root")
+    shutil.rmtree(target)
+    return {
+        "status": "deleted",
+        "capsule_id": capsule_id,
+        "capsule_dir": relative_project_path(project_root, target),
+        "references": references,
+    }
+
+
 @router.get("/{capsule_id}/files/{file_path:path}")
 def read_capsule_file(capsule_id: str, file_path: str, request: Request) -> dict[str, Any]:
     capsule = load_capsule_or_404(capsule_id, request)
@@ -220,6 +261,88 @@ def load_capsule_or_404(capsule_id: str, request: Request):
 
 def capsules_dir(project_root: Path) -> Path:
     return configured_project_dir(project_root, "ACC_CAPSULES_DIR", "capsules")
+
+
+def workflows_dir(project_root: Path) -> Path:
+    return configured_project_dir(project_root, "ACC_WORKFLOWS_DIR", "workflows")
+
+
+def find_capsule_references(project_root: Path, capsule_id: str) -> list[dict[str, Any]]:
+    root = workflows_dir(project_root)
+    if not root.exists():
+        return []
+
+    references: list[dict[str, Any]] = []
+    for path in sorted(item for item in root.rglob("*") if item.is_file()):
+        rel_path = relative_project_path(project_root, path)
+        if path.suffix == ".json":
+            references.extend(find_json_workflow_references(path, rel_path, capsule_id))
+        elif path.suffix in {".yaml", ".yml"}:
+            references.extend(find_yaml_workflow_references(path, rel_path, capsule_id))
+    return references
+
+
+def find_json_workflow_references(
+    path: Path,
+    rel_path: str,
+    capsule_id: str,
+) -> list[dict[str, Any]]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(payload, dict):
+        return []
+
+    references: list[dict[str, Any]] = []
+    for node in payload.get("nodes", []):
+        if isinstance(node, dict) and node.get("capsule_id") == capsule_id:
+            references.append(
+                {
+                    "path": rel_path,
+                    "kind": "workflow_graph",
+                    "node_id": node.get("id"),
+                }
+            )
+    return references
+
+
+def find_yaml_workflow_references(
+    path: Path,
+    rel_path: str,
+    capsule_id: str,
+) -> list[dict[str, Any]]:
+    try:
+        payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError:
+        return []
+    if not isinstance(payload, dict):
+        return []
+
+    references: list[dict[str, Any]] = []
+    for task in payload.get("tasks", []):
+        if not isinstance(task, dict):
+            continue
+        if task.get("capsule_id") == capsule_id or command_mentions_capsule(
+            task.get("command"),
+            capsule_id,
+        ):
+            references.append(
+                {
+                    "path": rel_path,
+                    "kind": "workflow_yaml",
+                    "task": task.get("name"),
+                }
+            )
+    return references
+
+
+def command_mentions_capsule(command: Any, capsule_id: str) -> bool:
+    if isinstance(command, str):
+        return command == capsule_id
+    if isinstance(command, list):
+        return capsule_id in [str(item) for item in command]
+    return False
 
 
 def allowed_capsule_file(capsule_dir: Path, file_path: str) -> Path:

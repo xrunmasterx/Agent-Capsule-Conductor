@@ -1,0 +1,49 @@
+{
+  "id": "demo_nested_workflow",
+  "version": "0.3.0",
+  "name": "嵌套 ACC Workflow Demo",
+  "description": "父 workflow 调用一个 kind=acc_workflow 的 Capsule。",
+  "policy": {
+    "failure_mode": "fail_fast",
+    "max_concurrency": 2
+  },
+  "nodes": [
+    {
+      "id": "input_normalize",
+      "capsule_id": "echo-test.generic",
+      "label": "输入整理",
+      "input": { "message": "normalize architecture question" },
+      "position": { "x": 0, "y": 120 }
+    },
+    {
+      "id": "sub_arch_review",
+      "capsule_id": "acc-subworkflow.example",
+      "label": "架构审查子工作流",
+      "input": {},
+      "position": { "x": 360, "y": 120 }
+    },
+    {
+      "id": "final_report",
+      "capsule_id": "fake-agent.generic",
+      "label": "最终报告",
+      "input": {},
+      "position": { "x": 720, "y": 120 }
+    }
+  ],
+  "control_edges": [
+    { "id": "c_input_sub", "from": "input_normalize", "to": "sub_arch_review" },
+    { "id": "c_sub_final", "from": "sub_arch_review", "to": "final_report" }
+  ],
+  "data_edges": [
+    {
+      "id": "d_input_sub",
+      "from": { "node": "input_normalize", "output": "summary" },
+      "to": { "node": "sub_arch_review", "input": "message" }
+    },
+    {
+      "id": "d_sub_final",
+      "from": { "node": "sub_arch_review", "output": "summary" },
+      "to": { "node": "final_report", "input": "topic" }
+    }
+  ]
+}

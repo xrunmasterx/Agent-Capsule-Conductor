@@ -12,6 +12,9 @@ def test_example_capsules_validate_without_external_agents() -> None:
         "source-reality-check.codex",
         "critical-review.claude",
         "workflow-editor.codex",
+        "codex-workflow-capsule.example",
+        "acc-subworkflow-capsule.example",
+        "external-workflow-capsule.example",
         "semiconductor-news-research.codex",
         "semiconductor-investment-analysis.codex",
     ]:

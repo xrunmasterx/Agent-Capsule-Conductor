@@ -1,4 +1,4 @@
-import { Play, Save, ShieldCheck, TestTube, WandSparkles } from 'lucide-react';
+import { Play, Save, ShieldCheck, TestTube, Trash2, WandSparkles } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import { api } from '../api';
@@ -12,6 +12,7 @@ type Props = {
 };
 
 const editableFiles = [
+  'capsule.yaml',
   'prompt_template.md',
   'input_schema.json',
   'output_schema.json',
@@ -19,12 +20,52 @@ const editableFiles = [
   'examples/input.json',
 ];
 
+const defaultInputFields = JSON.stringify(
+  [{ name: 'topic', type: 'string', required: true, description: '任务主题' }],
+  null,
+  2,
+);
+const defaultOutputFields = JSON.stringify(
+  [
+    { name: 'summary', type: 'string', required: true, description: '一句话结论' },
+    { name: 'report', type: 'string', required: true, description: '结构化报告正文' },
+  ],
+  null,
+  2,
+);
+const defaultArtifacts = JSON.stringify([], null, 2);
+
 export function CapsuleBrowser({ capsules, selectedCapsuleId, onSelect, onChanged }: Props) {
   const [detail, setDetail] = useState<CapsuleDetail | null>(null);
   const [selectedFile, setSelectedFile] = useState(editableFiles[0]);
   const [fileContent, setFileContent] = useState('');
   const [message, setMessage] = useState('');
-  const [newCapsuleId, setNewCapsuleId] = useState('demo-note.generic');
+  const [newCapsuleId, setNewCapsuleId] = useState('demo-research.codex');
+  const [newCapsuleName, setNewCapsuleName] = useState('Demo Research Capsule');
+  const [description, setDescription] = useState('通过 Codex CLI 执行一个结构化调研任务。');
+  const [runtime, setRuntime] = useState('codex_cli');
+  const [workspaceMode, setWorkspaceMode] = useState('existing_dir');
+  const [sandbox, setSandbox] = useState('workspace-write');
+  const [network, setNetwork] = useState(true);
+  const [writeFiles, setWriteFiles] = useState(true);
+  const [timeoutSeconds, setTimeoutSeconds] = useState(600);
+  const [allowDangerous, setAllowDangerous] = useState(false);
+  const [overwriteExisting, setOverwriteExisting] = useState(false);
+  const [inputFieldsText, setInputFieldsText] = useState(defaultInputFields);
+  const [outputFieldsText, setOutputFieldsText] = useState(defaultOutputFields);
+  const [artifactsText, setArtifactsText] = useState(defaultArtifacts);
+  const [prompt, setPrompt] = useState(
+    [
+      '你是一个可复用的 Capsule Template。请严格按照输入任务执行。',
+      '',
+      '输入主题：{{ topic }}',
+      '',
+      '方法论：',
+      '1. 先明确事实边界和时间边界。',
+      '2. 区分事实、推断和不确定性。',
+      '3. 输出必须满足 output_schema.json。',
+    ].join('\n'),
+  );
 
   useEffect(() => {
     if (!selectedCapsuleId) {
@@ -65,24 +106,67 @@ export function CapsuleBrowser({ capsules, selectedCapsuleId, onSelect, onChange
   }, [selectedCapsuleId, selectedFile]);
 
   async function createCapsule() {
-    setMessage('');
-    const result = await api.scaffoldCapsule({
-      id: newCapsuleId,
-      runtime: 'generic_cli',
-      template: 'simple',
-      force: true,
-    });
-    setMessage(`已创建 ${result.capsule_id}`);
-    onSelect(result.capsule_id);
-    onChanged?.();
+    try {
+      setMessage('');
+      const blueprint = {
+        id: newCapsuleId,
+        name: newCapsuleName || newCapsuleId,
+        runtime,
+        workspace_mode: workspaceMode,
+        description,
+        input_fields: JSON.parse(inputFieldsText || '[]'),
+        output_fields: JSON.parse(outputFieldsText || '[]'),
+        artifacts: JSON.parse(artifactsText || '[]'),
+        permissions: {
+          sandbox,
+          network,
+          write_files: writeFiles,
+          timeout_seconds: timeoutSeconds,
+          allow_dangerous: allowDangerous,
+        },
+        prompt,
+      };
+      const result = await api.scaffoldCapsule({ blueprint, force: overwriteExisting });
+      setMessage(`已创建 ${result.capsule_id}`);
+      onSelect(result.capsule_id);
+      onChanged?.();
+    } catch (error) {
+      setMessage(`创建失败: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  async function deleteSelectedCapsule() {
+    if (!selectedCapsuleId) {
+      return;
+    }
+    const confirmed = window.confirm(
+      `删除 ${selectedCapsuleId}？如果它仍被 workflow 引用，后端会拒绝删除。`,
+    );
+    if (!confirmed) {
+      return;
+    }
+    try {
+      const result = await api.deleteCapsule(selectedCapsuleId);
+      setMessage(`已删除 ${result.capsule_id}`);
+      setDetail(null);
+      onSelect(capsules.find((capsule) => capsule.id !== selectedCapsuleId)?.id || '');
+      onChanged?.();
+    } catch (error) {
+      setMessage(`删除失败: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   async function saveFile() {
     if (!selectedCapsuleId) {
       return;
     }
-    await api.saveCapsuleFile(selectedCapsuleId, selectedFile, fileContent);
-    setMessage(`已保存 ${selectedFile}`);
+    try {
+      await api.saveCapsuleFile(selectedCapsuleId, selectedFile, fileContent);
+      setMessage(`已保存 ${selectedFile}`);
+      onChanged?.();
+    } catch (error) {
+      setMessage(`保存失败: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   async function validateCapsule() {
@@ -97,13 +181,25 @@ export function CapsuleBrowser({ capsules, selectedCapsuleId, onSelect, onChange
     if (!selectedCapsuleId) {
       return;
     }
-    const inputText = selectedFile === 'examples/input.json' ? fileContent : '{}';
-    const input = JSON.parse(inputText || '{}') as Record<string, unknown>;
-    const result = await api.testCapsule(selectedCapsuleId, {
-      input,
-      run_dir: `runs/ui_capsule_test_${selectedCapsuleId.replaceAll('.', '_')}`,
-    });
-    setMessage(`测试 ${selectedCapsuleId}: ${result.status}`);
+    try {
+      const inputText =
+        selectedFile === 'examples/input.json'
+          ? fileContent
+          : (
+              await api.capsuleFile(selectedCapsuleId, 'examples/input.json').catch(() => ({
+                content: '{}',
+              }))
+            ).content;
+      const input = JSON.parse(inputText || '{}') as Record<string, unknown>;
+      const result = await api.testCapsule(selectedCapsuleId, {
+        input,
+        run_dir: `runs/ui_capsule_test_${selectedCapsuleId.replaceAll('.', '_')}`,
+      });
+      setMessage(`测试 ${selectedCapsuleId}: ${result.status}`);
+      onChanged?.();
+    } catch (error) {
+      setMessage(`测试失败: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   return (
@@ -116,17 +212,130 @@ export function CapsuleBrowser({ capsules, selectedCapsuleId, onSelect, onChange
       </header>
       <div className="split compact">
         <div className="list-stack">
-          <section className="inline-form" aria-label="创建 Capsule">
+          <section className="inline-form capsule-create-form" aria-label="创建 Capsule">
             <h3>创建 Capsule</h3>
+            {message ? <div className="notice neutral sticky-notice">{message}</div> : null}
             <input
               aria-label="新 Capsule id"
               value={newCapsuleId}
               onChange={(event) => setNewCapsuleId(event.target.value)}
             />
+            <input
+              aria-label="新 Capsule 名称"
+              value={newCapsuleName}
+              onChange={(event) => setNewCapsuleName(event.target.value)}
+            />
+            <label>
+              Runtime
+              <select value={runtime} onChange={(event) => setRuntime(event.target.value)}>
+                <option value="codex_cli">codex_cli</option>
+                <option value="generic_cli">generic_cli</option>
+                <option value="claude_sdk">claude_sdk</option>
+              </select>
+            </label>
+            <label>
+              Workspace
+              <select
+                value={workspaceMode}
+                onChange={(event) => setWorkspaceMode(event.target.value)}
+              >
+                <option value="existing_dir">existing_dir</option>
+                <option value="git_worktree_readonly">git_worktree_readonly</option>
+                <option value="git_worktree_write">git_worktree_write</option>
+              </select>
+            </label>
+            <label>
+              Sandbox
+              <select value={sandbox} onChange={(event) => setSandbox(event.target.value)}>
+                <option value="read-only">read-only</option>
+                <option value="workspace-write">workspace-write</option>
+                <option value="danger-full-access">danger-full-access</option>
+              </select>
+            </label>
+            <div className="toggle-row">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={network}
+                  onChange={(event) => setNetwork(event.target.checked)}
+                />
+                Network
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={writeFiles}
+                  onChange={(event) => setWriteFiles(event.target.checked)}
+                />
+                Write files
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={allowDangerous}
+                  onChange={(event) => setAllowDangerous(event.target.checked)}
+                />
+                Dangerous
+              </label>
+            </div>
+            <label>
+              Timeout seconds
+              <input
+                type="number"
+                min={1}
+                value={timeoutSeconds}
+                onChange={(event) => setTimeoutSeconds(Number(event.target.value) || 1)}
+              />
+            </label>
+            <label>
+              描述
+              <textarea
+                className="compact-textarea"
+                value={description}
+                onChange={(event) => setDescription(event.target.value)}
+              />
+            </label>
+            <label>
+              Input fields JSON
+              <textarea
+                className="compact-textarea"
+                value={inputFieldsText}
+                onChange={(event) => setInputFieldsText(event.target.value)}
+              />
+            </label>
+            <label>
+              Output fields JSON
+              <textarea
+                className="compact-textarea"
+                value={outputFieldsText}
+                onChange={(event) => setOutputFieldsText(event.target.value)}
+              />
+            </label>
+            <label>
+              Artifacts JSON
+              <textarea
+                className="compact-textarea"
+                value={artifactsText}
+                onChange={(event) => setArtifactsText(event.target.value)}
+              />
+            </label>
+            <label>
+              Prompt
+              <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} />
+            </label>
+            <label className="inline-check">
+              <input
+                type="checkbox"
+                checked={overwriteExisting}
+                onChange={(event) => setOverwriteExisting(event.target.checked)}
+              />
+              覆盖同名 Capsule
+            </label>
             <button type="button" className="primary-action" onClick={createCapsule}>
               <WandSparkles aria-hidden="true" size={16} />
               创建
             </button>
+            {message ? <div className="notice neutral">{message}</div> : null}
           </section>
           {capsules.map((capsule) => (
             <button
@@ -163,7 +372,7 @@ export function CapsuleBrowser({ capsules, selectedCapsuleId, onSelect, onChange
             </div>
             <dl className="definition-grid">
               <dt>Prompt</dt>
-              <dd>{detail.prompt_template}</dd>
+              <dd>{detail.prompt_template || 'n/a'}</dd>
               <dt>Input schema</dt>
               <dd>{detail.input_schema}</dd>
               <dt>Output schema</dt>
@@ -205,6 +414,10 @@ export function CapsuleBrowser({ capsules, selectedCapsuleId, onSelect, onChange
                 <button type="button" onClick={testCapsule}>
                   <Play aria-hidden="true" size={16} />
                   测试
+                </button>
+                <button type="button" className="danger-action" onClick={deleteSelectedCapsule}>
+                  <Trash2 aria-hidden="true" size={16} />
+                  删除
                 </button>
               </div>
               <textarea

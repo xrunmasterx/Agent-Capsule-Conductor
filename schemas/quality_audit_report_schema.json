@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ACC Quality Audit Report",
+  "type": "object",
+  "required": ["status", "started_at", "completed_at", "summary", "commands", "findings", "remaining_risks"],
+  "properties": {
+    "status": { "type": "string", "enum": ["passed", "failed", "partial", "blocked"] },
+    "started_at": { "type": "string" },
+    "completed_at": { "type": "string" },
+    "summary": { "type": "string" },
+    "commands": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["command", "exit_code"],
+        "properties": {
+          "command": { "type": "string" },
+          "exit_code": { "type": "integer" },
+          "notes": { "type": "string" }
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": { "$ref": "quality_issue_schema.json" }
+    },
+    "fixes_applied": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "browser_e2e_report": { "type": ["string", "null"] },
+    "remaining_risks": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "additionalProperties": false
+}

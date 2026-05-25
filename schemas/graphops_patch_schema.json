@@ -24,6 +24,8 @@
               "add_node",
               "remove_node",
               "connect_nodes",
+              "add_control_edge",
+              "add_data_edge",
               "update_node_input",
               "update_capsule_prompt",
               "update_capsule_permission",

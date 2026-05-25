@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ACC Workflow Capsule v2",
+  "type": "object",
+  "required": ["id", "version", "kind", "interface"],
+  "properties": {
+    "id": { "type": "string" },
+    "version": { "type": "string" },
+    "kind": {
+      "type": "string",
+      "enum": ["atomic", "agent_session", "agent_workflow", "acc_workflow", "external_workflow"]
+    },
+    "runtime": { "type": "object" },
+    "behavior_pack": {
+      "type": "object",
+      "properties": {
+        "root": { "type": "string" },
+        "required_files": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "workflow": {
+      "type": "object",
+      "properties": {
+        "type": { "type": "string" },
+        "path": { "type": "string" }
+      }
+    },
+    "lifecycle": {
+      "type": "object",
+      "properties": {
+        "setup": { "type": "array", "items": { "type": "string" } },
+        "run": { "type": "array", "items": { "type": "string" } },
+        "collect": { "type": "array", "items": { "type": "string" } },
+        "cleanup": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "interface": {
+      "type": "object",
+      "required": ["input_schema", "output_schema", "artifact_manifest"],
+      "properties": {
+        "input_schema": { "type": "string" },
+        "output_schema": { "type": "string" },
+        "artifact_manifest": { "type": "string" }
+      }
+    }
+  }
+}

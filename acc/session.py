@@ -23,6 +23,9 @@ class SessionManifest(BaseModel):
     artifact_dir: str
     event_log_path: str
     conductor_output_path: str
+    template_snapshot_dir: str | None = None
+    lifecycle_log_dir: str | None = None
+    capsule_kind: str | None = None
     parent_workflow_run_id: str | None = None
     parent_node_id: str | None = None
     error: str | None = None

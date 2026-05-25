@@ -1,0 +1,8 @@
+required:
+  - name: output
+    path: output.json
+    type: json
+optional:
+  - name: nested_summary
+    path: artifacts/nested_summary.md
+    type: markdown

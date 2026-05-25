@@ -1,0 +1,4 @@
+required:
+  - name: output
+    path: output.json
+    type: json

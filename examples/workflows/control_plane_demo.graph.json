@@ -1,0 +1,16 @@
+{
+  "id": "control_plane_demo",
+  "version": "0.1.0",
+  "name": "控制面 Demo",
+  "nodes": [
+    {
+      "id": "control_echo",
+      "capsule_id": "echo-test.generic",
+      "input": { "message": "control plane demo" },
+      "position": { "x": 120, "y": 120 }
+    }
+  ],
+  "control_edges": [],
+  "data_edges": [],
+  "policy": { "failure_mode": "fail_fast", "max_concurrency": 1 }
+}

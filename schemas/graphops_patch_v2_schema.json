@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ACC GraphOps Patch v2",
+  "type": "object",
+  "required": ["patch_id", "target_path", "operations"],
+  "properties": {
+    "patch_id": { "type": "string" },
+    "author": { "type": "string" },
+    "target_type": { "type": "string", "enum": ["workflow", "capsule"] },
+    "target_path": { "type": "string" },
+    "rationale": { "type": "string" },
+    "operations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["op"],
+        "properties": {
+          "op": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

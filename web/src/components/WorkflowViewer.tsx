@@ -15,6 +15,7 @@ import {
   type NodeChange,
   type NodeProps,
   type OnConnect,
+  useUpdateNodeInternals,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import {
@@ -30,8 +31,8 @@ import {
   Terminal,
   TestTube,
 } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
 import dagre from 'dagre';
+import { useEffect, useMemo, useState } from 'react';
 
 import { api } from '../api';
 import { shortPath, statusTone } from '../format';
@@ -41,6 +42,7 @@ import type {
   ArtifactLink,
   CapsuleSummary,
   NodeRunSummary,
+  RunEvent,
   WorkflowDetail,
   WorkflowGraph,
   WorkflowGraphEdge,
@@ -75,6 +77,7 @@ type CapsuleNodeData = {
 type CapsuleFlowNode = Node<CapsuleNodeData, 'capsuleNode'>;
 
 const nodeTypes = { capsuleNode: CapsuleNodeCard };
+const capsuleNodeSize = { width: 230, height: 112 };
 
 export function WorkflowViewer({
   workflows,
@@ -92,6 +95,11 @@ export function WorkflowViewer({
   const [edgeMappingText, setEdgeMappingText] = useState('{}');
   const [message, setMessage] = useState('');
   const [workflowRun, setWorkflowRun] = useState<WorkflowRunResult | null>(null);
+  const [workflowEvents, setWorkflowEvents] = useState<RunEvent[]>([]);
+  const [nodeEvents, setNodeEvents] = useState<RunEvent[]>([]);
+  const [liveStdout, setLiveStdout] = useState('');
+  const [liveStderr, setLiveStderr] = useState('');
+  const [isRunning, setIsRunning] = useState(false);
   const [artifacts, setArtifacts] = useState<ArtifactLink[]>([]);
   const [content, setContent] = useState<ArtifactContent | null>(null);
 
@@ -101,18 +109,23 @@ export function WorkflowViewer({
     }
     let ignore = false;
     api.workflow(selectedWorkflowId).then((workflow) => {
-      if (!ignore) {
-        const nextGraph = workflow.graph || graphFromLegacyWorkflow(workflow);
-        setDetail(workflow);
-        setGraph(nextGraph);
-        setSelection(
-          nextGraph.nodes[0]
-            ? { type: 'node', id: nextGraph.nodes[0].id }
-            : { type: 'workflow', id: nextGraph.id },
-        );
-        setWorkflowRun(null);
-        setMessage('');
+      if (ignore) {
+        return;
       }
+      const nextGraph = workflow.graph || graphFromLegacyWorkflow(workflow);
+      setDetail(workflow);
+      setGraph(nextGraph);
+      setSelection(
+        nextGraph.nodes[0]
+          ? { type: 'node', id: nextGraph.nodes[0].id }
+          : { type: 'workflow', id: nextGraph.id },
+      );
+      setWorkflowRun(null);
+      setWorkflowEvents([]);
+      setNodeEvents([]);
+      setLiveStdout('');
+      setLiveStderr('');
+      setMessage('');
     });
     return () => {
       ignore = true;
@@ -145,7 +158,7 @@ export function WorkflowViewer({
       setArtifacts([]);
       return;
     }
-    const runId = workflowRun.run_dir.split(/[\\/]/).filter(Boolean).at(-1) || workflowRun.run_dir;
+    const runId = runIdFromRunDir(workflowRun.run_dir);
     let ignore = false;
     api
       .nodeArtifacts(runId, selectedNode.id)
@@ -164,12 +177,63 @@ export function WorkflowViewer({
     };
   }, [workflowRun?.run_dir, selectedNode?.id]);
 
+  useEffect(() => {
+    if (!workflowRun?.run_dir || !selectedNode?.id) {
+      setNodeEvents([]);
+      setLiveStdout('');
+      setLiveStderr('');
+      return;
+    }
+    const selectedNodeId = selectedNode.id;
+    const runId = runIdFromRunDir(workflowRun.run_dir);
+    const stdoutPath =
+      selectedNodeRun?.stdout_log || `${workflowRun.run_dir}/node_runs/${selectedNodeId}/stdout.log`;
+    const stderrPath =
+      selectedNodeRun?.stderr_log || `${workflowRun.run_dir}/node_runs/${selectedNodeId}/stderr.log`;
+    let ignore = false;
+
+    async function pollNodeDetails() {
+      const [events, stdout, stderr] = await Promise.all([
+        api.nodeEvents(runId, selectedNodeId).catch(() => null),
+        api.artifact(stdoutPath).catch(() => null),
+        api.artifact(stderrPath).catch(() => null),
+      ]);
+      if (ignore) {
+        return;
+      }
+      setNodeEvents(events?.events || []);
+      setLiveStdout(stdout?.content || '');
+      setLiveStderr(stderr?.content || '');
+    }
+
+    void pollNodeDetails();
+    if (!isRunning) {
+      return () => {
+        ignore = true;
+      };
+    }
+    const timer = window.setInterval(() => {
+      void pollNodeDetails();
+    }, 1000);
+    return () => {
+      ignore = true;
+      window.clearInterval(timer);
+    };
+  }, [
+    workflowRun?.run_dir,
+    selectedNode?.id,
+    selectedNodeRun?.stdout_log,
+    selectedNodeRun?.stderr_log,
+    isRunning,
+  ]);
+
   function createGraph() {
     const nextGraph = emptyGraph();
     setDetail(null);
     setGraph(nextGraph);
     setSelection({ type: 'workflow', id: nextGraph.id });
     setWorkflowRun(null);
+    setWorkflowEvents([]);
     setMessage('已新建工作流画布');
   }
 
@@ -179,6 +243,7 @@ export function WorkflowViewer({
     setGraph(nextGraph);
     setSelection({ type: 'node', id: nextGraph.nodes[0].id });
     setWorkflowRun(null);
+    setWorkflowEvents([]);
     setMessage(kind === 'serial' ? '已加载串行 Demo' : '已加载并行 Demo');
   }
 
@@ -235,8 +300,7 @@ export function WorkflowViewer({
   }
 
   function autoLayout() {
-    const nextGraph = layoutGraph(graph);
-    setGraph(nextGraph);
+    setGraph(layoutGraph(graph));
     setMessage('已执行自动布局');
   }
 
@@ -258,14 +322,44 @@ export function WorkflowViewer({
   }
 
   async function runGraph() {
+    const runId = `ui_workflow_${graph.id}`;
+    const runDir = `runs/${runId}`;
+    let pollTimer: number | undefined;
+    async function pollWorkflowEvents() {
+      try {
+        const result = await api.runEvents(runId);
+        setWorkflowEvents(result.events);
+        setWorkflowRun(liveWorkflowRunFromEvents(graph, runDir, result.events));
+      } catch {
+        setWorkflowRun(liveWorkflowRunFromEvents(graph, runDir, []));
+      }
+    }
     try {
       await saveGraph();
-      const result = await api.runWorkflow(graph.id, `runs/ui_workflow_${graph.id}`);
+      setIsRunning(true);
+      setWorkflowEvents([]);
+      setWorkflowRun(liveWorkflowRunFromEvents(graph, runDir, []));
+      setMessage(`运行 ${graph.id}: 已提交，等待节点事件...`);
+      void pollWorkflowEvents();
+      pollTimer = window.setInterval(() => {
+        void pollWorkflowEvents();
+      }, 1000);
+      const result = await api.runWorkflow(graph.id, runDir);
+      if (pollTimer !== undefined) {
+        window.clearInterval(pollTimer);
+      }
       setWorkflowRun(result);
+      const events = await api.runEvents(runId).catch(() => null);
+      setWorkflowEvents(events?.events || []);
       setMessage(`运行 ${result.workflow_id}: ${statusLabel(result.status)}`);
       onChanged?.();
     } catch (error) {
+      if (pollTimer !== undefined) {
+        window.clearInterval(pollTimer);
+      }
       setMessage(`运行失败: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setIsRunning(false);
     }
   }
 
@@ -294,17 +388,17 @@ export function WorkflowViewer({
           <button type="button" onClick={() => loadDemo('parallel')}>
             {t.loadDemo} 并行
           </button>
-          <button type="button" onClick={saveGraph}>
+          <button type="button" onClick={saveGraph} disabled={isRunning}>
             <Save aria-hidden="true" size={16} />
             {t.save}
           </button>
-          <button type="button" onClick={validateGraph}>
+          <button type="button" onClick={validateGraph} disabled={isRunning}>
             <TestTube aria-hidden="true" size={16} />
             {t.validate}
           </button>
-          <button type="button" onClick={runGraph}>
+          <button type="button" onClick={runGraph} disabled={isRunning}>
             <Play aria-hidden="true" size={16} />
-            {t.run}
+            {isRunning ? '运行中' : t.run}
           </button>
           <button type="button" onClick={autoLayout}>
             <LayoutDashboard aria-hidden="true" size={16} />
@@ -376,6 +470,9 @@ export function WorkflowViewer({
               content={content}
               inputText={nodeInputText}
               mappingText={nodeMappingText}
+              nodeEvents={nodeEvents}
+              liveStdout={liveStdout}
+              liveStderr={liveStderr}
               onInputText={setNodeInputText}
               onMappingText={setNodeMappingText}
               onApplyJson={applyNodeJson}
@@ -404,9 +501,12 @@ export function WorkflowViewer({
       </div>
 
       <footer className="graph-bottom-panel" aria-label="运行面板">
-        <strong>{workflowRun ? statusLabel(workflowRun.status) : t.notRun}</strong>
-        <span>{message || '可从节点库添加节点，拖拽节点右侧输出连接到另一个节点左侧输入。'}</span>
-        {workflowRun?.errors?.length ? <span>{workflowRun.errors.join('; ')}</span> : null}
+        <div className="run-status-line">
+          <strong>{workflowRun ? statusLabel(workflowRun.status) : t.notRun}</strong>
+          <span>{message || '可从节点库添加节点，拖拽节点右侧输出连接到另一个节点左侧输入。'}</span>
+          {workflowRun?.errors?.length ? <span>{workflowRun.errors.join('; ')}</span> : null}
+        </div>
+        <EventTimeline events={workflowEvents} title="工作流事件" />
       </footer>
     </section>
   );
@@ -446,30 +546,35 @@ function WorkflowGraphCanvas({
   }, [flowEdges]);
 
   function handleNodesChange(changes: NodeChange<CapsuleFlowNode>[]) {
-    setNodes((current) => {
-      const nextNodes = applyNodeChanges(changes, current) as CapsuleFlowNode[];
-      const positions = new Map(nextNodes.map((node) => [node.id, node.position]));
-      onGraphChange({
-        ...graph,
-        nodes: graph.nodes.map((node) => ({
-          ...node,
-          position: positions.get(node.id) || node.position,
-        })),
-      });
-      return nextNodes;
+    const nextNodes = applyNodeChanges(changes, nodes) as CapsuleFlowNode[];
+    setNodes(nextNodes);
+    const shouldPersistGraph = changes.some(
+      (change) => change.type === 'position' || change.type === 'remove',
+    );
+    if (!shouldPersistGraph) {
+      return;
+    }
+    const positions = new Map(nextNodes.map((node) => [node.id, node.position]));
+    const remainingNodeIds = new Set(nextNodes.map((node) => node.id));
+    onGraphChange({
+      ...graph,
+      nodes: graph.nodes
+        .filter((node) => remainingNodeIds.has(node.id))
+        .map((node) => ({ ...node, position: positions.get(node.id) || node.position })),
+      edges: graph.edges.filter(
+        (edge) => remainingNodeIds.has(edge.from) && remainingNodeIds.has(edge.to),
+      ),
     });
   }
 
   function handleEdgesChange(changes: EdgeChange[]) {
-    setEdges((current) => {
-      const nextEdges = applyEdgeChanges(changes, current);
-      const remaining = new Set(nextEdges.map((edge) => edge.id));
-      onGraphChange({
-        ...graph,
-        edges: graph.edges.filter((edge) => remaining.has(edge.id)),
-      });
-      return nextEdges;
-    });
+    const nextEdges = applyEdgeChanges(changes, edges);
+    setEdges(nextEdges);
+    if (!changes.some((change) => change.type === 'remove')) {
+      return;
+    }
+    const remaining = new Set(nextEdges.map((edge) => edge.id));
+    onGraphChange({ ...graph, edges: graph.edges.filter((edge) => remaining.has(edge.id)) });
   }
 
   const handleConnect: OnConnect = (connection) => {
@@ -509,6 +614,7 @@ function WorkflowGraphCanvas({
           markerEnd: { type: MarkerType.ArrowClosed },
         }}
       >
+        <GraphInternalsRefresh nodeIds={nodes.map((node) => node.id)} />
         <MiniMap pannable zoomable />
         <Controls />
         <Background variant={BackgroundVariant.Dots} gap={22} size={1} />
@@ -517,10 +623,33 @@ function WorkflowGraphCanvas({
   );
 }
 
-function CapsuleNodeCard({ data, selected }: NodeProps<CapsuleFlowNode>) {
+function GraphInternalsRefresh({ nodeIds }: { nodeIds: string[] }) {
+  const updateNodeInternals = useUpdateNodeInternals();
+  const nodeIdKey = nodeIds.join('|');
+  useEffect(() => {
+    const frameId = requestAnimationFrame(() => {
+      nodeIdKey
+        .split('|')
+        .filter(Boolean)
+        .forEach((nodeId) => updateNodeInternals(nodeId));
+    });
+    return () => cancelAnimationFrame(frameId);
+  }, [nodeIdKey, updateNodeInternals]);
+  return null;
+}
+
+function CapsuleNodeCard({ id, data, selected }: NodeProps<CapsuleFlowNode>) {
   return (
-    <article className={selected ? 'capsule-flow-node selected' : 'capsule-flow-node'}>
-      <Handle type="target" position={Position.Left} aria-label="输入" />
+    <article
+      className={selected ? 'capsule-flow-node selected' : 'capsule-flow-node'}
+      data-testid={`workflow-node-${id}`}
+    >
+      <Handle
+        type="target"
+        position={Position.Left}
+        aria-label="输入"
+        data-testid={`workflow-node-${id}-target`}
+      />
       <header>
         <strong>{data.label}</strong>
         <span className={`pill ${statusTone(data.status)}`}>{statusLabel(data.status)}</span>
@@ -531,7 +660,12 @@ function CapsuleNodeCard({ data, selected }: NodeProps<CapsuleFlowNode>) {
       </small>
       {data.warning ? <small className="warning-text">{data.warning}</small> : null}
       {data.artifactDir ? <small>{t.artifacts}: {shortPath(data.artifactDir)}</small> : null}
-      <Handle type="source" position={Position.Right} aria-label="输出" />
+      <Handle
+        type="source"
+        position={Position.Right}
+        aria-label="输出"
+        data-testid={`workflow-node-${id}-source`}
+      />
     </article>
   );
 }
@@ -544,6 +678,9 @@ function NodeInspector({
   content,
   inputText,
   mappingText,
+  nodeEvents,
+  liveStdout,
+  liveStderr,
   onInputText,
   onMappingText,
   onApplyJson,
@@ -557,6 +694,9 @@ function NodeInspector({
   content: ArtifactContent | null;
   inputText: string;
   mappingText: string;
+  nodeEvents: RunEvent[];
+  liveStdout: string;
+  liveStderr: string;
   onInputText: (value: string) => void;
   onMappingText: (value: string) => void;
   onApplyJson: () => void;
@@ -613,6 +753,13 @@ function NodeInspector({
       <button type="button" onClick={onApplyJson}>
         {t.save} {t.input}
       </button>
+      <EventTimeline events={nodeEvents} title="节点事件" />
+      <section className="live-log-panel" aria-label="CLI 可见输出">
+        <h3>CLI 可见输出</h3>
+        <p className="muted">这里只展示 CLI 实际输出、事件和错误日志，不展示模型隐藏思考链。</p>
+        <CodeBlock title="stdout.log" content={liveStdout || '(暂无 stdout)'} variant="log" />
+        <CodeBlock title="stderr.log" content={liveStderr || '(暂无 stderr)'} variant="log" />
+      </section>
       <div className="path-grid single">
         {paths.map((item) => {
           const Icon = item.icon;
@@ -677,10 +824,7 @@ function EdgeInspector({
       </dl>
       <label>
         Label
-        <input
-          value={edge.label || ''}
-          onChange={(event) => onUpdate({ label: event.target.value })}
-        />
+        <input value={edge.label || ''} onChange={(event) => onUpdate({ label: event.target.value })} />
       </label>
       <label>
         {t.mapping}
@@ -711,6 +855,24 @@ function WorkflowInspector({ graph }: { graph: WorkflowGraph }) {
   );
 }
 
+function EventTimeline({ events, title }: { events: RunEvent[]; title: string }) {
+  const visibleEvents = events.slice(-12).reverse();
+  return (
+    <section className="event-timeline" aria-label={title}>
+      <h3>{title}</h3>
+      {visibleEvents.length === 0 ? <p className="muted">暂无事件</p> : null}
+      {visibleEvents.map((event, index) => (
+        <article key={String(event.event_id || `${event.type}-${index}`)} className="event-row">
+          <strong>{String(event.type || event.event || 'event')}</strong>
+          <span>{event.node_id ? `node=${event.node_id}` : ''}</span>
+          <small>{String(event.status || '')}</small>
+          <small>{event.timestamp}</small>
+        </article>
+      ))}
+    </section>
+  );
+}
+
 function toFlowNodes(
   graph: WorkflowGraph,
   capsules: CapsuleSummary[],
@@ -725,6 +887,8 @@ function toFlowNodes(
       type: 'capsuleNode',
       selected: node.id === selectedNodeId,
       position: node.position || { x: 0, y: 0 },
+      initialWidth: capsuleNodeSize.width,
+      initialHeight: capsuleNodeSize.height,
       data: {
         label: node.label || node.id,
         capsuleId: node.capsule_id,
@@ -904,6 +1068,58 @@ function graphFromLegacyWorkflow(workflow: WorkflowDetail): WorkflowGraph {
   };
 }
 
+function liveWorkflowRunFromEvents(
+  graph: WorkflowGraph,
+  runDir: string,
+  events: RunEvent[],
+): WorkflowRunResult {
+  const statusByNode = new Map(graph.nodes.map((node) => [node.id, 'not_run']));
+  let workflowStatus = events.length ? 'running' : 'not_run';
+  for (const event of events) {
+    const type = String(event.type || event.event || '');
+    const nodeId = typeof event.node_id === 'string' ? event.node_id : '';
+    if (nodeId && statusByNode.has(nodeId)) {
+      if (type === 'node_scheduled') {
+        statusByNode.set(nodeId, 'scheduled');
+      } else if (type === 'node_started' || type === 'input_materialized') {
+        statusByNode.set(nodeId, 'running');
+      } else if (type === 'node_completed') {
+        statusByNode.set(nodeId, 'success');
+      } else if (type === 'node_failed') {
+        statusByNode.set(nodeId, String(event.status || 'failed'));
+      }
+    }
+    if (type === 'workflow_completed') {
+      workflowStatus = 'success';
+    } else if (type === 'workflow_failed') {
+      workflowStatus = String(event.status || 'failed');
+    } else if (type === 'workflow_started') {
+      workflowStatus = 'running';
+    }
+  }
+  return {
+    workflow_id: graph.id,
+    status: workflowStatus,
+    run_dir: runDir,
+    nodes: graph.nodes.map((node) => ({
+      node_id: node.id,
+      capsule_id: node.capsule_id,
+      status: statusByNode.get(node.id) || 'not_run',
+      run_dir: `${runDir}/node_runs/${node.id}`,
+      input_path: `${runDir}/node_runs/${node.id}/input.json`,
+      prompt_path: `${runDir}/node_runs/${node.id}/resolved_prompt.md`,
+      output_path: `${runDir}/node_runs/${node.id}/output.json`,
+      artifact_dir: `${runDir}/node_runs/${node.id}/artifacts`,
+      event_log: `${runDir}/node_runs/${node.id}/events.jsonl`,
+      stdout_log: `${runDir}/node_runs/${node.id}/stdout.log`,
+      stderr_log: `${runDir}/node_runs/${node.id}/stderr.log`,
+      errors: [],
+    })),
+    edges: graph.edges,
+    errors: [],
+  };
+}
+
 function findCapsuleId(command: unknown): string {
   if (!Array.isArray(command)) {
     return '';
@@ -936,6 +1152,10 @@ function uniqueEdgeId(graph: WorkflowGraph, from: string, to: string): string {
   return edgeId;
 }
 
+function runIdFromRunDir(runDir: string): string {
+  return runDir.split(/[\\/]/).filter(Boolean).at(-1) || runDir;
+}
+
 function statusLabel(status: string) {
   const labels: Record<string, string> = {
     success: t.success,
@@ -944,6 +1164,7 @@ function statusLabel(status: string) {
     schema_error: t.schemaError,
     artifact_error: t.artifactError,
     running: t.running,
+    scheduled: '已调度',
     not_run: t.notRun,
   };
   return labels[status] || status;

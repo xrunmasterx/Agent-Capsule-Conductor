@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ACC Control Plane Tool Response",
+  "type": "object",
+  "required": ["status", "tool", "result"],
+  "properties": {
+    "status": { "type": "string", "enum": ["success", "failed", "blocked", "unavailable"] },
+    "tool": { "type": "string" },
+    "result": { "type": ["object", "array", "string", "null"] },
+    "errors": { "type": "array", "items": { "type": "object" } },
+    "warnings": { "type": "array", "items": { "type": "object" } }
+  }
+}

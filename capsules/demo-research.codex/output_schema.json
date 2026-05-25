@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "report": {
+      "description": "结构化报告正文",
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "success"
+      ],
+      "type": "string"
+    },
+    "summary": {
+      "description": "一句话结论",
+      "type": "string"
+    }
+  },
+  "required": [
+    "status",
+    "summary",
+    "report"
+  ],
+  "type": "object"
+}

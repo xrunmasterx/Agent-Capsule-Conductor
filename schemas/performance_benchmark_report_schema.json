@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ACC Performance Benchmark Report",
+  "type": "object",
+  "required": ["benchmarks"],
+  "properties": {
+    "benchmarks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "target", "result", "notes"],
+        "properties": {
+          "name": { "type": "string" },
+          "target": { "type": "string" },
+          "result": { "type": "string" },
+          "notes": { "type": "string" }
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+}

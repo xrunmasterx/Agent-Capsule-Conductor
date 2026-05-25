@@ -1,0 +1,7 @@
+{
+  "type": "object",
+  "properties": {
+    "workflow_input": { "type": "string" }
+  },
+  "additionalProperties": true
+}

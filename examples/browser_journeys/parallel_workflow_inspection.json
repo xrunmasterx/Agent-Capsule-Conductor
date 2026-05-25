@@ -1,0 +1,13 @@
+{
+  "id": "parallel_workflow_inspection",
+  "name": "并行 Workflow 可视化检查",
+  "steps": [
+    "打开并行 demo workflow",
+    "点击自动布局",
+    "确认 fan-out/fan-in 结构清晰",
+    "运行 workflow",
+    "查看并行分支节点状态",
+    "查看合并节点输出",
+    "检查 console/network 错误"
+  ]
+}

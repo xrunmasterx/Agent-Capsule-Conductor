@@ -23,6 +23,8 @@ def main() -> None:
             "echo": input_payload,
         }
     elif mode == "fake":
+        if input_payload.get("should_fail"):
+            raise SystemExit("Fake agent was asked to fail")
         topic = input_payload["topic"]
         report_path = artifact_dir / "report.md"
         report_path.write_text(f"# Fake Agent Report\n\nTopic: {topic}\n", encoding="utf-8")

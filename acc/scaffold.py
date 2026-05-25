@@ -128,6 +128,14 @@ def write_capsule_files(destination: Path, blueprint: dict[str, Any]) -> None:
 
 def capsule_yaml(blueprint: dict[str, Any]) -> dict[str, Any]:
     runtime = blueprint["runtime"]
+    permissions = {
+        "sandbox": "read-only",
+        "network": False,
+        "write_files": runtime == "generic_cli",
+        "timeout_seconds": 30,
+        "allow_dangerous": False,
+        **blueprint.get("permissions", {}),
+    }
     payload: dict[str, Any] = {
         "id": blueprint["id"],
         "version": "0.1.0",
@@ -135,13 +143,7 @@ def capsule_yaml(blueprint: dict[str, Any]) -> dict[str, Any]:
         "description": blueprint.get("description", ""),
         "runtime": runtime_spec(runtime, blueprint),
         "workspace": {"mode": blueprint["workspace_mode"]},
-        "permissions": {
-            "sandbox": "read-only",
-            "network": False,
-            "write_files": runtime == "generic_cli",
-            "timeout_seconds": 30,
-            "allow_dangerous": False,
-        },
+        "permissions": permissions,
         "prompt": {"template": "prompt_template.md"},
         "schema": {"input": "input_schema.json", "output": "output_schema.json"},
         "artifacts": {"manifest": "artifact_manifest.yaml"},

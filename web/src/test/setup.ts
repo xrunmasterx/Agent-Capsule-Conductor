@@ -7,3 +7,9 @@ class ResizeObserverMock {
 }
 
 globalThis.ResizeObserver = ResizeObserverMock;
+
+class DOMMatrixReadOnlyMock {
+  m22 = 1;
+}
+
+globalThis.DOMMatrixReadOnly = DOMMatrixReadOnlyMock as unknown as typeof DOMMatrixReadOnly;

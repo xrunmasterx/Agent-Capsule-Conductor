@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import yaml
 from fastapi import APIRouter, HTTPException, Request
@@ -193,7 +194,7 @@ def workflow_graph_path(workflows_dir: Path, path_value: str) -> Path:
 
 def save_graph(path: Path, graph: dict[str, Any], request: Request) -> dict[str, Any]:
     path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = path.with_suffix(path.suffix + ".tmp")
+    temp_path = path.with_suffix(f"{path.suffix}.{uuid4().hex}.tmp")
     temp_path.write_text(
         json.dumps(graph, ensure_ascii=False, indent=2, sort_keys=True),
         encoding="utf-8",

@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ACC WorkflowGraph v3",
+  "type": "object",
+  "required": ["id", "version", "nodes"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+$" },
+    "version": { "type": "string" },
+    "name": { "type": "string" },
+    "description": { "type": "string" },
+    "policy": {
+      "type": "object",
+      "properties": {
+        "failure_mode": {
+          "type": "string",
+          "enum": ["fail_fast", "continue_on_error", "all_or_nothing", "manual_review"]
+        },
+        "max_concurrency": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": true
+    },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "capsule_id"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+$" },
+          "capsule_id": { "type": "string" },
+          "label": { "type": "string" },
+          "kind": { "type": "string" },
+          "input": { "type": "object" },
+          "position": {
+            "type": "object",
+            "properties": {
+              "x": { "type": "number" },
+              "y": { "type": "number" }
+            },
+            "additionalProperties": false
+          },
+          "timeout_seconds": { "type": "integer", "minimum": 1 },
+          "retry": {
+            "type": "object",
+            "properties": {
+              "max_attempts": { "type": "integer", "minimum": 1 },
+              "backoff_seconds": { "type": "number", "minimum": 0 }
+            },
+            "additionalProperties": true
+          },
+          "on_failure": {
+            "type": "string",
+            "enum": ["fail", "skip", "retry", "manual_review"]
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "control_edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "from", "to"],
+        "properties": {
+          "id": { "type": "string" },
+          "from": { "type": "string" },
+          "to": { "type": "string" },
+          "condition": { "type": ["string", "null"] },
+          "label": { "type": "string" }
+        },
+        "additionalProperties": true
+      },
+      "default": []
+    },
+    "data_edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "from", "to"],
+        "properties": {
+          "id": { "type": "string" },
+          "from": {
+            "type": "object",
+            "required": ["node"],
+            "properties": {
+              "node": { "type": "string" },
+              "output": { "type": "string" },
+              "artifact": { "type": "string" },
+              "path": { "type": "string" }
+            },
+            "additionalProperties": false
+          },
+          "to": {
+            "type": "object",
+            "required": ["node", "input"],
+            "properties": {
+              "node": { "type": "string" },
+              "input": { "type": "string" }
+            },
+            "additionalProperties": false
+          },
+          "required": { "type": "boolean", "default": true }
+        },
+        "additionalProperties": true
+      },
+      "default": []
+    },
+    "metadata": { "type": "object" }
+  },
+  "additionalProperties": true
+}

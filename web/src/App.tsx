@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from './api';
 import { ArtifactViewer } from './components/ArtifactViewer';
 import { CapsuleBrowser } from './components/CapsuleBrowser';
+import { ControlPlanePanel } from './components/ControlPlanePanel';
 import { RunInspector } from './components/RunInspector';
 import { RunList } from './components/RunList';
 import { WorkflowViewer } from './components/WorkflowViewer';
@@ -15,6 +16,7 @@ const navigation = [
   { key: 'capsules', label: t.capsuleLibrary, icon: Box },
   { key: 'artifacts', label: t.artifacts, icon: FileText },
   { key: 'workflows', label: t.workflow, icon: GitBranch },
+  { key: 'control', label: t.controlPlane, icon: Layers },
 ] as const;
 
 export function App() {
@@ -131,6 +133,9 @@ export function App() {
             onSelect={setSelectedWorkflowId}
             onChanged={() => loadInitialData()}
           />
+        ) : null}
+        {view === 'control' ? (
+          <ControlPlanePanel runs={runs} workflows={workflows} selectedRun={selectedRun} />
         ) : null}
         <div className="read-only-bar">
           <Layers aria-hidden="true" size={16} />

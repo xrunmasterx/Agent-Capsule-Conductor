@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ACC Workflow Run Manifest v2",
+  "type": "object",
+  "required": ["workflow_run_id", "workflow_id", "status", "node_runs"],
+  "properties": {
+    "workflow_run_id": { "type": "string" },
+    "workflow_id": { "type": "string" },
+    "status": { "type": "string" },
+    "started_at": { "type": "string" },
+    "ended_at": { "type": "string" },
+    "failure_mode": { "type": "string" },
+    "event_log": { "type": "string" },
+    "summary_path": { "type": "string" },
+    "node_runs": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string" },
+          "run_dir": { "type": "string" },
+          "output_path": { "type": "string" },
+          "artifact_dir": { "type": "string" },
+          "event_log": { "type": "string" },
+          "error": { "type": ["string", "null"] }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

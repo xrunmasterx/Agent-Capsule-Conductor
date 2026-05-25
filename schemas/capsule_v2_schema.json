@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ACC Capsule v2",
+  "type": "object",
+  "required": ["id", "version", "name", "kind", "runtime"],
+  "properties": {
+    "id": { "type": "string" },
+    "version": { "type": "string" },
+    "name": { "type": "string" },
+    "description": { "type": "string" },
+    "kind": {
+      "type": "string",
+      "enum": ["atomic", "agent_session", "agent_workflow", "acc_workflow", "external_workflow"]
+    },
+    "runtime": { "type": "object" },
+    "workflow": {
+      "type": "object",
+      "properties": {
+        "type": { "type": "string", "enum": ["acc_graph", "conductor", "custom"] },
+        "path": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "behavior_pack": {
+      "type": "object",
+      "properties": {
+        "root": { "type": "string" },
+        "files": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": true
+    },
+    "lifecycle": {
+      "type": "object",
+      "properties": {
+        "setup": { "type": "array", "items": { "type": "string" } },
+        "run": { "type": "array", "items": { "type": "string" } },
+        "teardown": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": true
+    },
+    "observability": {
+      "type": "object",
+      "properties": {
+        "event_policy": { "type": "string" },
+        "capture_stdout": { "type": "boolean" },
+        "capture_stderr": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

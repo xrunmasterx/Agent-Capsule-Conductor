@@ -1,0 +1,36 @@
+id: external-workflow-capsule.example
+version: "0.1.0"
+name: External Workflow Capsule Example
+description: Example external_workflow capsule backed by a local fake workflow runner.
+kind: external_workflow
+runtime:
+  type: generic_cli
+  command: python
+  args_base:
+    - scripts/fake_external_workflow.py
+    - run
+workspace:
+  mode: existing_dir
+permissions:
+  sandbox: read-only
+  network: false
+  write_files: true
+  timeout_seconds: 30
+  allow_dangerous: false
+workflow:
+  type: custom
+  path: external_workflow.yaml
+lifecycle:
+  setup:
+    - python scripts/fake_external_workflow.py setup
+  run:
+    - python scripts/fake_external_workflow.py run
+  collect:
+    - python scripts/fake_external_workflow.py collect
+  cleanup:
+    - python scripts/fake_external_workflow.py cleanup
+schema:
+  input: input_schema.json
+  output: output_schema.json
+artifacts:
+  manifest: artifact_manifest.yaml

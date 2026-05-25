@@ -3,7 +3,11 @@ import type {
   ArtifactList,
   CapsuleDetail,
   CapsuleSummary,
+  GraphOpsExample,
   NodeRunSummary,
+  ReplayPayload,
+  RunEvent,
+  RunDiffPayload,
   RunIndex,
   RunSummary,
   WorkflowDetail,
@@ -15,21 +19,45 @@ import type {
 async function getJson<T>(path: string): Promise<T> {
   const response = await fetch(path);
   if (!response.ok) {
-    throw new Error(`${response.status} ${response.statusText || 'Request failed'}: ${path}`);
+    throw new Error(await responseErrorMessage(response, path));
   }
   return (await response.json()) as T;
 }
 
-async function sendJson<T>(method: 'POST' | 'PUT', path: string, body: unknown): Promise<T> {
+async function sendJson<T>(
+  method: 'POST' | 'PUT' | 'DELETE',
+  path: string,
+  body?: unknown,
+): Promise<T> {
   const response = await fetch(path, {
     method,
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (!response.ok) {
-    throw new Error(`${response.status} ${response.statusText || 'Request failed'}: ${path}`);
+    throw new Error(await responseErrorMessage(response, path));
   }
   return (await response.json()) as T;
+}
+
+async function responseErrorMessage(response: Response, path: string): Promise<string> {
+  const fallback = `${response.status} ${response.statusText || 'Request failed'}: ${path}`;
+  try {
+    const payload = await response.json();
+    const detail = payload?.detail;
+    if (typeof detail === 'string') {
+      return `${fallback} - ${detail}`;
+    }
+    if (detail?.message) {
+      return `${fallback} - ${detail.message}`;
+    }
+    if (detail) {
+      return `${fallback} - ${JSON.stringify(detail)}`;
+    }
+  } catch {
+    return fallback;
+  }
+  return fallback;
 }
 
 function encodePath(path: string): string {
@@ -55,6 +83,11 @@ export const api = {
     getJson<CapsuleDetail>(`/api/capsules/${encodeURIComponent(capsuleId)}`),
   scaffoldCapsule: (body: unknown) =>
     sendJson<{ status: string; capsule_id: string }>('POST', '/api/capsules/scaffold', body),
+  deleteCapsule: (capsuleId: string, force = false) =>
+    sendJson<{ status: string; capsule_id: string }>(
+      'DELETE',
+      `/api/capsules/${encodeURIComponent(capsuleId)}${force ? '?force=true' : ''}`,
+    ),
   capsuleFile: (capsuleId: string, filePath: string) =>
     getJson<{ capsule_id: string; file: string; path: string; content: string }>(
       `/api/capsules/${encodeURIComponent(capsuleId)}/files/${encodePath(filePath)}`,
@@ -100,4 +133,47 @@ export const api = {
       `/api/workflows/${encodeURIComponent(workflowId)}/run`,
       { run_dir: runDir },
     ),
+  runEvents: (runId: string) =>
+    getJson<{ run_id: string; event_log: string; events: RunEvent[] }>(
+      `/api/runs/${encodeURIComponent(runId)}/events?limit=200`,
+    ),
+  nodeEvents: (runId: string, nodeId: string) =>
+    getJson<{ run_id: string; node_id: string; event_log: string; events: RunEvent[] }>(
+      `/api/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/events?limit=200`,
+    ),
+  replayRun: (runId: string, nodeId?: string) =>
+    sendJson<ReplayPayload>('POST', `/api/debugger/runs/${encodeURIComponent(runId)}/replay`, {
+      node_id: nodeId,
+    }),
+  rerunNode: (runId: string, nodeId: string, outDir: string) =>
+    sendJson<WorkflowRunResult>(
+      'POST',
+      `/api/debugger/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/rerun`,
+      { out_dir: outDir },
+    ),
+  rerunFrom: (runId: string, nodeId: string, outDir: string) =>
+    sendJson<WorkflowRunResult>(
+      'POST',
+      `/api/debugger/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/rerun-from`,
+      { out_dir: outDir },
+    ),
+  forkRun: (runId: string, nodeId: string, outDir: string, override: Record<string, unknown>) =>
+    sendJson<WorkflowRunResult>(
+      'POST',
+      `/api/debugger/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/fork`,
+      { out_dir: outDir, override },
+    ),
+  diffRuns: (runA: string, runB: string) =>
+    sendJson<RunDiffPayload>('POST', '/api/debugger/diff', { run_a: runA, run_b: runB }),
+  graphopsExamples: () => getJson<{ patches: GraphOpsExample[] }>('/api/graphops/examples'),
+  graphopsValidate: (patchPath: string, semantic = true) =>
+    sendJson<Record<string, unknown>>('POST', '/api/graphops/validate', {
+      patch_path: patchPath,
+      semantic,
+    }),
+  graphopsDryRun: (patchPath: string, semantic = true) =>
+    sendJson<Record<string, unknown>>('POST', '/api/graphops/dry-run', {
+      patch_path: patchPath,
+      semantic,
+    }),
 };

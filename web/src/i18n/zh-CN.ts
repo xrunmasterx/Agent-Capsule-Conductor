@@ -6,6 +6,7 @@ export const zhCN = {
   capsuleLibrary: '节点库',
   runs: '运行记录',
   artifacts: '产物',
+  controlPlane: '控制平面',
   settings: '设置',
   canvas: '画布',
   new: '新建',
@@ -45,6 +46,14 @@ export const zhCN = {
   cycleDetected: '存在环路',
   missingInput: '输入缺失',
   invalidMapping: '映射无效',
+  replay: '事件回放',
+  debugger: '调试',
+  graphOps: 'GraphOps',
+  rerunNode: '重跑节点',
+  rerunFrom: '从此节点重跑',
+  forkRun: 'Fork 运行',
+  compareRuns: '对比运行',
+  approvalRequired: '危险 apply 默认关闭，必须经过人工审批。',
 };
 
 export type ZhKey = keyof typeof zhCN;

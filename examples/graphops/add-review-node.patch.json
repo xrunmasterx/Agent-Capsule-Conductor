@@ -1,19 +1,31 @@
 {
-  "patch_id": "patch_add_review_node",
-  "author": "workflow-editor.codex",
+  "patch_id": "add-review-node",
+  "author": "example",
   "target_type": "workflow",
-  "target_path": "workflows/engine-architecture-research.v2.yaml",
-  "rationale": "Add a reviewer node before final synthesis.",
+  "target_path": "examples/workflows/demo_level_parallel.graph.json",
+  "rationale": "Add a critical review node after merge.",
   "operations": [
     {
       "op": "add_node",
-      "node_id": "critical_review",
-      "capsule_id": "critical-review.claude"
+      "node": {
+        "id": "critical_review",
+        "capsule_id": "fake-agent.generic",
+        "label": "批判性审查",
+        "input": { "topic": "review merged result" },
+        "position": { "x": 1080, "y": 200 }
+      }
     },
     {
-      "op": "connect_nodes",
-      "from": "source_reality_check",
-      "to": "critical_review"
+      "op": "add_control_edge",
+      "edge": { "id": "c_merge_review", "from": "merge", "to": "critical_review" }
+    },
+    {
+      "op": "add_data_edge",
+      "edge": {
+        "id": "d_merge_review",
+        "from": { "node": "merge", "output": "summary" },
+        "to": { "node": "critical_review", "input": "topic" }
+      }
     }
   ]
 }

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ACC Workflow Event",
+  "type": "object",
+  "required": ["event_id", "type", "timestamp"],
+  "properties": {
+    "event_id": { "type": "string" },
+    "type": { "type": "string" },
+    "timestamp": { "type": "string" },
+    "workflow_run_id": { "type": "string" },
+    "node_id": { "type": "string" },
+    "session_id": { "type": "string" },
+    "level": { "type": "integer" },
+    "status": { "type": "string" },
+    "payload": { "type": "object" }
+  },
+  "additionalProperties": true
+}

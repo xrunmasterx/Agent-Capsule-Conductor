@@ -1,0 +1,33 @@
+{
+  "id": "debugger_replay_demo",
+  "version": "0.1.0",
+  "name": "调试与重跑 Demo",
+  "nodes": [
+    {
+      "id": "demo_node_a",
+      "capsule_id": "echo-test.generic",
+      "input": { "message": "debugger demo input" },
+      "position": { "x": 100, "y": 160 }
+    },
+    {
+      "id": "demo_node_b",
+      "capsule_id": "fake-agent.generic",
+      "input": { "notes": "replay downstream node" },
+      "position": { "x": 420, "y": 160 }
+    }
+  ],
+  "control_edges": [
+    { "id": "e_control_a_b", "from": "demo_node_a", "to": "demo_node_b" }
+  ],
+  "data_edges": [
+    {
+      "id": "e_data_a_b",
+      "from": { "node": "demo_node_a", "output": "summary" },
+      "to": { "node": "demo_node_b", "input": "topic" }
+    }
+  ],
+  "policy": {
+    "failure_mode": "fail_fast",
+    "max_concurrency": 2
+  }
+}

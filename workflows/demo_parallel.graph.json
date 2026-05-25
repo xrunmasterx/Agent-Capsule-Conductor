@@ -1,0 +1,97 @@
+{
+  "description": "一个上游节点扇出到两个并行节点，再汇入最终节点。",
+  "edges": [
+    {
+      "condition": null,
+      "from": "plan",
+      "id": "edge_plan_a",
+      "label": "并行 A",
+      "mapping": {},
+      "to": "branch_a"
+    },
+    {
+      "condition": null,
+      "from": "plan",
+      "id": "edge_plan_b",
+      "label": "并行 B",
+      "mapping": {},
+      "to": "branch_b"
+    },
+    {
+      "condition": null,
+      "from": "branch_a",
+      "id": "edge_a_merge",
+      "label": "汇入",
+      "mapping": {},
+      "to": "merge"
+    },
+    {
+      "condition": null,
+      "from": "branch_b",
+      "id": "edge_b_merge",
+      "label": "汇入",
+      "mapping": {},
+      "to": "merge"
+    }
+  ],
+  "id": "demo_parallel",
+  "metadata": {
+    "layout": "dagre-lr"
+  },
+  "name": "并行 Demo 工作流",
+  "nodes": [
+    {
+      "capsule_id": "echo-test.generic",
+      "id": "plan",
+      "input": {
+        "message": "plan research task"
+      },
+      "input_mapping": {},
+      "label": "任务规划",
+      "position": {
+        "x": 0,
+        "y": 96
+      }
+    },
+    {
+      "capsule_id": "fake-agent.generic",
+      "id": "branch_a",
+      "input": {},
+      "input_mapping": {
+        "topic": "{{ nodes.plan.output.summary }}"
+      },
+      "label": "分支 A",
+      "position": {
+        "x": 350,
+        "y": 0
+      }
+    },
+    {
+      "capsule_id": "fake-agent.generic",
+      "id": "branch_b",
+      "input": {},
+      "input_mapping": {
+        "topic": "{{ nodes.plan.output.summary }}"
+      },
+      "label": "分支 B",
+      "position": {
+        "x": 350,
+        "y": 192
+      }
+    },
+    {
+      "capsule_id": "fake-agent.generic",
+      "id": "merge",
+      "input": {},
+      "input_mapping": {
+        "topic": "A={{ nodes.branch_a.output.summary }}; B={{ nodes.branch_b.output.summary }}"
+      },
+      "label": "结果汇总",
+      "position": {
+        "x": 700,
+        "y": 96
+      }
+    }
+  ],
+  "version": "0.2.0"
+}

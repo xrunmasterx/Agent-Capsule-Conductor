@@ -1,0 +1,3 @@
+workflow:
+  name: external_conductor_example
+  description: Placeholder conductor workflow. Default tests should not require conductor installed.

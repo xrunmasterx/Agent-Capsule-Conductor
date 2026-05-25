@@ -1,0 +1,6 @@
+required:
+  - path: output.json
+optional:
+  - path: workflow_summary.json
+  - path: nested_summary.md
+  - path: nested_collect.md

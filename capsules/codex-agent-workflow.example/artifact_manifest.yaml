@@ -1,0 +1,8 @@
+required:
+  - name: output
+    path: output.json
+    type: json
+optional:
+  - name: report
+    path: artifacts/report.md
+    type: markdown

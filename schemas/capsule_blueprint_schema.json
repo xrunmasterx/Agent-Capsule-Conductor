@@ -31,6 +31,17 @@
         "additionalProperties": false
       }
     },
+    "permissions": {
+      "type": "object",
+      "properties": {
+        "sandbox": {"type": "string", "enum": ["read-only", "workspace-write", "danger-full-access"]},
+        "network": {"type": "boolean"},
+        "write_files": {"type": "boolean"},
+        "timeout_seconds": {"type": "integer", "minimum": 1},
+        "allow_dangerous": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    },
     "prompt": {"type": "string"}
   },
   "$defs": {

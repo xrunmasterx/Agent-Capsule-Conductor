@@ -96,7 +96,9 @@ def load_or_rebuild_run_index(runs_root: Path = Path("runs")) -> RunIndex:
     index_path = runs_root / "index.json"
     if index_path.exists():
         try:
-            return RunIndex.model_validate(load_json(index_path))
+            index = normalize_run_index(RunIndex.model_validate(load_json(index_path)))
+            write_json(index_path, index.model_dump())
+            return index
         except AccError:
             return rebuild_run_index(runs_root)
     return rebuild_run_index(runs_root)
@@ -111,7 +113,18 @@ def rebuild_run_index(runs_root: Path = Path("runs")) -> RunIndex:
         if summary is not None:
             summaries.append(summary)
     summaries.sort(key=lambda item: item.started_at or item.run_id, reverse=True)
-    return RunIndex(runs=summaries)
+    return normalize_run_index(RunIndex(runs=summaries))
+
+
+def normalize_run_index(index: RunIndex) -> RunIndex:
+    deduped: list[RunSummary] = []
+    seen_run_ids: set[str] = set()
+    for summary in index.runs:
+        if summary.run_id in seen_run_ids:
+            continue
+        seen_run_ids.add(summary.run_id)
+        deduped.append(summary)
+    return RunIndex(version=index.version, runs=deduped)
 
 
 def load_run_summary_by_id(run_id: str, runs_root: Path = Path("runs")) -> RunSummary:

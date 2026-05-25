@@ -1,0 +1,4 @@
+required:
+  - path: external_workflow_report.md
+optional:
+  - path: external_workflow_manifest.json

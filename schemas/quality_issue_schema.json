@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ACC Quality Issue",
+  "type": "object",
+  "required": ["id", "title", "area", "severity", "status", "evidence", "root_cause", "recommended_fix"],
+  "properties": {
+    "id": { "type": "string" },
+    "title": { "type": "string" },
+    "area": {
+      "type": "string",
+      "enum": ["architecture", "runtime", "workflow", "security", "performance", "browser", "docs", "tests", "control_plane", "graphops"]
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["critical", "high", "medium", "low"]
+    },
+    "status": {
+      "type": "string",
+      "enum": ["open", "fixed", "blocked", "deferred"]
+    },
+    "evidence": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "root_cause": { "type": "string" },
+    "first_principles_violation": { "type": "string" },
+    "recommended_fix": { "type": "string" },
+    "regression_test": { "type": "string" },
+    "remaining_risk": { "type": "string" }
+  },
+  "additionalProperties": false
+}

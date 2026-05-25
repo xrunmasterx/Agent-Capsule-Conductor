@@ -8,8 +8,10 @@
     },
     "notes": {
       "type": "string"
+    },
+    "should_fail": {
+      "type": "boolean"
     }
   },
-  "additionalProperties": false
+  "additionalProperties": true
 }
-

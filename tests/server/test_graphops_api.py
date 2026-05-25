@@ -1,0 +1,82 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+
+def test_graphops_example_validate_and_dry_run(client, project_root: Path) -> None:
+    graph_path = project_root / "workflows" / "control_plane_demo.graph.json"
+    graph_path.write_text(
+        json.dumps(
+            {
+                "id": "control_plane_demo",
+                "version": "0.1.0",
+                "nodes": [
+                    {
+                        "id": "start",
+                        "capsule_id": "echo-test.generic",
+                        "input": {"message": "hello graphops"},
+                    }
+                ],
+                "edges": [],
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    patch_dir = project_root / "examples" / "graphops"
+    patch_dir.mkdir(parents=True)
+    patch_path = patch_dir / "add-review-node.patch.json"
+    patch_path.write_text(
+        json.dumps(
+            {
+                "patch_id": "patch_add_review_node",
+                "author": "browser_e2e",
+                "target_type": "workflow",
+                "target_path": "workflows/control_plane_demo.graph.json",
+                "rationale": "Add a review node after start.",
+                "operations": [
+                    {
+                        "op": "add_node",
+                        "node": {
+                            "id": "review",
+                            "capsule_id": "echo-test.generic",
+                            "input": {"message": "review"},
+                        },
+                    },
+                    {
+                        "op": "connect_nodes",
+                        "from": "start",
+                        "to": "review",
+                    },
+                ],
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    list_response = client.get("/api/graphops/examples")
+    assert list_response.status_code == 200
+    assert (
+        list_response.json()["patches"][0]["path"]
+        == "examples/graphops/add-review-node.patch.json"
+    )
+
+    validate_response = client.post(
+        "/api/graphops/validate",
+        json={"patch_path": "examples/graphops/add-review-node.patch.json", "semantic": True},
+    )
+    assert validate_response.status_code == 200, validate_response.text
+    validate_payload = validate_response.json()
+    assert validate_payload["status"] == "valid"
+    assert validate_payload["apply_requires_human_approval"] is True
+
+    dry_run_response = client.post(
+        "/api/graphops/dry-run",
+        json={"patch_path": "examples/graphops/add-review-node.patch.json", "semantic": True},
+    )
+    assert dry_run_response.status_code == 200, dry_run_response.text
+    dry_run_payload = dry_run_response.json()
+    assert dry_run_payload["status"] == "dry_run"
+    assert dry_run_payload["mutated"] is False

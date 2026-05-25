@@ -1,0 +1,56 @@
+{
+  "id": "demo_branch_failure",
+  "version": "0.3.0",
+  "name": "失败策略 Demo",
+  "description": "用于测试 workflow failure_mode 和 node on_failure 行为。",
+  "policy": {
+    "failure_mode": "continue_on_error",
+    "max_concurrency": 2
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "capsule_id": "echo-test.generic",
+      "label": "开始",
+      "input": { "message": "start" },
+      "position": { "x": 0, "y": 160 }
+    },
+    {
+      "id": "may_fail",
+      "capsule_id": "fake-agent.generic",
+      "label": "可能失败节点",
+      "input": { "topic": "simulate failure", "should_fail": true },
+      "on_failure": "skip",
+      "retry": { "max_attempts": 1 },
+      "position": { "x": 360, "y": 80 }
+    },
+    {
+      "id": "safe_branch",
+      "capsule_id": "fake-agent.generic",
+      "label": "安全分支",
+      "input": { "topic": "safe branch" },
+      "position": { "x": 360, "y": 240 }
+    },
+    {
+      "id": "final",
+      "capsule_id": "fake-agent.generic",
+      "label": "最终汇总",
+      "input": { "topic": "final" },
+      "position": { "x": 720, "y": 160 }
+    }
+  ],
+  "control_edges": [
+    { "id": "c_start_fail", "from": "start", "to": "may_fail" },
+    { "id": "c_start_safe", "from": "start", "to": "safe_branch" },
+    { "id": "c_fail_final", "from": "may_fail", "to": "final" },
+    { "id": "c_safe_final", "from": "safe_branch", "to": "final" }
+  ],
+  "data_edges": [
+    {
+      "id": "d_safe_final",
+      "from": { "node": "safe_branch", "output": "summary" },
+      "to": { "node": "final", "input": "safe_summary" },
+      "required": true
+    }
+  ]
+}

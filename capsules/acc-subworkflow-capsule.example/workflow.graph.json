@@ -1,0 +1,35 @@
+{
+  "id": "nested_workflow_capsule_demo",
+  "version": "0.1.0",
+  "name": "Nested Workflow Capsule Demo",
+  "nodes": [
+    {
+      "id": "child_echo",
+      "capsule_id": "echo-test.generic",
+      "input_mapping": {
+        "message": "{{ workflow.input.message }}"
+      }
+    },
+    {
+      "id": "child_report",
+      "capsule_id": "fake-agent.generic",
+      "input": {
+        "notes": "nested workflow downstream node"
+      }
+    }
+  ],
+  "control_edges": [
+    { "id": "edge_child_echo_report", "from": "child_echo", "to": "child_report" }
+  ],
+  "data_edges": [
+    {
+      "id": "edge_child_echo_topic",
+      "from": { "node": "child_echo", "output": "summary" },
+      "to": { "node": "child_report", "input": "topic" }
+    }
+  ],
+  "policy": {
+    "failure_mode": "fail_fast",
+    "max_concurrency": 1
+  }
+}

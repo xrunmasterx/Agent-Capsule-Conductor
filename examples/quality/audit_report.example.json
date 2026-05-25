@@ -1,0 +1,27 @@
+{
+  "status": "partial",
+  "started_at": "2026-05-25T00:00:00Z",
+  "completed_at": "2026-05-25T01:00:00Z",
+  "summary": "Example audit report shape.",
+  "commands": [
+    { "command": "uv run pytest -q", "exit_code": 0, "notes": "example" }
+  ],
+  "findings": [
+    {
+      "id": "QA-001",
+      "title": "Example finding",
+      "area": "architecture",
+      "severity": "low",
+      "status": "deferred",
+      "evidence": ["example evidence"],
+      "root_cause": "example",
+      "first_principles_violation": "example",
+      "recommended_fix": "example",
+      "regression_test": "example",
+      "remaining_risk": "example"
+    }
+  ],
+  "fixes_applied": [],
+  "browser_e2e_report": null,
+  "remaining_risks": ["example remaining risk"]
+}

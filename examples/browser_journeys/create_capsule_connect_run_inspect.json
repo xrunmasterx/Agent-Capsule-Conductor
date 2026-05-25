@@ -1,0 +1,16 @@
+{
+  "id": "create_capsule_connect_run_inspect",
+  "name": "创建 Capsule、连接节点、运行并检查结果",
+  "steps": [
+    "打开 Workbench",
+    "进入 Capsule 页面",
+    "创建一个简单 Capsule",
+    "保存并校验",
+    "进入 Workflow Builder",
+    "添加两个节点",
+    "拖边连接 A -> B",
+    "保存并校验 workflow",
+    "运行 workflow",
+    "点击节点查看 input/output/artifacts/logs"
+  ]
+}

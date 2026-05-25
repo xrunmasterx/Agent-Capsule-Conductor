@@ -1,0 +1,21 @@
+id: demo-research.codex
+version: 0.1.0
+name: Demo Research Capsule
+description: 通过 Codex CLI 执行一个结构化调研任务。
+runtime:
+  type: codex_cli
+workspace:
+  mode: existing_dir
+permissions:
+  sandbox: workspace-write
+  network: true
+  write_files: true
+  timeout_seconds: 600
+  allow_dangerous: false
+prompt:
+  template: prompt_template.md
+schema:
+  input: input_schema.json
+  output: output_schema.json
+artifacts:
+  manifest: artifact_manifest.yaml

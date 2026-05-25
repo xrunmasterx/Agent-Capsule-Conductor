@@ -8,7 +8,7 @@ from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
 
 from acc.registry import CapsuleRegistry
 from acc.utils import AccError, load_json
-from acc.workflow_graph import topological_order, validate_workflow_graph
+from acc.workflow_graph import topological_levels, topological_order, validate_workflow_graph
 
 
 def write_graph(path: Path, payload: dict) -> None:
@@ -169,3 +169,51 @@ def test_node_input_must_be_object(tmp_path: Path) -> None:
 
     with pytest.raises(JsonSchemaValidationError, match="'bad' is not of type 'object'"):
         validate_workflow_graph(path)
+
+
+def test_topological_levels_preserve_parallel_layers() -> None:
+    graph = load_json(Path("examples/workflows/demo_parallel.graph.json"))
+
+    levels = topological_levels(graph)
+
+    assert levels == [["plan"], ["branch_a", "branch_b"], ["merge"]]
+
+
+def test_validate_large_linear_graph(tmp_path: Path) -> None:
+    nodes = [
+        {
+            "id": "node_0",
+            "capsule_id": "echo-test.generic",
+            "input": {"message": "seed"},
+        }
+    ]
+    edges = []
+    for index in range(1, 150):
+        previous = f"node_{index - 1}"
+        current = f"node_{index}"
+        nodes.append(
+            {
+                "id": current,
+                "capsule_id": "echo-test.generic",
+                "input_mapping": {"message": f"{{{{ nodes.{previous}.output.summary }}}}"},
+            }
+        )
+        edges.append({"id": f"edge_{previous}_{current}", "from": previous, "to": current})
+
+    path = tmp_path / "large.graph.json"
+    write_graph(
+        path,
+        {
+            "id": "large_linear",
+            "version": "1.0",
+            "name": "Large Linear",
+            "nodes": nodes,
+            "edges": edges,
+        },
+    )
+
+    result = validate_workflow_graph(path)
+
+    assert result["status"] == "valid"
+    assert result["node_count"] == 150
+    assert len(result["topological_levels"]) == 150

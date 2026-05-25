@@ -40,6 +40,9 @@
     "artifact_dir": { "type": "string", "minLength": 1 },
     "event_log_path": { "type": "string", "minLength": 1 },
     "conductor_output_path": { "type": "string", "minLength": 1 },
+    "template_snapshot_dir": { "type": ["string", "null"] },
+    "lifecycle_log_dir": { "type": ["string", "null"] },
+    "capsule_kind": { "type": ["string", "null"] },
     "parent_workflow_run_id": { "type": ["string", "null"] },
     "parent_node_id": { "type": ["string", "null"] },
     "error": { "type": ["string", "null"] }

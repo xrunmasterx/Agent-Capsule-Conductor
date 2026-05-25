@@ -1,0 +1,23 @@
+{
+  "id": "demo_for_each_research",
+  "version": "0.3.0",
+  "name": "ForEach 调研 Demo 占位",
+  "description": "如果本阶段实现 foreach，可用该图测试多文档并发调研。若 defer，则文档化为后续能力。",
+  "policy": {
+    "failure_mode": "fail_fast",
+    "max_concurrency": 3
+  },
+  "nodes": [
+    {
+      "id": "plan",
+      "capsule_id": "echo-test.generic",
+      "label": "调研计划",
+      "input": { "message": "research plan" }
+    }
+  ],
+  "control_edges": [],
+  "data_edges": [],
+  "metadata": {
+    "deferred_feature": "foreach"
+  }
+}

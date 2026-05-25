@@ -1,0 +1,21 @@
+id: external-conductor.example
+version: 0.1.0
+name: External Conductor Workflow Example
+description: Example capsule wrapping a Conductor workflow file. Default validation must not require conductor installed.
+kind: external_workflow
+runtime:
+  type: generic_cli
+  command: conductor
+workflow:
+  type: conductor
+  path: workflow.conductor.yaml
+schema:
+  input: input_schema.json
+  output: output_schema.json
+artifacts:
+  manifest: artifact_manifest.yaml
+permissions:
+  sandbox: read-only
+  network: false
+  write_files: false
+  timeout_seconds: 600

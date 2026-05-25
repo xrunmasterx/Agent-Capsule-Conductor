@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ACC Conductor Export Manifest",
+  "type": "object",
+  "required": ["source_graph", "output_yaml", "status"],
+  "properties": {
+    "source_graph": { "type": "string" },
+    "output_yaml": { "type": "string" },
+    "status": { "type": "string" },
+    "warnings": { "type": "array", "items": { "type": "string" } },
+    "exported_nodes": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": true
+}

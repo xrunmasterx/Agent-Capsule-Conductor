@@ -66,6 +66,13 @@ const routes: Record<string, unknown> = {
     content: '{"status":"success","summary":"ok"}',
     size_bytes: 36,
   },
+  '/api/artifacts/read?path=runs%2Fui_acceptance_fake%2Finput.json': {
+    path: 'runs/ui_acceptance_fake/input.json',
+    name: 'input.json',
+    type: 'json',
+    content: '{"message":"hello from input"}',
+    size_bytes: 30,
+  },
   '/api/capsules': {
     capsules: [
       {
@@ -220,6 +227,77 @@ const routes: Record<string, unknown> = {
     edges: [{ id: 'edge_echo_fake', from: 'echo', to: 'fake' }],
     errors: [],
   },
+  '/api/graphops/examples': {
+    patches: [
+      {
+        id: 'add-review-node.patch',
+        path: 'examples/graphops/add-review-node.patch.json',
+        name: 'add-review-node.patch.json',
+      },
+    ],
+  },
+  'POST /api/graphops/validate': {
+    status: 'valid',
+    patch_id: 'patch_add_review_node',
+    target_type: 'workflow',
+    target_path: 'examples/workflows/control_plane_demo.graph.json',
+    operations: 3,
+    apply_requires_human_approval: true,
+    semantic_diff: { status: 'valid', added_nodes: ['review'], added_edges: ['a->review'] },
+  },
+  'POST /api/graphops/dry-run': {
+    status: 'dry_run',
+    patch_id: 'patch_add_review_node',
+    target_type: 'workflow',
+    target_path: 'examples/workflows/control_plane_demo.graph.json',
+    mutated: false,
+    apply_requires_human_approval: true,
+    operations: [{ op: 'add_node', description: 'Would add node review using capsule critical-review.claude' }],
+    semantic_diff: { status: 'valid', added_nodes: ['review'], added_edges: ['a->review'] },
+  },
+  'POST /api/debugger/runs/ui_acceptance_fake/replay': {
+    run_dir: 'runs/ui_acceptance_fake',
+    status: 'success',
+    workflow_status: 'success',
+    workflow_id: 'ui_acceptance_fake',
+    node_filter: 'ui_acceptance_fake',
+    failed_node: null,
+    nodes: [{ node_id: 'ui_acceptance_fake', status: 'success' }],
+    timeline: [{ type: 'node_completed', node_id: 'ui_acceptance_fake', status: 'success' }],
+    errors: [],
+    event_log: 'runs/ui_acceptance_fake/events.jsonl',
+  },
+  'POST /api/debugger/runs/ui_acceptance_fake/nodes/ui_acceptance_fake/rerun': {
+    workflow_id: 'ui_acceptance_fake',
+    status: 'success',
+    run_dir: 'runs/ui_rerun_node_ui_acceptance_fake',
+    nodes: [],
+    edges: [],
+    errors: [],
+  },
+  'POST /api/debugger/runs/ui_acceptance_fake/nodes/ui_acceptance_fake/rerun-from': {
+    workflow_id: 'ui_acceptance_fake',
+    status: 'success',
+    run_dir: 'runs/ui_rerun_from_ui_acceptance_fake',
+    nodes: [],
+    edges: [],
+    errors: [],
+  },
+  'POST /api/debugger/runs/ui_acceptance_fake/nodes/ui_acceptance_fake/fork': {
+    workflow_id: 'ui_acceptance_fake',
+    status: 'success',
+    run_dir: 'runs/ui_fork_ui_acceptance_fake',
+    nodes: [],
+    edges: [],
+    errors: [],
+  },
+  'POST /api/debugger/diff': {
+    run_a: 'runs/ui_acceptance_fake',
+    run_b: 'runs/ui_rerun_node_ui_acceptance_fake',
+    status: { a: 'success', b: 'success', changed: false },
+    changed_nodes: [],
+    node_diffs: [],
+  },
 };
 
 beforeEach(() => {
@@ -360,5 +438,31 @@ describe('Agent Capsule Workbench editable UI', () => {
     expect(canvas).toHaveTextContent('分支 A');
     expect(canvas).toHaveTextContent('分支 B');
     expect(canvas).toHaveTextContent('结果汇总');
+  });
+
+  test('Run Inspector exposes debugger actions and diff results', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByText('ui_acceptance_fake');
+    await user.click(await screen.findByRole('button', { name: /事件回放/i }));
+    await user.click(await screen.findByRole('button', { name: /重跑节点/i }));
+
+    expect(await screen.findByLabelText('replay.json')).toHaveTextContent('node_completed');
+    expect(await screen.findByLabelText('run_diff.json')).toHaveTextContent('"changed_nodes": []');
+  });
+
+  test('Control Plane renders GraphOps safety flow', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: /控制平面/i }));
+    await user.click(await screen.findByRole('button', { name: /校验 patch/i }));
+    await user.click(await screen.findByRole('button', { name: /dry-run patch/i }));
+
+    expect(await screen.findByLabelText('graphops.dry-run.json')).toHaveTextContent(
+      'apply_requires_human_approval',
+    );
+    expect(screen.getByText(/危险 apply 默认关闭/)).toBeInTheDocument();
   });
 });

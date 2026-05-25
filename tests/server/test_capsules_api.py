@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 
@@ -23,6 +24,82 @@ def test_get_capsule_metadata(client) -> None:
     payload = response.json()
     assert payload["id"] == "echo-test.generic"
     assert payload["runtime"] == "generic_cli"
+    assert payload["prompt_template"] == "prompt_template.md"
+
+
+def test_get_workflow_capsule_metadata_without_prompt(client, project_root: Path) -> None:
+    capsule_dir = project_root / "capsules" / "nested-flow.generic"
+    capsule_dir.mkdir(parents=True)
+    (capsule_dir / "workflow.graph.json").write_text(
+        json.dumps(
+            {
+                "id": "nested_flow_graph",
+                "version": "0.1.0",
+                "nodes": [
+                    {
+                        "id": "echo",
+                        "capsule_id": "echo-test.generic",
+                        "input": {"message": "nested hello"},
+                    }
+                ],
+                "edges": [],
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (capsule_dir / "input_schema.json").write_text(
+        json.dumps({"type": "object", "properties": {}, "additionalProperties": True}, indent=2),
+        encoding="utf-8",
+    )
+    (capsule_dir / "output_schema.json").write_text(
+        json.dumps({"type": "object", "properties": {}, "additionalProperties": True}, indent=2),
+        encoding="utf-8",
+    )
+    (capsule_dir / "artifact_manifest.yaml").write_text(
+        "version: '2.0'\nrequired: []\n",
+        encoding="utf-8",
+    )
+    (capsule_dir / "capsule.yaml").write_text(
+        "\n".join(
+            [
+                "id: nested-flow.generic",
+                "version: '0.1.0'",
+                "name: Nested Flow",
+                "description: Workflow capsule without prompt template.",
+                "kind: acc_workflow",
+                "runtime:",
+                "  type: acc_workflow",
+                "workflow:",
+                "  type: acc_graph",
+                "  path: workflow.graph.json",
+                "workspace:",
+                "  mode: existing_dir",
+                "permissions:",
+                "  sandbox: read-only",
+                "  network: false",
+                "  write_files: true",
+                "  timeout_seconds: 30",
+                "  allow_dangerous: false",
+                "schema:",
+                "  input: input_schema.json",
+                "  output: output_schema.json",
+                "artifacts:",
+                "  manifest: artifact_manifest.yaml",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    response = client.get("/api/capsules/nested-flow.generic")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["id"] == "nested-flow.generic"
+    assert payload["kind"] == "acc_workflow"
+    assert payload["prompt_template"] is None
+    assert payload["workflow"] == {"type": "acc_graph", "path": "workflow.graph.json"}
 
 
 def test_missing_capsule_returns_404(client) -> None:
@@ -114,3 +191,55 @@ def test_capsule_file_path_traversal_is_rejected(client) -> None:
     response = client.get("/api/capsules/echo-test.generic/files/%2E%2E/capsule.yaml")
 
     assert response.status_code == 400
+
+
+def test_delete_capsule_removes_capsule_directory(client, project_root) -> None:
+    response = client.delete("/api/capsules/echo-test.generic")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "deleted"
+    assert not (project_root / "capsules" / "echo-test.generic").exists()
+
+
+def test_delete_capsule_rejects_workflow_references_by_default(client, project_root) -> None:
+    workflow_path = project_root / "workflows" / "referenced.graph.json"
+    workflow_path.write_text(
+        json.dumps(
+            {
+                "id": "referenced",
+                "version": "3",
+                "nodes": [{"id": "server_node", "capsule_id": "echo-test.generic"}],
+                "edges": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    response = client.delete("/api/capsules/echo-test.generic")
+
+    assert response.status_code == 409
+    assert (project_root / "capsules" / "echo-test.generic").exists()
+    detail = response.json()["detail"]
+    assert detail["capsule_id"] == "echo-test.generic"
+    assert detail["references"][0]["node_id"] == "server_node"
+
+
+def test_delete_capsule_force_allows_workflow_references(client, project_root) -> None:
+    workflow_path = project_root / "workflows" / "referenced.graph.json"
+    workflow_path.write_text(
+        json.dumps(
+            {
+                "id": "referenced",
+                "version": "3",
+                "nodes": [{"id": "server_node", "capsule_id": "echo-test.generic"}],
+                "edges": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    response = client.delete("/api/capsules/echo-test.generic?force=true")
+
+    assert response.status_code == 200
+    assert response.json()["references"][0]["path"] == "workflows/referenced.graph.json"
+    assert not (project_root / "capsules" / "echo-test.generic").exists()

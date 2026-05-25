@@ -195,3 +195,89 @@ This repository already has a working headless Agent Capsule runtime and an edit
 ## Recommended frontend direction
 
 Prefer React Flow + ELK/Dagre layout for the graph canvas, unless the existing project has already committed to a different graph library. Keep the graph schema independent from the UI library.
+
+Phase 5: Workflow Kernel Upgrade Rules
+This repository already has an ACC core/runtime/workbench baseline. This phase must upgrade workflow semantics without rewriting the existing capsule runner or mature-agent adapters.
+Mandatory boundaries
+Do not rewrite `acc run` unless needed for event emission integration. Preserve its stdout JSON contract.
+Do not implement a custom LLM agent loop.
+Do not copy Microsoft Conductor's full YAML DSL.
+Do not remove or weaken existing hermetic tests.
+Do not let default tests require real Codex, Claude, Cursor, Hermes, network, or Conductor installation.
+Keep ACC local-first, artifact-first, and session-isolated.
+LLM-generated workflow/capsule mutations must go through GraphOps: proposal -> validation -> dry-run -> human approval -> apply.
+WorkflowGraph is the ACC authoring IR. Conductor YAML is an export target, not the internal source of truth.
+New phase priorities
+Implement in this order:
+Standard event emitters.
+WorkflowGraph v3 validation.
+DAG level parallel execution and failure modes.
+Explicit data/control edges and artifact references.
+Workflow Capsule kinds, especially nested `acc_workflow`.
+GraphOps semantic validation after dry-run.
+Conductor export bridge.
+Minimal API/UI integration only if existing workbench code already exists.
+Test rule
+Every feature must have hermetic tests using fake capsules/workflows. Optional real-agent or Conductor tests must be skipped unless environment variables explicitly enable them.
+ACC 
+Phase 6: Debugger, Workflow Capsules, Agent Control Plane, Browser UX
+Context
+The repository should already contain the ACC MVP, Workbench, Graph Workbench, and Workflow Kernel work. The next stage must not rewrite the existing runtime. It must improve debuggability, workflow reuse, agent-callable control, and browser-based usability.
+Mandatory rules
+Preserve existing `acc run` behavior and stdout JSON contract.
+Do not implement a new LLM agent loop.
+Do not replace the existing Capsule Runtime or Workflow Kernel; extend them.
+Do not make default tests require real Codex, Claude, Hermes, Cursor, browser credentials, network, or external paid services.
+Browser E2E validation may use Playwright or Codex browser-control tools. If the browser cannot run, record the gap and keep hermetic tests passing.
+UI must default to Chinese for all core user-visible labels in this phase.
+When using browser automation, record:
+journey name
+exact steps
+pass/fail result
+screenshots or evidence path if available
+console errors
+network errors
+usability issues discovered
+Do not mark a goal complete until its acceptance file passes.
+If an issue is discovered during browser testing, fix it and repeat the relevant journey until it passes or record a blocker.
+GraphOps or agent-driven changes must remain proposal/dry-run/review-first. Do not allow unattended destructive apply by default.
+
+# Phase 7: ACC Quality Audit and Hardening Rules
+
+This phase is a quality audit, not a feature expansion.
+
+## Mandatory priority order
+
+1. Preserve existing public behavior and contracts.
+2. Audit architecture and code before changing code.
+3. Fix correctness, safety, and maintainability issues before optimizing performance.
+4. Optimize only when supported by profiling, complexity analysis, or measurable evidence.
+5. Keep the framework lightweight. Prefer removing complexity over adding abstraction.
+6. Every meaningful fix must have a test, browser E2E evidence, or documented rationale.
+7. Do not mark the goal complete while critical or high-severity issues remain unresolved.
+
+## Invariants that must not be broken
+
+- `acc run ... --emit-conductor-json` stdout must contain exactly one JSON object.
+- Logs must go to stderr or files, not stdout, when machine-readable output is requested.
+- Default tests must remain hermetic.
+- Default tests must not require real Codex, Claude, Cursor, Gemini, Hermes, Conductor, browser cloud services, external network, or paid credentials.
+- Existing accepted commands from older `docs/codex_goal*/ACCEPTANCE.md` files must continue to pass unless a documented migration updates them.
+- Do not implement a custom LLM reasoning/tool loop.
+- Do not turn ACC into Dify/LangGraph/Conductor clone.
+- Do not add database/cloud/team/SaaS features for this goal.
+
+## Review discipline
+
+Before modifying code:
+
+1. Generate or update `docs/codex_goal_quality_audit/FINDINGS.md`.
+2. Classify issues by severity: critical, high, medium, low.
+3. Identify the root cause and first-principles design violation.
+4. Propose the smallest safe fix.
+5. Then implement fixes in priority order.
+
+## Browser QA
+
+If a browser UI exists, run real browser journeys through Playwright or the available browser-control tool. Capture screenshots, console logs, network logs, and browser QA reports.
+

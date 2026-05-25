@@ -1,0 +1,4 @@
+required:
+  - path: agent_workflow_report.md
+optional:
+  - path: collect.json

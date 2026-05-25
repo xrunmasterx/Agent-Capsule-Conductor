@@ -1,4 +1,4 @@
-export type ViewKey = 'runs' | 'capsules' | 'artifacts' | 'workflows';
+export type ViewKey = 'runs' | 'capsules' | 'artifacts' | 'workflows' | 'control';
 
 export type NodeRunSummary = {
   node_id: string;
@@ -39,6 +39,20 @@ export type RunIndex = {
   runs: RunSummary[];
 };
 
+export type RunEvent = {
+  event_id?: string;
+  type?: string;
+  event?: string;
+  timestamp?: string;
+  workflow_run_id?: string;
+  node_id?: string;
+  session_id?: string;
+  level?: number;
+  status?: string;
+  payload?: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
 export type CapsuleSummary = {
   id: string;
   version: string;
@@ -51,7 +65,7 @@ export type CapsuleSummary = {
 
 export type CapsuleDetail = CapsuleSummary & {
   yaml_path: string;
-  prompt_template: string;
+  prompt_template: string | null;
   input_schema: string;
   output_schema: string;
   artifact_manifest: string;
@@ -151,4 +165,39 @@ export type WorkflowRunResult = {
   nodes: NodeRunSummary[];
   edges: WorkflowGraphEdge[];
   errors?: string[];
+};
+
+export type ReplayPayload = {
+  run_dir: string;
+  status: string;
+  workflow_status: string;
+  workflow_id?: string | null;
+  node_filter?: string | null;
+  failed_node?: string | null;
+  nodes: Array<Record<string, unknown>>;
+  timeline: RunEvent[];
+  errors: Array<Record<string, unknown>>;
+  event_log: string;
+};
+
+export type RunDiffPayload = {
+  run_a: string;
+  run_b: string;
+  status: {
+    a: string;
+    b: string;
+    changed: boolean;
+  };
+  duration_ms?: {
+    a?: number | null;
+    b?: number | null;
+  };
+  changed_nodes: string[];
+  node_diffs: Array<Record<string, unknown>>;
+};
+
+export type GraphOpsExample = {
+  id: string;
+  path: string;
+  name: string;
 };

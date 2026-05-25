@@ -1,0 +1,27 @@
+id: codex-agent-workflow.example
+version: 0.1.0
+name: Codex Agent Workflow Example
+description: Example capsule wrapping a pre-built Codex-style behavior pack. Default tests must not call real Codex.
+kind: agent_workflow
+runtime:
+  type: generic_cli
+  command: python
+  args_base:
+    - scripts/fake_agent_workflow.py
+behavior_pack:
+  root: behavior
+  files:
+    - AGENTS.md
+    - skills/
+    - hooks/
+    - prompts/
+schema:
+  input: input_schema.json
+  output: output_schema.json
+artifacts:
+  manifest: artifact_manifest.yaml
+permissions:
+  sandbox: read-only
+  network: false
+  write_files: false
+  timeout_seconds: 600

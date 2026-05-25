@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ACC Browser E2E Report",
+  "type": "object",
+  "required": ["started_at", "ended_at", "journeys"],
+  "properties": {
+    "started_at": { "type": "string" },
+    "ended_at": { "type": "string" },
+    "base_url": { "type": "string" },
+    "journeys": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "status", "steps"],
+        "properties": {
+          "id": { "type": "string" },
+          "status": { "type": "string", "enum": ["pass", "partial", "fail", "blocked"] },
+          "steps": { "type": "array", "items": { "type": "object" } },
+          "screenshots": { "type": "array", "items": { "type": "string" } },
+          "console_errors": { "type": "array", "items": { "type": "string" } },
+          "network_errors": { "type": "array", "items": { "type": "string" } },
+          "issues_found": { "type": "array", "items": { "type": "object" } },
+          "fixes_applied": { "type": "array", "items": { "type": "object" } }
+        }
+      }
+    }
+  }
+}

@@ -9,26 +9,58 @@ import typer
 
 from acc.batch import run_batch
 from acc.capsule_authoring import clone_capsule, doctor_capsule
-from acc.graphops import apply_patch_request, validate_patch_file
+from acc.conductor_export import export_conductor_yaml
+from acc.control_plane import (
+    list_capsules_payload,
+    list_workflows_payload,
+    read_artifact_payload,
+    show_capsule_payload,
+    show_run_payload,
+    show_workflow_payload,
+)
+from acc.debugger import (
+    artifact_diff,
+    diff_runs,
+    fork_run,
+    replay_workflow_events,
+    rerun_from_node,
+    rerun_single_node,
+)
+from acc.graphops import apply_patch_request, dry_run_patch, validate_patch_file
 from acc.registry import CapsuleRegistry, validate_capsule_files
-from acc.run_index import load_or_rebuild_run_index, load_run_summary, load_run_summary_by_id
+from acc.run_index import load_or_rebuild_run_index, load_run_summary
 from acc.runner import CapsuleRunner, load_input
 from acc.scaffold import scaffold_capsule
 from acc.utils import AccError, dump_json, load_json, log_stderr
 from acc.workflow_graph import validate_workflow_graph
-from acc.workflow_runner import run_workflow_graph_sync, workflow_json
+from acc.workflow_runner import (
+    run_workflow_graph_sync,
+    workflow_events_payload,
+    workflow_inspect_payload,
+    workflow_json,
+)
 
 app = typer.Typer(help="Agent Capsule Conductor CLI.")
 session_app = typer.Typer(help="Session commands.")
 graphops_app = typer.Typer(help="GraphOps control plane commands.")
 runs_app = typer.Typer(help="Run discovery and inspection commands.")
 capsule_app = typer.Typer(help="Capsule authoring commands.")
+capsules_app = typer.Typer(help="Agent-callable capsule discovery commands.")
 workflow_app = typer.Typer(help="Workflow graph commands.")
+workflows_app = typer.Typer(help="Agent-callable workflow discovery commands.")
+conductor_app = typer.Typer(help="Conductor export commands.")
+events_app = typer.Typer(help="Workflow event replay commands.")
+artifacts_app = typer.Typer(help="Artifact comparison commands.")
 app.add_typer(session_app, name="session")
 app.add_typer(graphops_app, name="graphops")
 app.add_typer(runs_app, name="runs")
 app.add_typer(capsule_app, name="capsule")
+app.add_typer(capsules_app, name="capsules")
 app.add_typer(workflow_app, name="workflow")
+app.add_typer(workflows_app, name="workflows")
+app.add_typer(conductor_app, name="conductor")
+app.add_typer(events_app, name="events")
+app.add_typer(artifacts_app, name="artifacts")
 
 
 @app.callback()
@@ -76,6 +108,39 @@ def show(
     typer.echo(dump_json(capsule.to_metadata()))
 
 
+@capsules_app.command("list")
+def capsules_list(
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
+    capsules_dir: Annotated[
+        Path | None,
+        typer.Option("--capsules-dir", help="Capsule registry directory."),
+    ] = None,
+) -> None:
+    try:
+        payload = list_capsules_payload(capsules_dir)
+    except AccError as exc:
+        log_stderr(str(exc))
+        raise typer.Exit(1) from exc
+    typer.echo(dump_json(payload) if json_output else dump_json(payload))
+
+
+@capsules_app.command("show")
+def capsules_show(
+    capsule_id: str,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
+    capsules_dir: Annotated[
+        Path | None,
+        typer.Option("--capsules-dir", help="Capsule registry directory."),
+    ] = None,
+) -> None:
+    try:
+        payload = show_capsule_payload(capsule_id, capsules_dir)
+    except AccError as exc:
+        log_stderr(str(exc))
+        raise typer.Exit(1) from exc
+    typer.echo(dump_json(payload) if json_output else dump_json(payload))
+
+
 @app.command()
 def validate(
     capsule_id: str,
@@ -106,9 +171,11 @@ def validate(
     )
 
 
-@app.command()
+@app.command("run")
 def run(
-    capsule_id: str,
+    capsule_or_command: Annotated[str, typer.Argument(help="Capsule id or diff subcommand.")],
+    run_a: Annotated[str | None, typer.Argument(help="First run path for diff mode.")] = None,
+    run_b: Annotated[str | None, typer.Argument(help="Second run path for diff mode.")] = None,
     input_path: Annotated[Path | None, typer.Option("--input", help="Input JSON path.")] = None,
     run_dir: Annotated[Path, typer.Option("--run-dir", help="Run directory.")] = Path("runs/run"),
     input_json: Annotated[
@@ -119,15 +186,28 @@ def run(
         bool,
         typer.Option("--emit-conductor-json", help="Print exactly one Conductor JSON object."),
     ] = False,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
     capsules_dir: Annotated[
         Path | None,
         typer.Option("--capsules-dir", help="Capsule registry directory."),
     ] = None,
 ) -> None:
+    if capsule_or_command == "diff":
+        if not run_a or not run_b:
+            log_stderr("run diff requires two run paths")
+            raise typer.Exit(2)
+        try:
+            payload = diff_runs(Path(run_a), Path(run_b))
+        except AccError as exc:
+            log_stderr(str(exc))
+            raise typer.Exit(1) from exc
+        typer.echo(dump_json(payload) if json_output else dump_json(payload))
+        return
+
     try:
         payload = load_input(input_path, input_json)
         runner = CapsuleRunner(registry=CapsuleRegistry(capsules_dir))
-        conductor_output = asyncio.run(runner.run(capsule_id, payload, run_dir))
+        conductor_output = asyncio.run(runner.run(capsule_or_command, payload, run_dir))
     except (AccError, json.JSONDecodeError) as exc:
         log_stderr(str(exc))
         raise typer.Exit(1) from exc
@@ -166,23 +246,83 @@ def session_inspect(run_dir: Path) -> None:
 
 
 @graphops_app.command("validate-patch")
-def graphops_validate_patch(patch_path: Path) -> None:
+def graphops_validate_patch(
+    patch_path: Path,
+    semantic: Annotated[
+        bool,
+        typer.Option("--semantic", help="Run semantic validation after dry-run materialization."),
+    ] = False,
+) -> None:
     try:
         patch = validate_patch_file(patch_path)
+        semantic_diff = None
+        if semantic:
+            from acc.graphops import semantic_diff_for_patch
+
+            semantic_diff = semantic_diff_for_patch(patch)
     except AccError as exc:
         log_stderr(str(exc))
         raise typer.Exit(1) from exc
-    typer.echo(
-        json.dumps(
-            {
-                "status": "valid",
-                "patch_id": patch["patch_id"],
-                "target_path": patch["target_path"],
-                "operations": len(patch["operations"]),
-            },
-            sort_keys=True,
-        )
-    )
+    payload = {
+        "status": "valid",
+        "patch_id": patch["patch_id"],
+        "target_path": patch["target_path"],
+        "operations": len(patch["operations"]),
+    }
+    if semantic_diff is not None:
+        payload["semantic_diff"] = semantic_diff
+        if semantic_diff["status"] == "invalid":
+            typer.echo(dump_json(payload))
+            raise typer.Exit(1)
+    typer.echo(json.dumps(payload, sort_keys=True))
+
+
+@graphops_app.command("validate")
+def graphops_validate(
+    patch_path: Path,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
+    semantic: Annotated[
+        bool,
+        typer.Option("--semantic", help="Run semantic validation after dry-run materialization."),
+    ] = False,
+) -> None:
+    try:
+        patch = validate_patch_file(patch_path)
+        payload = {
+            "status": "valid",
+            "patch_id": patch["patch_id"],
+            "target_type": patch["target_type"],
+            "target_path": patch["target_path"],
+            "operations": len(patch["operations"]),
+        }
+        if semantic:
+            from acc.graphops import semantic_diff_for_patch
+
+            payload["semantic_diff"] = semantic_diff_for_patch(patch)
+    except AccError as exc:
+        log_stderr(str(exc))
+        raise typer.Exit(1) from exc
+    if semantic and payload["semantic_diff"]["status"] == "invalid":
+        typer.echo(dump_json(payload) if json_output else dump_json(payload))
+        raise typer.Exit(1)
+    typer.echo(dump_json(payload) if json_output else dump_json(payload))
+
+
+@graphops_app.command("dry-run")
+def graphops_dry_run(
+    patch_path: Path,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
+    semantic: Annotated[
+        bool,
+        typer.Option("--semantic", help="Run semantic validation after dry-run materialization."),
+    ] = False,
+) -> None:
+    try:
+        payload = dry_run_patch(validate_patch_file(patch_path), semantic=semantic)
+    except AccError as exc:
+        log_stderr(str(exc))
+        raise typer.Exit(1) from exc
+    typer.echo(dump_json(payload) if json_output else dump_json(payload))
 
 
 @graphops_app.command("apply-patch")
@@ -194,6 +334,10 @@ def graphops_apply_patch(
         bool,
         typer.Option("--human-approved", help="Confirm human approval for real apply."),
     ] = False,
+    semantic: Annotated[
+        bool,
+        typer.Option("--semantic", help="Run semantic validation after dry-run materialization."),
+    ] = False,
 ) -> None:
     try:
         result = apply_patch_request(
@@ -201,6 +345,7 @@ def graphops_apply_patch(
             dry_run=dry_run,
             apply=apply,
             human_approved=human_approved,
+            semantic=semantic,
         )
     except AccError as exc:
         log_stderr(str(exc))
@@ -277,15 +422,14 @@ def runs_list(
 
 @runs_app.command("show")
 def runs_show(
-    run_id: str,
+    run_ref: str,
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
     try:
-        summary = load_run_summary_by_id(run_id)
+        payload = show_run_payload(run_ref)
     except AccError as exc:
         log_stderr(str(exc))
         raise typer.Exit(1) from exc
-    payload = summary.model_dump()
     if json_output:
         typer.echo(dump_json(payload))
         return
@@ -308,9 +452,7 @@ def capsule_test(
 ) -> None:
     try:
         runner = CapsuleRunner(registry=CapsuleRegistry(capsules_dir))
-        conductor_output = asyncio.run(
-            runner.run(capsule_id, load_json(input_path), run_dir)
-        )
+        conductor_output = asyncio.run(runner.run(capsule_id, load_json(input_path), run_dir))
     except AccError as exc:
         log_stderr(str(exc))
         raise typer.Exit(1) from exc
@@ -428,6 +570,200 @@ def workflow_run(
         raise typer.Exit(1)
     if not emit_json:
         return
+
+
+@workflows_app.command("list")
+def workflows_list(
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
+    workflows_dir: Annotated[
+        Path | None,
+        typer.Option("--workflows-dir", help="Workflow directory."),
+    ] = None,
+    capsules_dir: Annotated[
+        Path | None,
+        typer.Option("--capsules-dir", help="Capsule registry directory."),
+    ] = None,
+) -> None:
+    try:
+        payload = list_workflows_payload(workflows_dir=workflows_dir, capsules_dir=capsules_dir)
+    except AccError as exc:
+        log_stderr(str(exc))
+        raise typer.Exit(1) from exc
+    typer.echo(dump_json(payload) if json_output else dump_json(payload))
+
+
+@workflows_app.command("show")
+def workflows_show(
+    workflow_ref: str,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
+    workflows_dir: Annotated[
+        Path | None,
+        typer.Option("--workflows-dir", help="Workflow directory."),
+    ] = None,
+    capsules_dir: Annotated[
+        Path | None,
+        typer.Option("--capsules-dir", help="Capsule registry directory."),
+    ] = None,
+) -> None:
+    try:
+        payload = show_workflow_payload(
+            workflow_ref,
+            workflows_dir=workflows_dir,
+            capsules_dir=capsules_dir,
+        )
+    except AccError as exc:
+        log_stderr(str(exc))
+        raise typer.Exit(1) from exc
+    typer.echo(dump_json(payload) if json_output else dump_json(payload))
+
+
+@workflow_app.command("events")
+def workflow_events(
+    run_dir: Path,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
+) -> None:
+    payload = workflow_events_payload(run_dir)
+    typer.echo(dump_json(payload) if json_output else dump_json(payload))
+
+
+@workflow_app.command("inspect")
+def workflow_inspect(
+    run_dir: Path,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
+) -> None:
+    payload = workflow_inspect_payload(run_dir)
+    typer.echo(dump_json(payload) if json_output else dump_json(payload))
+
+
+@workflow_app.command("rerun-node")
+def workflow_rerun_node(
+    run_dir: Path,
+    node_id: str,
+    out: Annotated[Path, typer.Option("--out", help="New run directory for the rerun.")],
+    capsules_dir: Annotated[
+        Path | None,
+        typer.Option("--capsules-dir", help="Capsule registry directory."),
+    ] = None,
+) -> None:
+    try:
+        payload = rerun_single_node(
+            run_dir,
+            node_id,
+            out,
+            registry=CapsuleRegistry(capsules_dir),
+        )
+    except AccError as exc:
+        log_stderr(str(exc))
+        raise typer.Exit(1) from exc
+    typer.echo(dump_json(payload))
+    if payload["status"] != "success":
+        raise typer.Exit(1)
+
+
+@workflow_app.command("rerun-from")
+def workflow_rerun_from(
+    run_dir: Path,
+    node_id: str,
+    out: Annotated[Path, typer.Option("--out", help="New run directory for the rerun.")],
+    capsules_dir: Annotated[
+        Path | None,
+        typer.Option("--capsules-dir", help="Capsule registry directory."),
+    ] = None,
+) -> None:
+    try:
+        payload = rerun_from_node(
+            run_dir,
+            node_id,
+            out,
+            registry=CapsuleRegistry(capsules_dir),
+        )
+    except AccError as exc:
+        log_stderr(str(exc))
+        raise typer.Exit(1) from exc
+    typer.echo(dump_json(payload))
+    if payload["status"] != "success":
+        raise typer.Exit(1)
+
+
+@workflow_app.command("fork")
+def workflow_fork(
+    run_dir: Path,
+    from_node: Annotated[str, typer.Option("--from-node", help="Node to fork from.")],
+    input_path: Annotated[Path, typer.Option("--input", help="Fork override JSON path.")],
+    out: Annotated[Path, typer.Option("--out", help="New run directory for the fork.")],
+    capsules_dir: Annotated[
+        Path | None,
+        typer.Option("--capsules-dir", help="Capsule registry directory."),
+    ] = None,
+) -> None:
+    try:
+        payload = fork_run(
+            run_dir,
+            from_node,
+            input_path,
+            out,
+            registry=CapsuleRegistry(capsules_dir),
+        )
+    except AccError as exc:
+        log_stderr(str(exc))
+        raise typer.Exit(1) from exc
+    typer.echo(dump_json(payload))
+    if payload["status"] != "success":
+        raise typer.Exit(1)
+
+
+@events_app.command("replay")
+def events_replay(
+    run_dir: Path,
+    node: Annotated[str | None, typer.Option("--node", help="Replay one node only.")] = None,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
+) -> None:
+    try:
+        payload = replay_workflow_events(run_dir, node)
+    except AccError as exc:
+        log_stderr(str(exc))
+        raise typer.Exit(1) from exc
+    typer.echo(dump_json(payload) if json_output else dump_json(payload))
+
+
+@artifacts_app.command("diff")
+def artifacts_diff(
+    artifact_a: Path,
+    artifact_b: Path,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
+) -> None:
+    payload = artifact_diff(artifact_a, artifact_b)
+    typer.echo(dump_json(payload) if json_output else dump_json(payload))
+
+
+@artifacts_app.command("get")
+def artifacts_get(
+    artifact_ref: str,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
+) -> None:
+    try:
+        payload = read_artifact_payload(artifact_ref)
+    except AccError as exc:
+        log_stderr(str(exc))
+        raise typer.Exit(1) from exc
+    typer.echo(dump_json(payload) if json_output else dump_json(payload))
+
+
+@conductor_app.command("export")
+def conductor_export(
+    graph_path: Path,
+    out: Annotated[Path, typer.Option("--out", help="Output Conductor YAML path.")],
+    capsules_dir: Annotated[
+        Path | None,
+        typer.Option("--capsules-dir", help="Capsule registry directory."),
+    ] = None,
+) -> None:
+    try:
+        result = export_conductor_yaml(graph_path, out, registry=CapsuleRegistry(capsules_dir))
+    except AccError as exc:
+        log_stderr(str(exc))
+        raise typer.Exit(1) from exc
+    typer.echo(dump_json(result))
 
 
 def main() -> None:

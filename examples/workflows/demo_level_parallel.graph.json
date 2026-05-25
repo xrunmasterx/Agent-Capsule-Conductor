@@ -1,0 +1,90 @@
+{
+  "id": "demo_level_parallel",
+  "version": "0.3.0",
+  "name": "并行层级 Demo",
+  "description": "plan 节点完成后，research_a/research_b/research_c 同层并发，然后 merge 汇总。",
+  "policy": {
+    "failure_mode": "fail_fast",
+    "max_concurrency": 3
+  },
+  "nodes": [
+    {
+      "id": "plan",
+      "capsule_id": "echo-test.generic",
+      "label": "规划",
+      "input": { "message": "plan research tasks" },
+      "position": { "x": 0, "y": 200 }
+    },
+    {
+      "id": "research_a",
+      "capsule_id": "fake-agent.generic",
+      "label": "论文调研 A",
+      "input": {},
+      "position": { "x": 360, "y": 80 }
+    },
+    {
+      "id": "research_b",
+      "capsule_id": "fake-agent.generic",
+      "label": "博客调研 B",
+      "input": {},
+      "position": { "x": 360, "y": 200 }
+    },
+    {
+      "id": "research_c",
+      "capsule_id": "fake-agent.generic",
+      "label": "开源实现调研 C",
+      "input": {},
+      "position": { "x": 360, "y": 320 }
+    },
+    {
+      "id": "merge",
+      "capsule_id": "fake-agent.generic",
+      "label": "调研汇总",
+      "input": { "topic": "merge research" },
+      "position": { "x": 720, "y": 200 }
+    }
+  ],
+  "control_edges": [
+    { "id": "c_plan_a", "from": "plan", "to": "research_a" },
+    { "id": "c_plan_b", "from": "plan", "to": "research_b" },
+    { "id": "c_plan_c", "from": "plan", "to": "research_c" },
+    { "id": "c_a_merge", "from": "research_a", "to": "merge" },
+    { "id": "c_b_merge", "from": "research_b", "to": "merge" },
+    { "id": "c_c_merge", "from": "research_c", "to": "merge" }
+  ],
+  "data_edges": [
+    {
+      "id": "d_plan_a",
+      "from": { "node": "plan", "output": "summary" },
+      "to": { "node": "research_a", "input": "topic" }
+    },
+    {
+      "id": "d_plan_b",
+      "from": { "node": "plan", "output": "summary" },
+      "to": { "node": "research_b", "input": "topic" }
+    },
+    {
+      "id": "d_plan_c",
+      "from": { "node": "plan", "output": "summary" },
+      "to": { "node": "research_c", "input": "topic" }
+    },
+    {
+      "id": "d_a_merge",
+      "from": { "node": "research_a", "output": "summary" },
+      "to": { "node": "merge", "input": "research_a_summary" }
+    },
+    {
+      "id": "d_b_merge",
+      "from": { "node": "research_b", "output": "summary" },
+      "to": { "node": "merge", "input": "research_b_summary" }
+    },
+    {
+      "id": "d_c_merge",
+      "from": { "node": "research_c", "output": "summary" },
+      "to": { "node": "merge", "input": "research_c_summary" }
+    }
+  ],
+  "metadata": {
+    "layout": "left-to-right"
+  }
+}

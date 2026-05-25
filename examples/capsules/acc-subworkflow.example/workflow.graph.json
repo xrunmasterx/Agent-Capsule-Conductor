@@ -1,0 +1,42 @@
+{
+  "id": "nested_arch_review",
+  "version": "0.3.0",
+  "name": "Nested Architecture Review",
+  "policy": { "failure_mode": "fail_fast", "max_concurrency": 2 },
+  "nodes": [
+    {
+      "id": "review_a",
+      "capsule_id": "fake-agent.generic",
+      "label": "审查 A",
+      "input": { "topic": "nested review A" }
+    },
+    {
+      "id": "review_b",
+      "capsule_id": "fake-agent.generic",
+      "label": "审查 B",
+      "input": { "topic": "nested review B" }
+    },
+    {
+      "id": "merge",
+      "capsule_id": "fake-agent.generic",
+      "label": "子流程汇总",
+      "input": { "topic": "merge nested review" }
+    }
+  ],
+  "control_edges": [
+    { "id": "c_a_merge", "from": "review_a", "to": "merge" },
+    { "id": "c_b_merge", "from": "review_b", "to": "merge" }
+  ],
+  "data_edges": [
+    {
+      "id": "d_a_merge",
+      "from": { "node": "review_a", "output": "summary" },
+      "to": { "node": "merge", "input": "review_a" }
+    },
+    {
+      "id": "d_b_merge",
+      "from": { "node": "review_b", "output": "summary" },
+      "to": { "node": "merge", "input": "review_b" }
+    }
+  ]
+}

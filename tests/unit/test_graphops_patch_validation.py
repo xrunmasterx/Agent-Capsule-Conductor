@@ -75,3 +75,13 @@ def test_dry_run_reports_target_and_operations() -> None:
     assert preview["mutated"] is False
     assert preview["target_path"] == "workflows/engine-architecture-research.v2.yaml"
     assert len(preview["operations"]) == 2
+
+
+def test_output_schema_mutation_is_disabled_by_default() -> None:
+    patch = valid_patch()
+    patch["target_type"] = "schema"
+    patch["target_path"] = "capsules/echo-test.generic/output_schema.json"
+    patch["operations"] = [{"op": "replace_schema", "schema": {"type": "object"}}]
+
+    with pytest.raises(AccError, match="schema mutations are disabled by default"):
+        validate_patch(patch)

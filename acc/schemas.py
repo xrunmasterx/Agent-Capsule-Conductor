@@ -10,8 +10,15 @@ from pydantic import (
     model_validator,
 )
 
-RuntimeType = Literal["generic_cli", "codex_cli", "claude_sdk"]
+RuntimeType = Literal["generic_cli", "codex_cli", "claude_sdk", "acc_workflow"]
 WorkspaceMode = Literal["existing_dir", "git_worktree_readonly", "git_worktree_write"]
+CapsuleKind = Literal[
+    "atomic",
+    "agent_session",
+    "agent_workflow",
+    "acc_workflow",
+    "external_workflow",
+]
 
 
 class RuntimeSpec(BaseModel):
@@ -80,6 +87,36 @@ class ArtifactSpec(BaseModel):
     manifest: str
 
 
+class BehaviorPackSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    root: str
+    files: list[str] = Field(default_factory=list)
+
+
+class LifecycleSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    setup: list[str] = Field(default_factory=list)
+    run: list[str] = Field(default_factory=list)
+    collect: list[str] = Field(default_factory=list)
+    cleanup: list[str] = Field(default_factory=list)
+
+    @field_validator("setup", "run", "collect", "cleanup")
+    @classmethod
+    def commands_must_not_be_blank(cls, value: list[str]) -> list[str]:
+        if any(not command.strip() for command in value):
+            raise ValueError("lifecycle commands must not be blank")
+        return value
+
+
+class WorkflowSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["acc_graph", "conductor", "custom"]
+    path: str
+
+
 class CapsuleSpec(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
@@ -87,9 +124,22 @@ class CapsuleSpec(BaseModel):
     version: str
     name: str
     description: str
+    kind: CapsuleKind | None = None
     runtime: RuntimeSpec
     workspace: WorkspaceSpec = Field(default_factory=WorkspaceSpec)
     permissions: PermissionSpec
-    prompt: PromptSpec
+    prompt: PromptSpec | None = None
     schemas: SchemaSpec = Field(alias="schema")
     artifacts: ArtifactSpec
+    behavior_pack: BehaviorPackSpec | None = None
+    workflow: WorkflowSpec | None = None
+    lifecycle: LifecycleSpec | None = None
+
+    @model_validator(mode="after")
+    def validate_workflow_capsule_requirements(self) -> CapsuleSpec:
+        kind = self.kind or "agent_session"
+        if kind == "agent_workflow" and self.behavior_pack is None:
+            raise ValueError("agent_workflow capsule requires behavior_pack")
+        if kind in {"acc_workflow", "external_workflow"} and self.workflow is None:
+            raise ValueError(f"{kind} capsule requires workflow")
+        return self
