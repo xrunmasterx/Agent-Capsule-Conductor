@@ -3,9 +3,13 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
+from acc.app import WorkflowAppService
 from acc.cli import app
 from acc.utils import load_json
-from acc.workflow_runner import run_workflow_graph_sync
+
+
+def run_workflow(graph_path: Path, run_dir: Path) -> dict:
+    return WorkflowAppService().run_sync(graph_path, run_dir)
 
 
 def test_cli_validates_goal2_workflow_capsules() -> None:
@@ -80,7 +84,7 @@ def test_cli_runs_nested_acc_workflow_capsule_and_writes_snapshot(tmp_path: Path
 def test_parent_workflow_consumes_child_workflow_capsule_output(tmp_path: Path) -> None:
     run_dir = tmp_path / "nested_demo"
 
-    result = run_workflow_graph_sync(
+    result = run_workflow(
         Path("examples/workflows/workflow_capsule_nested_demo.graph.json"),
         run_dir,
     )

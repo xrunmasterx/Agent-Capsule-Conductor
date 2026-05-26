@@ -1,4 +1,15 @@
 {
+  "control_edges": [
+    {
+      "condition": null,
+      "from": "echo_test_1",
+      "id": "edge_echo_test_1_fake_agent_2",
+      "label": "依赖",
+      "mapping": {},
+      "to": "fake_agent_2"
+    }
+  ],
+  "data_edges": [],
   "description": "可编辑工作流图",
   "edges": [
     {
@@ -45,5 +56,9 @@
       }
     }
   ],
+  "policy": {
+    "failure_mode": "fail_fast",
+    "max_concurrency": 4
+  },
   "version": "0.2.0"
 }

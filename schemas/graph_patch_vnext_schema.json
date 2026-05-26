@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GraphPatchVNext",
+  "type": "object",
+  "required": [
+    "patch_id",
+    "operations"
+  ],
+  "properties": {
+    "patch_id": {
+      "type": "string"
+    },
+    "rationale": {
+      "type": "string"
+    },
+    "operations": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "risk_level": {
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ]
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ACC Port Manifest",
+  "type": "object",
+  "required": [
+    "port_id",
+    "node_id",
+    "direction",
+    "artifacts"
+  ],
+  "properties": {
+    "port_id": {
+      "type": "string"
+    },
+    "node_id": {
+      "type": "string"
+    },
+    "direction": {
+      "enum": [
+        "input",
+        "output"
+      ]
+    },
+    "source_refs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "type",
+          "path"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "size_bytes": {
+            "type": "integer"
+          }
+        }
+      }
+    }
+  }
+}

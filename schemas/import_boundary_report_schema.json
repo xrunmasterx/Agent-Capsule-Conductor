@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ImportBoundaryReport",
+  "type": "object",
+  "required": ["passed", "violations"],
+  "properties": {
+    "passed": {"type": "boolean"},
+    "violations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["module", "forbidden_import", "reason"],
+        "properties": {
+          "module": {"type": "string"},
+          "forbidden_import": {"type": "string"},
+          "reason": {"type": "string"}
+        }
+      }
+    }
+  }
+}

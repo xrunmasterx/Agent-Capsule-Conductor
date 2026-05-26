@@ -37,6 +37,7 @@ class NodeRunSummary(BaseModel):
     event_log: str | None = None
     stdout_log: str | None = None
     stderr_log: str | None = None
+    workspace_dir: str | None = None
     errors: list[SummaryError] = Field(default_factory=list)
 
 
@@ -203,6 +204,7 @@ def build_node_summary(
         event_log=conductor_output.get("event_log") or manifest.get("event_log_path"),
         stdout_log=existing_path(run_dir / "stdout.log"),
         stderr_log=existing_path(run_dir / "stderr.log"),
+        workspace_dir=manifest.get("workspace_dir"),
         errors=errors,
     )
 

@@ -1,0 +1,9 @@
+{
+  "workspace_access": "read_only",
+  "network": false,
+  "shell": false,
+  "dangerous": false,
+  "env_policy": "acc_whitelist",
+  "allowed_env": [],
+  "timeout_seconds": 120
+}

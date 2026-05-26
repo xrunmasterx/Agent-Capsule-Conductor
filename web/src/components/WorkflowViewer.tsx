@@ -32,7 +32,14 @@ import {
   TestTube,
 } from 'lucide-react';
 import dagre from 'dagre';
-import { useEffect, useMemo, useState } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from 'react';
 
 import { api } from '../api';
 import { shortPath, statusTone } from '../format';
@@ -102,6 +109,22 @@ export function WorkflowViewer({
   const [isRunning, setIsRunning] = useState(false);
   const [artifacts, setArtifacts] = useState<ArtifactLink[]>([]);
   const [content, setContent] = useState<ArtifactContent | null>(null);
+  const graphRef = useRef(graph);
+
+  function updateGraph(next: SetStateAction<WorkflowGraph>) {
+    setGraph((current) => {
+      const nextGraph =
+        typeof next === 'function'
+          ? (next as (current: WorkflowGraph) => WorkflowGraph)(current)
+          : next;
+      graphRef.current = nextGraph;
+      return nextGraph;
+    });
+  }
+
+  useEffect(() => {
+    graphRef.current = graph;
+  }, [graph]);
 
   useEffect(() => {
     if (!selectedWorkflowId) {
@@ -112,9 +135,10 @@ export function WorkflowViewer({
       if (ignore) {
         return;
       }
-      const nextGraph = workflow.graph || graphFromLegacyWorkflow(workflow);
+      const nextGraph = normalizeClientGraph(workflow.graph || graphFromLegacyWorkflow(workflow));
       setDetail(workflow);
       setGraph(nextGraph);
+      graphRef.current = nextGraph;
       setSelection(
         nextGraph.nodes[0]
           ? { type: 'node', id: nextGraph.nodes[0].id }
@@ -231,6 +255,7 @@ export function WorkflowViewer({
     const nextGraph = emptyGraph();
     setDetail(null);
     setGraph(nextGraph);
+    graphRef.current = nextGraph;
     setSelection({ type: 'workflow', id: nextGraph.id });
     setWorkflowRun(null);
     setWorkflowEvents([]);
@@ -241,6 +266,7 @@ export function WorkflowViewer({
     const nextGraph = kind === 'serial' ? serialDemoGraph() : parallelDemoGraph();
     setDetail(null);
     setGraph(nextGraph);
+    graphRef.current = nextGraph;
     setSelection({ type: 'node', id: nextGraph.nodes[0].id });
     setWorkflowRun(null);
     setWorkflowEvents([]);
@@ -252,17 +278,20 @@ export function WorkflowViewer({
     if (!capsule) {
       return;
     }
-    const nodeId = uniqueNodeId(graph, capsule.id.split('.')[0].replaceAll('-', '_'));
-    const nextNode: WorkflowGraphNode = {
-      id: nodeId,
-      capsule_id: capsule.id,
-      label: capsule.name,
-      input: {},
-      input_mapping: {},
-      notes: '',
-      position: { x: 120 + graph.nodes.length * 280, y: 180 },
-    };
-    setGraph({ ...graph, nodes: [...graph.nodes, nextNode] });
+    let nodeId = '';
+    updateGraph((current) => {
+      nodeId = uniqueNodeId(current, capsule.id.split('.')[0].replaceAll('-', '_'));
+      const nextNode: WorkflowGraphNode = {
+        id: nodeId,
+        capsule_id: capsule.id,
+        label: capsule.name,
+        input: {},
+        input_mapping: {},
+        notes: '',
+        position: { x: 120 + current.nodes.length * 280, y: 180 },
+      };
+      return { ...current, nodes: [...current.nodes, nextNode] };
+    });
     setSelection({ type: 'node', id: nodeId });
   }
 
@@ -270,12 +299,12 @@ export function WorkflowViewer({
     if (!selectedNode) {
       return;
     }
-    setGraph({
-      ...graph,
-      nodes: graph.nodes.map((node) =>
+    updateGraph((current) => ({
+      ...current,
+      nodes: current.nodes.map((node) =>
         node.id === selectedNode.id ? { ...node, ...patch } : node,
       ),
-    });
+    }));
   }
 
   function applyNodeJson() {
@@ -290,22 +319,22 @@ export function WorkflowViewer({
       return;
     }
     const mapping = JSON.parse(edgeMappingText || '{}') as Record<string, unknown>;
-    setGraph({
-      ...graph,
-      edges: graph.edges.map((edge) =>
+    updateGraph((current) => ({
+      ...current,
+      edges: current.edges.map((edge) =>
         edge.id === selectedEdge.id ? { ...edge, mapping } : edge,
       ),
-    });
+    }));
     setMessage(`已更新连接 ${selectedEdge.id} 的映射`);
   }
 
   function autoLayout() {
-    setGraph(layoutGraph(graph));
+    updateGraph((current) => layoutGraph(current));
     setMessage('已执行自动布局');
   }
 
   async function saveGraph() {
-    const result = await api.saveWorkflow(graph, true);
+    const result = await api.saveWorkflow(graphRef.current, true);
     setMessage(`已保存 ${result.workflow_id}`);
     onSelect(result.workflow_id);
     onChanged?.();
@@ -314,7 +343,7 @@ export function WorkflowViewer({
   async function validateGraph() {
     try {
       await saveGraph();
-      const result = await api.validateWorkflow(graph.id);
+      const result = await api.validateWorkflow(graphRef.current.id);
       setMessage(`${t.validationPassed}: ${result.workflow_id}`);
     } catch (error) {
       setMessage(`${t.validationFailed}: ${error instanceof Error ? error.message : String(error)}`);
@@ -322,29 +351,30 @@ export function WorkflowViewer({
   }
 
   async function runGraph() {
-    const runId = `ui_workflow_${graph.id}`;
+    const runId = `ui_workflow_${graphRef.current.id}`;
     const runDir = `runs/${runId}`;
     let pollTimer: number | undefined;
     async function pollWorkflowEvents() {
       try {
         const result = await api.runEvents(runId);
         setWorkflowEvents(result.events);
-        setWorkflowRun(liveWorkflowRunFromEvents(graph, runDir, result.events));
+        setWorkflowRun(liveWorkflowRunFromEvents(graphRef.current, runDir, result.events));
       } catch {
-        setWorkflowRun(liveWorkflowRunFromEvents(graph, runDir, []));
+        setWorkflowRun(liveWorkflowRunFromEvents(graphRef.current, runDir, []));
       }
     }
     try {
       await saveGraph();
+      const nextGraph = graphRef.current;
       setIsRunning(true);
       setWorkflowEvents([]);
-      setWorkflowRun(liveWorkflowRunFromEvents(graph, runDir, []));
+      setWorkflowRun(liveWorkflowRunFromEvents(nextGraph, runDir, []));
       setMessage(`运行 ${graph.id}: 已提交，等待节点事件...`);
       void pollWorkflowEvents();
       pollTimer = window.setInterval(() => {
         void pollWorkflowEvents();
       }, 1000);
-      const result = await api.runWorkflow(graph.id, runDir);
+      const result = await api.runWorkflow(nextGraph.id, runDir);
       if (pollTimer !== undefined) {
         window.clearInterval(pollTimer);
       }
@@ -456,7 +486,7 @@ export function WorkflowViewer({
           workflowRun={workflowRun}
           selectedNodeId={selection.type === 'node' ? selection.id : ''}
           selectedEdgeId={selection.type === 'edge' ? selection.id : ''}
-          onGraphChange={setGraph}
+          onGraphChange={updateGraph}
           onSelect={setSelection}
         />
 
@@ -487,12 +517,12 @@ export function WorkflowViewer({
               onMappingText={setEdgeMappingText}
               onApplyJson={applyEdgeJson}
               onUpdate={(patch) =>
-                setGraph({
-                  ...graph,
-                  edges: graph.edges.map((edge) =>
+                updateGraph((current) => ({
+                  ...current,
+                  edges: current.edges.map((edge) =>
                     edge.id === selectedEdge.id ? { ...edge, ...patch } : edge,
                   ),
-                })
+                }))
               }
             />
           ) : null}
@@ -526,7 +556,7 @@ function WorkflowGraphCanvas({
   workflowRun: WorkflowRunResult | null;
   selectedNodeId: string;
   selectedEdgeId: string;
-  onGraphChange: (graph: WorkflowGraph) => void;
+  onGraphChange: Dispatch<SetStateAction<WorkflowGraph>>;
   onSelect: (selection: Selection) => void;
 }) {
   const flowNodes = useMemo(
@@ -534,20 +564,9 @@ function WorkflowGraphCanvas({
     [graph, capsules, workflowRun, selectedNodeId],
   );
   const flowEdges = useMemo(() => toFlowEdges(graph, selectedEdgeId), [graph, selectedEdgeId]);
-  const [nodes, setNodes] = useState(flowNodes);
-  const [edges, setEdges] = useState(flowEdges);
-
-  useEffect(() => {
-    setNodes(flowNodes);
-  }, [flowNodes]);
-
-  useEffect(() => {
-    setEdges(flowEdges);
-  }, [flowEdges]);
 
   function handleNodesChange(changes: NodeChange<CapsuleFlowNode>[]) {
-    const nextNodes = applyNodeChanges(changes, nodes) as CapsuleFlowNode[];
-    setNodes(nextNodes);
+    const nextNodes = applyNodeChanges(changes, flowNodes) as CapsuleFlowNode[];
     const shouldPersistGraph = changes.some(
       (change) => change.type === 'position' || change.type === 'remove',
     );
@@ -556,25 +575,27 @@ function WorkflowGraphCanvas({
     }
     const positions = new Map(nextNodes.map((node) => [node.id, node.position]));
     const remainingNodeIds = new Set(nextNodes.map((node) => node.id));
-    onGraphChange({
-      ...graph,
-      nodes: graph.nodes
+    onGraphChange((current) => ({
+      ...current,
+      nodes: current.nodes
         .filter((node) => remainingNodeIds.has(node.id))
         .map((node) => ({ ...node, position: positions.get(node.id) || node.position })),
-      edges: graph.edges.filter(
+      edges: current.edges.filter(
         (edge) => remainingNodeIds.has(edge.from) && remainingNodeIds.has(edge.to),
       ),
-    });
+    }));
   }
 
   function handleEdgesChange(changes: EdgeChange[]) {
-    const nextEdges = applyEdgeChanges(changes, edges);
-    setEdges(nextEdges);
+    const nextEdges = applyEdgeChanges(changes, flowEdges);
     if (!changes.some((change) => change.type === 'remove')) {
       return;
     }
     const remaining = new Set(nextEdges.map((edge) => edge.id));
-    onGraphChange({ ...graph, edges: graph.edges.filter((edge) => remaining.has(edge.id)) });
+    onGraphChange((current) => ({
+      ...current,
+      edges: current.edges.filter((edge) => remaining.has(edge.id)),
+    }));
   }
 
   const handleConnect: OnConnect = (connection) => {
@@ -590,15 +611,15 @@ function WorkflowGraphCanvas({
       mapping: {},
       condition: null,
     };
-    onGraphChange({ ...graph, edges: [...graph.edges, edge] });
+    onGraphChange((current) => ({ ...current, edges: [...current.edges, edge] }));
     onSelect({ type: 'edge', id: edgeId });
   };
 
   return (
     <div className="graph-canvas" aria-label="图谱画布">
       <ReactFlow
-        nodes={nodes}
-        edges={edges}
+        nodes={flowNodes}
+        edges={flowEdges}
         nodeTypes={nodeTypes}
         onNodesChange={handleNodesChange}
         onEdgesChange={handleEdgesChange}
@@ -614,7 +635,7 @@ function WorkflowGraphCanvas({
           markerEnd: { type: MarkerType.ArrowClosed },
         }}
       >
-        <GraphInternalsRefresh nodeIds={nodes.map((node) => node.id)} />
+        <GraphInternalsRefresh nodeIds={flowNodes.map((node) => node.id)} />
         <MiniMap pannable zoomable />
         <Controls />
         <Background variant={BackgroundVariant.Dots} gap={22} size={1} />
@@ -726,6 +747,12 @@ function NodeInspector({
         <dd>{node.capsule_id}</dd>
         <dt>{t.runtime}</dt>
         <dd>{capsule?.runtime || 'unknown'}</dd>
+        <dt>kind</dt>
+        <dd>{node.kind || 'agent_session'}</dd>
+        <dt>cwd</dt>
+        <dd>{shortPath(nodeRun?.workspace_dir) || node.cwd_policy || 'inherit_environment'}</dd>
+        <dt>behavior</dt>
+        <dd>{node.cwd_policy || 'inherit_environment'}</dd>
         <dt>{t.status}</dt>
         <dd>{nodeRun ? statusLabel(nodeRun.status) : t.notRun}</dd>
         <dt>output path</dt>
@@ -734,6 +761,12 @@ function NodeInspector({
         <dd>{shortPath(nodeRun?.artifact_dir)}</dd>
         <dt>logs path</dt>
         <dd>{shortPath(nodeRun?.stderr_log || nodeRun?.event_log)}</dd>
+      </dl>
+      <dl className="definition-grid compact">
+        <dt>input ports</dt>
+        <dd>{(node.input_ports || [{ id: 'main' }]).map((port) => port.id).join(', ')}</dd>
+        <dt>output ports</dt>
+        <dd>{(node.output_ports || [{ id: 'main' }]).map((port) => port.id).join(', ')}</dd>
       </dl>
       <label>
         {t.input}
@@ -850,6 +883,14 @@ function WorkflowInspector({ graph }: { graph: WorkflowGraph }) {
         <dd>{graph.nodes.length}</dd>
         <dt>edges</dt>
         <dd>{graph.edges.length}</dd>
+        <dt>environment</dt>
+        <dd>{graph.workspace_policy?.default_state_mode || 'stateless'}</dd>
+        <dt>binding</dt>
+        <dd>{graph.workspace_policy?.save_mode || 'stateless_template'}</dd>
+        <dt>ports</dt>
+        <dd>
+          {(graph.exposed_inputs || []).length} in / {(graph.exposed_outputs || []).length} out
+        </dd>
       </dl>
     </section>
   );
@@ -940,6 +981,7 @@ function emptyGraph(): WorkflowGraph {
     description: '可编辑工作流图',
     nodes: [],
     edges: [],
+    policy: { failure_mode: 'fail_fast', max_concurrency: 4 },
     metadata: { layout: 'manual' },
   };
 }
@@ -980,6 +1022,7 @@ function serialDemoGraph(): WorkflowGraph {
         condition: null,
       },
     ],
+    policy: { failure_mode: 'fail_fast', max_concurrency: 1 },
     metadata: { layout: 'left-to-right' },
   };
 }
@@ -1032,6 +1075,7 @@ function parallelDemoGraph(): WorkflowGraph {
       { id: 'edge_a_merge', from: 'branch_a', to: 'merge', label: '汇入', mapping: {}, condition: null },
       { id: 'edge_b_merge', from: 'branch_b', to: 'merge', label: '汇入', mapping: {}, condition: null },
     ],
+    policy: { failure_mode: 'fail_fast', max_concurrency: 4 },
     metadata: { layout: 'left-to-right' },
   };
 }
@@ -1065,6 +1109,37 @@ function graphFromLegacyWorkflow(workflow: WorkflowDetail): WorkflowGraph {
       })),
     ),
     metadata: { source: 'legacy-yaml' },
+  };
+}
+
+function normalizeClientGraph(graph: WorkflowGraph): WorkflowGraph {
+  const controlEdges = graph.control_edges || graph.edges || [];
+  const dataEdges = graph.data_edges || [];
+  const edgeMap = new Map<string, WorkflowGraphEdge>();
+  for (const edge of controlEdges) {
+    edgeMap.set(edge.id || `edge_${edge.from}_${edge.to}`, {
+      ...edge,
+      id: edge.id || `edge_${edge.from}_${edge.to}`,
+    });
+  }
+  for (const edge of dataEdges) {
+    const fromPort = edge.from.port || edge.from.output || edge.from.artifact || 'main';
+    const toPort = edge.to.port || edge.to.input || 'main';
+    const id = edge.id || `data_${edge.from.node}_${fromPort}_${edge.to.node}_${toPort}`;
+    edgeMap.set(id, {
+      id,
+      from: edge.from.node,
+      to: edge.to.node,
+      label: `${fromPort} -> ${toPort}`,
+      mapping: {},
+      condition: null,
+    });
+  }
+  return {
+    ...graph,
+    edges: [...edgeMap.values()],
+    control_edges: controlEdges,
+    data_edges: dataEdges,
   };
 }
 

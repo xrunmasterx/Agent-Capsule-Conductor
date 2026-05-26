@@ -1,0 +1,36 @@
+{
+  "id": "environment_stateful_demo",
+  "version": "0.1.0",
+  "name": "绑定工作目录 Demo",
+  "nodes": [
+    {
+      "id": "agent_in_workspace",
+      "kind": "agent",
+      "runtime": "generic_fake_agent",
+      "prompt": "Print effective cwd and detect workspace files.",
+      "ports": {
+        "outputs": {
+          "cwd_report": {
+            "type": "artifact"
+          }
+        }
+      },
+      "behavior_pack": {
+        "mode": "workspace_native"
+      },
+      "position": {
+        "x": 0,
+        "y": 0
+      }
+    }
+  ],
+  "control_edges": [],
+  "data_edges": [],
+  "policies": {
+    "max_concurrency": 1,
+    "failure_mode": "fail_fast"
+  },
+  "metadata": {
+    "layout": "left-to-right"
+  }
+}

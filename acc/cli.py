@@ -1,13 +1,17 @@
 from __future__ import annotations
 
-import asyncio
 import json
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
-from acc.batch import run_batch
+from acc.app import (
+    CapsuleAppService,
+    WorkflowAppService,
+    create_clean_environment_binding,
+    load_capsule_input,
+)
 from acc.capsule_authoring import clone_capsule, doctor_capsule
 from acc.conductor_export import export_conductor_yaml
 from acc.control_plane import (
@@ -26,19 +30,14 @@ from acc.debugger import (
     rerun_from_node,
     rerun_single_node,
 )
+from acc.environment import create_workspace_binding, inspect_environment_run
 from acc.graphops import apply_patch_request, dry_run_patch, validate_patch_file
+from acc.port_io import inspect_ports_run
 from acc.registry import CapsuleRegistry, validate_capsule_files
 from acc.run_index import load_or_rebuild_run_index, load_run_summary
-from acc.runner import CapsuleRunner, load_input
 from acc.scaffold import scaffold_capsule
+from acc.store import is_clean_workflow_path
 from acc.utils import AccError, dump_json, load_json, log_stderr
-from acc.workflow_graph import validate_workflow_graph
-from acc.workflow_runner import (
-    run_workflow_graph_sync,
-    workflow_events_payload,
-    workflow_inspect_payload,
-    workflow_json,
-)
 
 app = typer.Typer(help="Agent Capsule Conductor CLI.")
 session_app = typer.Typer(help="Session commands.")
@@ -51,6 +50,8 @@ workflows_app = typer.Typer(help="Agent-callable workflow discovery commands.")
 conductor_app = typer.Typer(help="Conductor export commands.")
 events_app = typer.Typer(help="Workflow event replay commands.")
 artifacts_app = typer.Typer(help="Artifact comparison commands.")
+environment_app = typer.Typer(help="Environment inspection commands.")
+ports_app = typer.Typer(help="Port inbox/outbox inspection commands.")
 app.add_typer(session_app, name="session")
 app.add_typer(graphops_app, name="graphops")
 app.add_typer(runs_app, name="runs")
@@ -61,6 +62,8 @@ app.add_typer(workflows_app, name="workflows")
 app.add_typer(conductor_app, name="conductor")
 app.add_typer(events_app, name="events")
 app.add_typer(artifacts_app, name="artifacts")
+app.add_typer(environment_app, name="environment")
+app.add_typer(ports_app, name="ports")
 
 
 @app.callback()
@@ -205,9 +208,10 @@ def run(
         return
 
     try:
-        payload = load_input(input_path, input_json)
-        runner = CapsuleRunner(registry=CapsuleRegistry(capsules_dir))
-        conductor_output = asyncio.run(runner.run(capsule_or_command, payload, run_dir))
+        payload = load_capsule_input(input_path, input_json)
+        conductor_output = CapsuleAppService(
+            registry=CapsuleRegistry(capsules_dir)
+        ).run_capsule_sync(capsule_or_command, payload, run_dir)
     except (AccError, json.JSONDecodeError) as exc:
         log_stderr(str(exc))
         raise typer.Exit(1) from exc
@@ -368,8 +372,9 @@ def batch_run_command(
     ] = None,
 ) -> None:
     try:
-        runner = CapsuleRunner(registry=CapsuleRegistry(capsules_dir))
-        conductor_output = asyncio.run(run_batch(spec, run_dir, max_concurrency, runner=runner))
+        conductor_output = CapsuleAppService(
+            registry=CapsuleRegistry(capsules_dir)
+        ).run_batch_sync(spec, run_dir, max_concurrency)
     except AccError as exc:
         log_stderr(str(exc))
         raise typer.Exit(1) from exc
@@ -451,8 +456,12 @@ def capsule_test(
     ] = None,
 ) -> None:
     try:
-        runner = CapsuleRunner(registry=CapsuleRegistry(capsules_dir))
-        conductor_output = asyncio.run(runner.run(capsule_id, load_json(input_path), run_dir))
+        payload = load_json(input_path)
+        if not isinstance(payload, dict):
+            raise AccError(f"Input JSON must be an object: {input_path}")
+        conductor_output = CapsuleAppService(
+            registry=CapsuleRegistry(capsules_dir)
+        ).run_capsule_sync(capsule_id, payload, run_dir)
     except AccError as exc:
         log_stderr(str(exc))
         raise typer.Exit(1) from exc
@@ -530,13 +539,32 @@ def capsule_scaffold(
 @workflow_app.command("validate")
 def workflow_validate(
     graph_path: Path,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
     capsules_dir: Annotated[
         Path | None,
         typer.Option("--capsules-dir", help="Capsule registry directory."),
     ] = None,
 ) -> None:
     try:
-        result = validate_workflow_graph(graph_path, registry=CapsuleRegistry(capsules_dir))
+        result = WorkflowAppService(registry=CapsuleRegistry(capsules_dir)).validate(graph_path)
+    except AccError as exc:
+        log_stderr(str(exc))
+        raise typer.Exit(1) from exc
+    typer.echo(dump_json(result))
+
+
+@workflow_app.command("bind")
+def workflow_bind(
+    graph_path: Path,
+    workspace: Annotated[Path, typer.Option("--workspace", help="Workspace directory.")],
+    out: Annotated[Path, typer.Option("--out", help="Local binding JSON path.")],
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
+) -> None:
+    try:
+        if is_clean_workflow_path(graph_path):
+            result = create_clean_environment_binding(graph_path, workspace, out)
+        else:
+            result = create_workspace_binding(graph_path, workspace, out)
     except AccError as exc:
         log_stderr(str(exc))
         raise typer.Exit(1) from exc
@@ -555,21 +583,48 @@ def workflow_run(
         Path | None,
         typer.Option("--capsules-dir", help="Capsule registry directory."),
     ] = None,
+    workspace: Annotated[
+        Path | None,
+        typer.Option("--workspace", help="Workspace directory for a stateful environment."),
+    ] = None,
+    binding: Annotated[
+        Path | None,
+        typer.Option("--binding", help="Local workspace binding JSON path."),
+    ] = None,
 ) -> None:
     try:
-        result = run_workflow_graph_sync(
+        result = WorkflowAppService(registry=CapsuleRegistry(capsules_dir)).run_sync(
             graph_path,
             run_dir,
-            registry=CapsuleRegistry(capsules_dir),
+            workspace=workspace,
+            binding_path=binding,
         )
     except AccError as exc:
         log_stderr(str(exc))
         raise typer.Exit(1) from exc
-    typer.echo(workflow_json(result))
+    typer.echo(dump_json(result))
     if result["status"] != "success":
         raise typer.Exit(1)
     if not emit_json:
         return
+
+
+@environment_app.command("inspect")
+def environment_inspect(
+    run_dir: Path,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
+) -> None:
+    payload = inspect_environment_run(run_dir)
+    typer.echo(dump_json(payload) if json_output else dump_json(payload))
+
+
+@ports_app.command("inspect")
+def ports_inspect(
+    run_dir: Path,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
+) -> None:
+    payload = inspect_ports_run(run_dir)
+    typer.echo(dump_json(payload) if json_output else dump_json(payload))
 
 
 @workflows_app.command("list")
@@ -622,7 +677,7 @@ def workflow_events(
     run_dir: Path,
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
-    payload = workflow_events_payload(run_dir)
+    payload = WorkflowAppService().events(run_dir)
     typer.echo(dump_json(payload) if json_output else dump_json(payload))
 
 
@@ -631,7 +686,7 @@ def workflow_inspect(
     run_dir: Path,
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
 ) -> None:
-    payload = workflow_inspect_payload(run_dir)
+    payload = WorkflowAppService().inspect(run_dir)
     typer.echo(dump_json(payload) if json_output else dump_json(payload))
 
 

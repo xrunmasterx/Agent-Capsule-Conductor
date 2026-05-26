@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ACC ArtifactBundle v2",
+  "type": "object",
+  "required": [
+    "bundle_id",
+    "producer_node_id",
+    "producer_session_id",
+    "artifacts"
+  ],
+  "properties": {
+    "bundle_id": {
+      "type": "string"
+    },
+    "producer_node_id": {
+      "type": "string"
+    },
+    "producer_session_id": {
+      "type": "string"
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "type",
+          "path"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "size_bytes": {
+            "type": "integer"
+          }
+        }
+      }
+    }
+  }
+}

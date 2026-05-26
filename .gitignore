@@ -9,3 +9,7 @@ acceptance_*.stderr.txt
 *.tsbuildinfo
 web/vite.config.js
 web/vite.config.d.ts
+设计文档/
+capsules/browser-stock-*.codex/
+capsules/stock-market-*.codex/
+workflows/stock_market_daily_research.graph.json

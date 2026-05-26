@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-from collections import deque
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +8,8 @@ import yaml
 from jinja2 import Environment, TemplateSyntaxError, meta
 from jsonschema import Draft202012Validator
 
+from acc.domain import ControlEdge, NodeSpec, WorkflowTemplate
+from acc.engine import topological_levels as engine_topological_levels
 from acc.registry import CapsuleRegistry
 from acc.utils import AccError, load_json
 
@@ -55,6 +56,8 @@ def validate_workflow_graph(
 
 
 def workflow_schema_path(graph: dict[str, Any]) -> Path:
+    if "workspace_policy" in graph:
+        return Path("schemas/workflow_template_v4_schema.json")
     if is_v3_graph(graph):
         return Path("schemas/workflow_graph_v3_schema.json")
     return Path("schemas/workflow_graph_schema.json")
@@ -69,10 +72,13 @@ def normalize_workflow_graph(graph: dict[str, Any]) -> dict[str, Any]:
     policy = {**DEFAULT_POLICY, **dict(graph.get("policy") or {})}
     normalized["policy"] = policy
     if is_v3_graph(graph):
-        normalized["control_edges"] = list(graph.get("control_edges", []))
-        normalized["data_edges"] = list(graph.get("data_edges", []))
-        normalized["edges"] = list(graph.get("control_edges", []))
-        normalized["format_version"] = "v3"
+        control_edge_value = graph.get("control_edges", [])
+        if not control_edge_value and isinstance(graph.get("edges"), list):
+            control_edge_value = graph.get("edges", [])
+        normalized["control_edges"] = normalize_control_edges(control_edge_value)
+        normalized["data_edges"] = normalize_data_edges(graph.get("data_edges", []))
+        normalized["edges"] = list(control_edge_value)
+        normalized["format_version"] = "environment" if "workspace_policy" in graph else "v3"
         return normalized
 
     control_edges = list(graph.get("edges", []))
@@ -80,6 +86,39 @@ def normalize_workflow_graph(graph: dict[str, Any]) -> dict[str, Any]:
     normalized["data_edges"] = legacy_data_edges(graph, control_edges)
     normalized["format_version"] = "legacy"
     return normalized
+
+
+def normalize_control_edges(value: Any) -> list[dict[str, Any]]:
+    edges: list[dict[str, Any]] = []
+    for index, edge in enumerate(value or []):
+        normalized = dict(edge)
+        normalized.setdefault(
+            "id",
+            f"control_{normalized.get('from')}_{normalized.get('to')}_{index}",
+        )
+        edges.append(normalized)
+    return edges
+
+
+def normalize_data_edges(value: Any) -> list[dict[str, Any]]:
+    edges: list[dict[str, Any]] = []
+    for index, edge in enumerate(value or []):
+        normalized = dict(edge)
+        source = normalized.get("from", {})
+        target = normalized.get("to", {})
+        if isinstance(source, dict) and isinstance(target, dict):
+            source_port = (
+                source.get("port") or source.get("output") or source.get("artifact") or "main"
+            )
+            target_port = target.get("port") or target.get("input") or "main"
+            normalized.setdefault(
+                "id",
+                f"data_{source.get('node')}_{source_port}_{target.get('node')}_{target_port}_{index}",
+            )
+        else:
+            normalized.setdefault("id", f"data_{index}")
+        edges.append(normalized)
+    return edges
 
 
 def legacy_data_edges(
@@ -125,6 +164,8 @@ def first_node_reference(value: Any) -> str | None:
 
 def validate_graph_semantics(graph: dict[str, Any], registry: CapsuleRegistry) -> None:
     normalized = normalize_workflow_graph(graph)
+    validate_portable_template(normalized)
+    validate_environment_nesting(normalized)
     nodes = normalized["nodes"]
     control_edges = normalized["control_edges"]
     data_edges = normalized["data_edges"]
@@ -216,8 +257,8 @@ def validate_data_edges(
         if ancestor_masks[target] & node_bits[source] == 0:
             raise AccError(f"Data edge {edge['id']} source {source!r} is not upstream")
         source_ref = edge["from"]
-        if not any(key in source_ref for key in ("output", "artifact", "path")):
-            raise AccError(f"Data edge {edge['id']} must reference output, artifact, or path")
+        if not any(key in source_ref for key in ("output", "artifact", "path", "port")):
+            raise AccError(f"Data edge {edge['id']} must reference output, artifact, path, or port")
         if "artifact" in source_ref:
             validate_artifact_reference(edge, capsule_by_node[source])
 
@@ -247,46 +288,88 @@ def validate_artifact_reference(edge: dict[str, Any], capsule: Any) -> None:
 def inputs_from_data_edges(data_edges: list[dict[str, Any]]) -> dict[str, set[str]]:
     mapped: dict[str, set[str]] = {}
     for edge in data_edges:
-        mapped.setdefault(edge["to"]["node"], set()).add(edge["to"]["input"])
+        target = edge["to"]
+        if "input" in target:
+            mapped.setdefault(target["node"], set()).add(target["input"])
     return mapped
 
 
-def topological_order(graph: dict[str, Any]) -> list[str]:
-    _normalized, node_ids, outgoing, _incoming, incoming_count = control_graph_structures(graph)
+def validate_portable_template(graph: dict[str, Any]) -> None:
+    if graph.get("workspace_policy", {}).get("save_mode") == "local_binding":
+        return
+    absolute_path_keys = {"workspace_root", "workspace", "workspace_path", "local_path"}
+    for key, value in walk_values(graph):
+        if key in absolute_path_keys and isinstance(value, str) and Path(value).is_absolute():
+            raise AccError(
+                "Saved workflow template must not contain local absolute workspace paths"
+            )
 
-    queue = deque(node_id for node_id in node_ids if incoming_count[node_id] == 0)
-    ordered: list[str] = []
-    while queue:
-        node_id = queue.popleft()
-        ordered.append(node_id)
-        for target in outgoing[node_id]:
-            incoming_count[target] -= 1
-            if incoming_count[target] == 0:
-                queue.append(target)
-    if len(ordered) != len(node_ids):
-        raise AccError("Workflow graph contains a cycle")
-    return ordered
+
+def walk_values(value: Any) -> list[tuple[str, Any]]:
+    result: list[tuple[str, Any]] = []
+    if isinstance(value, dict):
+        for key, item in value.items():
+            result.append((str(key), item))
+            result.extend(walk_values(item))
+    elif isinstance(value, list):
+        for item in value:
+            result.extend(walk_values(item))
+    return result
+
+
+def validate_environment_nesting(graph: dict[str, Any]) -> None:
+    workspace_policy = graph.get("workspace_policy") or {}
+    root_state = workspace_policy.get("default_state_mode")
+    if root_state != "stateful":
+        return
+    for node in graph.get("nodes", []):
+        if node.get("kind") != "workflow":
+            continue
+        if node.get("workspace_mode") in {"stateful", "stateful_binding_required"}:
+            raise AccError("Stateful workflow cannot contain another stateful workflow by default")
+
+
+def topological_order(graph: dict[str, Any]) -> list[str]:
+    return [node_id for level in topological_levels(graph) for node_id in level]
 
 
 def topological_levels(graph: dict[str, Any]) -> list[list[str]]:
-    _normalized, node_ids, outgoing, _incoming, incoming_count = control_graph_structures(graph)
-    ready = [node_id for node_id in node_ids if incoming_count[node_id] == 0]
-    levels: list[list[str]] = []
-    processed = 0
-    while ready:
-        level = ready
-        levels.append(level)
-        processed += len(level)
-        next_level: list[str] = []
-        for node_id in level:
-            for target in outgoing[node_id]:
-                incoming_count[target] -= 1
-                if incoming_count[target] == 0:
-                    next_level.append(target)
-        ready = next_level
-    if processed != len(node_ids):
-        raise AccError("Workflow graph contains a cycle")
-    return levels
+    try:
+        return engine_topological_levels(template_for_topology(graph))
+    except AccError as exc:
+        if str(exc) == "WorkflowTemplate control graph contains a cycle":
+            raise AccError("Workflow graph contains a cycle") from exc
+        raise
+
+
+def template_for_topology(graph: dict[str, Any]) -> WorkflowTemplate:
+    normalized = normalize_workflow_graph(graph)
+    nodes = {
+        str(node["id"]): NodeSpec(
+            id=str(node["id"]),
+            kind="agent",
+            runtime=str(node.get("capsule_id") or "legacy_capsule"),
+            raw=dict(node),
+        )
+        for node in normalized.get("nodes", [])
+    }
+    control_edges = [
+        ControlEdge(
+            source=str(edge["from"]),
+            target=str(edge["to"]),
+            condition=edge.get("condition") if isinstance(edge.get("condition"), str) else None,
+        )
+        for edge in normalized.get("control_edges", [])
+    ]
+    return WorkflowTemplate(
+        id=str(normalized.get("id") or "legacy_workflow"),
+        version=str(normalized.get("version") or "0.1.0"),
+        nodes=nodes,
+        control_edges=control_edges,
+        data_edges=[],
+        policies=dict(normalized.get("policy") or {}),
+        metadata=dict(normalized.get("metadata") or {}),
+    )
 
 
 def graph_ancestor_masks(

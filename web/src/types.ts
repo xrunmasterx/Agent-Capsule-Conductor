@@ -15,6 +15,7 @@ export type NodeRunSummary = {
   event_log?: string | null;
   stdout_log?: string | null;
   stderr_log?: string | null;
+  workspace_dir?: string | null;
   artifacts_url?: string;
   errors?: Array<{ error_class: string; message: string; paths: Record<string, string> }>;
 };
@@ -125,9 +126,14 @@ export type WorkflowDetail = {
 export type WorkflowGraphNode = {
   id: string;
   capsule_id: string;
+  kind?: 'agent_session' | 'tool' | 'workflow' | string;
   label?: string;
   input?: Record<string, unknown>;
   input_mapping?: Record<string, unknown>;
+  cwd_policy?: string;
+  relative_cwd?: string;
+  input_ports?: WorkflowPort[];
+  output_ports?: WorkflowPort[];
   notes?: string;
   position?: { x: number; y: number };
   ui?: {
@@ -145,6 +151,22 @@ export type WorkflowGraphEdge = {
   condition?: string | null;
 };
 
+export type WorkflowPort = {
+  id: string;
+  direction?: 'input' | 'output' | string;
+  required?: boolean;
+  cardinality?: 'one' | 'many' | string;
+  artifact_types?: string[];
+};
+
+export type WorkflowDataEdge = {
+  id?: string;
+  from: { node: string; port?: string; output?: string; artifact?: string; path?: string };
+  to: { node: string; port?: string; input?: string };
+  materialization?: string;
+  required?: boolean;
+};
+
 export type WorkflowGraph = {
   id: string;
   version: string;
@@ -153,6 +175,23 @@ export type WorkflowGraph = {
   input?: Record<string, unknown>;
   nodes: WorkflowGraphNode[];
   edges: WorkflowGraphEdge[];
+  control_edges?: WorkflowGraphEdge[];
+  data_edges?: WorkflowDataEdge[];
+  workspace_policy?: {
+    save_mode?: string;
+    default_state_mode?: string;
+  };
+  behavior_pack_policy?: {
+    mode?: string;
+    precedence?: string;
+    snapshot_effective?: boolean;
+  };
+  exposed_inputs?: WorkflowPort[];
+  exposed_outputs?: WorkflowPort[];
+  policy?: {
+    failure_mode?: string;
+    max_concurrency?: number;
+  };
   metadata?: Record<string, unknown>;
 };
 

@@ -52,6 +52,27 @@ def test_generated_example_input_matches_input_schema(tmp_path: Path) -> None:
     )
 
 
+def test_generated_example_input_includes_optional_fields(tmp_path: Path) -> None:
+    capsules_dir = tmp_path / "capsules"
+    blueprint = load_json(Path("examples/blueprints/simple_research_capsule.json"))
+    blueprint["id"] = "demo-optional.generic"
+    blueprint["input_fields"].append(
+        {
+            "name": "focus",
+            "type": "string",
+            "required": False,
+            "description": "Optional focus area",
+        }
+    )
+
+    scaffold_capsule(blueprint_payload=blueprint, capsules_dir=capsules_dir)
+
+    example_payload = load_json(capsules_dir / "demo-optional.generic" / "examples" / "input.json")
+
+    assert example_payload["topic"] == "example topic"
+    assert example_payload["focus"] == "example focus"
+
+
 def test_generated_output_schema_includes_required_fields(tmp_path: Path) -> None:
     capsules_dir = tmp_path / "capsules"
     scaffold_capsule(

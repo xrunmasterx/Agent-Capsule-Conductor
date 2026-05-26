@@ -1,0 +1,8 @@
+{
+  "workflow_id": "environment_stateful_demo",
+  "binding_name": "local_repo",
+  "workspace_root": ".",
+  "behavior_policy": {
+    "mode": "workspace_native"
+  }
+}

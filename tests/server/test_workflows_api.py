@@ -86,3 +86,34 @@ def test_validate_and_run_graph_endpoint(client, project_root) -> None:
     assert run_response.status_code == 200, run_response.text
     assert run_response.json()["status"] == "success"
     assert (project_root / "runs" / "server_graph_run" / "workflow_run.json").exists()
+
+
+def test_run_graph_endpoint_routes_through_workflow_app_service(
+    client,
+    monkeypatch,
+) -> None:
+    create_response = client.post("/api/workflows", json={"graph": simple_graph(), "force": True})
+    assert create_response.status_code == 200, create_response.text
+    calls = []
+
+    class FakeWorkflowAppService:
+        def __init__(self, registry=None) -> None:
+            self.registry = registry
+
+        def run_sync(self, graph_path, run_dir):
+            calls.append((graph_path.name, run_dir.name, self.registry is not None))
+            return {"status": "success", "workflow_id": "server_graph", "nodes": []}
+
+    monkeypatch.setattr(
+        "acc.server.routes.workflows.WorkflowAppService",
+        FakeWorkflowAppService,
+    )
+
+    response = client.post(
+        "/api/workflows/server_graph/run",
+        json={"run_dir": "runs/server_graph_service_run"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "success"
+    assert calls == [("server_graph.graph.json", "server_graph_service_run", True)]

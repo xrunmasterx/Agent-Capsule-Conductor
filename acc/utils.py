@@ -7,9 +7,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-
-class AccError(Exception):
-    """Base exception for user-facing ACC failures."""
+from acc.domain import AccError
 
 
 def dump_json(data: Any) -> str:

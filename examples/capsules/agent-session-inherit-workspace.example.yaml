@@ -1,0 +1,13 @@
+{
+  "id": "agent-session-inherit-workspace.example",
+  "kind": "agent",
+  "runtime": "generic_fake_agent",
+  "behavior_pack": {
+    "mode": "workspace_native"
+  },
+  "permissions": {
+    "network": false,
+    "write_files": false,
+    "timeout_seconds": 60
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "NodeSpecVNext",
+  "type": "object",
+  "required": [
+    "id",
+    "kind"
+  ],
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "kind": {
+      "enum": [
+        "agent",
+        "tool",
+        "workflow"
+      ]
+    },
+    "runtime": {
+      "type": "string"
+    },
+    "tool": {
+      "type": "string"
+    },
+    "workflow_ref": {
+      "type": "string"
+    },
+    "ports": {
+      "$ref": "port_contract_vnext_schema.json"
+    },
+    "behavior_pack": {
+      "type": "object"
+    },
+    "permissions": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": true
+}

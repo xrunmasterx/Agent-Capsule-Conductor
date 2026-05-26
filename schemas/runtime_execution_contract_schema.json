@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RuntimeExecutionContract",
+  "type": "object",
+  "required": ["node_id", "runner_type", "workspace_dir", "inbox_dir", "outbox_dir", "artifact_dir", "permission_profile"],
+  "properties": {
+    "node_id": {"type": "string"},
+    "runner_type": {"type": "string"},
+    "workspace_dir": {"type": "string"},
+    "inbox_dir": {"type": "string"},
+    "outbox_dir": {"type": "string"},
+    "artifact_dir": {"type": "string"},
+    "permission_profile": {"$ref": "permission_profile_v2_schema.json"},
+    "env": {"type": "object", "additionalProperties": {"type": "string"}}
+  }
+}

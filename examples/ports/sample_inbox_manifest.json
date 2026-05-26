@@ -1,0 +1,11 @@
+{
+  "node_id": "consumer",
+  "port": "main",
+  "sources": [
+    {
+      "node": "producer",
+      "port": "main",
+      "materialized_path": "nodes/consumer/inbox/main/producer"
+    }
+  ]
+}

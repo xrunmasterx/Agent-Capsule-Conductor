@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PermissionProfileV2",
+  "type": "object",
+  "required": ["workspace_access", "network", "shell", "dangerous", "env_policy", "timeout_seconds"],
+  "properties": {
+    "workspace_access": {
+      "type": "string",
+      "enum": ["read_only", "writes_run_only", "writes_workspace"]
+    },
+    "network": {"type": "boolean"},
+    "shell": {"type": "boolean"},
+    "dangerous": {"type": "boolean"},
+    "env_policy": {
+      "type": "string",
+      "enum": ["acc_whitelist", "explicit_allowlist"]
+    },
+    "allowed_env": {
+      "type": "array",
+      "items": {"type": "string"},
+      "default": []
+    },
+    "timeout_seconds": {"type": "integer", "minimum": 1}
+  },
+  "additionalProperties": false
+}

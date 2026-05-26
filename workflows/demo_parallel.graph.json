@@ -93,5 +93,9 @@
       }
     }
   ],
+  "policy": {
+    "failure_mode": "fail_fast",
+    "max_concurrency": 4
+  },
   "version": "0.2.0"
 }

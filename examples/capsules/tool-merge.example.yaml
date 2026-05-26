@@ -1,0 +1,8 @@
+{
+  "id": "tool-merge.example",
+  "kind": "tool",
+  "tool": "merge",
+  "permissions": {
+    "timeout_seconds": 30
+  }
+}

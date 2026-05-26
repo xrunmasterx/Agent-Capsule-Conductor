@@ -1,0 +1,6 @@
+{
+  "id": "workflow-capsule.example",
+  "kind": "workflow",
+  "workflow_ref": "examples/workflows/stateless_template_demo.accflow.json",
+  "environment_policy": "inherit_parent"
+}

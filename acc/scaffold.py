@@ -218,7 +218,7 @@ def artifact_manifest(blueprint: dict[str, Any]) -> dict[str, Any]:
 
 
 def example_input(fields: list[dict[str, Any]]) -> dict[str, Any]:
-    return {field["name"]: example_value(field) for field in fields if field.get("required")}
+    return {field["name"]: example_value(field) for field in fields}
 
 
 def example_value(field: dict[str, Any]) -> Any:

@@ -1,0 +1,72 @@
+{
+  "id": "stateless_template_demo",
+  "version": "0.1.0",
+  "name": "无状态模板 Demo",
+  "nodes": [
+    {
+      "id": "producer",
+      "kind": "tool",
+      "tool": "fake_producer",
+      "ports": {
+        "outputs": {
+          "main": {
+            "type": "artifact"
+          }
+        }
+      },
+      "position": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "id": "consumer",
+      "kind": "agent",
+      "runtime": "generic_fake_agent",
+      "prompt": "Read from inbox and summarize.",
+      "ports": {
+        "inputs": {
+          "main": {
+            "type": "artifact"
+          }
+        },
+        "outputs": {
+          "summary": {
+            "type": "artifact"
+          }
+        }
+      },
+      "position": {
+        "x": 360,
+        "y": 0
+      }
+    }
+  ],
+  "control_edges": [
+    {
+      "from": "producer",
+      "to": "consumer",
+      "condition": null
+    }
+  ],
+  "data_edges": [
+    {
+      "from": {
+        "node": "producer",
+        "port": "main"
+      },
+      "to": {
+        "node": "consumer",
+        "port": "main"
+      },
+      "materialization": "copy"
+    }
+  ],
+  "policies": {
+    "max_concurrency": 2,
+    "failure_mode": "fail_fast"
+  },
+  "metadata": {
+    "layout": "left-to-right"
+  }
+}

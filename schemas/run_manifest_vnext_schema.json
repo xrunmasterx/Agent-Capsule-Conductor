@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "WorkflowRunManifestVNext",
+  "type": "object",
+  "required": [
+    "run_id",
+    "workflow_id",
+    "status",
+    "environments",
+    "nodes"
+  ],
+  "properties": {
+    "run_id": {
+      "type": "string"
+    },
+    "workflow_id": {
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "success",
+        "failed",
+        "partial",
+        "running",
+        "manual_review"
+      ]
+    },
+    "environments": {
+      "type": "array"
+    },
+    "nodes": {
+      "type": "array"
+    },
+    "events_path": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true
+}

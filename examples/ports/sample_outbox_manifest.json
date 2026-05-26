@@ -1,0 +1,12 @@
+{
+  "node_id": "producer",
+  "ports": {
+    "main": {
+      "path": "nodes/producer/outbox/main",
+      "files": [
+        "report.md",
+        "output.json"
+      ]
+    }
+  }
+}

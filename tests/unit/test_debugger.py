@@ -2,17 +2,21 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from acc.app import WorkflowAppService
 from acc.debugger import artifact_diff, diff_runs, fork_run, replay_workflow_events
 from acc.registry import CapsuleRegistry
-from acc.workflow_runner import run_workflow_graph_sync
 
 DEMO_GRAPH = Path("examples/workflows/debugger_replay_demo.graph.json")
 FORK_OVERRIDE = Path("examples/workflows/fork_override.json")
 
 
+def run_workflow(graph_path: Path, run_dir: Path) -> dict:
+    return WorkflowAppService().run_sync(graph_path, run_dir)
+
+
 def test_replay_reconstructs_workflow_state(tmp_path: Path) -> None:
     run_dir = tmp_path / "debugger_demo"
-    run_workflow_graph_sync(DEMO_GRAPH, run_dir)
+    run_workflow(DEMO_GRAPH, run_dir)
 
     payload = replay_workflow_events(run_dir)
 
@@ -26,7 +30,7 @@ def test_replay_reconstructs_workflow_state(tmp_path: Path) -> None:
 
 def test_replay_handles_missing_node_events_gracefully(tmp_path: Path) -> None:
     run_dir = tmp_path / "debugger_demo"
-    run_workflow_graph_sync(DEMO_GRAPH, run_dir)
+    run_workflow(DEMO_GRAPH, run_dir)
     (run_dir / "node_runs" / "demo_node_b" / "events.jsonl").unlink()
 
     payload = replay_workflow_events(run_dir, "demo_node_b")
@@ -40,7 +44,7 @@ def test_replay_handles_missing_node_events_gracefully(tmp_path: Path) -> None:
 def test_artifact_diff_and_run_diff_detect_changes(tmp_path: Path) -> None:
     run_a = tmp_path / "run_a"
     run_b = tmp_path / "run_b"
-    run_workflow_graph_sync(DEMO_GRAPH, run_a)
+    run_workflow(DEMO_GRAPH, run_a)
     fork_run(
         run_a,
         "demo_node_a",

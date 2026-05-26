@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -10,6 +11,7 @@ from fastapi import APIRouter, HTTPException, Request
 from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
 from pydantic import BaseModel, ConfigDict
 
+from acc.app import WorkflowAppService
 from acc.registry import CapsuleRegistry
 from acc.server.context import (
     configured_project_dir,
@@ -17,8 +19,6 @@ from acc.server.context import (
     relative_project_path,
 )
 from acc.utils import AccError, load_json
-from acc.workflow_graph import validate_workflow_graph
-from acc.workflow_runner import run_workflow_graph_sync
 
 router = APIRouter(prefix="/workflows", tags=["workflows"])
 
@@ -141,7 +141,7 @@ def update_workflow(
 def validate_workflow_endpoint(workflow_id: str, request: Request) -> dict[str, Any]:
     graph_path = find_graph_path(workflow_id, request)
     try:
-        return validate_workflow_graph(graph_path, registry=server_registry(request))
+        return WorkflowAppService(registry=server_registry(request)).validate(graph_path)
     except (AccError, JsonSchemaValidationError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -158,7 +158,7 @@ def run_workflow_endpoint(
     if not run_dir.is_relative_to(project_root):
         raise HTTPException(status_code=400, detail="Run directory is outside project root")
     try:
-        return run_workflow_graph_sync(graph_path, run_dir, registry=server_registry(request))
+        return WorkflowAppService(registry=server_registry(request)).run_sync(graph_path, run_dir)
     except AccError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -200,17 +200,28 @@ def save_graph(path: Path, graph: dict[str, Any], request: Request) -> dict[str,
         encoding="utf-8",
     )
     try:
-        validate_workflow_graph(temp_path, registry=server_registry(request))
+        WorkflowAppService(registry=server_registry(request)).validate(temp_path)
     except (AccError, JsonSchemaValidationError) as exc:
         temp_path.unlink(missing_ok=True)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    temp_path.replace(path)
+    replace_workflow_file(temp_path, path)
     return {
         "status": "saved",
         "workflow_id": graph["id"],
         "path": relative_project_path(get_project_root(request), path),
-        "validation": validate_workflow_graph(path, registry=server_registry(request)),
+        "validation": WorkflowAppService(registry=server_registry(request)).validate(path),
     }
+
+
+def replace_workflow_file(temp_path: Path, target_path: Path) -> None:
+    try:
+        temp_path.replace(target_path)
+        return
+    except PermissionError:
+        if target_path.exists():
+            os.chmod(target_path, 0o666)
+            target_path.unlink()
+        temp_path.replace(target_path)
 
 
 def find_graph_path(workflow_id: str, request: Request) -> Path:

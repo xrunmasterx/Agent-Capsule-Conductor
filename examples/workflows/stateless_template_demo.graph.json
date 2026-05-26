@@ -1,0 +1,104 @@
+{
+  "id": "stateless_template_demo",
+  "version": "0.4.0",
+  "name": "无状态模板 Demo",
+  "workspace_policy": {
+    "save_mode": "stateless_template",
+    "default_state_mode": "stateless"
+  },
+  "exposed_inputs": [
+    {
+      "id": "task",
+      "direction": "input",
+      "required": true,
+      "cardinality": "one",
+      "artifact_types": [
+        "json",
+        "markdown"
+      ]
+    }
+  ],
+  "exposed_outputs": [
+    {
+      "id": "result",
+      "direction": "output",
+      "required": true,
+      "cardinality": "one",
+      "artifact_types": [
+        "json",
+        "markdown"
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "id": "plan",
+      "kind": "tool",
+      "capsule_id": "fake-agent.generic",
+      "cwd_policy": "inherit_environment",
+      "input": {
+        "topic": "environment stateless task"
+      },
+      "input_ports": [
+        {
+          "id": "task",
+          "direction": "input",
+          "required": true,
+          "cardinality": "one"
+        }
+      ],
+      "output_ports": [
+        {
+          "id": "main",
+          "direction": "output",
+          "required": true,
+          "cardinality": "one"
+        }
+      ]
+    },
+    {
+      "id": "review",
+      "kind": "agent_session",
+      "capsule_id": "echo-test.generic",
+      "cwd_policy": "inherit_environment",
+      "input": {
+        "message": "review materialized inbox"
+      },
+      "input_ports": [
+        {
+          "id": "from_plan",
+          "direction": "input",
+          "required": true,
+          "cardinality": "one"
+        }
+      ],
+      "output_ports": [
+        {
+          "id": "main",
+          "direction": "output",
+          "required": true,
+          "cardinality": "one"
+        }
+      ]
+    }
+  ],
+  "control_edges": [
+    {
+      "from": "plan",
+      "to": "review"
+    }
+  ],
+  "data_edges": [
+    {
+      "from": {
+        "node": "plan",
+        "port": "main"
+      },
+      "to": {
+        "node": "review",
+        "port": "from_plan"
+      },
+      "materialization": "copy"
+    }
+  ]
+}

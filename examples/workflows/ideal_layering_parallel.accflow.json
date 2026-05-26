@@ -1,0 +1,23 @@
+{
+  "id": "ideal_layering_parallel",
+  "version": "0.1.0",
+  "nodes": [
+    {"id": "start", "type": "tool", "runner": "fake", "ports": {"out": ["main"]}, "permission_profile": {"workspace_access": "writes_run_only", "network": false, "shell": false, "dangerous": false, "env_policy": "acc_whitelist", "allowed_env": [], "timeout_seconds": 30}},
+    {"id": "branch_a", "type": "tool", "runner": "fake", "ports": {"in": ["input"], "out": ["main"]}, "permission_profile": {"workspace_access": "writes_run_only", "network": false, "shell": false, "dangerous": false, "env_policy": "acc_whitelist", "allowed_env": [], "timeout_seconds": 30}},
+    {"id": "branch_b", "type": "tool", "runner": "fake", "ports": {"in": ["input"], "out": ["main"]}, "permission_profile": {"workspace_access": "writes_run_only", "network": false, "shell": false, "dangerous": false, "env_policy": "acc_whitelist", "allowed_env": [], "timeout_seconds": 30}},
+    {"id": "merge", "type": "tool", "runner": "fake", "ports": {"in": ["a", "b"], "out": ["main"]}, "permission_profile": {"workspace_access": "writes_run_only", "network": false, "shell": false, "dangerous": false, "env_policy": "acc_whitelist", "allowed_env": [], "timeout_seconds": 30}}
+  ],
+  "control_edges": [
+    {"from": "start", "to": "branch_a"},
+    {"from": "start", "to": "branch_b"},
+    {"from": "branch_a", "to": "merge"},
+    {"from": "branch_b", "to": "merge"}
+  ],
+  "data_edges": [
+    {"from": {"node": "start", "port": "main"}, "to": {"node": "branch_a", "port": "input"}},
+    {"from": {"node": "start", "port": "main"}, "to": {"node": "branch_b", "port": "input"}},
+    {"from": {"node": "branch_a", "port": "main"}, "to": {"node": "merge", "port": "a"}},
+    {"from": {"node": "branch_b", "port": "main"}, "to": {"node": "merge", "port": "b"}}
+  ],
+  "policy": {"failure_mode": "fail_fast", "max_concurrency": 2}
+}

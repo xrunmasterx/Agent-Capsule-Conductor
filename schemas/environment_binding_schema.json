@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ACC Environment Workspace Binding",
+  "type": "object",
+  "required": [
+    "workflow_id",
+    "state_mode",
+    "workspace_root"
+  ],
+  "properties": {
+    "workflow_id": {
+      "type": "string"
+    },
+    "state_mode": {
+      "enum": [
+        "stateful"
+      ]
+    },
+    "workspace_root": {
+      "type": "string"
+    },
+    "created_at": {
+      "type": "string"
+    },
+    "notes": {
+      "type": "string"
+    }
+  }
+}

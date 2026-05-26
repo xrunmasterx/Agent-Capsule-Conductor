@@ -12,6 +12,7 @@ from acc.adapters.claude_sdk import ClaudeSdkAdapter
 from acc.adapters.codex_cli import CodexCliAdapter
 from acc.adapters.generic_cli import GenericCliAdapter, maybe_write_json_stdout
 from acc.artifact_store import ArtifactStore
+from acc.environment import WorkflowExecutionContext
 from acc.events import SessionEventEmitter
 from acc.prompting import render_prompt
 from acc.registry import CapsuleRegistry, validate_capsule_files
@@ -47,6 +48,7 @@ class CapsuleRunner:
         capsule_id: str,
         input_payload: dict[str, Any],
         run_dir: Path,
+        execution_context: WorkflowExecutionContext | None = None,
     ) -> dict[str, Any]:
         store = ArtifactStore(run_dir)
         store.prepare()
@@ -123,27 +125,41 @@ class CapsuleRunner:
                 capsule.spec.workspace,
                 input_payload,
                 store.run_dir,
+            ) if execution_context is None else None
+            workspace_path = (
+                workspace.path if workspace is not None else execution_context.cwd
             )
+            workspace_mode = workspace.mode if workspace is not None else "environment"
+            workspace_command = workspace.command if workspace is not None else None
             store.write_workspace_manifest(
                 {
-                    "mode": workspace.mode,
-                    "path": str(workspace.path),
-                    "command": workspace.command,
+                    "mode": workspace_mode,
+                    "path": str(workspace_path),
+                    "command": workspace_command,
                 }
             )
             event_emitter.emit(
                 "workspace_prepared",
                 status="running",
-                payload={"mode": workspace.mode, "path": str(workspace.path)},
+                payload={"mode": workspace_mode, "path": str(workspace_path)},
             )
             manifest = self._update_manifest(
                 store,
                 manifest,
-                workspace_dir=str(workspace.path.resolve()),
+                workspace_dir=str(workspace_path.resolve()),
+                parent_workflow_run_id=execution_context.workflow_run_id
+                if execution_context
+                else manifest.get("parent_workflow_run_id"),
+                parent_node_id=execution_context.node_id
+                if execution_context
+                else manifest.get("parent_node_id"),
                 status="running",
             )
 
             adapter = self.adapters[capsule.spec.runtime.type]
+            env = dict(capsule.spec.runtime.env)
+            if execution_context is not None:
+                env.update(execution_context.extra_env)
             event_emitter.emit(
                 "adapter_started",
                 status="running",
@@ -153,17 +169,23 @@ class CapsuleRunner:
                 AgentRunRequest(
                     capsule_id=capsule_id,
                     run_dir=store.run_dir,
-                    workspace_dir=workspace.path,
+                    workspace_dir=workspace_path,
                     prompt_path=store.prompt_path,
                     input_payload=input_payload,
                     output_schema_path=capsule.output_schema_path,
                     timeout_seconds=capsule.spec.permissions.timeout_seconds,
                     command=capsule.spec.runtime.command,
                     args_base=capsule.spec.runtime.args_base,
-                    env=capsule.spec.runtime.env,
+                    env=env,
                     sandbox=capsule.spec.permissions.sandbox,
                     allow_dangerous=capsule.spec.permissions.allow_dangerous,
                     session_id=session_id,
+                    inbox_dir=execution_context.inbox_dir if execution_context else None,
+                    outbox_dir=execution_context.outbox_dir if execution_context else None,
+                    environment_id=execution_context.environment.environment_id
+                    if execution_context
+                    else None,
+                    node_id=execution_context.node_id if execution_context else None,
                 )
             )
             conductor_output = self._finalize_result(
@@ -461,7 +483,7 @@ class CapsuleRunner:
     ) -> AgentRunResult:
         if capsule.spec.workflow is None:
             raise AccError(f"Capsule {capsule.spec.id} has no workflow config")
-        from acc.workflow_runner import run_workflow_graph
+        from acc.app import WorkflowAppService
 
         workflow_path = workspace_dir / Path(capsule.spec.workflow.path).name
         nested_run_dir = store.artifacts_dir / "nested_workflow"
@@ -470,10 +492,9 @@ class CapsuleRunner:
             status="running",
             payload={"workflow_path": str(workflow_path), "run_dir": str(nested_run_dir)},
         )
-        nested_result = await run_workflow_graph(
+        nested_result = await WorkflowAppService(registry=self.registry).run(
             workflow_path,
             nested_run_dir,
-            self.registry,
             input_payload=input_payload,
         )
         status = "success" if nested_result.get("status") == "success" else "failed"

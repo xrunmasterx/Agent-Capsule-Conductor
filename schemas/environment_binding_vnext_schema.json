@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EnvironmentBindingVNext",
+  "type": "object",
+  "required": [
+    "workflow_id",
+    "binding_name",
+    "workspace_root"
+  ],
+  "properties": {
+    "workflow_id": {
+      "type": "string"
+    },
+    "binding_name": {
+      "type": "string"
+    },
+    "workspace_root": {
+      "type": "string"
+    },
+    "behavior_policy": {
+      "type": "object"
+    },
+    "env": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": false
+}

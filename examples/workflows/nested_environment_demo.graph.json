@@ -1,0 +1,74 @@
+{
+  "id": "nested_environment_demo",
+  "version": "0.4.0",
+  "name": "嵌套环境 Demo",
+  "workspace_policy": {
+    "save_mode": "stateless_template",
+    "default_state_mode": "stateless"
+  },
+  "nodes": [
+    {
+      "id": "stateless_child_a",
+      "kind": "workflow",
+      "capsule_id": "acc-subworkflow-capsule.example",
+      "workspace_mode": "inherit_parent",
+      "input_ports": [
+        {
+          "id": "main",
+          "direction": "input",
+          "required": false,
+          "cardinality": "many"
+        }
+      ],
+      "output_ports": [
+        {
+          "id": "main",
+          "direction": "output",
+          "required": true,
+          "cardinality": "one"
+        }
+      ]
+    },
+    {
+      "id": "stateless_child_b",
+      "kind": "workflow",
+      "capsule_id": "acc-subworkflow-capsule.example",
+      "workspace_mode": "inherit_parent",
+      "input_ports": [
+        {
+          "id": "main",
+          "direction": "input",
+          "required": false,
+          "cardinality": "many"
+        }
+      ],
+      "output_ports": [
+        {
+          "id": "main",
+          "direction": "output",
+          "required": true,
+          "cardinality": "one"
+        }
+      ]
+    }
+  ],
+  "control_edges": [
+    {
+      "from": "stateless_child_a",
+      "to": "stateless_child_b"
+    }
+  ],
+  "data_edges": [
+    {
+      "from": {
+        "node": "stateless_child_a",
+        "port": "main"
+      },
+      "to": {
+        "node": "stateless_child_b",
+        "port": "main"
+      },
+      "materialization": "reference"
+    }
+  ]
+}

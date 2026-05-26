@@ -1,0 +1,84 @@
+{
+  "id": "environment_stateful_demo",
+  "version": "0.4.0",
+  "name": "绑定工作目录 Demo",
+  "workspace_policy": {
+    "save_mode": "stateless_template",
+    "default_state_mode": "stateful"
+  },
+  "behavior_pack_policy": {
+    "mode": "workspace_native",
+    "snapshot_effective": true
+  },
+  "nodes": [
+    {
+      "id": "agent_a",
+      "kind": "agent_session",
+      "capsule_id": "echo-test.generic",
+      "cwd_policy": "inherit_environment",
+      "input": {
+        "message": "bound workspace demo"
+      },
+      "input_ports": [
+        {
+          "id": "main",
+          "direction": "input",
+          "required": false,
+          "cardinality": "many"
+        }
+      ],
+      "output_ports": [
+        {
+          "id": "main",
+          "direction": "output",
+          "required": true,
+          "cardinality": "one"
+        }
+      ]
+    },
+    {
+      "id": "agent_b",
+      "kind": "agent_session",
+      "capsule_id": "fake-agent.generic",
+      "cwd_policy": "inherit_environment",
+      "input": {
+        "topic": "bound workspace downstream"
+      },
+      "input_ports": [
+        {
+          "id": "from_a",
+          "direction": "input",
+          "required": true,
+          "cardinality": "one"
+        }
+      ],
+      "output_ports": [
+        {
+          "id": "main",
+          "direction": "output",
+          "required": true,
+          "cardinality": "one"
+        }
+      ]
+    }
+  ],
+  "control_edges": [
+    {
+      "from": "agent_a",
+      "to": "agent_b"
+    }
+  ],
+  "data_edges": [
+    {
+      "from": {
+        "node": "agent_a",
+        "port": "main"
+      },
+      "to": {
+        "node": "agent_b",
+        "port": "from_a"
+      },
+      "materialization": "copy"
+    }
+  ]
+}

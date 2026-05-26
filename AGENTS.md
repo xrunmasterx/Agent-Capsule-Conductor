@@ -281,3 +281,118 @@ Before modifying code:
 
 If a browser UI exists, run real browser journeys through Playwright or the available browser-control tool. Capture screenshots, console logs, network logs, and browser QA reports.
 
+# Phase 8: Environment-Scoped Workflow Capsule Rules
+
+## Purpose
+
+This phase upgrades ACC from a flat capsule-kind model into an environment-scoped workflow model.
+
+## Non-negotiable rules
+
+1. Do not rewrite `acc run` from scratch.
+2. Do not break the existing `--emit-conductor-json` stdout contract.
+3. Do not implement a custom LLM tool-calling loop.
+4. Do not make the ACC install directory the default mutable workspace.
+5. Do not let sender nodes write directly into receiver workspaces.
+6. Do not implicitly share agent session context across nodes.
+7. Do not introduce cloud, database, or remote registry dependencies by default.
+8. Default tests must remain hermetic.
+
+## Architecture rules
+
+- `WorkflowTemplate` is a saved, reusable, stateless graph asset.
+- `EnvironmentFrame` is a runtime binding of a workflow to a workspace root.
+- `AgentSessionNode` should feel like starting an agent CLI in the workflow working directory.
+- Data transfer between nodes must go through explicit `Port`, `Inbox`, `Outbox`, and `ArtifactBundle` contracts.
+- Scheduler must materialize data into receiver inboxes; sender nodes must not mutate receiver folders directly.
+- A stateful environment may not contain another stateful environment by default.
+- A stateless workflow template may instantiate one stateful environment frame when explicitly bound by the user.
+- Saved workflows must not store machine-specific workspace paths unless explicitly marked as a local binding file.
+
+## Validation rules
+
+Codex must add tests for:
+
+- workspace binding and stateless template reuse;
+- agent node cwd inheritance;
+- inbox/outbox materialization;
+- fan-out/fan-in readiness;
+- stateful-in-stateful nesting rejection;
+- sender cannot write receiver workspace directly;
+- existing stdout contract regression.
+
+# Phase 9: Clean Core Refactor Rules
+
+## Priority
+
+The current priority is clean architecture, correctness, robustness, and maintainability.
+
+Previous implementation details may be removed or replaced if they conflict with the new clean-core architecture. Previous docs are historical references; `docs/codex_goal_clean_core_refactor/` is the active contract for this refactor.
+
+## Core principles
+
+1. Do not patch around architecture debt. Prefer a smaller clean core.
+2. Keep ACC lightweight. Avoid database, cloud, distributed workers, or heavy frameworks unless explicitly required by acceptance criteria.
+3. Separate template from runtime state.
+4. Separate control dependencies from data dependencies.
+5. Separate workflow environment from node execution.
+6. Separate UI/API state from runtime state.
+7. No implicit shared context between Agent sessions.
+8. No direct upstream writes into downstream workspaces.
+9. Default stateless workflows must use run-scoped ephemeral workspaces, not the ACC install directory.
+10. Existing old commands may be deprecated if they conflict with the new model, but document the replacement clearly.
+
+## Must preserve
+
+- Default tests must remain hermetic.
+- No default tests may require real Codex, Claude, Cursor, Hermes, network, or Conductor.
+- External integrations must be optional smoke tests.
+- Logs must not pollute machine-readable JSON outputs.
+- Any browser/UI tests must capture screenshots and console logs if UI exists.
+
+## Prohibited during this goal
+
+- Building a new LLM tool-calling agent framework.
+- Recreating Microsoft Conductor's full DSL.
+- Adding database/cloud/distributed worker infrastructure.
+- Treating the ACC installation directory as a default workflow workspace.
+- Allowing LLM-proposed GraphOps patches to apply without validation and approval.
+
+
+# Phase 10: Ideal Layering Refactor Rules
+
+This phase is a clean architecture refactor of ACC Clean Core.
+
+## Mandatory goal docs
+
+Before changing code, read:
+
+- docs/codex_goal_ideal_layering/GOAL.md
+- docs/codex_goal_ideal_layering/SPEC.md
+- docs/codex_goal_ideal_layering/DESIGN.md
+- docs/codex_goal_ideal_layering/LAYERING_CONTRACT.md
+- docs/codex_goal_ideal_layering/TEST_PLAN.md
+- docs/codex_goal_ideal_layering/ACCEPTANCE.md
+- docs/human/ACC_IDEAL_LAYERING_PLAIN_LANGUAGE.md
+
+## Non-negotiable constraints
+
+1. Do not preserve old module layout just for compatibility.
+2. Preserve public behavior that matters: stable JSON CLI, run artifacts, stdout contract, hermetic default tests.
+3. Do not implement a custom LLM agent loop.
+4. Do not introduce database/cloud/distributed worker dependencies.
+5. Do not call real Codex/Claude/Cursor/Hermes in default tests.
+6. Do not let domain import IO/process/UI modules.
+7. Do not let engine run subprocesses or write files.
+8. Do not let runtime mutate workflow graph semantics.
+9. Do not let store know CLI/UI concepts.
+10. Do not pass full host environment to real or fake runners by default.
+
+## Completion discipline
+
+- Create FINDINGS.md before refactoring.
+- Refactor by contract, not by taste.
+- Every moved responsibility must have tests.
+- Every security contract must have negative tests.
+- The final report must explain what was deleted, kept, renamed, and why.
+

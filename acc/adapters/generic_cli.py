@@ -27,6 +27,14 @@ class GenericCliAdapter:
                 "ACC_EVENTS_JSONL": str(request.events_log_path),
             }
         )
+        if request.inbox_dir is not None:
+            env["ACC_INBOX_DIR"] = str(request.inbox_dir)
+        if request.outbox_dir is not None:
+            env["ACC_OUTBOX_DIR"] = str(request.outbox_dir)
+        if request.environment_id is not None:
+            env["ACC_ENVIRONMENT_ID"] = request.environment_id
+        if request.node_id is not None:
+            env["ACC_NODE_ID"] = request.node_id
 
         prompt_bytes = request.prompt_path.read_bytes()
         try:

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import shutil
 from pathlib import Path
@@ -10,9 +9,9 @@ import yaml
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
+from acc.app import CapsuleAppService
 from acc.capsule_authoring import doctor_capsule
 from acc.registry import CapsuleRegistry, validate_capsule_files
-from acc.runner import CapsuleRunner
 from acc.scaffold import scaffold_capsule
 from acc.server.context import (
     configured_project_dir,
@@ -174,8 +173,10 @@ def test_capsule(
 
     run_dir = resolve_inside_project(project_root, payload.run_dir)
     try:
-        return asyncio.run(
-            CapsuleRunner(registry=registry).run(capsule.spec.id, input_payload, Path(run_dir))
+        return CapsuleAppService(registry=registry).run_capsule_sync(
+            capsule.spec.id,
+            input_payload,
+            Path(run_dir),
         )
     except AccError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

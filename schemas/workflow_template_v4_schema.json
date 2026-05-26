@@ -1,0 +1,186 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ACC WorkflowTemplate v4",
+  "type": "object",
+  "required": [
+    "id",
+    "version",
+    "nodes",
+    "control_edges",
+    "workspace_policy"
+  ],
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "version": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "workspace_policy": {
+      "type": "object",
+      "required": [
+        "save_mode"
+      ],
+      "properties": {
+        "save_mode": {
+          "enum": [
+            "stateless_template",
+            "local_binding"
+          ]
+        },
+        "default_state_mode": {
+          "enum": [
+            "stateless",
+            "stateful"
+          ]
+        }
+      }
+    },
+    "exposed_inputs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/port"
+      }
+    },
+    "exposed_outputs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/port"
+      }
+    },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "agent_session",
+              "tool",
+              "workflow"
+            ]
+          },
+          "capsule_id": {
+            "type": "string"
+          },
+          "cwd_policy": {
+            "enum": [
+              "inherit_environment",
+              "relative_subdir",
+              "custom"
+            ]
+          },
+          "relative_cwd": {
+            "type": "string"
+          },
+          "input_ports": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/port"
+            }
+          },
+          "output_ports": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/port"
+            }
+          }
+        }
+      }
+    },
+    "control_edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "from",
+          "to"
+        ],
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "condition": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "data_edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "from",
+          "to"
+        ],
+        "properties": {
+          "from": {
+            "type": "object"
+          },
+          "to": {
+            "type": "object"
+          },
+          "materialization": {
+            "enum": [
+              "copy",
+              "link",
+              "reference"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "port": {
+      "type": "object",
+      "required": [
+        "id",
+        "direction"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "direction": {
+          "enum": [
+            "input",
+            "output"
+          ]
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "cardinality": {
+          "enum": [
+            "one",
+            "many"
+          ]
+        },
+        "artifact_types": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

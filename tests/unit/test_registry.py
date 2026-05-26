@@ -170,3 +170,18 @@ def test_validate_capsule_files_rejects_unsafe_lifecycle_shell_syntax(tmp_path: 
     errors = validate_capsule_files(capsule)
 
     assert any("Invalid lifecycle setup command" in error for error in errors)
+
+
+def test_stock_market_demo_capsules_use_least_privilege_permissions() -> None:
+    capsules_dir = Path(__file__).resolve().parents[2] / "capsules"
+    registry = CapsuleRegistry(capsules_dir)
+
+    for capsule_id, network in [
+        ("stock-market-research.codex", True),
+        ("stock-market-info-cleaner.codex", True),
+        ("stock-market-deep-analysis.codex", False),
+    ]:
+        capsule = registry.get(capsule_id)
+        assert capsule.spec.permissions.sandbox == "read-only"
+        assert capsule.spec.permissions.network is network
+        assert capsule.spec.permissions.write_files is False

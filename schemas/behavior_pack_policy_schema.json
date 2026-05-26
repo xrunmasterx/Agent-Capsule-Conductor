@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ACC BehaviorPackPolicy",
+  "type": "object",
+  "required": [
+    "mode"
+  ],
+  "properties": {
+    "mode": {
+      "enum": [
+        "workspace_native",
+        "template_overlay",
+        "hybrid"
+      ]
+    },
+    "overlay_path": {
+      "type": "string"
+    },
+    "precedence": {
+      "enum": [
+        "template_over_workspace",
+        "workspace_over_template"
+      ]
+    },
+    "snapshot_effective": {
+      "type": "boolean"
+    }
+  }
+}

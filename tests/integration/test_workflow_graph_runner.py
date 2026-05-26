@@ -5,15 +5,19 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
+from acc.app import WorkflowAppService
 from acc.cli import app
 from acc.utils import load_json
-from acc.workflow_runner import run_workflow_graph_sync
+
+
+def run_workflow(graph_path: Path, run_dir: Path) -> dict:
+    return WorkflowAppService().run_sync(graph_path, run_dir)
 
 
 def test_runs_demo_two_node_graph_successfully(tmp_path: Path) -> None:
     run_dir = tmp_path / "demo_graph"
 
-    result = run_workflow_graph_sync(Path("examples/workflows/demo_two_node.graph.json"), run_dir)
+    result = run_workflow(Path("examples/workflows/demo_two_node.graph.json"), run_dir)
 
     assert result["status"] == "success"
     assert (run_dir / "workflow_run.json").exists()
@@ -25,7 +29,7 @@ def test_runs_demo_two_node_graph_successfully(tmp_path: Path) -> None:
 def test_template_mapping_passes_previous_output_to_next_node(tmp_path: Path) -> None:
     run_dir = tmp_path / "demo_graph"
 
-    run_workflow_graph_sync(Path("examples/workflows/demo_two_node.graph.json"), run_dir)
+    run_workflow(Path("examples/workflows/demo_two_node.graph.json"), run_dir)
 
     fake_input = load_json(run_dir / "nodes" / "fake" / "input.json")
     assert fake_input["topic"] == "Echoed message: hello from editable workbench"
@@ -45,7 +49,7 @@ def test_graph_metadata_does_not_pollute_node_input_or_prompt(tmp_path: Path) ->
     graph_path.write_text(json.dumps(graph), encoding="utf-8")
     run_dir = tmp_path / "isolated_graph"
 
-    result = run_workflow_graph_sync(graph_path, run_dir)
+    result = run_workflow(graph_path, run_dir)
 
     assert result["status"] == "success"
     fake_input_text = (run_dir / "nodes" / "fake" / "input.json").read_text(encoding="utf-8")
@@ -92,7 +96,7 @@ def test_failed_node_marks_workflow_failed(tmp_path: Path) -> None:
     graph_path.write_text(json.dumps(graph), encoding="utf-8")
     run_dir = tmp_path / "bad_graph"
 
-    result = run_workflow_graph_sync(graph_path, run_dir)
+    result = run_workflow(graph_path, run_dir)
 
     assert result["status"] == "failed"
     assert (run_dir / "workflow_run.json").exists()

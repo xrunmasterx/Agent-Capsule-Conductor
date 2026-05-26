@@ -1,31 +1,22 @@
 from __future__ import annotations
 
-import asyncio
 import difflib
 import hashlib
 import json
 import shutil
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from acc.events import WorkflowEventEmitter, read_jsonl_events
+from acc.app import WorkflowAppService
+from acc.events import read_jsonl_events
 from acc.registry import CapsuleRegistry
 from acc.run_index import NodeRunSummary, RunSummary, SummaryError, load_run_summary, write_json
-from acc.runner import CapsuleRunner
 from acc.session import utc_now_iso
 from acc.utils import AccError, load_json
 from acc.workflow_graph import normalize_workflow_graph, topological_levels
-from acc.workflow_runner import (
-    SUCCESS_STATUSES,
-    WorkflowNodeResult,
-    copy_node_run_for_legacy_compat,
-    failed_node_result,
-    load_node_summary,
-    load_output_payload,
-    resolve_node_input,
-    run_capsule_with_optional_timeout,
-    write_workflow_outputs,
-)
+
+SUCCESS_STATUSES = {"success"}
 
 TEXT_EXTENSIONS = {
     ".json",
@@ -47,6 +38,25 @@ STATUS_PRIORITY = [
     "failed",
     "skipped",
 ]
+
+
+@dataclass
+class WorkflowNodeResult:
+    node_id: str
+    capsule_id: str
+    level: int
+    status: str
+    summary: str
+    run_dir: Path
+    conductor_output: dict[str, Any] = field(default_factory=dict)
+    node_summary: NodeRunSummary | None = None
+    output: dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
+    attempts: int = 1
+
+    @property
+    def succeeded(self) -> bool:
+        return self.status in SUCCESS_STATUSES
 
 
 def replay_workflow_events(run_dir: Path, node_id: str | None = None) -> dict[str, Any]:
@@ -319,7 +329,6 @@ def _lineage_run(
 
     normalized_graph = normalize_workflow_graph(graph)
     ordered_node_ids = topological_order_ids(normalized_graph)
-
     affected_nodes = (
         {node_id}
         if operation == "rerun_node"
@@ -330,13 +339,7 @@ def _lineage_run(
         for current_node_id in ordered_node_ids
         if current_node_id not in affected_nodes
     ]
-    lineage_run_dir = copy_run_for_lineage(source_run_dir, out_dir)
-    clear_affected_node_runs(lineage_run_dir, affected_nodes)
-
-    event_log_path = lineage_run_dir / "workflow_events.jsonl"
-    event_log_path.write_text("", encoding="utf-8")
-    workflow_run_id = f"workflow_{lineage_run_dir.name}"
-    emitter = WorkflowEventEmitter(event_log_path, workflow_run_id=workflow_run_id)
+    lineage_run_dir = out_dir.resolve()
     started_at = utc_now_iso()
     parent_manifest = load_optional_json(source_run_dir / "workflow_run_manifest.json") or {}
     lineage_payload = {
@@ -350,192 +353,31 @@ def _lineage_run(
         "override": override_payload,
         "created_at": started_at,
     }
-    emitter.emit(
-        "workflow_lineage_started",
-        status="running",
-        payload={
-            "workflow_id": graph["id"],
-            "operation": operation,
-            "parent_run_id": source_run_dir.name,
-            "target_node_id": node_id,
-        },
-    )
 
-    node_results = load_preserved_node_results(
+    lineage_graph = graph_with_node_override(graph, node_id, override_payload or {})
+    temp_graph_path = write_lineage_graph_temp(
         lineage_run_dir,
-        ordered_node_ids,
-        node_by_id,
-        affected_nodes,
+        lineage_graph,
+        operation,
     )
-    context = build_context_from_results(node_results, graph)
-    node_summary_by_id: dict[str, NodeRunSummary] = {}
-    for current_node_id in ordered_node_ids:
-        if current_node_id in node_results:
-            emitter.emit(
-                "node_preserved",
-                status=node_results[current_node_id].status,
-                node_id=current_node_id,
-                payload={"source_run_id": source_run_dir.name},
-            )
-            node_summary_by_id[current_node_id] = require_node_summary(
-                lineage_run_dir, current_node_id
-            )
-
-    runner = CapsuleRunner(registry=registry)
-    workflow_status = "success"
-    errors: list[str] = []
-    level_by_node = level_map(normalized_graph)
-    stop_remaining = False
-
-    for current_node_id in ordered_node_ids:
-        if current_node_id not in affected_nodes:
-            continue
-        node = node_by_id[current_node_id]
-        node_run_dir_path = node_run_dir(lineage_run_dir, current_node_id)
-        if stop_remaining:
-            skipped = skipped_node_result(
-                node, node_run_dir_path, "Skipped after upstream rerun failure"
-            )
-            node_results[current_node_id] = skipped
-            node_summary_by_id[current_node_id] = skipped.node_summary or require_node_summary(
-                lineage_run_dir, current_node_id
-            )
-            emitter.emit(
-                "node_skipped",
-                status="skipped",
-                level=level_by_node.get(current_node_id),
-                node_id=current_node_id,
-                payload={"reason": "stopped_after_failure"},
-            )
-            context["nodes"][current_node_id] = {
-                "output": {},
-                "output_path": None,
-                "artifact_dir": None,
-                "status": "skipped",
-                "error": skipped.error,
-            }
-            continue
-
-        emitter.emit(
-            "node_started",
-            status="running",
-            level=level_by_node.get(current_node_id),
-            node_id=current_node_id,
-            payload={"capsule_id": node["capsule_id"]},
+    try:
+        workflow_payload = WorkflowAppService(registry=registry).run_sync(
+            temp_graph_path,
+            lineage_run_dir,
         )
-        try:
-            input_payload = resolve_node_input(node, normalized_graph, context, node_results)
-            if current_node_id == node_id and override_payload:
-                input_payload = {**input_payload, **override_payload}
-            conductor_output = asyncio.run(
-                run_capsule_with_optional_timeout(
-                    runner,
-                    node["capsule_id"],
-                    input_payload,
-                    node_run_dir_path,
-                    node.get("timeout_seconds"),
-                )
-            )
-            result = workflow_result_from_node_run(
-                node,
-                node_run_dir_path,
-                conductor_output,
-                level_by_node.get(current_node_id, 0),
-            )
-        except AccError as exc:
-            result = failed_node_result(
-                node,
-                node_run_dir_path,
-                level_by_node.get(current_node_id, 0),
-                str(exc),
-                "schema_error",
-            )
+    finally:
+        temp_graph_path.unlink(missing_ok=True)
 
-        node_results[current_node_id] = result
-        node_summary_by_id[current_node_id] = result.node_summary or require_node_summary(
-            lineage_run_dir, current_node_id
-        )
-        copy_node_run_for_legacy_compat(
-            node_run_dir_path, lineage_run_dir / "nodes" / current_node_id
-        )
-        if result.succeeded:
-            context["nodes"][current_node_id] = {
-                "output": result.output,
-                "output_path": result.conductor_output.get("output_path"),
-                "artifact_dir": result.conductor_output.get("artifact_dir"),
-            }
-            emitter.emit(
-                "node_completed",
-                status="success",
-                level=level_by_node.get(current_node_id),
-                node_id=current_node_id,
-                session_id=result.conductor_output.get("session_id"),
-                payload={"summary": result.summary},
-            )
-            continue
-
-        workflow_status = result.status if result.status in STATUS_PRIORITY else "failed"
-        errors.append(f"Node {current_node_id} failed: {result.error or result.summary}")
-        context["nodes"][current_node_id] = {
-            "output": result.output,
-            "output_path": result.conductor_output.get("output_path"),
-            "artifact_dir": result.conductor_output.get("artifact_dir"),
-            "status": result.status,
-            "error": result.error,
-        }
-        emitter.emit(
-            "node_failed",
-            status=result.status,
-            level=level_by_node.get(current_node_id),
-            node_id=current_node_id,
-            session_id=result.conductor_output.get("session_id"),
-            payload={"error": result.error or result.summary},
-        )
-        if operation != "rerun_node":
-            stop_remaining = True
-
-    node_summaries = [node_summary_by_id[current_node_id] for current_node_id in ordered_node_ids]
-    final_status = summarize_workflow_status(node_summaries)
-    if workflow_status != "success" and final_status == "success":
-        final_status = workflow_status
-    ended_at = utc_now_iso()
-    if final_status == "success":
-        emitter.emit("workflow_completed", status="success", payload={"workflow_id": graph["id"]})
-    else:
-        emitter.emit("workflow_failed", status=final_status, payload={"errors": errors})
-
-    workflow_payload = {
-        "workflow_id": graph["id"],
-        "status": final_status,
-        "run_dir": str(lineage_run_dir.resolve()),
-        "started_at": started_at,
-        "ended_at": ended_at,
-        "policy": normalized_graph["policy"],
-        "failure_mode": normalized_graph["policy"].get("failure_mode"),
-        "topological_levels": topological_levels(normalized_graph),
-        "nodes": [summary.model_dump() for summary in node_summaries],
-        "edges": normalized_graph.get("edges", normalized_graph.get("control_edges", [])),
-        "control_edges": normalized_graph.get("control_edges", []),
-        "data_edges": normalized_graph.get("data_edges", []),
-        "errors": errors,
-    }
-    write_workflow_outputs(
-        lineage_run_dir,
-        resolve_graph_source_path(source_run_dir, parent_manifest),
-        normalized_graph,
-        workflow_payload,
-        workflow_run_id,
-        event_log_path,
-        started_at,
-        ended_at,
-    )
+    workflow_payload["lineage"] = lineage_payload
+    graph_source_path = resolve_graph_source_path(source_run_dir, parent_manifest)
+    rewrite_lineage_manifest_graph_path(lineage_run_dir, graph_source_path)
     attach_lineage_metadata(lineage_run_dir, lineage_payload, operation)
     replay_manifest = {
         "run_dir": str(lineage_run_dir.resolve()),
-        "status": final_status,
+        "status": workflow_payload.get("status"),
         "lineage": lineage_payload,
-        "errors": errors,
-        "nodes": [summary.model_dump() for summary in node_summaries],
+        "errors": workflow_payload.get("errors", []),
+        "nodes": workflow_payload.get("nodes", []),
     }
     write_json(lineage_run_dir / "replay_manifest.json", replay_manifest)
     if operation == "fork":
@@ -543,7 +385,7 @@ def _lineage_run(
             lineage_run_dir / "fork_manifest.json",
             {
                 "run_dir": str(lineage_run_dir.resolve()),
-                "status": final_status,
+                "status": workflow_payload.get("status"),
                 "parent_run_dir": str(source_run_dir.resolve()),
                 "parent_run_id": source_run_dir.name,
                 "from_node_id": node_id,
@@ -562,6 +404,41 @@ def resolve_run_dir(run_ref: Path) -> Path:
     if candidate.exists():
         return candidate.resolve()
     raise AccError(f"Run not found: {run_ref}")
+
+
+def graph_with_node_override(
+    graph: dict[str, Any],
+    node_id: str,
+    override_payload: dict[str, Any],
+) -> dict[str, Any]:
+    cloned = json.loads(json.dumps(graph))
+    for node in cloned.get("nodes", []):
+        if not isinstance(node, dict) or node.get("id") != node_id:
+            continue
+        if override_payload:
+            node["input"] = {**dict(node.get("input", {}) or {}), **override_payload}
+        return cloned
+    raise AccError(f"Workflow node not found: {node_id}")
+
+
+def write_lineage_graph_temp(
+    lineage_run_dir: Path,
+    graph: dict[str, Any],
+    operation: str,
+) -> Path:
+    lineage_run_dir.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = lineage_run_dir.parent / f".{lineage_run_dir.name}.{operation}.graph.json"
+    write_json(temp_path, graph)
+    return temp_path
+
+
+def rewrite_lineage_manifest_graph_path(run_dir: Path, graph_source_path: Path) -> None:
+    manifest_path = run_dir / "workflow_run_manifest.json"
+    manifest = load_optional_json(manifest_path) or {}
+    if not isinstance(manifest, dict):
+        return
+    manifest["graph_path"] = str(graph_source_path.resolve())
+    write_json(manifest_path, manifest)
 
 
 def load_graph_snapshot(run_dir: Path) -> dict[str, Any]:
@@ -959,6 +836,28 @@ def require_node_summary(run_dir: Path, node_id: str) -> NodeRunSummary:
     if isinstance(payload, dict):
         payload["node_id"] = node_id
     return NodeRunSummary.model_validate(payload)
+
+
+def load_output_payload(conductor_output: dict[str, Any]) -> dict[str, Any]:
+    output_path = conductor_output.get("output_path")
+    if not output_path:
+        return {}
+    payload = load_json(Path(output_path))
+    return payload if isinstance(payload, dict) else {}
+
+
+def load_node_summary(run_dir: Path, conductor_output: dict[str, Any]) -> NodeRunSummary:
+    summary_path = run_dir / "node_summary.json"
+    if summary_path.exists():
+        payload = load_json(summary_path)
+        payload["node_id"] = run_dir.name
+        write_json(summary_path, payload)
+        return NodeRunSummary.model_validate(payload)
+    manifest_path = run_dir / "session_manifest.json"
+    manifest = load_json(manifest_path) if manifest_path.exists() else {}
+    from acc.run_index import build_node_summary
+
+    return build_node_summary(run_dir, manifest, conductor_output)
 
 
 def workflow_result_from_node_run(

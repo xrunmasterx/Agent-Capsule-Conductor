@@ -1,0 +1,10 @@
+[
+  {"type": "workflow_started", "workflow_id": "ideal_layering_serial"},
+  {"type": "node_scheduled", "node_id": "a"},
+  {"type": "node_started", "node_id": "a"},
+  {"type": "node_completed", "node_id": "a"},
+  {"type": "data_materialized", "from": "a.main", "to": "b.input"},
+  {"type": "node_scheduled", "node_id": "b"},
+  {"type": "node_completed", "node_id": "b"},
+  {"type": "workflow_completed", "workflow_id": "ideal_layering_serial"}
+]

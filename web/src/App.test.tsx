@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
@@ -390,6 +390,80 @@ describe('Agent Capsule Workbench editable UI', () => {
     expect(screen.getByRole('button', { name: /保存/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /校验/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /测试/i })).toBeInTheDocument();
+  });
+
+  test('Capsule scaffold defaults stay least-privilege for codex and expand for generic cli', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: /节点库/i }));
+
+    const runtime = await screen.findByRole('combobox', { name: 'Runtime' });
+    const sandbox = screen.getByRole('combobox', { name: 'Sandbox' });
+    const network = screen.getByLabelText('Network');
+    const writeFiles = screen.getByLabelText('Write files');
+
+    expect(runtime).toHaveValue('codex_cli');
+    expect(sandbox).toHaveValue('read-only');
+    expect(network).toBeChecked();
+    expect(writeFiles).not.toBeChecked();
+
+    await user.selectOptions(runtime, 'generic_cli');
+
+    expect(sandbox).toHaveValue('workspace-write');
+    expect(network).not.toBeChecked();
+    expect(writeFiles).toBeChecked();
+  });
+
+  test('New workflow graph saves with parallel-friendly default policy', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: /工作流/i }));
+    const toolbar = await screen.findByLabelText('工作流工具栏');
+    await user.click(within(toolbar).getByRole('button', { name: /^新建$/i }));
+    await user.click(within(toolbar).getByRole('button', { name: /^保存$/i }));
+
+    const calls = vi.mocked(fetch).mock.calls;
+    const saveCall = calls.find(([url, init]) => url === '/api/workflows' && init?.method === 'POST');
+    expect(saveCall).toBeTruthy();
+    const savedPayload = JSON.parse(String(saveCall?.[1]?.body));
+    expect(savedPayload.graph.policy).toEqual({
+      failure_mode: 'fail_fast',
+      max_concurrency: 4,
+    });
+  });
+
+  test('New workflow graph saves newly added nodes instead of an empty canvas snapshot', async () => {
+    const user = userEvent.setup();
+    const { container } = render(<App />);
+
+    const navButtons = container.querySelectorAll<HTMLButtonElement>('.nav-button');
+    await user.click(navButtons[3]);
+
+    await waitFor(() =>
+      expect(container.querySelector('.graph-toolbar .toolbar-actions')).toBeTruthy(),
+    );
+    const graphToolbar = container.querySelector<HTMLElement>('.graph-toolbar .toolbar-actions');
+    const graphToolbarButtons = graphToolbar?.querySelectorAll<HTMLButtonElement>('button');
+    expect(graphToolbarButtons).toBeTruthy();
+    await user.click(graphToolbarButtons![0]);
+
+    const addNodeButton = container.querySelector<HTMLButtonElement>('.node-library .primary-action');
+    expect(addNodeButton).toBeTruthy();
+    await user.click(addNodeButton!);
+    await user.click(addNodeButton!);
+    await user.click(graphToolbarButtons![3]);
+
+    const calls = vi.mocked(fetch).mock.calls;
+    const saveCall = calls
+      .filter(([url, init]) => url === '/api/workflows' && init?.method === 'POST')
+      .at(-1);
+    expect(saveCall).toBeTruthy();
+    const savedPayload = JSON.parse(String(saveCall?.[1]?.body));
+    expect(savedPayload.graph.nodes).toHaveLength(2);
+    expect(savedPayload.graph.nodes[0].capsule_id).toBe('echo-test.generic');
+    expect(savedPayload.graph.edges).toHaveLength(0);
   });
 
   test('Workflow Builder exposes graph authoring controls', async () => {

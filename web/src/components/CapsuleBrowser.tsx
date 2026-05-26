@@ -35,7 +35,36 @@ const defaultOutputFields = JSON.stringify(
 );
 const defaultArtifacts = JSON.stringify([], null, 2);
 
+type RuntimeDefaults = {
+  sandbox: string;
+  network: boolean;
+  writeFiles: boolean;
+};
+
+function defaultsForRuntime(runtime: string): RuntimeDefaults {
+  if (runtime === 'generic_cli') {
+    return {
+      sandbox: 'workspace-write',
+      network: false,
+      writeFiles: true,
+    };
+  }
+  if (runtime === 'codex_cli') {
+    return {
+      sandbox: 'read-only',
+      network: true,
+      writeFiles: false,
+    };
+  }
+  return {
+    sandbox: 'read-only',
+    network: false,
+    writeFiles: false,
+  };
+}
+
 export function CapsuleBrowser({ capsules, selectedCapsuleId, onSelect, onChanged }: Props) {
+  const runtimeDefaults = defaultsForRuntime('codex_cli');
   const [detail, setDetail] = useState<CapsuleDetail | null>(null);
   const [selectedFile, setSelectedFile] = useState(editableFiles[0]);
   const [fileContent, setFileContent] = useState('');
@@ -45,9 +74,9 @@ export function CapsuleBrowser({ capsules, selectedCapsuleId, onSelect, onChange
   const [description, setDescription] = useState('通过 Codex CLI 执行一个结构化调研任务。');
   const [runtime, setRuntime] = useState('codex_cli');
   const [workspaceMode, setWorkspaceMode] = useState('existing_dir');
-  const [sandbox, setSandbox] = useState('workspace-write');
-  const [network, setNetwork] = useState(true);
-  const [writeFiles, setWriteFiles] = useState(true);
+  const [sandbox, setSandbox] = useState(runtimeDefaults.sandbox);
+  const [network, setNetwork] = useState(runtimeDefaults.network);
+  const [writeFiles, setWriteFiles] = useState(runtimeDefaults.writeFiles);
   const [timeoutSeconds, setTimeoutSeconds] = useState(600);
   const [allowDangerous, setAllowDangerous] = useState(false);
   const [overwriteExisting, setOverwriteExisting] = useState(false);
@@ -133,6 +162,14 @@ export function CapsuleBrowser({ capsules, selectedCapsuleId, onSelect, onChange
     } catch (error) {
       setMessage(`创建失败: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  function updateRuntime(nextRuntime: string) {
+    const defaults = defaultsForRuntime(nextRuntime);
+    setRuntime(nextRuntime);
+    setSandbox(defaults.sandbox);
+    setNetwork(defaults.network);
+    setWriteFiles(defaults.writeFiles);
   }
 
   async function deleteSelectedCapsule() {
@@ -227,7 +264,7 @@ export function CapsuleBrowser({ capsules, selectedCapsuleId, onSelect, onChange
             />
             <label>
               Runtime
-              <select value={runtime} onChange={(event) => setRuntime(event.target.value)}>
+              <select value={runtime} onChange={(event) => updateRuntime(event.target.value)}>
                 <option value="codex_cli">codex_cli</option>
                 <option value="generic_cli">generic_cli</option>
                 <option value="claude_sdk">claude_sdk</option>

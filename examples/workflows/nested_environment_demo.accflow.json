@@ -1,0 +1,72 @@
+{
+  "id": "nested_environment_demo",
+  "version": "0.1.0",
+  "name": "嵌套 Workflow Demo",
+  "nodes": [
+    {
+      "id": "subflow",
+      "kind": "workflow",
+      "workflow_ref": "examples/workflows/stateless_template_demo.accflow.json",
+      "environment_policy": "inherit_parent",
+      "ports": {
+        "outputs": {
+          "summary": {
+            "type": "artifact"
+          }
+        }
+      },
+      "position": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "id": "final_merge",
+      "kind": "tool",
+      "tool": "merge",
+      "ports": {
+        "inputs": {
+          "summary": {
+            "type": "artifact"
+          }
+        },
+        "outputs": {
+          "bundle": {
+            "type": "artifact"
+          }
+        }
+      },
+      "position": {
+        "x": 360,
+        "y": 0
+      }
+    }
+  ],
+  "control_edges": [
+    {
+      "from": "subflow",
+      "to": "final_merge",
+      "condition": null
+    }
+  ],
+  "data_edges": [
+    {
+      "from": {
+        "node": "subflow",
+        "port": "summary"
+      },
+      "to": {
+        "node": "final_merge",
+        "port": "summary"
+      },
+      "materialization": "copy"
+    }
+  ],
+  "policies": {
+    "max_concurrency": 2,
+    "failure_mode": "fail_fast"
+  },
+  "metadata": {
+    "layout": "left-to-right"
+  }
+}

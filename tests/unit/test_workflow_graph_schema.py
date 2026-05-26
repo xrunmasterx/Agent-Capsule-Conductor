@@ -179,6 +179,15 @@ def test_topological_levels_preserve_parallel_layers() -> None:
     assert levels == [["plan"], ["branch_a", "branch_b"], ["merge"]]
 
 
+def test_legacy_edges_still_define_dependencies_when_policy_is_present() -> None:
+    graph = load_json(Path("examples/workflows/demo_parallel.graph.json"))
+    graph["policy"] = {"failure_mode": "fail_fast", "max_concurrency": 4}
+
+    levels = topological_levels(graph)
+
+    assert levels == [["plan"], ["branch_a", "branch_b"], ["merge"]]
+
+
 def test_validate_large_linear_graph(tmp_path: Path) -> None:
     nodes = [
         {

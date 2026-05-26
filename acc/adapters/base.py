@@ -20,6 +20,10 @@ class AgentRunRequest:
     sandbox: str = "read-only"
     allow_dangerous: bool = False
     session_id: str = "session_test"
+    inbox_dir: Path | None = None
+    outbox_dir: Path | None = None
+    environment_id: str | None = None
+    node_id: str | None = None
 
     @property
     def stdout_log_path(self) -> Path:
