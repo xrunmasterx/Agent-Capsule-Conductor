@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from acc.app import WorkflowAppService
 from acc.engine import topological_levels
 from acc.legacy_graph_importer import legacy_graph_to_accflow_payload, load_legacy_graph_template
 from acc.store import write_json
+from acc.utils import AccError
 
 
 def test_legacy_graph_demo_imports_to_canonical_workflow_template() -> None:
@@ -51,6 +54,21 @@ def test_legacy_graph_with_policy_still_imports_legacy_edges_as_control_edges(
         ("branch_b", "merge"),
     ]
     assert topological_levels(template) == [["plan"], ["branch_a", "branch_b"], ["merge"]]
+
+
+def test_workflow_app_service_validate_rejects_missing_legacy_capsule(tmp_path: Path) -> None:
+    graph_path = tmp_path / "missing_capsule.graph.json"
+    write_json(
+        graph_path,
+        {
+            "id": "missing_capsule",
+            "nodes": [{"id": "only", "capsule_id": "missing.generic", "input": {}}],
+            "edges": [],
+        },
+    )
+
+    with pytest.raises(AccError, match="Capsule not found: missing.generic"):
+        WorkflowAppService().validate(graph_path)
 
 
 def test_legacy_graph_and_imported_accflow_produce_equivalent_outputs_and_events(

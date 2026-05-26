@@ -100,6 +100,7 @@ class WorkflowAppService:
         if is_clean_workflow_path(workflow_path):
             return validate_clean_workflow_file(workflow_path)
         template, raw_graph = load_legacy_graph_template(workflow_path)
+        validate_legacy_capsule_references(template, self.registry)
         validate_clean_workflow_template(template)
         levels = topological_levels(template)
         return {
@@ -269,6 +270,8 @@ async def run_legacy_graph_template(
     input_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     template, raw_graph = load_legacy_graph_template(workflow_path)
+    service_registry = registry or CapsuleRegistry()
+    validate_legacy_capsule_references(template, service_registry)
     validate_clean_workflow_template(template)
     workspace_for_store = workspace
     if binding_path is not None and workspace_for_store is None:
@@ -284,7 +287,6 @@ async def run_legacy_graph_template(
     workflow_input = dict(raw_graph.get("input", {}) or {})
     if input_payload is not None:
         workflow_input.update(input_payload)
-    service_registry = registry or CapsuleRegistry()
 
     async def legacy_executor(
         node: NodeSpec,
@@ -490,6 +492,16 @@ def legacy_summary_capsule_id(template: WorkflowTemplate, node: dict[str, Any]) 
         or (template_node.raw.get("legacy_capsule_id") if template_node else "")
         or ""
     )
+
+
+def validate_legacy_capsule_references(
+    template: WorkflowTemplate,
+    registry: CapsuleRegistry,
+) -> None:
+    for node in template.nodes.values():
+        capsule_id = node.raw.get("legacy_capsule_id")
+        if isinstance(capsule_id, str):
+            registry.get(capsule_id)
 
 
 def run_clean_workflow_template_sync(

@@ -4,7 +4,7 @@ Status: Complete for this refactor pass.
 
 ## Baseline Evidence
 
-- `uv run pytest -q`: 227 passed.
+- `uv run pytest -q`: 229 passed.
 - `uv run ruff check .`: passed.
 - `uv run acc run echo-test.generic --input capsules/echo-test.generic/examples/input.json --run-dir runs/acceptance_layering_echo --emit-conductor-json`: passed and stdout was a single JSON object.
 
@@ -33,6 +33,8 @@ After a first-principles follow-up audit, three additional hardening changes wer
 - Removed `acc.workflow_runner` after production code and tests no longer used it.
 - Routed workflow CLI and server run/validate paths through `WorkflowAppService`; routed debugger
   rerun/fork lineage execution through the same service.
+- Strengthened `WorkflowAppService` legacy `.graph.json` validation so missing legacy
+  `capsule_id` references are rejected during validate/run before any node execution starts.
 - Preserved legacy UI-authored `.graph.json` files that contain `policy` plus old `edges` by
   importing those `edges` as canonical control edges before scheduling.
 - Narrowed `acc.workflow_graph` to legacy authoring/inspection helpers: runtime-facing app,
@@ -161,7 +163,7 @@ uv run acc workflow run examples/workflows/nested_environment_demo.accflow.json 
 
 Results:
 
-- `uv run pytest -q`: 227 passed.
+- `uv run pytest -q`: 229 passed.
 - `uv run ruff check .`: passed.
 - Dependency-boundary tests: 9 passed.
 - CLI JSON smoke: passed; stdout parsed as one JSON object.
