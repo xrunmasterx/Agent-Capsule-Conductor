@@ -1,4 +1,39 @@
 {
+  "control_edges": [
+    {
+      "condition": null,
+      "from": "plan",
+      "id": "edge_plan_a",
+      "label": "并行 A",
+      "mapping": {},
+      "to": "branch_a"
+    },
+    {
+      "condition": null,
+      "from": "plan",
+      "id": "edge_plan_b",
+      "label": "并行 B",
+      "mapping": {},
+      "to": "branch_b"
+    },
+    {
+      "condition": null,
+      "from": "branch_a",
+      "id": "edge_a_merge",
+      "label": "汇入",
+      "mapping": {},
+      "to": "merge"
+    },
+    {
+      "condition": null,
+      "from": "branch_b",
+      "id": "edge_b_merge",
+      "label": "汇入",
+      "mapping": {},
+      "to": "merge"
+    }
+  ],
+  "data_edges": [],
   "description": "一个上游节点扇出到两个并行节点，再汇入最终节点。",
   "edges": [
     {

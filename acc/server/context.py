@@ -63,7 +63,16 @@ def is_relative_to(path: Path, root: Path) -> bool:
 
 
 def relative_project_path(project_root: Path, path: Path) -> str:
-    return str(path.resolve().relative_to(project_root)).replace("\\", "/")
+    root = project_root.resolve()
+    candidate = path if path.is_absolute() else root / path
+    try:
+        relative = candidate.resolve().relative_to(root)
+    except ValueError:
+        try:
+            relative = candidate.relative_to(root)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Path is outside project root") from exc
+    return str(relative).replace("\\", "/")
 
 
 def reject_secret_like_path(path: Path) -> None:

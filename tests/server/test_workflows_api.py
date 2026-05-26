@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import shutil
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from acc.server.app import create_app
+from acc.server.context import relative_project_path
+from acc.utils import load_json
 
 
 def test_list_workflows(client) -> None:
@@ -60,7 +63,9 @@ def test_post_workflow_saves_graph(client, project_root) -> None:
 
     assert response.status_code == 200, response.text
     assert response.json()["status"] == "saved"
-    assert (project_root / "workflows" / "server_graph.graph.json").exists()
+    saved = load_json(project_root / "workflows" / "server_graph.graph.json")
+    assert saved["control_edges"] == []
+    assert saved["data_edges"] == []
 
 
 def test_validate_graph_endpoint_catches_invalid_edges(client) -> None:
@@ -117,3 +122,21 @@ def test_run_graph_endpoint_routes_through_workflow_app_service(
     assert response.status_code == 200, response.text
     assert response.json()["status"] == "success"
     assert calls == [("server_graph.graph.json", "server_graph_service_run", True)]
+
+
+def test_relative_project_path_survives_atomic_replace_race(tmp_path, monkeypatch) -> None:
+    project_root = tmp_path.resolve()
+    workflow_path = project_root / "workflows" / "ui_demo_graph.graph.json"
+    deleted_path = project_root.parent / "$Extend" / "$Deleted" / "stale"
+    original_resolve = Path.resolve
+
+    def fake_resolve(self, *args, **kwargs):
+        if self == workflow_path:
+            return deleted_path
+        return original_resolve(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", fake_resolve)
+
+    assert relative_project_path(project_root, workflow_path) == (
+        "workflows/ui_demo_graph.graph.json"
+    )

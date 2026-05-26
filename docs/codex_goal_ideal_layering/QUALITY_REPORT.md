@@ -4,7 +4,7 @@ Status: Complete for this refactor pass.
 
 ## Baseline Evidence
 
-- `uv run pytest -q`: 229 passed.
+- `uv run pytest -q`: 230 passed.
 - `uv run ruff check .`: passed.
 - `uv run acc run echo-test.generic --input capsules/echo-test.generic/examples/input.json --run-dir runs/acceptance_layering_echo --emit-conductor-json`: passed and stdout was a single JSON object.
 
@@ -35,6 +35,10 @@ After a first-principles follow-up audit, three additional hardening changes wer
   rerun/fork lineage execution through the same service.
 - Strengthened `WorkflowAppService` legacy `.graph.json` validation so missing legacy
   `capsule_id` references are rejected during validate/run before any node execution starts.
+- Hardened server path presentation against a Windows atomic-replace race where resolving a
+  just-replaced workflow file can temporarily point at `$Deleted`, causing a browser-visible 500.
+- Hardened server graph saves so Workbench-authored legacy `.graph.json` files retain
+  `control_edges` and `data_edges` compatibility fields instead of dropping them after UI saves.
 - Preserved legacy UI-authored `.graph.json` files that contain `policy` plus old `edges` by
   importing those `edges` as canonical control edges before scheduling.
 - Narrowed `acc.workflow_graph` to legacy authoring/inspection helpers: runtime-facing app,
@@ -163,15 +167,20 @@ uv run acc workflow run examples/workflows/nested_environment_demo.accflow.json 
 
 Results:
 
-- `uv run pytest -q`: 229 passed.
+- `uv run pytest -q`: 230 passed.
 - `uv run ruff check .`: passed.
 - Dependency-boundary tests: 9 passed.
 - CLI JSON smoke: passed; stdout parsed as one JSON object.
+- Final CLI acceptance audit: passed with 5 human-readable commands, 15 strict JSON
+  stdout commands, session inspect, store layout check, port materialization evidence, and
+  GraphOps unapproved apply rejection.
 - Serial ideal-layering workflow validate/run: passed.
 - Parallel ideal-layering workflow validate/run: passed.
 - Legacy `.graph.json` import/run equivalence tests: passed.
 - Server workflow run app-service routing smoke: passed.
-- Browser E2E: passed; latest report `runs/browser_e2e/2026-05-26T16-15-06-698Z/browser_e2e_report.json`, with Chinese UI, capsule creation, two-node workflow, parallel workflow, debugger replay, and GraphOps safety journeys all passing.
+- Web unit tests: `npm test` passed with 13 tests.
+- Web build: `npm run build` passed; Vite reported only the existing chunk-size warning.
+- Browser E2E: passed; latest report `runs/browser_e2e/2026-05-26T16-56-35-333Z/browser_e2e_report.json`, with Chinese UI, capsule creation, two-node workflow, parallel workflow, debugger replay, and GraphOps safety journeys all passing. The latest `console.log` and `network.log` are empty.
 - Nested workflow recheck: passed.
 - Store evidence check: passed.
 - `rg "from acc\\.clean_workflow|import acc\\.clean_workflow|acc\\.clean_workflow" acc tests`: no code/test imports remain.

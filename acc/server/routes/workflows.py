@@ -193,6 +193,7 @@ def workflow_graph_path(workflows_dir: Path, path_value: str) -> Path:
 
 
 def save_graph(path: Path, graph: dict[str, Any], request: Request) -> dict[str, Any]:
+    graph = legacy_graph_payload_for_save(graph)
     path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = path.with_suffix(f"{path.suffix}.{uuid4().hex}.tmp")
     temp_path.write_text(
@@ -211,6 +212,14 @@ def save_graph(path: Path, graph: dict[str, Any], request: Request) -> dict[str,
         "path": relative_project_path(get_project_root(request), path),
         "validation": WorkflowAppService(registry=server_registry(request)).validate(path),
     }
+
+
+def legacy_graph_payload_for_save(graph: dict[str, Any]) -> dict[str, Any]:
+    payload = json.loads(json.dumps(graph))
+    if "control_edges" not in payload and isinstance(payload.get("edges"), list):
+        payload["control_edges"] = payload["edges"]
+    payload.setdefault("data_edges", [])
+    return payload
 
 
 def replace_workflow_file(temp_path: Path, target_path: Path) -> None:
