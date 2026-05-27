@@ -449,7 +449,17 @@ def write_clean_outboxes(
             if not source.exists():
                 continue
             target = outbox_dir / source.name
-            copy_path(source, target)
+            if source.is_dir():
+                target = outbox_dir / f"{source.name}.reference.json"
+                write_json(
+                    target,
+                    {
+                        "type": "directory_reference",
+                        "source": str(source.resolve()),
+                    },
+                )
+            else:
+                copy_path(source, target)
             if target.is_file():
                 copied_files.append(file_record(target, outbox_dir))
         bundle = ArtifactBundle(

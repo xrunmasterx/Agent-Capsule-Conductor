@@ -5,6 +5,7 @@ import {
   Handle,
   MarkerType,
   MiniMap as ReactFlowMiniMap,
+  NodeResizer,
   Position,
   ReactFlow,
   applyEdgeChanges,
@@ -153,6 +154,7 @@ type WorkflowCanvasEdge =
       source: { workflowId: string };
       target: { workflowId: string };
       condition?: string | null;
+      context?: 'upstream_output' | 'none';
     };
 
 type WorkspaceCanvasModel = {
@@ -183,6 +185,12 @@ type NodeCreateMenuState = {
   pendingConnection?: PendingCanvasConnection;
 } | null;
 
+type FlowEndpoint = {
+  nodeId: string;
+  workflowId: string | null;
+  internal: boolean;
+};
+
 type CanvasSelection =
   | { type: 'workflow'; id: string }
   | { type: 'port'; workflowId: string; portId: string; direction: PortDirection }
@@ -199,17 +207,43 @@ type WorkflowNodeData = {
   workflow: WorkflowContainerModel;
   binding?: WorkflowBindingView;
   selected: boolean;
+  showDataPorts: boolean;
   onSelectPort: (workflowId: string, port: WorkflowPortView) => void;
   onSelectInternal: (workflowId: string, nodeId: string) => void;
   onOpenFocus: (workflowId: string) => void;
   onConfigureWorkflow: (workflowId: string) => void;
+  onResize: (workflowId: string, size: { width: number; height: number }) => void;
+  onMoveInternal: (
+    workflowId: string,
+    nodeId: string,
+    position: { x: number; y: number },
+  ) => void;
+};
+
+type AgentToolNodeData = {
+  id: string;
+  title: string;
+  kind: 'Agent' | 'Tool';
+  status: WorkflowStatus;
+  capsuleId?: string;
+  workflowId?: string;
+  internalNodeId?: string;
+  inputPorts: WorkflowPortView[];
+  outputPorts: WorkflowPortView[];
+  selected: boolean;
+  showDataPorts: boolean;
+  onSelect: () => void;
 };
 
 type WorkflowFlowNode = Node<WorkflowNodeData, 'workflowContainer'>;
+type AgentToolFlowNode = Node<AgentToolNodeData, 'agentToolNode'>;
+type CanvasFlowNode = WorkflowFlowNode | AgentToolFlowNode;
 
-const nodeTypes = { workflowContainer: memo(WorkflowContainer) };
+const nodeTypes = { workflowContainer: memo(WorkflowContainer), agentToolNode: memo(AgentToolNode) };
 const DEFAULT_CONTAINER_SIZE = { width: 430, height: 328 };
 const BOUNDARY_NODE_SIZE = { width: 270, height: 240 };
+const AGENT_TOOL_NODE_SIZE = { width: 260, height: 72 };
+const WORKFLOW_CHILD_PADDING = 24;
 const ROOT_WORKSPACE = 'F:\\UE5_Project_A';
 const MAX_LOG_PREVIEW_LINES = 180;
 
@@ -228,7 +262,7 @@ export function WorkflowViewer({
     type: 'workflow',
     id: 'Research_Flow',
   });
-  const [connectionMode, setConnectionMode] = useState<ConnectionMode>('data');
+  const [connectionMode, setConnectionMode] = useState<ConnectionMode>('control');
   const [message, setMessage] = useState('已加载 Workspace Canvas Demo');
   const [workflowRun, setWorkflowRun] = useState<WorkflowRunResult | null>(null);
   const [workflowEvents, setWorkflowEvents] = useState<RunEvent[]>([]);
@@ -419,7 +453,8 @@ export function WorkflowViewer({
     const graph = graphForCurrentView(canvas, focusedWorkflowId);
     const runId = `ui_workflow_${graph.id}`;
     const runDir = `runs/${runId}`;
-    const bindingPath = bindingPathOf(workflowBindings[graph.id]);
+    const binding = workflowBindings[graph.id];
+    const bindingPath = binding?.exists ? bindingPathOf(binding) : '';
     let pollTimer: number | undefined;
     let pollingStopped = false;
 
@@ -447,12 +482,15 @@ export function WorkflowViewer({
       setWorkflowEvents([]);
       setWorkflowRun(liveWorkflowRunFromEvents(graph, runDir, []));
       setMessage(`运行 ${graph.id}: 已提交，等待节点事件...`);
-      void pollWorkflowEvents();
-      const result = await api.runWorkflow(
+      const runPromise = api.runWorkflow(
         graph.id,
         runDir,
         bindingPath ? { bindingPath } : undefined,
       );
+      pollTimer = window.setTimeout(() => {
+        void pollWorkflowEvents();
+      }, 300);
+      const result = await runPromise;
       pollingStopped = true;
       if (pollTimer !== undefined) {
         window.clearTimeout(pollTimer);
@@ -535,7 +573,13 @@ export function WorkflowViewer({
           focusedWorkflowId={focusedWorkflowId}
           onAddPaletteItem={(item) => {
             if (!focusedWorkflowId) {
-              setMessage('请先双击 Workflow 进入 Focus Mode');
+              updateCanvas((current) =>
+                addCapsuleNodeFromPalette(current, item, {
+                  x: 120 + current.workflows.length * 80,
+                  y: 180 + current.workflows.length * 40,
+                }),
+              );
+              setMessage(`已加入 ${item.label}`);
               return;
             }
             updateCanvas((current) => {
@@ -737,7 +781,7 @@ function LeftNavigator({
             key={capsule.id}
             className="capsule-palette-item"
             draggable
-            title={focusedWorkflowId ? '双击加入当前 Workflow' : '拖入 Focus Mode 后加入 Workflow'}
+            title={focusedWorkflowId ? '双击加入当前 Workflow' : '拖到画布或 Workflow 容器'}
             onDoubleClick={() => onAddPaletteItem(item)}
             onDragStart={(event) => setPaletteDragData(event, item)}
           >
@@ -757,7 +801,7 @@ function LeftNavigator({
         <article
           className="capsule-palette-item"
           draggable
-          title={focusedWorkflowId ? '双击加入当前 Workflow' : '拖入 Focus Mode 后加入 Workflow'}
+          title={focusedWorkflowId ? '双击加入当前 Workflow' : '拖到画布或 Workflow 容器'}
           onDoubleClick={() =>
             onAddPaletteItem({
               kind: 'file_source',
@@ -860,16 +904,31 @@ function WorkspaceCanvas({
         handleSelectInternal,
         onFocusedWorkflow,
         onConfigureWorkflow,
+        connectionMode === 'data',
+        (workflowId, size) =>
+          onCanvasChange((current) => resizeWorkflowContainer(current, workflowId, size)),
+        (workflowId, nodeId, position) =>
+          onCanvasChange((current) => moveInternalNode(current, workflowId, nodeId, position)),
       ),
-    [visibleCanvas, selection, bindings, handleSelectInternal, onSelect, onFocusedWorkflow, onConfigureWorkflow],
+    [
+      visibleCanvas,
+      selection,
+      bindings,
+      handleSelectInternal,
+      onSelect,
+      onFocusedWorkflow,
+      onConfigureWorkflow,
+      connectionMode,
+      onCanvasChange,
+    ],
   );
   const flowEdges = useMemo(
     () => toFlowEdges(visibleCanvas, selection, connectionMode),
     [visibleCanvas, selection, connectionMode],
   );
 
-  function handleNodesChange(changes: NodeChange<WorkflowFlowNode>[]) {
-    const nextNodes = applyNodeChanges(changes, flowNodes) as WorkflowFlowNode[];
+  function handleNodesChange(changes: NodeChange<CanvasFlowNode>[]) {
+    const nextNodes = applyNodeChanges(changes, flowNodes) as CanvasFlowNode[];
     const shouldPersist = changes.some(
       (change) => change.type === 'position' || change.type === 'remove',
     );
@@ -878,37 +937,12 @@ function WorkspaceCanvas({
     }
     const positions = new Map(nextNodes.map((node) => [node.id, node.position]));
     const remainingIds = new Set(nextNodes.map((node) => node.id));
-    if (focusedWorkflowId) {
-      onCanvasChange((current) => ({
-        ...current,
-        workflows: current.workflows.map((workflow) =>
-          workflow.id === focusedWorkflowId
-            ? {
-                ...workflow,
-                internalNodes: workflow.internalNodes
-                  .filter((node) => remainingIds.has(node.id))
-                  .map((node) =>
-                    positions.has(node.id)
-                      ? { ...node, position: positions.get(node.id) || node.position }
-                      : node,
-                  ),
-                internalEdges: workflow.internalEdges.filter((edge) =>
-                  edgeConnectsRemainingNodes(edge, remainingIds),
-                ),
-              }
-            : workflow,
-        ),
-      }));
-      return;
-    }
     onCanvasChange((current) => ({
       ...current,
       workflows: current.workflows
         .filter((workflow) => remainingIds.has(workflow.id) || !visibleCanvas.workflows.includes(workflow))
         .map((workflow) =>
-          positions.has(workflow.id)
-            ? { ...workflow, position: positions.get(workflow.id) || workflow.position }
-            : workflow,
+          updateWorkflowPositionsFromFlow(workflow, positions, remainingIds),
         ),
       edges: current.edges.filter(
         (edge) =>
@@ -926,36 +960,27 @@ function WorkspaceCanvas({
       return;
     }
     const remaining = new Set(nextEdges.map((edge) => edge.id));
-    if (focusedWorkflowId) {
-      onCanvasChange((current) => ({
-        ...current,
-        workflows: current.workflows.map((workflow) =>
-          workflow.id === focusedWorkflowId
-            ? {
-                ...workflow,
-                internalEdges: workflow.internalEdges.filter((edge) => remaining.has(edge.id)),
-              }
-            : workflow,
-        ),
-      }));
-      return;
-    }
     onCanvasChange((current) => ({
       ...current,
       edges: current.edges.filter((edge) => remaining.has(edge.id)),
+      workflows: current.workflows.map((workflow) => ({
+        ...workflow,
+        internalEdges: workflow.internalEdges.filter((edge) => remaining.has(edge.id)),
+      })),
     }));
   }
 
   const handleConnect: OnConnect = (connection) => {
-    const edge = edgeFromConnection(visibleCanvas, connection, connectionMode);
-    if (!edge) {
+    const scopedEdge = scopedEdgeFromConnection(visibleCanvas, connection, connectionMode);
+    if (!scopedEdge) {
       return;
     }
-    if (focusedWorkflowId) {
+    const { edge, scopeWorkflowId } = scopedEdge;
+    if (scopeWorkflowId) {
       onCanvasChange((current) => ({
         ...current,
         workflows: current.workflows.map((workflow) =>
-          workflow.id === focusedWorkflowId
+          workflow.id === scopeWorkflowId
             ? {
                 ...workflow,
                 internalEdges: [...workflow.internalEdges.filter((item) => item.id !== edge.id), edge],
@@ -973,6 +998,10 @@ function WorkspaceCanvas({
     onSelect({ type: 'edge', id: edge.id });
   };
 
+  function handleNodeDragStop(node: CanvasFlowNode) {
+    onCanvasChange((current) => reparentDraggedFlowNode(current, node));
+  }
+
   function handleDrop(event: DragEvent<HTMLElement>) {
     event.preventDefault();
     const item = parsePaletteItem(event.dataTransfer.getData('application/x-acc-palette'));
@@ -987,10 +1016,25 @@ function WorkspaceCanvas({
       onCanvasChange((current) => addInternalNodeFromPalette(current, focusedWorkflowId, item, position));
       return;
     }
-    if (item.kind !== 'workflow') {
-      return;
-    }
-    onCanvasChange((current) => addWorkflowFromPalette(current, item, position));
+    onCanvasChange((current) => {
+      if (item.kind === 'workflow') {
+        return addWorkflowFromPalette(current, item, position);
+      }
+      const targetWorkflow = workflowFromDropTarget(current, event.target);
+      const positionedWorkflow = targetWorkflow || workflowAtPosition(current, position);
+      const internalPosition = positionedWorkflow
+        ? finitePosition(
+            {
+              x: position.x - positionedWorkflow.position.x,
+              y: position.y - positionedWorkflow.position.y,
+            },
+            defaultInternalNodePosition(positionedWorkflow.internalNodes.length),
+          )
+        : position;
+      return positionedWorkflow
+        ? addInternalNodeFromPalette(current, positionedWorkflow.id, item, internalPosition)
+        : addCapsuleNodeFromPalette(current, item, position);
+    });
   }
 
   function openCreateMenu(event: ReactMouseEvent<Element> | MouseEvent) {
@@ -1023,9 +1067,6 @@ function WorkspaceCanvas({
     if (focusedWorkflowId && item.kind === 'workflow') {
       return;
     }
-    if (!focusedWorkflowId && item.kind !== 'workflow') {
-      return;
-    }
     const menu = nodeCreateMenu;
     if (!menu) {
       return;
@@ -1045,6 +1086,8 @@ function WorkspaceCanvas({
     }
     if (item.kind === 'workflow') {
       onCanvasChange((current) => addWorkflowFromPalette(current, item, menu.position));
+    } else {
+      onCanvasChange((current) => addCapsuleNodeFromPalette(current, item, menu.position));
     }
     setNodeCreateMenu(null);
   }
@@ -1070,6 +1113,7 @@ function WorkspaceCanvas({
         onNodesChange={handleNodesChange}
         onEdgesChange={handleEdgesChange}
         onConnect={handleConnect}
+        onNodeDragStop={(_, node) => handleNodeDragStop(node as CanvasFlowNode)}
         onConnectStart={(_, params) =>
           setConnectStart({
             nodeId: String(params.nodeId || ''),
@@ -1080,16 +1124,12 @@ function WorkspaceCanvas({
         onConnectEnd={handleConnectEnd}
         onInit={(instance) => setFlowInstance(instance)}
         onNodeClick={(_, node) => {
-          if (focusedWorkflowId) {
-            handleSelectInternal(node.id, node.id);
+          const internal = parseInternalFlowNodeId(node.id);
+          if (internal) {
+            handleSelectInternal(internal.workflowId, internal.nodeId);
             return;
           }
           onSelect({ type: 'workflow', id: node.id });
-        }}
-        onNodeDoubleClick={(_, node) => {
-          if (!focusedWorkflowId) {
-            onFocusedWorkflow(node.id);
-          }
         }}
         onEdgeClick={(_, edge) => onSelect({ type: 'edge', id: edge.id })}
         onPaneClick={() => onSelect({ type: 'workflow', id: canvas.rootWorkflowId })}
@@ -1248,7 +1288,6 @@ function WorkflowContainer({
   data,
 }: NodeProps<WorkflowFlowNode>) {
   const workflow = data.workflow;
-  const focusNode = workflow.internalNodes.length === 1 && workflow.internalNodes[0]?.id === workflow.id;
   return (
     <article
       className={[
@@ -1259,47 +1298,121 @@ function WorkflowContainer({
         .filter(Boolean)
         .join(' ')}
       data-testid={`workflow-container-${id}`}
+      data-workflow-id={workflow.id}
       style={{ width: workflow.size.width, minHeight: workflow.size.height }}
-      onClick={() => {
-        if (focusNode) {
-          data.onSelectInternal(workflow.id, workflow.id);
-        }
-      }}
-      onDoubleClick={() => data.onOpenFocus(workflow.id)}
     >
+      <NodeResizer
+        color="#1d78d6"
+        isVisible={data.selected}
+        minWidth={260}
+        minHeight={190}
+        onResize={(_, params) =>
+          data.onResize(workflow.id, {
+            width: Math.round(params.width),
+            height: Math.round(params.height),
+          })
+        }
+      />
+      <Handle
+        type="target"
+        position={Position.Left}
+        className="workflow-control-handle input"
+      />
+      <Handle
+        type="source"
+        position={Position.Right}
+        className="workflow-control-handle output"
+      />
       <WorkflowDirectoryPill
         directory={bindingDirectory(workflow, data.binding)}
         status={data.binding?.status || 'unbound'}
         onConfigure={() => data.onConfigureWorkflow(workflow.id)}
       />
       <WorkflowHeader workflow={workflow} />
-      <div className="workflow-nested-canvas">
-        <WorkflowPortColumn
-          workflowId={workflow.id}
-          direction="input"
-          ports={workflow.inputPorts}
-          onSelectPort={data.onSelectPort}
-        />
+      <div className={data.showDataPorts ? 'workflow-nested-canvas advanced-data' : 'workflow-nested-canvas'}>
+        {data.showDataPorts ? (
+          <WorkflowPortColumn
+            workflowId={workflow.id}
+            direction="input"
+            ports={workflow.inputPorts}
+            onSelectPort={data.onSelectPort}
+          />
+        ) : null}
         <div className="internal-node-grid" aria-label={`${workflow.title} internal nodes`}>
-          {workflow.internalNodes.map((node) => (
-            <InternalNodeCard
-              key={node.id}
-              node={node}
-              onClick={() => data.onSelectInternal(workflow.id, node.id)}
-            />
-          ))}
           {workflow.internalNodes.length === 0 ? (
             <div className="empty-internal-node">内部节点未展开</div>
           ) : null}
         </div>
-        <WorkflowPortColumn
-          workflowId={workflow.id}
-          direction="output"
-          ports={workflow.outputPorts}
-          onSelectPort={data.onSelectPort}
-        />
+        {data.showDataPorts ? (
+          <WorkflowPortColumn
+            workflowId={workflow.id}
+            direction="output"
+            ports={workflow.outputPorts}
+            onSelectPort={data.onSelectPort}
+          />
+        ) : null}
       </div>
     </article>
+  );
+}
+
+function AgentToolNode({
+  data,
+}: NodeProps<AgentToolFlowNode>) {
+  return (
+    <button
+      type="button"
+      className={[
+        'agent-tool-node',
+        data.kind === 'Tool' ? 'tool' : 'agent',
+        data.selected ? 'selected' : '',
+      ]
+        .filter(Boolean)
+        .join(' ')}
+      data-testid={`agent-tool-node-${data.id}`}
+      onClick={data.onSelect}
+    >
+      <Handle
+        type="target"
+        position={Position.Left}
+        className="workflow-control-handle input"
+      />
+      <Handle
+        type="source"
+        position={Position.Right}
+        className="workflow-control-handle output"
+      />
+      {data.showDataPorts
+        ? data.inputPorts.map((portValue, index) => (
+            <Handle
+              key={portValue.id}
+              id={portHandleId(data.id, 'input', portValue.id)}
+              type="target"
+              position={Position.Left}
+              className="workflow-port-handle input"
+              style={{ top: 42 + index * 14 }}
+            />
+          ))
+        : null}
+      {data.showDataPorts
+        ? data.outputPorts.map((portValue, index) => (
+            <Handle
+              key={portValue.id}
+              id={portHandleId(data.id, 'output', portValue.id)}
+              type="source"
+              position={Position.Right}
+              className="workflow-port-handle output"
+              style={{ top: 42 + index * 14 }}
+            />
+          ))
+        : null}
+      <span className={`status-dot ${data.status}`} />
+      <div>
+        <strong>{data.title}</strong>
+        <p>{data.capsuleId || data.kind}</p>
+      </div>
+      <small>{data.kind}</small>
+    </button>
   );
 }
 
@@ -1424,9 +1537,60 @@ function WorkflowPortNode({
   );
 }
 
-function InternalNodeCard({ node, onClick }: { node: InternalNodeView; onClick: () => void }) {
+function InternalNodeCard({
+  workflowId,
+  node,
+  index,
+  onClick,
+  onMove,
+}: {
+  workflowId: string;
+  node: InternalNodeView;
+  index: number;
+  onClick: () => void;
+  onMove: (workflowId: string, nodeId: string, position: { x: number; y: number }) => void;
+}) {
+  function startDrag(event: ReactMouseEvent<HTMLButtonElement>) {
+    if (event.button !== 0) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    const card = event.currentTarget;
+    const container = card.closest('.internal-node-grid');
+    if (!(container instanceof HTMLElement)) {
+      return;
+    }
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const startPosition = node.position || defaultInternalNodePosition(index);
+    const maxX = Math.max(0, container.clientWidth - card.offsetWidth - 8);
+    const maxY = Math.max(0, container.clientHeight - card.offsetHeight - 8);
+    const move = (nextEvent: MouseEvent) => {
+      const nextPosition = {
+        x: clamp(startPosition.x + nextEvent.clientX - startX, 8, maxX),
+        y: clamp(startPosition.y + nextEvent.clientY - startY, 8, maxY),
+      };
+      onMove(workflowId, node.id, nextPosition);
+    };
+    const stop = () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', stop);
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', stop, { once: true });
+  }
   return (
-    <button type="button" className="internal-node-card" onClick={onClick}>
+    <button
+      type="button"
+      className="internal-node-card nodrag nopan"
+      onClick={onClick}
+      onMouseDown={startDrag}
+      style={{
+        left: finiteNumber(node.position?.x, defaultInternalNodePosition(index).x),
+        top: finiteNumber(node.position?.y, defaultInternalNodePosition(index).y),
+      }}
+    >
       <span className={`status-dot ${node.status}`} />
       <div>
         <strong>{node.name}</strong>
@@ -1944,22 +2108,91 @@ function toFlowNodes(
   onSelectInternalFn: (workflowId: string, nodeId: string) => void,
   onOpenFocus: (workflowId: string) => void,
   onConfigureWorkflow: (workflowId: string) => void,
-): WorkflowFlowNode[] {
-  return canvas.workflows.map((workflow) => ({
+  showDataPorts: boolean,
+  onResize: (workflowId: string, size: { width: number; height: number }) => void,
+  onMoveInternal: (
+    workflowId: string,
+    nodeId: string,
+    position: { x: number; y: number },
+  ) => void,
+): CanvasFlowNode[] {
+  return canvas.workflows.flatMap((workflow) => {
+    if (isExecutableNodeWorkflow(workflow)) {
+      return [topLevelAgentToolFlowNode(workflow, selection, showDataPorts)];
+    }
+    const workflowNode: WorkflowFlowNode = {
+      id: workflow.id,
+      type: 'workflowContainer',
+      position: workflow.position,
+      selected: selection.type === 'workflow' && selection.id === workflow.id,
+      data: {
+        workflow,
+        binding: bindings[workflow.id],
+        selected: selection.type === 'workflow' && selection.id === workflow.id,
+        showDataPorts,
+        onSelectPort: onSelectPortFn,
+        onSelectInternal: onSelectInternalFn,
+        onOpenFocus,
+        onConfigureWorkflow,
+        onResize,
+        onMoveInternal,
+      },
+    };
+    const internalNodes = workflow.internalNodes.map((node, index): AgentToolFlowNode => ({
+      id: internalFlowNodeId(workflow.id, node.id),
+      type: 'agentToolNode',
+      parentId: workflow.id,
+      position: node.position || defaultInternalNodePosition(index),
+      selected:
+        selection.type === 'internal' &&
+        selection.workflowId === workflow.id &&
+        selection.nodeId === node.id,
+      data: {
+        id: internalFlowNodeId(workflow.id, node.id),
+        title: node.name,
+        kind: node.kind,
+        status: node.status,
+        capsuleId: node.capsuleId || node.runtime,
+        workflowId: workflow.id,
+        internalNodeId: node.id,
+        inputPorts: node.inputPorts || [port('main', 'input', 'input')],
+        outputPorts: node.outputPorts || [port('main', 'output', 'output')],
+        selected:
+          selection.type === 'internal' &&
+          selection.workflowId === workflow.id &&
+          selection.nodeId === node.id,
+        showDataPorts,
+        onSelect: () => onSelectInternalFn(workflow.id, node.id),
+      },
+    }));
+    return [workflowNode, ...internalNodes];
+  });
+}
+
+function topLevelAgentToolFlowNode(
+  workflow: WorkflowContainerModel,
+  selection: CanvasSelection,
+  showDataPorts: boolean,
+): AgentToolFlowNode {
+  const kind = workflow.sourceKind === 'tool' ? 'Tool' : 'Agent';
+  return {
     id: workflow.id,
-    type: 'workflowContainer',
+    type: 'agentToolNode',
     position: workflow.position,
     selected: selection.type === 'workflow' && selection.id === workflow.id,
     data: {
-      workflow,
-      binding: bindings[workflow.id],
+      id: workflow.id,
+      title: workflow.title,
+      kind,
+      status: workflow.status,
+      capsuleId: workflow.capsuleId,
+      inputPorts: workflow.inputPorts,
+      outputPorts: workflow.outputPorts,
       selected: selection.type === 'workflow' && selection.id === workflow.id,
-      onSelectPort: onSelectPortFn,
-      onSelectInternal: onSelectInternalFn,
-      onOpenFocus,
-      onConfigureWorkflow,
+      showDataPorts,
+      onSelect: () => undefined,
     },
-  }));
+  };
 }
 
 function toFlowEdges(
@@ -1967,27 +2200,52 @@ function toFlowEdges(
   selection: CanvasSelection,
   connectionMode: ConnectionMode,
 ): Edge[] {
-  return canvas.edges.map((edge) => {
+  const rootEdges = canvas.edges.flatMap((edge) =>
+    canvasEdgeToFlowEdge(edge, selection, connectionMode),
+  );
+  const internalEdges = canvas.workflows.flatMap((workflow) =>
+    workflow.internalEdges.flatMap((edge) =>
+      canvasEdgeToFlowEdge(edge, selection, connectionMode, workflow.id),
+    ),
+  );
+  return [...rootEdges, ...internalEdges];
+}
+
+function canvasEdgeToFlowEdge(
+  edge: WorkflowCanvasEdge,
+  selection: CanvasSelection,
+  connectionMode: ConnectionMode,
+  parentWorkflowId?: string,
+): Edge[] {
     const isSelected = selection.type === 'edge' && selection.id === edge.id;
+    const sourceId = parentWorkflowId
+      ? internalEdgeEndpointToFlowId(parentWorkflowId, edge.source.workflowId)
+      : edge.source.workflowId;
+    const targetId = parentWorkflowId
+      ? internalEdgeEndpointToFlowId(parentWorkflowId, edge.target.workflowId)
+      : edge.target.workflowId;
     if (edge.kind === 'data') {
-      return {
+      if (connectionMode !== 'data') {
+        return [];
+      }
+      return [{
         id: edge.id,
-        source: edge.source.workflowId,
-        target: edge.target.workflowId,
-        sourceHandle: portHandleId(edge.source.workflowId, 'output', edge.source.portId),
-        targetHandle: portHandleId(edge.target.workflowId, 'input', edge.target.portId),
+        source: sourceId,
+        target: targetId,
+        sourceHandle: portHandleId(sourceId, 'output', edge.source.portId),
+        targetHandle: portHandleId(targetId, 'input', edge.target.portId),
         label: `${edge.source.portId} -> ${edge.target.portId}`,
         selected: isSelected,
         type: 'smoothstep',
         markerEnd: { type: MarkerType.ArrowClosed, color: '#1d78d6' },
         className: 'workflow-edge-data',
         style: { stroke: '#1d78d6', strokeWidth: isSelected ? 3 : 2 },
-      };
+      }];
     }
-    return {
+    return [{
       id: edge.id,
-      source: edge.source.workflowId,
-      target: edge.target.workflowId,
+      source: sourceId,
+      target: targetId,
       label: 'control',
       selected: isSelected,
       type: 'smoothstep',
@@ -1998,32 +2256,24 @@ function toFlowEdges(
         strokeWidth: isSelected ? 2.5 : 1.6,
         strokeDasharray: '7 7',
       },
-    };
-  });
+    }];
 }
 
-function edgeFromConnection(
+function scopedEdgeFromConnection(
   canvas: WorkspaceCanvasModel,
   connection: Connection,
   connectionMode: ConnectionMode,
-): WorkflowCanvasEdge | null {
+): { edge: WorkflowCanvasEdge; scopeWorkflowId: string | null } | null {
   if (!connection.source || !connection.target || connection.source === connection.target) {
     return null;
   }
+  const source = flowEndpoint(connection.source);
+  const target = flowEndpoint(connection.target);
+  if (connectionMode === 'control') {
+    return scopedControlEdge(canvas, source, target);
+  }
   const sourceHandle = parsePortHandle(connection.sourceHandle);
   const targetHandle = parsePortHandle(connection.targetHandle);
-  if (connectionMode === 'control') {
-    if (isWorkflowBoundaryId(connection.source) || isWorkflowBoundaryId(connection.target)) {
-      return null;
-    }
-    return {
-      id: uniqueEdgeId(canvas, 'control', connection.source, connection.target),
-      kind: 'control',
-      source: { workflowId: connection.source },
-      target: { workflowId: connection.target },
-      condition: null,
-    };
-  }
   if (
     !sourceHandle ||
     !targetHandle ||
@@ -2032,13 +2282,91 @@ function edgeFromConnection(
   ) {
     return null;
   }
-  return {
-    id: uniqueEdgeId(canvas, 'data', sourceHandle.workflowId, targetHandle.workflowId),
-    kind: 'data',
-    source: { workflowId: sourceHandle.workflowId, portId: sourceHandle.portId },
-    target: { workflowId: targetHandle.workflowId, portId: targetHandle.portId },
-    materialization: 'copy',
-  };
+  return scopedDataEdge(canvas, source, target, sourceHandle.portId, targetHandle.portId);
+}
+
+function scopedControlEdge(
+  canvas: WorkspaceCanvasModel,
+  source: FlowEndpoint,
+  target: FlowEndpoint,
+): { edge: WorkflowCanvasEdge; scopeWorkflowId: string | null } | null {
+  if (source.internal && target.internal && source.workflowId === target.workflowId) {
+    return {
+      scopeWorkflowId: source.workflowId,
+      edge: controlEdgeWithId(
+        uniqueEdgeIdForScope(canvas, source.workflowId, 'control', source.nodeId, target.nodeId),
+        source.nodeId,
+        target.nodeId,
+      ),
+    };
+  }
+  if (!source.internal && target.internal && source.nodeId === target.workflowId) {
+    const boundaryId = workflowInputBoundaryId(target.workflowId);
+    return {
+      scopeWorkflowId: target.workflowId,
+      edge: controlEdgeWithId(
+        uniqueEdgeIdForScope(canvas, target.workflowId, 'control', boundaryId, target.nodeId),
+        boundaryId,
+        target.nodeId,
+      ),
+    };
+  }
+  if (source.internal && !target.internal && target.nodeId === source.workflowId) {
+    const boundaryId = workflowOutputBoundaryId(source.workflowId);
+    return {
+      scopeWorkflowId: source.workflowId,
+      edge: controlEdgeWithId(
+        uniqueEdgeIdForScope(canvas, source.workflowId, 'control', source.nodeId, boundaryId),
+        source.nodeId,
+        boundaryId,
+      ),
+    };
+  }
+  if (!source.internal && !target.internal) {
+    return {
+      scopeWorkflowId: null,
+      edge: controlEdgeWithId(
+        uniqueEdgeIdForScope(canvas, null, 'control', source.nodeId, target.nodeId),
+        source.nodeId,
+        target.nodeId,
+      ),
+    };
+  }
+  return null;
+}
+
+function scopedDataEdge(
+  canvas: WorkspaceCanvasModel,
+  source: FlowEndpoint,
+  target: FlowEndpoint,
+  sourcePortId: string,
+  targetPortId: string,
+): { edge: WorkflowCanvasEdge; scopeWorkflowId: string | null } | null {
+  if (source.internal && target.internal && source.workflowId === target.workflowId) {
+    return {
+      scopeWorkflowId: source.workflowId,
+      edge: dataEdgeWithId(
+        uniqueEdgeIdForScope(canvas, source.workflowId, 'data', source.nodeId, target.nodeId),
+        source.nodeId,
+        sourcePortId,
+        target.nodeId,
+        targetPortId,
+      ),
+    };
+  }
+  if (!source.internal && !target.internal) {
+    return {
+      scopeWorkflowId: null,
+      edge: dataEdgeWithId(
+        uniqueEdgeIdForScope(canvas, null, 'data', source.nodeId, target.nodeId),
+        source.nodeId,
+        sourcePortId,
+        target.nodeId,
+        targetPortId,
+      ),
+    };
+  }
+  return null;
 }
 
 function graphToWorkspaceCanvas(
@@ -2201,6 +2529,7 @@ function canvasToWorkflowGraph(canvas: WorkspaceCanvasModel): WorkflowGraph {
       to: edge.target.workflowId,
       label: 'control',
       condition: edge.condition || null,
+      context: 'upstream_output',
       mapping: {},
     }));
   const dataEdges = executableEdges
@@ -2214,7 +2543,7 @@ function canvasToWorkflowGraph(canvas: WorkspaceCanvasModel): WorkflowGraph {
     }));
   return {
     id: canvas.id,
-    version: '0.3.0',
+    version: '0.4.0',
     name: canvas.name,
     description: 'Graph-first workspace canvas generated by ACC Workbench.',
     nodes: runtimeWorkflows.map(workflowToGraphNode),
@@ -2287,6 +2616,7 @@ function internalWorkflowToGraph(workflow: WorkflowContainerModel): WorkflowGrap
       to: edge.target.workflowId,
       label: 'control',
       condition: edge.condition || null,
+      context: 'upstream_output',
       mapping: {},
     }));
   const dataEdges = executableEdges
@@ -2300,7 +2630,7 @@ function internalWorkflowToGraph(workflow: WorkflowContainerModel): WorkflowGrap
     }));
   return {
     id: workflow.id,
-    version: '0.3.0',
+    version: '0.4.0',
     name: workflow.title,
     description: 'Workflow Focus Mode graph generated by ACC Workbench.',
     nodes: workflow.internalNodes.map(internalNodeToGraphNode),
@@ -2779,8 +3109,28 @@ function dataEdge(
   targetWorkflowId: string,
   targetPortId: string,
 ): WorkflowCanvasEdge {
+  return dataEdgeWithId(
+    `data_${sourceWorkflowId}_${sourcePortId}_${targetWorkflowId}_${targetPortId}`,
+    sourceWorkflowId,
+    sourcePortId,
+    targetWorkflowId,
+    targetPortId,
+  );
+}
+
+function controlEdge(sourceWorkflowId: string, targetWorkflowId: string): WorkflowCanvasEdge {
+  return controlEdgeWithId(`control_${sourceWorkflowId}_${targetWorkflowId}`, sourceWorkflowId, targetWorkflowId);
+}
+
+function dataEdgeWithId(
+  id: string,
+  sourceWorkflowId: string,
+  sourcePortId: string,
+  targetWorkflowId: string,
+  targetPortId: string,
+): WorkflowCanvasEdge {
   return {
-    id: `data_${sourceWorkflowId}_${sourcePortId}_${targetWorkflowId}_${targetPortId}`,
+    id,
     kind: 'data',
     source: { workflowId: sourceWorkflowId, portId: sourcePortId },
     target: { workflowId: targetWorkflowId, portId: targetPortId },
@@ -2788,13 +3138,18 @@ function dataEdge(
   };
 }
 
-function controlEdge(sourceWorkflowId: string, targetWorkflowId: string): WorkflowCanvasEdge {
+function controlEdgeWithId(
+  id: string,
+  sourceWorkflowId: string,
+  targetWorkflowId: string,
+): WorkflowCanvasEdge {
   return {
-    id: `control_${sourceWorkflowId}_${targetWorkflowId}`,
+    id,
     kind: 'control',
     source: { workflowId: sourceWorkflowId },
     target: { workflowId: targetWorkflowId },
     condition: null,
+    context: 'upstream_output',
   };
 }
 
@@ -2817,6 +3172,7 @@ function controlEdgeToCanvasEdge(edge: WorkflowGraphEdge): WorkflowCanvasEdge {
     source: { workflowId: edge.from },
     target: { workflowId: edge.to },
     condition: edge.condition || null,
+    context: edge.context === 'none' ? 'none' : 'upstream_output',
   };
 }
 
@@ -2836,6 +3192,7 @@ function canvasEdgeToGraphMetadataEdge(edge: WorkflowCanvasEdge): WorkflowDataEd
     to: edge.target.workflowId,
     label: 'control',
     condition: edge.condition || null,
+    context: 'upstream_output',
     mapping: {},
   };
 }
@@ -2913,6 +3270,58 @@ function uniqueEdgeId(
     edgeId = `${kind}_${sourceWorkflowId}_${targetWorkflowId}_${index}`;
   }
   return edgeId;
+}
+
+function uniqueEdgeIdForScope(
+  canvas: WorkspaceCanvasModel,
+  scopeWorkflowId: string | null,
+  kind: 'data' | 'control',
+  sourceWorkflowId: string,
+  targetWorkflowId: string,
+): string {
+  const scopedEdges =
+    scopeWorkflowId === null
+      ? canvas.edges
+      : canvas.workflows.find((workflow) => workflow.id === scopeWorkflowId)?.internalEdges || [];
+  const existing = new Set(scopedEdges.map((edge) => edge.id));
+  let index = 1;
+  let edgeId = `${kind}_${sourceWorkflowId}_${targetWorkflowId}`;
+  while (existing.has(edgeId)) {
+    index += 1;
+    edgeId = `${kind}_${sourceWorkflowId}_${targetWorkflowId}_${index}`;
+  }
+  return edgeId;
+}
+
+function internalFlowNodeId(workflowId: string, nodeId: string): string {
+  return `${workflowId}__internal__${nodeId}`;
+}
+
+function parseInternalFlowNodeId(nodeId: string): { workflowId: string; nodeId: string } | null {
+  const marker = '__internal__';
+  const index = nodeId.indexOf(marker);
+  if (index < 0) {
+    return null;
+  }
+  return {
+    workflowId: nodeId.slice(0, index),
+    nodeId: nodeId.slice(index + marker.length),
+  };
+}
+
+function flowEndpoint(flowNodeId: string): FlowEndpoint {
+  const internal = parseInternalFlowNodeId(flowNodeId);
+  if (internal) {
+    return { nodeId: internal.nodeId, workflowId: internal.workflowId, internal: true };
+  }
+  return { nodeId: flowNodeId, workflowId: null, internal: false };
+}
+
+function internalEdgeEndpointToFlowId(workflowId: string, nodeId: string): string {
+  if (nodeId === workflowInputBoundaryId(workflowId) || nodeId === workflowOutputBoundaryId(workflowId)) {
+    return workflowId;
+  }
+  return internalFlowNodeId(workflowId, nodeId);
 }
 
 function onSelectPort(onSelect: (selection: CanvasSelection) => void) {
@@ -2997,8 +3406,8 @@ function parsePaletteItem(raw: string): PaletteItem | null {
 
 function edgeConnectsRemainingNodes(edge: WorkflowCanvasEdge, remainingIds: Set<string>): boolean {
   return (
-    remainingIds.has(edge.source.workflowId) &&
-    remainingIds.has(edge.target.workflowId)
+    (remainingIds.has(edge.source.workflowId) || isWorkflowBoundaryId(edge.source.workflowId)) &&
+    (remainingIds.has(edge.target.workflowId) || isWorkflowBoundaryId(edge.target.workflowId))
   );
 }
 
@@ -3012,6 +3421,333 @@ function runtimeCanvasEdges(edges: WorkflowCanvasEdge[]): WorkflowCanvasEdge[] {
 
 function workflowBoundaryEdges(edges: WorkflowCanvasEdge[]): WorkflowCanvasEdge[] {
   return edges.filter(isWorkflowBoundaryEdge);
+}
+
+function isExecutableNodeWorkflow(workflow: WorkflowContainerModel): boolean {
+  if (workflow.boundaryKind) {
+    return false;
+  }
+  if (workflow.sourceKind && workflow.sourceKind !== 'workflow') {
+    return true;
+  }
+  const wrappedRuntime = workflow.internalNodes[0]?.runtime;
+  return (
+    !workflow.workflowRef &&
+    (workflow.capsuleId ?? 'fake-agent.generic') === 'fake-agent.generic' &&
+    workflow.internalNodes.length === 1 &&
+    typeof wrappedRuntime === 'string' &&
+    wrappedRuntime !== workflow.capsuleId
+  );
+}
+
+function workflowAtPosition(
+  canvas: WorkspaceCanvasModel,
+  position: { x: number; y: number },
+): WorkflowContainerModel | null {
+  const candidates = canvas.workflows
+    .filter((workflow) => !workflow.boundaryKind && (workflow.sourceKind || 'workflow') === 'workflow')
+    .filter(
+      (workflow) =>
+        position.x >= workflow.position.x &&
+        position.y >= workflow.position.y &&
+        position.x <= workflow.position.x + workflow.size.width &&
+        position.y <= workflow.position.y + workflow.size.height,
+    );
+  return candidates[candidates.length - 1] || null;
+}
+
+function workflowFromDropTarget(
+  canvas: WorkspaceCanvasModel,
+  target: EventTarget | null,
+): WorkflowContainerModel | null {
+  if (!(target instanceof Element)) {
+    return null;
+  }
+  const container = target.closest<HTMLElement>('[data-workflow-id]');
+  const workflowId = container?.dataset.workflowId;
+  if (!workflowId) {
+    return null;
+  }
+  return (
+    canvas.workflows.find(
+      (workflow) =>
+        workflow.id === workflowId &&
+        !workflow.boundaryKind &&
+        (workflow.sourceKind || 'workflow') === 'workflow',
+    ) || null
+  );
+}
+
+function resizeWorkflowContainer(
+  canvas: WorkspaceCanvasModel,
+  workflowId: string,
+  size: { width: number; height: number },
+): WorkspaceCanvasModel {
+  return {
+    ...canvas,
+    workflows: canvas.workflows.map((workflow) =>
+      workflow.id === workflowId
+        ? {
+            ...workflow,
+            size: {
+              width: Math.max(260, size.width),
+              height: Math.max(190, size.height),
+            },
+          }
+        : workflow,
+    ),
+  };
+}
+
+function moveInternalNode(
+  canvas: WorkspaceCanvasModel,
+  workflowId: string,
+  nodeId: string,
+  position: { x: number; y: number },
+): WorkspaceCanvasModel {
+  return {
+    ...canvas,
+    workflows: canvas.workflows.map((workflow) =>
+      workflow.id === workflowId
+        ? {
+            ...workflow,
+            internalNodes: workflow.internalNodes.map((node) =>
+              node.id === nodeId ? { ...node, position } : node,
+            ),
+          }
+        : workflow,
+    ),
+  };
+}
+
+function updateWorkflowPositionsFromFlow(
+  workflow: WorkflowContainerModel,
+  positions: Map<string, { x: number; y: number }>,
+  remainingIds: Set<string>,
+): WorkflowContainerModel {
+  const workflowPosition = positions.get(workflow.id);
+  const nextWorkflow = workflowPosition ? { ...workflow, position: workflowPosition } : workflow;
+  if (isExecutableNodeWorkflow(nextWorkflow)) {
+    return nextWorkflow;
+  }
+  const keptNodes = nextWorkflow.internalNodes
+    .filter((node) => remainingIds.has(internalFlowNodeId(nextWorkflow.id, node.id)))
+    .map((node) => {
+      const position = positions.get(internalFlowNodeId(nextWorkflow.id, node.id));
+      return position ? { ...node, position } : node;
+    });
+  const keptIds = new Set(keptNodes.map((node) => node.id));
+  return expandWorkflowToFitChildren({
+    ...nextWorkflow,
+    internalNodes: keptNodes,
+    internalEdges: nextWorkflow.internalEdges.filter((edge) =>
+      edgeConnectsRemainingNodes(edge, keptIds),
+    ),
+  });
+}
+
+function reparentDraggedFlowNode(
+  canvas: WorkspaceCanvasModel,
+  node: CanvasFlowNode,
+): WorkspaceCanvasModel {
+  const internal = parseInternalFlowNodeId(node.id);
+  if (internal) {
+    return reparentInternalNode(canvas, internal.workflowId, internal.nodeId, node.position);
+  }
+  const workflow = canvas.workflows.find((item) => item.id === node.id);
+  if (!workflow || !isExecutableNodeWorkflow(workflow)) {
+    return canvas;
+  }
+  const targetWorkflow = workflowAtPosition(canvas, node.position);
+  if (!targetWorkflow) {
+    return canvas;
+  }
+  const internalNode = internalNodeFromExecutableWorkflow(workflow, {
+    x: node.position.x - targetWorkflow.position.x,
+    y: node.position.y - targetWorkflow.position.y,
+  });
+  return {
+    ...canvas,
+    workflows: canvas.workflows
+      .filter((item) => item.id !== workflow.id)
+      .map((item) =>
+        item.id === targetWorkflow.id
+          ? expandWorkflowToFitChildren({
+              ...item,
+              internalNodes: [...item.internalNodes, internalNode],
+            })
+          : item,
+      ),
+    edges: canvas.edges.filter((edge) => !edgeTouchesNode(edge, workflow.id)),
+  };
+}
+
+function reparentInternalNode(
+  canvas: WorkspaceCanvasModel,
+  sourceWorkflowId: string,
+  nodeId: string,
+  relativePosition: { x: number; y: number },
+): WorkspaceCanvasModel {
+  const sourceWorkflow = canvas.workflows.find((workflow) => workflow.id === sourceWorkflowId);
+  const node = sourceWorkflow?.internalNodes.find((item) => item.id === nodeId);
+  if (!sourceWorkflow || !node) {
+    return canvas;
+  }
+  const absolutePosition = {
+    x: sourceWorkflow.position.x + relativePosition.x,
+    y: sourceWorkflow.position.y + relativePosition.y,
+  };
+  const targetWorkflow = workflowAtPosition(canvas, absolutePosition);
+  if (targetWorkflow?.id === sourceWorkflowId) {
+    return {
+      ...canvas,
+      workflows: canvas.workflows.map((workflow) =>
+        workflow.id === sourceWorkflowId
+          ? expandWorkflowToFitChildren({
+              ...workflow,
+              internalNodes: workflow.internalNodes.map((item) =>
+                item.id === nodeId ? { ...item, position: relativePosition } : item,
+              ),
+            })
+          : workflow,
+      ),
+    };
+  }
+  if (targetWorkflow) {
+    return {
+      ...canvas,
+      workflows: canvas.workflows.map((workflow) => {
+        if (workflow.id === sourceWorkflowId) {
+          return {
+            ...workflow,
+            internalNodes: workflow.internalNodes.filter((item) => item.id !== nodeId),
+            internalEdges: workflow.internalEdges.filter((edge) => !edgeTouchesNode(edge, nodeId)),
+          };
+        }
+        if (workflow.id === targetWorkflow.id) {
+          return expandWorkflowToFitChildren({
+            ...workflow,
+            internalNodes: [
+              ...workflow.internalNodes,
+              {
+                ...node,
+                position: {
+                  x: absolutePosition.x - workflow.position.x,
+                  y: absolutePosition.y - workflow.position.y,
+                },
+              },
+            ],
+          });
+        }
+        return workflow;
+      }),
+    };
+  }
+  const rootNode = executableWorkflowFromInternalNode(node, absolutePosition, canvas);
+  return {
+    ...canvas,
+    workflows: [
+      ...canvas.workflows.map((workflow) =>
+        workflow.id === sourceWorkflowId
+          ? {
+              ...workflow,
+              internalNodes: workflow.internalNodes.filter((item) => item.id !== nodeId),
+              internalEdges: workflow.internalEdges.filter((edge) => !edgeTouchesNode(edge, nodeId)),
+            }
+          : workflow,
+      ),
+      rootNode,
+    ],
+  };
+}
+
+function edgeTouchesNode(edge: WorkflowCanvasEdge, nodeId: string): boolean {
+  return edge.source.workflowId === nodeId || edge.target.workflowId === nodeId;
+}
+
+function internalNodeFromExecutableWorkflow(
+  workflow: WorkflowContainerModel,
+  position: { x: number; y: number },
+): InternalNodeView {
+  const wrapped = workflow.internalNodes[0];
+  return {
+    id: workflow.id,
+    name: workflow.title,
+    task: wrapped?.task || workflow.capsuleId || workflow.title,
+    kind: workflow.sourceKind === 'tool' ? 'Tool' : 'Agent',
+    status: workflow.status,
+    capsuleId: workflow.capsuleId || wrapped?.capsuleId,
+    runtime: workflow.capsuleId || wrapped?.runtime,
+    input: workflow.sourceInput || wrapped?.input,
+    inputPorts: workflow.inputPorts,
+    outputPorts: workflow.outputPorts,
+    position,
+  };
+}
+
+function executableWorkflowFromInternalNode(
+  node: InternalNodeView,
+  position: { x: number; y: number },
+  canvas: WorkspaceCanvasModel,
+): WorkflowContainerModel {
+  const id = uniqueId(node.id, new Set(canvas.workflows.map((workflow) => workflow.id)));
+  return {
+    id,
+    title: node.name,
+    sourceKind: node.kind === 'Tool' ? 'tool' : 'agent_session',
+    capsuleId: node.capsuleId || node.runtime,
+    sourceInput: node.input,
+    directory: 'Root canvas environment',
+    status: node.status,
+    inputPorts: node.inputPorts || [port('main', 'input', 'input')],
+    outputPorts: node.outputPorts || [port('main', 'output', 'output')],
+    internalNodes: [],
+    internalEdges: [],
+    position,
+    size: AGENT_TOOL_NODE_SIZE,
+    warnings: [],
+  };
+}
+
+function expandWorkflowToFitChildren(workflow: WorkflowContainerModel): WorkflowContainerModel {
+  if (!workflow.internalNodes.length || isExecutableNodeWorkflow(workflow)) {
+    return workflow;
+  }
+  const maxX = Math.max(
+    ...workflow.internalNodes.map((node) => (node.position?.x || 0) + AGENT_TOOL_NODE_SIZE.width),
+  );
+  const maxY = Math.max(
+    ...workflow.internalNodes.map((node) => (node.position?.y || 0) + AGENT_TOOL_NODE_SIZE.height),
+  );
+  return {
+    ...workflow,
+    size: {
+      width: Math.max(workflow.size.width, maxX + WORKFLOW_CHILD_PADDING),
+      height: Math.max(workflow.size.height, maxY + WORKFLOW_CHILD_PADDING + 96),
+    },
+  };
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), Math.max(min, max));
+}
+
+function finiteNumber(value: number | undefined, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function finitePosition(
+  position: { x: number; y: number },
+  fallback: { x: number; y: number },
+): { x: number; y: number } {
+  return Number.isFinite(position.x) && Number.isFinite(position.y) ? position : fallback;
+}
+
+function defaultInternalNodePosition(index: number): { x: number; y: number } {
+  return {
+    x: 12,
+    y: 12 + index * 78,
+  };
 }
 
 function boundaryPort(portValue: WorkflowPortView, direction: PortDirection): WorkflowPortView {
@@ -3038,6 +3774,33 @@ function addWorkflowFromPalette(
     internalEdges: [],
     position,
     size: DEFAULT_CONTAINER_SIZE,
+    warnings: [],
+  };
+  return { ...canvas, workflows: [...canvas.workflows, workflow] };
+}
+
+function addCapsuleNodeFromPalette(
+  canvas: WorkspaceCanvasModel,
+  item: Exclude<PaletteItem, { kind: 'workflow' }>,
+  position: { x: number; y: number },
+): WorkspaceCanvasModel {
+  const existingIds = new Set(canvas.workflows.map((workflow) => workflow.id));
+  const node = internalNodeFromPaletteItem(item, position, existingIds);
+  const id = node.id;
+  const workflow: WorkflowContainerModel = {
+    id,
+    title: node.name,
+    sourceKind: node.kind === 'Tool' ? 'tool' : 'agent_session',
+    capsuleId: node.capsuleId,
+    sourceInput: node.input,
+    directory: 'Root canvas environment',
+    status: 'not_run',
+    inputPorts: [port('main', 'input', 'input')],
+    outputPorts: [port('main', 'output', 'output')],
+    internalNodes: [],
+    internalEdges: [],
+    position,
+    size: AGENT_TOOL_NODE_SIZE,
     warnings: [],
   };
   return { ...canvas, workflows: [...canvas.workflows, workflow] };
@@ -3076,7 +3839,7 @@ function addInternalNodeFromPalette(
         outputPorts: [port('main', 'output', 'output')],
         position,
       };
-      return { ...workflow, internalNodes: [...workflow.internalNodes, node] };
+      return expandWorkflowToFitChildren({ ...workflow, internalNodes: [...workflow.internalNodes, node] });
     }),
   };
 }
@@ -3103,13 +3866,13 @@ function addInternalNodeFromPaletteWithConnection(
             node.id,
           )
         : null;
-      return {
+      return expandWorkflowToFitChildren({
         ...workflow,
         internalNodes: [...workflow.internalNodes, node],
         internalEdges: pendingEdge
           ? [...workflow.internalEdges.filter((edge) => edge.id !== pendingEdge.id), pendingEdge]
           : workflow.internalEdges,
-      };
+      });
     }),
   };
 }

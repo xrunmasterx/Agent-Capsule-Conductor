@@ -178,7 +178,7 @@ def test_stock_market_demo_capsules_use_least_privilege_permissions() -> None:
 
     for capsule_id, network in [
         ("stock-market-research.codex", True),
-        ("stock-market-info-cleaner.codex", True),
+        ("stock-market-info-curation.codex", True),
         ("stock-market-deep-analysis.codex", False),
     ]:
         capsule = registry.get(capsule_id)

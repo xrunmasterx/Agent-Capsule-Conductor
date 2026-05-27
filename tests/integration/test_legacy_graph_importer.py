@@ -13,7 +13,7 @@ from acc.app import (
 from acc.engine import topological_levels
 from acc.legacy_graph_importer import legacy_graph_to_accflow_payload, load_legacy_graph_template
 from acc.registry import CapsuleRegistry
-from acc.store import FileSystemWorkflowStore, write_json
+from acc.store import FileSystemWorkflowStore, load_json, write_json
 from acc.utils import AccError
 
 
@@ -62,6 +62,28 @@ def test_legacy_graph_with_policy_still_imports_legacy_edges_as_control_edges(
     assert topological_levels(template) == [["plan"], ["branch_a", "branch_b"], ["merge"]]
 
 
+def test_legacy_graph_imports_control_context_mode(tmp_path: Path) -> None:
+    graph_path = tmp_path / "legacy_context.graph.json"
+    write_json(
+        graph_path,
+        {
+            "id": "legacy_context",
+            "version": "0.4.0",
+            "nodes": [
+                {"id": "a", "capsule_id": "fake-agent.generic", "input": {}},
+                {"id": "b", "capsule_id": "fake-agent.generic", "input": {}},
+            ],
+            "control_edges": [
+                {"id": "c_ab", "from": "a", "to": "b", "context": "none"}
+            ],
+        },
+    )
+
+    template, _raw = load_legacy_graph_template(graph_path)
+
+    assert template.control_edges[0].context == "none"
+
+
 def test_workflow_app_service_validate_rejects_missing_legacy_capsule(tmp_path: Path) -> None:
     graph_path = tmp_path / "missing_capsule.graph.json"
     write_json(
@@ -75,6 +97,31 @@ def test_workflow_app_service_validate_rejects_missing_legacy_capsule(tmp_path: 
 
     with pytest.raises(AccError, match="Capsule not found: missing.generic"):
         WorkflowAppService().validate(graph_path)
+
+
+def test_legacy_graph_rejects_parent_edge_to_internal_workflow_node(tmp_path: Path) -> None:
+    graph_path = tmp_path / "bad_internal_edge.graph.json"
+    write_json(
+        graph_path,
+        {
+            "id": "bad_internal_edge",
+            "version": "0.4.0",
+            "nodes": [
+                {
+                    "id": "container",
+                    "kind": "workflow",
+                    "capsule_id": "fake-agent.generic",
+                    "ui": {"internal_nodes": [{"id": "inside"}]},
+                },
+                {"id": "outside", "capsule_id": "fake-agent.generic", "input": {}},
+            ],
+            "control_edges": [{"id": "c_bad", "from": "outside", "to": "inside"}],
+            "data_edges": [],
+        },
+    )
+
+    with pytest.raises(AccError, match="workflow boundary"):
+        load_legacy_graph_template(graph_path)
 
 
 def test_legacy_graph_nodes_inherit_capsule_timeout(tmp_path: Path, monkeypatch) -> None:
@@ -156,6 +203,88 @@ def test_legacy_graph_nodes_inherit_capsule_timeout(tmp_path: Path, monkeypatch)
         service.validate(graph_path)
     monkeypatch.setenv("ACC_RUN_EXTERNAL_AGENT_TESTS", "1")
     assert service.validate(graph_path)["status"] == "valid"
+
+
+def test_legacy_graph_workflow_ref_runs_as_nested_workflow_with_boundary_context(
+    tmp_path: Path,
+) -> None:
+    child_path = tmp_path / "inline_child.accflow.json"
+    write_json(
+        child_path,
+        {
+            "id": "inline_child",
+            "version": "0.4.0",
+            "nodes": [
+                {
+                    "id": "inside",
+                    "kind": "agent",
+                    "runtime": "capsule",
+                    "legacy_capsule_id": "fake-agent.generic",
+                    "input": {"topic": "inside workflow"},
+                    "acc_receive_upstream_context": True,
+                    "input_ports": [{"id": "main", "direction": "input"}],
+                    "output_ports": [{"id": "main", "direction": "output"}],
+                }
+            ],
+            "control_edges": [],
+            "data_edges": [],
+            "exposed_inputs": [{"id": "main", "direction": "input", "required": False}],
+            "workflow_input_bindings": [
+                {
+                    "source_port": "main",
+                    "target": {"node": "inside", "port": "main"},
+                    "required": False,
+                    "materialization": "copy",
+                }
+            ],
+            "policies": {"failure_mode": "fail_fast", "max_concurrency": 1},
+        },
+    )
+    parent_path = tmp_path / "parent.graph.json"
+    write_json(
+        parent_path,
+        {
+            "id": "inline_parent",
+            "version": "0.4.0",
+            "nodes": [
+                {
+                    "id": "producer",
+                    "capsule_id": "fake-agent.generic",
+                    "input": {"topic": "seed"},
+                    "output_ports": [{"id": "main", "direction": "output"}],
+                },
+                {
+                    "id": "container",
+                    "kind": "workflow",
+                    "capsule_id": "fake-agent.generic",
+                    "workflow_ref": child_path.name,
+                    "input_ports": [{"id": "main", "direction": "input"}],
+                    "output_ports": [{"id": "main", "direction": "output"}],
+                },
+            ],
+            "control_edges": [
+                {"id": "c_producer_container", "from": "producer", "to": "container"}
+            ],
+            "data_edges": [],
+            "policy": {"failure_mode": "fail_fast", "max_concurrency": 1},
+        },
+    )
+
+    result = WorkflowAppService().run_sync(parent_path, tmp_path / "run")
+
+    assert result["status"] == "success"
+    inside_input = load_json(
+        tmp_path
+        / "run"
+        / "nodes"
+        / "container"
+        / "nested_workflow"
+        / "nodes"
+        / "inside"
+        / "input.json"
+    )
+    assert inside_input["upstream_context"][0]["node_id"] == "producer"
+    assert inside_input["upstream_context"][0]["via"] == "workflow_input_boundary"
 
 
 def test_legacy_graph_and_imported_accflow_produce_equivalent_outputs_and_events(

@@ -7,6 +7,7 @@ from typing import Any, Literal
 NodeKind = Literal["agent", "tool", "workflow"]
 PortDirection = Literal["input", "output"]
 MaterializationMode = Literal["copy", "reference", "symlink"]
+ControlContextMode = Literal["upstream_output", "none"]
 WorkspaceAccess = Literal["read_only", "writes_run_only", "writes_workspace"]
 EnvPolicy = Literal["acc_whitelist", "explicit_allowlist"]
 RuntimeStatus = Literal[
@@ -53,6 +54,7 @@ class ControlEdge:
     source: str
     target: str
     condition: str | None = None
+    context: ControlContextMode = "upstream_output"
 
 
 @dataclass(frozen=True)

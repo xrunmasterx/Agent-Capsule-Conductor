@@ -1443,6 +1443,22 @@ small {
   box-shadow: 0 12px 32px rgb(25 38 48 / 10%);
 }
 
+.workflow-control-handle {
+  width: 15px;
+  height: 15px;
+  border: 2px solid #ffffff;
+  background: #4f5f6d;
+  box-shadow: 0 0 0 2px rgb(79 95 109 / 18%);
+}
+
+.workflow-control-handle.input {
+  left: -8px;
+}
+
+.workflow-control-handle.output {
+  right: -8px;
+}
+
 .workflow-container.selected {
   border-color: #1d78d6;
   box-shadow: 0 0 0 2px rgb(29 120 214 / 18%), 0 14px 34px rgb(25 38 48 / 13%);
@@ -1547,9 +1563,14 @@ small {
 
 .workflow-nested-canvas {
   display: grid;
-  grid-template-columns: 112px minmax(0, 1fr) 112px;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   min-height: 220px;
+  pointer-events: none;
+}
+
+.workflow-nested-canvas.advanced-data {
+  grid-template-columns: 112px minmax(0, 1fr) 112px;
 }
 
 .workflow-port-column {
@@ -1569,6 +1590,8 @@ small {
   border-radius: 7px;
   background: #ffffff;
   color: #24313a;
+  overflow: auto;
+  resize: both;
   text-align: left;
 }
 
@@ -1599,7 +1622,7 @@ small {
 }
 
 .workflow-port-handle.input {
-  background: #6a7682;
+  background: #1d78d6;
 }
 
 .workflow-port-handle.output {
@@ -1607,28 +1630,85 @@ small {
 }
 
 .internal-node-grid {
-  display: grid;
-  align-content: start;
-  gap: 8px;
+  position: relative;
   min-width: 0;
+  min-height: 202px;
   padding: 9px;
   border: 1px solid #e0e6eb;
   border-radius: 8px;
   background: #f6f8fa;
+  overflow: visible;
 }
 
-.internal-node-card {
+.agent-tool-node {
+  position: relative;
   display: grid;
   grid-template-columns: 12px minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
+  width: 260px;
+  min-height: 72px;
+  padding: 10px;
+  border: 1px solid #d6dee5;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #24313a;
+  cursor: grab;
+  text-align: left;
+  box-shadow: 0 8px 20px rgb(25 38 48 / 8%);
+}
+
+.agent-tool-node.tool {
+  border-color: #cbd8d0;
+  background: #fbfffc;
+}
+
+.agent-tool-node.selected {
+  border-color: #1d78d6;
+  box-shadow: 0 0 0 2px rgb(29 120 214 / 18%), 0 10px 22px rgb(25 38 48 / 10%);
+}
+
+.agent-tool-node:active {
+  cursor: grabbing;
+}
+
+.agent-tool-node strong,
+.agent-tool-node p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.agent-tool-node strong {
+  font-size: 13px;
+}
+
+.agent-tool-node p,
+.agent-tool-node small {
+  color: #60707d;
+  font-size: 11px;
+}
+
+.internal-node-card {
+  position: absolute;
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  width: 260px;
   min-height: 54px;
   padding: 8px;
   border: 1px solid #d6dee5;
   border-radius: 7px;
   background: #ffffff;
   color: #24313a;
+  cursor: grab;
+  overflow: auto;
+  resize: both;
   text-align: left;
+}
+
+.internal-node-card:active {
+  cursor: grabbing;
 }
 
 .internal-node-card strong,

@@ -212,7 +212,17 @@ def parse_control_edge(payload: Any, index: int) -> ControlEdge:
     condition = payload.get("condition")
     if condition is not None and not isinstance(condition, str):
         raise AccError(f"control edge {index} condition must be string or null")
-    return ControlEdge(source=source, target=target, condition=condition)
+    context = str(payload.get("context") or "upstream_output")
+    if context not in {"upstream_output", "none"}:
+        raise AccError(
+            f"control edge {index} context must be 'upstream_output' or 'none'"
+        )
+    return ControlEdge(
+        source=source,
+        target=target,
+        condition=condition,
+        context=context,  # type: ignore[arg-type]
+    )
 
 
 def parse_data_edge(payload: Any, index: int) -> DataEdge:
@@ -307,6 +317,7 @@ def validate_clean_workflow_template(
     validate_identifier(template.id, "workflow id")
     if raw_payload is not None:
         reject_absolute_workspace_paths(raw_payload)
+        validate_nested_internal_node_boundaries(raw_payload)
     validate_workflow_policy(template.policies)
     node_ids = set(template.nodes)
     for node in template.nodes.values():
@@ -426,6 +437,53 @@ def validate_workflow_boundary_contract(template: WorkflowTemplate) -> None:
         if binding.target_port in seen_output_ports:
             raise AccError(f"Duplicate workflow output binding for {binding.target_port!r}")
         seen_output_ports.add(binding.target_port)
+
+
+def validate_nested_internal_node_boundaries(payload: dict[str, Any]) -> None:
+    nodes = payload.get("nodes") or []
+    if not isinstance(nodes, list):
+        return
+    internal_node_ids: set[str] = set()
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        ui = node.get("ui")
+        if not isinstance(ui, dict):
+            continue
+        internal_nodes = ui.get("internal_nodes")
+        if not isinstance(internal_nodes, list):
+            continue
+        for internal_node in internal_nodes:
+            if not isinstance(internal_node, dict):
+                continue
+            internal_node_id = internal_node.get("id")
+            if isinstance(internal_node_id, str) and internal_node_id:
+                internal_node_ids.add(internal_node_id)
+    if not internal_node_ids:
+        return
+    for edge_key in ("control_edges", "edges"):
+        for index, edge in enumerate(payload.get(edge_key) or []):
+            if not isinstance(edge, dict):
+                continue
+            source = edge.get("from")
+            target = edge.get("to")
+            if source in internal_node_ids or target in internal_node_ids:
+                raise AccError(
+                    f"{edge_key[:-1]} {index} crosses workflow boundary by "
+                    "referencing an internal workflow node"
+                )
+    for index, edge in enumerate(payload.get("data_edges") or []):
+        if not isinstance(edge, dict):
+            continue
+        source = edge.get("from")
+        target = edge.get("to")
+        source_node = source.get("node") if isinstance(source, dict) else None
+        target_node = target.get("node") if isinstance(target, dict) else None
+        if source_node in internal_node_ids or target_node in internal_node_ids:
+            raise AccError(
+                f"data edge {index} crosses workflow boundary by "
+                "referencing an internal workflow node"
+            )
 
 
 def topological_levels(template: WorkflowTemplate) -> list[list[str]]:

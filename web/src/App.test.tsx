@@ -413,6 +413,7 @@ describe('Agent Capsule Workbench editable UI', () => {
     expect(canvas).toHaveTextContent('Review_Flow');
     expect(canvas).toHaveTextContent('Paper_Digest_Pipeline');
     expect(canvas).toHaveTextContent('F:\\UE5_Project_A\\workflows\\research');
+    await user.click(screen.getByRole('button', { name: '数据' }));
     expect(canvas).toHaveTextContent('in_requirements');
     expect(canvas).toHaveTextContent('out_report');
     expect(canvas).toHaveTextContent('Codex CLI');
@@ -503,7 +504,7 @@ describe('Agent Capsule Workbench editable UI', () => {
   });
 
   /*
-  test('Workflow Focus Mode saves runnable internal node defaults', async () => {
+  test('Workflow Builder saves workflow internals without Focus Mode navigation', async () => {
     const user = userEvent.setup();
     render(<App />);
 
@@ -534,7 +535,7 @@ describe('Agent Capsule Workbench editable UI', () => {
     const navigation = await screen.findByLabelText('Workbench navigation');
     await user.click(within(navigation).getByRole('button', { name: '工作流' }));
     fireEvent.doubleClick(await screen.findByTestId('workflow-container-Research_Flow'));
-    await screen.findByText('返回 Workspace');
+    expect(screen.queryByText('返回 Workspace')).not.toBeInTheDocument();
     await user.click(screen.getAllByRole('button', { name: /^保存$/i })[0]);
 
     const calls = vi.mocked(fetch).mock.calls;
@@ -543,11 +544,170 @@ describe('Agent Capsule Workbench editable UI', () => {
       .at(-1);
     expect(saveCall).toBeTruthy();
     const savedPayload = JSON.parse(String(saveCall?.[1]?.body));
-    expect(savedPayload.graph.id).toBe('Research_Flow');
+    expect(savedPayload.graph.id).toBe('acc_workspace_canvas');
     expect(savedPayload.graph.nodes.length).toBeGreaterThan(0);
-    expect(savedPayload.graph.nodes[0].capsule_id).toBe('fake-agent.generic');
-    expect(savedPayload.graph.nodes[0].input.topic).toBeTruthy();
+    expect(savedPayload.graph.nodes[0].kind).toBe('workflow');
+    expect(savedPayload.graph.nodes[0].ui.internal_nodes.length).toBeGreaterThan(0);
     expect(savedPayload.graph.control_edges.length).toBeGreaterThan(0);
+  });
+
+  test('Workflow Builder drops palette capsule into workflow container internals', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const navigation = await screen.findByLabelText('Workbench navigation');
+    await user.click(within(navigation).getAllByRole('button')[3]);
+    const container = await screen.findByTestId('workflow-container-Research_Flow');
+    fireEvent.drop(container, {
+      clientX: 180,
+      clientY: 240,
+      dataTransfer: {
+        getData: (key: string) =>
+          key === 'application/x-acc-palette'
+            ? JSON.stringify({
+                kind: 'agent',
+                capsuleId: 'fake-agent.generic',
+                label: 'Dropped Agent',
+              })
+            : '',
+      },
+    });
+    await user.click(screen.getAllByRole('button', { name: '保存' })[0]);
+
+    const calls = vi.mocked(fetch).mock.calls;
+    const saveCall = calls
+      .filter(([url, init]) => url === '/api/workflows' && init?.method === 'POST')
+      .at(-1);
+    expect(saveCall).toBeTruthy();
+    const savedPayload = JSON.parse(String(saveCall?.[1]?.body));
+    const researchFlow = savedPayload.graph.nodes.find(
+      (node: { id: string }) => node.id === 'Research_Flow',
+    );
+    expect(researchFlow.ui.internal_nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'Dropped Agent',
+          capsuleId: 'fake-agent.generic',
+          position: expect.objectContaining({
+            x: expect.any(Number),
+            y: expect.any(Number),
+          }),
+        }),
+      ]),
+    );
+    const dropped = researchFlow.ui.internal_nodes.find(
+      (node: { name: string }) => node.name === 'Dropped Agent',
+    );
+    expect(dropped.position.x).toBeGreaterThanOrEqual(0);
+    expect(dropped.position.y).toBeGreaterThanOrEqual(0);
+  });
+
+  test('Workflow Builder drops palette capsule on root as plain executable node', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const navigation = await screen.findByLabelText('Workbench navigation');
+    await user.click(within(navigation).getAllByRole('button')[3]);
+    const canvas = await screen.findByLabelText('Workspace Canvas');
+    fireEvent.drop(canvas, {
+      clientX: 980,
+      clientY: 180,
+      dataTransfer: {
+        getData: (key: string) =>
+          key === 'application/x-acc-palette'
+            ? JSON.stringify({
+                kind: 'agent',
+                capsuleId: 'fake-agent.generic',
+                label: 'Root Agent',
+              })
+            : '',
+      },
+    });
+    await user.click(screen.getAllByRole('button', { name: /保存|淇濆瓨/ })[0]);
+
+    const calls = vi.mocked(fetch).mock.calls;
+    const saveCall = calls
+      .filter(([url, init]) => url === '/api/workflows' && init?.method === 'POST')
+      .at(-1);
+    expect(saveCall).toBeTruthy();
+    const savedPayload = JSON.parse(String(saveCall?.[1]?.body));
+    const rootAgent = savedPayload.graph.nodes.find(
+      (node: { label: string }) => node.label === 'Root Agent',
+    );
+    expect(rootAgent.kind).toBe('agent_session');
+    expect(rootAgent.capsule_id).toBe('fake-agent.generic');
+    expect(rootAgent.ui).toBeUndefined();
+  });
+
+  test('Workflow Builder expands workflow container to fit dropped child node', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const navigation = await screen.findByLabelText('Workbench navigation');
+    await user.click(within(navigation).getAllByRole('button')[3]);
+    const container = await screen.findByTestId('workflow-container-Research_Flow');
+    fireEvent.drop(container, {
+      clientX: 720,
+      clientY: 520,
+      dataTransfer: {
+        getData: (key: string) =>
+          key === 'application/x-acc-palette'
+            ? JSON.stringify({
+                kind: 'tool',
+                capsuleId: 'fake-agent.generic',
+                label: 'Wide Tool',
+              })
+            : '',
+      },
+    });
+    await user.click(screen.getAllByRole('button', { name: /保存|淇濆瓨/ })[0]);
+
+    const calls = vi.mocked(fetch).mock.calls;
+    const saveCall = calls
+      .filter(([url, init]) => url === '/api/workflows' && init?.method === 'POST')
+      .at(-1);
+    expect(saveCall).toBeTruthy();
+    const savedPayload = JSON.parse(String(saveCall?.[1]?.body));
+    const researchFlow = savedPayload.graph.nodes.find(
+      (node: { id: string }) => node.id === 'Research_Flow',
+    );
+    const dropped = researchFlow.ui.internal_nodes.find(
+      (node: { name: string }) => node.name === 'Wide Tool',
+    );
+    expect(researchFlow.position).toBeTruthy();
+    expect(dropped.position.x + 260).toBeLessThanOrEqual(900);
+    expect(JSON.stringify(researchFlow.ui.internal_nodes)).toContain('Wide Tool');
+    expect(getComputedStyle(await screen.findByLabelText('Research_Flow internal nodes')).overflow).not.toBe(
+      'auto',
+    );
+  });
+
+  test('Workflow Builder saves existing internal control edges for workflow children', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const navigation = await screen.findByLabelText('Workbench navigation');
+    await user.click(within(navigation).getAllByRole('button')[3]);
+    await user.click(screen.getAllByRole('button', { name: /保存|淇濆瓨/ })[0]);
+
+    const calls = vi.mocked(fetch).mock.calls;
+    const saveCall = calls
+      .filter(([url, init]) => url === '/api/workflows' && init?.method === 'POST')
+      .at(-1);
+    expect(saveCall).toBeTruthy();
+    const savedPayload = JSON.parse(String(saveCall?.[1]?.body));
+    const researchFlow = savedPayload.graph.nodes.find(
+      (node: { id: string }) => node.id === 'Research_Flow',
+    );
+    expect(researchFlow.ui.internal_edges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          from: 'research_codex',
+          to: 'research_merge',
+          context: 'upstream_output',
+        }),
+      ]),
+    );
   });
 
   test('Workflow Builder exposes graph authoring controls', async () => {

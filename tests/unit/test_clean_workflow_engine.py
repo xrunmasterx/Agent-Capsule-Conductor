@@ -44,6 +44,31 @@ def tool_node(node_id: str, **updates: Any) -> dict[str, Any]:
     return payload
 
 
+def agent_node(node_id: str, **updates: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "id": node_id,
+        "kind": "agent",
+        "runtime": "generic_fake_agent",
+        "ports": {
+            "inputs": {"main": {"type": "artifact"}},
+            "outputs": {"main": {"type": "artifact"}},
+        },
+    }
+    payload.update(updates)
+    return payload
+
+
+def workflow_node(node_id: str, workflow_ref: str, **updates: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "id": node_id,
+        "kind": "workflow",
+        "workflow_ref": workflow_ref,
+        "ports": {"outputs": {"main": {"type": "artifact"}}},
+    }
+    payload.update(updates)
+    return payload
+
+
 def test_clean_template_rejects_absolute_workspace_path(tmp_path: Path) -> None:
     path = tmp_path / "bad.accflow.json"
     write_template(
@@ -138,6 +163,207 @@ def test_clean_template_rejects_invalid_policy(tmp_path: Path) -> None:
     )
 
     with pytest.raises(AccError, match="Unsupported failure_mode"):
+        validate_clean_workflow_file(path)
+
+
+def test_control_edge_default_passes_upstream_context_without_inbox(tmp_path: Path) -> None:
+    path = tmp_path / "control_context.accflow.json"
+    write_template(
+        path,
+        clean_template(
+            [tool_node("producer"), agent_node("consumer")],
+            control_edges=[{"from": "producer", "to": "consumer"}],
+        ),
+    )
+
+    result = asyncio.run(run_clean_workflow_template(path, tmp_path / "run"))
+
+    assert result["status"] == "success"
+    consumer_output = json.loads(
+        (tmp_path / "run" / "nodes" / "consumer" / "output.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert consumer_output["read_from_inbox"] is False
+    assert consumer_output["read_from_upstream_context"] is True
+    assert consumer_output["upstream_context_count"] == 1
+    consumer_input = json.loads(
+        (tmp_path / "run" / "nodes" / "consumer" / "input.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert consumer_input["upstream_context"][0]["node_id"] == "producer"
+    assert Path(consumer_input["upstream_context"][0]["output_path"]).name == "output.json"
+    assert Path(consumer_input["upstream_context"][0]["output_path"]).parent.name == "producer"
+
+
+def test_control_edge_context_none_disables_upstream_context(tmp_path: Path) -> None:
+    path = tmp_path / "control_context_none.accflow.json"
+    write_template(
+        path,
+        clean_template(
+            [tool_node("producer"), agent_node("consumer")],
+            control_edges=[
+                {"from": "producer", "to": "consumer", "context": "none"}
+            ],
+        ),
+    )
+
+    result = asyncio.run(run_clean_workflow_template(path, tmp_path / "run"))
+
+    assert result["status"] == "success"
+    consumer_output = json.loads(
+        (tmp_path / "run" / "nodes" / "consumer" / "output.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert consumer_output["read_from_upstream_context"] is False
+    assert consumer_output["upstream_context_count"] == 0
+
+
+def test_clean_template_rejects_invalid_control_context(tmp_path: Path) -> None:
+    path = tmp_path / "bad_control_context.accflow.json"
+    write_template(
+        path,
+        clean_template(
+            [tool_node("producer"), agent_node("consumer")],
+            control_edges=[
+                {"from": "producer", "to": "consumer", "context": "files"}
+            ],
+        ),
+    )
+
+    with pytest.raises(AccError, match="context"):
+        validate_clean_workflow_file(path)
+
+
+def test_control_edge_fan_out_reuses_same_upstream_output_path(tmp_path: Path) -> None:
+    path = tmp_path / "control_fanout.accflow.json"
+    write_template(
+        path,
+        clean_template(
+            [tool_node("producer"), agent_node("branch_a"), agent_node("branch_b")],
+            control_edges=[
+                {"from": "producer", "to": "branch_a"},
+                {"from": "producer", "to": "branch_b"},
+            ],
+        ),
+    )
+
+    result = asyncio.run(run_clean_workflow_template(path, tmp_path / "run"))
+
+    assert result["status"] == "success"
+    branch_a = json.loads(
+        (tmp_path / "run" / "nodes" / "branch_a" / "input.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    branch_b = json.loads(
+        (tmp_path / "run" / "nodes" / "branch_b" / "input.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert (
+        branch_a["upstream_context"][0]["output_path"]
+        == branch_b["upstream_context"][0]["output_path"]
+    )
+
+
+def test_control_edge_fan_in_keeps_control_edge_order(tmp_path: Path) -> None:
+    path = tmp_path / "control_fanin.accflow.json"
+    write_template(
+        path,
+        clean_template(
+            [tool_node("a"), tool_node("b"), agent_node("merge")],
+            control_edges=[
+                {"from": "b", "to": "merge"},
+                {"from": "a", "to": "merge"},
+            ],
+        ),
+    )
+
+    result = asyncio.run(run_clean_workflow_template(path, tmp_path / "run"))
+
+    assert result["status"] == "success"
+    merge_input = json.loads(
+        (tmp_path / "run" / "nodes" / "merge" / "input.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert [item["node_id"] for item in merge_input["upstream_context"]] == ["b", "a"]
+
+
+def test_nested_workflow_boundary_passes_context_only_to_bound_internal_nodes(
+    tmp_path: Path,
+) -> None:
+    child_path = tmp_path / "child.accflow.json"
+    write_template(
+        child_path,
+        clean_template(
+            [agent_node("bound"), agent_node("unbound")],
+            id="child_context",
+            exposed_inputs={
+                "main": {"direction": "input", "type": "artifact", "required": False}
+            },
+            workflow_input_bindings=[
+                {
+                    "source_port": "main",
+                    "target": {"node": "bound", "port": "main"},
+                    "materialization": "copy",
+                }
+            ],
+        ),
+    )
+    parent_path = tmp_path / "parent.accflow.json"
+    write_template(
+        parent_path,
+        clean_template(
+            [
+                tool_node("producer"),
+                workflow_node("subflow", str(child_path)),
+            ],
+            id="parent_context",
+            control_edges=[{"from": "producer", "to": "subflow"}],
+        ),
+    )
+
+    result = asyncio.run(run_clean_workflow_template(parent_path, tmp_path / "run"))
+
+    assert result["status"] == "success"
+    child_run = tmp_path / "run" / "nodes" / "subflow" / "nested_workflow"
+    bound_input = json.loads(
+        (child_run / "nodes" / "bound" / "input.json").read_text(encoding="utf-8")
+    )
+    unbound_input = json.loads(
+        (child_run / "nodes" / "unbound" / "input.json").read_text(encoding="utf-8")
+    )
+    assert [item["node_id"] for item in bound_input["upstream_context"]] == ["producer"]
+    assert bound_input["upstream_context"][0]["via"] == "workflow_input_boundary"
+    assert bound_input["inbox"]["records"][0]["skipped"] is True
+    assert not list((child_run / "nodes" / "bound" / "inbox").rglob("*"))
+    assert unbound_input["upstream_context"] == []
+
+
+def test_clean_template_rejects_parent_edge_to_internal_workflow_node(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "bad_internal_edge.accflow.json"
+    write_template(
+        path,
+        clean_template(
+            [
+                workflow_node(
+                    "subflow",
+                    "child.accflow.json",
+                    ui={"internal_nodes": [{"id": "inside_agent"}]},
+                ),
+                agent_node("outside"),
+            ],
+            control_edges=[{"from": "outside", "to": "inside_agent"}],
+        ),
+    )
+
+    with pytest.raises(AccError, match="workflow boundary"):
         validate_clean_workflow_file(path)
 
 

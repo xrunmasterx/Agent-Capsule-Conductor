@@ -153,6 +153,7 @@ export type WorkflowGraphEdge = {
   label?: string;
   mapping?: Record<string, unknown>;
   condition?: string | null;
+  context?: 'upstream_output' | 'none' | string;
 };
 
 export type WorkflowPort = {

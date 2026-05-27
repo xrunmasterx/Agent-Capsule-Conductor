@@ -136,6 +136,9 @@ def prepare_runtime_attempt_dir(node_dir: Path) -> None:
 
 
 def execute_tool_node(node: NodeSpec, node_dir: Path, frame: EnvironmentFrame) -> dict[str, Any]:
+    node_input = read_node_input(node_dir)
+    upstream_context = node_input.get("upstream_context")
+    upstream_context_count = len(upstream_context) if isinstance(upstream_context, list) else 0
     if node.tool in {"fake_producer", "fake"}:
         inbox_files = sorted(path for path in (node_dir / "inbox").rglob("*") if path.is_file())
         output = {
@@ -144,6 +147,8 @@ def execute_tool_node(node: NodeSpec, node_dir: Path, frame: EnvironmentFrame) -
             "producer_node_id": node.id,
             "read_from_inbox": bool(inbox_files),
             "inbox_file_count": len(inbox_files),
+            "read_from_upstream_context": upstream_context_count > 0,
+            "upstream_context_count": upstream_context_count,
         }
         write_json(node_dir / "artifacts" / "payload.json", output)
     elif node.tool == "merge":
@@ -153,6 +158,8 @@ def execute_tool_node(node: NodeSpec, node_dir: Path, frame: EnvironmentFrame) -
             "summary": f"Merged {len(inbox_files)} inbox file(s)",
             "merged_file_count": len(inbox_files),
             "read_from_inbox": bool(inbox_files),
+            "read_from_upstream_context": upstream_context_count > 0,
+            "upstream_context_count": upstream_context_count,
         }
         write_json(node_dir / "artifacts" / "merged.json", output)
     elif node.tool == "wait":
@@ -174,10 +181,21 @@ def write_json(path: Path, payload: Any) -> None:
     )
 
 
+def read_node_input(node_dir: Path) -> dict[str, Any]:
+    input_path = node_dir / "input.json"
+    if not input_path.exists():
+        return {}
+    payload = json.loads(input_path.read_text(encoding="utf-8"))
+    return payload if isinstance(payload, dict) else {}
+
+
 def execute_agent_node(node: NodeSpec, node_dir: Path, frame: EnvironmentFrame) -> dict[str, Any]:
     if node.runtime != "generic_fake_agent":
         raise AccError(f"Unsupported clean agent runtime for {node.id}: {node.runtime}")
     inbox_files = sorted(path for path in (node_dir / "inbox").rglob("*") if path.is_file())
+    node_input = read_node_input(node_dir)
+    upstream_context = node_input.get("upstream_context")
+    upstream_context_count = len(upstream_context) if isinstance(upstream_context, list) else 0
     output = {
         "status": "success",
         "summary": f"Fake agent {node.id} ran in {frame.workspace_root}",
@@ -185,6 +203,8 @@ def execute_agent_node(node: NodeSpec, node_dir: Path, frame: EnvironmentFrame) 
         "prompt": node.prompt or "",
         "read_from_inbox": bool(inbox_files),
         "inbox_file_count": len(inbox_files),
+        "read_from_upstream_context": upstream_context_count > 0,
+        "upstream_context_count": upstream_context_count,
     }
     write_json(node_dir / "artifacts" / "cwd_report.json", output)
     write_json(node_dir / "output.json", output)

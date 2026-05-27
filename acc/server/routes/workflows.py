@@ -324,6 +324,7 @@ def workflow_graph_path(workflows_dir: Path, path_value: str) -> Path:
 
 def save_graph(path: Path, graph: dict[str, Any], request: Request) -> dict[str, Any]:
     graph = legacy_graph_payload_for_save(graph)
+    materialize_inline_workflow_nodes(path, graph, request)
     path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = path.with_suffix(f"{path.suffix}.{uuid4().hex}.tmp")
     temp_path.write_text(
@@ -351,6 +352,213 @@ def legacy_graph_payload_for_save(graph: dict[str, Any]) -> dict[str, Any]:
         payload["control_edges"] = payload["edges"]
     payload.setdefault("data_edges", [])
     return payload
+
+
+def materialize_inline_workflow_nodes(path: Path, graph: dict[str, Any], request: Request) -> None:
+    nodes = graph.get("nodes")
+    if not isinstance(nodes, list):
+        return
+    for node in nodes:
+        if not is_inline_workflow_container(node):
+            continue
+        child_payload = inline_workflow_payload(graph, node)
+        child_path = path.parent / f"{graph['id']}__{node['id']}.accflow.json"
+        child_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = child_path.with_name(f"{child_path.stem}.{uuid4().hex}.accflow.json")
+        temp_path.write_text(
+            json.dumps(child_payload, ensure_ascii=False, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        try:
+            WorkflowAppService(registry=server_registry(request)).validate(temp_path)
+        except (AccError, JsonSchemaValidationError) as exc:
+            temp_path.unlink(missing_ok=True)
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        replace_workflow_file(temp_path, child_path)
+        node["workflow_ref"] = child_path.name
+        node["capsule_id"] = "fake-agent.generic"
+        node["kind"] = "workflow"
+        node.setdefault("input_ports", [{"id": "main", "direction": "input"}])
+        node.setdefault("output_ports", [{"id": "main", "direction": "output"}])
+        ui = node.get("ui")
+        if isinstance(ui, dict):
+            ui["inline_workflow_ref"] = child_path.name
+
+
+def is_inline_workflow_container(node: Any) -> bool:
+    if not isinstance(node, dict) or node.get("kind") != "workflow":
+        return False
+    ui = node.get("ui")
+    if not isinstance(ui, dict):
+        return False
+    internal_nodes = ui.get("internal_nodes")
+    return isinstance(internal_nodes, list) and len(internal_nodes) > 0
+
+
+def inline_workflow_payload(parent_graph: dict[str, Any], node: dict[str, Any]) -> dict[str, Any]:
+    ui = node.get("ui") if isinstance(node.get("ui"), dict) else {}
+    internal_nodes = ui.get("internal_nodes") if isinstance(ui, dict) else []
+    internal_edges = ui.get("internal_edges") if isinstance(ui, dict) else []
+    if not isinstance(internal_nodes, list):
+        internal_nodes = []
+    if not isinstance(internal_edges, list):
+        internal_edges = []
+    raw_control_edges = [
+        {
+            "id": str(edge.get("id") or f"control_{edge.get('from')}_{edge.get('to')}"),
+            "from": str(edge["from"]),
+            "to": str(edge["to"]),
+            "condition": edge.get("condition"),
+            "context": edge.get("context")
+            if edge.get("context") in {"upstream_output", "none"}
+            else "upstream_output",
+        }
+        for edge in internal_edges
+        if isinstance(edge, dict)
+        and isinstance(edge.get("from"), str)
+        and isinstance(edge.get("to"), str)
+    ]
+    input_boundary_id = f"{node['id']}__workflow_inputs"
+    output_boundary_id = f"{node['id']}__workflow_outputs"
+    input_bound_targets = [
+        str(edge["to"])
+        for edge in raw_control_edges
+        if edge["from"] == input_boundary_id and isinstance(edge.get("to"), str)
+    ]
+    output_bound_sources = [
+        str(edge["from"])
+        for edge in raw_control_edges
+        if edge["to"] == output_boundary_id and isinstance(edge.get("from"), str)
+    ]
+    control_edges = [
+        edge
+        for edge in raw_control_edges
+        if edge["from"] != input_boundary_id
+        and edge["to"] != output_boundary_id
+        and edge["to"] != input_boundary_id
+        and edge["from"] != output_boundary_id
+    ]
+    data_edges = [
+        {
+            "id": str(edge.get("id") or "data_edge"),
+            "from": edge["from"],
+            "to": edge["to"],
+            "materialization": edge.get("materialization") or "copy",
+        }
+        for edge in internal_edges
+        if isinstance(edge, dict)
+        and isinstance(edge.get("from"), dict)
+        and isinstance(edge.get("to"), dict)
+    ]
+    internal_ids = [
+        str(item["id"])
+        for item in internal_nodes
+        if isinstance(item, dict) and isinstance(item.get("id"), str)
+    ]
+    control_sources = {str(edge["from"]) for edge in control_edges}
+    control_targets = {str(edge["to"]) for edge in control_edges}
+    entry_ids = input_bound_targets or (
+        [node_id for node_id in internal_ids if node_id not in control_targets]
+        or internal_ids[:1]
+    )
+    terminal_ids = output_bound_sources or (
+        [node_id for node_id in internal_ids if node_id not in control_sources]
+        or internal_ids[-1:]
+    )
+    output_ports = [
+        {"id": "main" if index == 0 else f"main_{node_id}", "direction": "output"}
+        for index, node_id in enumerate(terminal_ids)
+    ]
+    return {
+        "id": f"{parent_graph['id']}__{node['id']}",
+        "version": "0.4.0",
+        "name": str(node.get("label") or node.get("id")),
+        "nodes": [
+            inline_internal_node_payload(item)
+            for item in internal_nodes
+            if isinstance(item, dict)
+        ],
+        "control_edges": control_edges,
+        "data_edges": data_edges,
+        "exposed_inputs": [{"id": "main", "direction": "input", "required": False}],
+        "exposed_outputs": output_ports,
+        "workflow_input_bindings": [
+            {
+                "source_port": "main",
+                "target": {"node": node_id, "port": "main"},
+                "required": False,
+                "materialization": "copy",
+            }
+            for node_id in entry_ids
+        ],
+        "workflow_output_bindings": [
+            {
+                "source": {"node": node_id, "port": "main"},
+                "target_port": "main" if index == 0 else f"main_{node_id}",
+                "required": False,
+                "materialization": "copy",
+            }
+            for index, node_id in enumerate(terminal_ids)
+        ],
+        "policies": {
+            "failure_mode": "fail_fast",
+            "max_concurrency": int(
+                dict(parent_graph.get("policy") or {}).get("max_concurrency") or 4
+            ),
+        },
+        "metadata": {
+            "layout": "inline-workflow-container",
+            "parent_workflow_id": parent_graph["id"],
+            "parent_node_id": node["id"],
+        },
+    }
+
+
+def inline_internal_node_payload(node: dict[str, Any]) -> dict[str, Any]:
+    capsule_id = str(
+        node.get("capsuleId")
+        or node.get("capsule_id")
+        or node.get("runtime")
+        or "fake-agent.generic"
+    )
+    input_payload = node.get("input") if isinstance(node.get("input"), dict) else {}
+    if not input_payload:
+        input_payload = {"topic": str(node.get("task") or node.get("name") or node.get("id"))}
+    return {
+        "id": str(node["id"]),
+        "kind": "agent",
+        "runtime": "capsule",
+        "legacy_capsule_id": capsule_id,
+        "input": input_payload,
+        "acc_receive_upstream_context": True,
+        "input_ports": normalize_inline_ports(
+            node.get("inputPorts") or node.get("input_ports"),
+            "input",
+        ),
+        "output_ports": normalize_inline_ports(
+            node.get("outputPorts") or node.get("output_ports"),
+            "output",
+        ),
+        "position": node.get("position"),
+    }
+
+
+def normalize_inline_ports(value: Any, direction: str) -> list[dict[str, Any]]:
+    if not isinstance(value, list) or not value:
+        return [{"id": "main", "direction": direction}]
+    ports: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict) or not isinstance(item.get("id"), str):
+            continue
+        ports.append(
+            {
+                "id": item["id"],
+                "direction": direction,
+                "required": bool(item.get("required", False)),
+                "cardinality": str(item.get("cardinality") or "one"),
+            }
+        )
+    return ports or [{"id": "main", "direction": direction}]
 
 
 def recover_wrapped_capsule_nodes(graph: dict[str, Any]) -> None:

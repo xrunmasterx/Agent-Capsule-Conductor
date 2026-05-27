@@ -13,7 +13,7 @@ from acc.domain import (
     WorkflowOutputBinding,
     WorkflowTemplate,
 )
-from acc.engine import DEFAULT_PERMISSION_PROFILE
+from acc.engine import DEFAULT_PERMISSION_PROFILE, validate_nested_internal_node_boundaries
 from acc.store import load_json
 from acc.utils import AccError
 
@@ -113,6 +113,7 @@ def import_legacy_graph_template(
     *,
     source_path: Path | None = None,
 ) -> WorkflowTemplate:
+    validate_nested_internal_node_boundaries(payload)
     nodes = {node.id: node for node in import_legacy_nodes(payload)}
     legacy_control_edges = legacy_control_edge_payloads(payload)
     control_edges = [
@@ -120,8 +121,9 @@ def import_legacy_graph_template(
             source=str(edge["from"]),
             target=str(edge["to"]),
             condition=edge.get("condition") if isinstance(edge.get("condition"), str) else None,
+            context=parse_control_context(edge, index),
         )
-        for edge in legacy_control_edges
+        for index, edge in enumerate(legacy_control_edges)
     ]
     data_edges, value_edges_by_target = split_legacy_data_edges(
         legacy_data_edge_payloads(payload, legacy_control_edges)
@@ -225,6 +227,15 @@ def parse_workflow_port_edges(
     return input_bindings, output_bindings
 
 
+def parse_control_context(edge: dict[str, Any], index: int) -> str:
+    context = str(edge.get("context") or "upstream_output")
+    if context not in {"upstream_output", "none"}:
+        raise AccError(
+            f"control edge {index} context must be 'upstream_output' or 'none'"
+        )
+    return context
+
+
 def legacy_control_edge_payloads(
     payload: dict[str, Any],
 ) -> list[dict[str, Any]]:
@@ -302,12 +313,25 @@ def import_legacy_nodes(graph: dict[str, Any]) -> list[NodeSpec]:
         if not isinstance(node, dict):
             raise AccError("Workflow graph node must be an object")
         node_id = require_string(node, "id", "workflow graph node")
-        capsule_id = require_string(node, "capsule_id", f"node {node_id}")
         raw = dict(node)
-        raw["legacy_capsule_id"] = capsule_id
         raw["legacy_kind"] = node.get("kind") or "agent_session"
         raw.setdefault("input", {})
         raw.setdefault("input_mapping", {})
+        if raw["legacy_kind"] == "workflow" and isinstance(node.get("workflow_ref"), str):
+            result.append(
+                NodeSpec(
+                    id=node_id,
+                    kind="workflow",
+                    workflow_ref=str(node["workflow_ref"]),
+                    permission_profile=DEFAULT_PERMISSION_PROFILE,
+                    input_ports=parse_legacy_ports(node.get("input_ports"), "input"),
+                    output_ports=parse_legacy_ports(node.get("output_ports"), "output"),
+                    raw=raw,
+                )
+            )
+            continue
+        capsule_id = require_string(node, "capsule_id", f"node {node_id}")
+        raw["legacy_capsule_id"] = capsule_id
         result.append(
             NodeSpec(
                 id=node_id,

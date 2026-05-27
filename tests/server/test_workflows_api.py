@@ -101,6 +101,127 @@ def test_post_workflow_recovers_wrapped_capsule_node(client, project_root) -> No
     assert "ui" not in saved["nodes"][0]
 
 
+def test_post_workflow_materializes_inline_workflow_container(client, project_root) -> None:
+    graph = simple_graph()
+    graph["id"] = "inline_container_graph"
+    graph["nodes"] = [
+        {
+            "id": "container",
+            "capsule_id": "fake-agent.generic",
+            "kind": "workflow",
+            "input_ports": [{"id": "main", "direction": "input"}],
+            "output_ports": [{"id": "main", "direction": "output"}],
+            "ui": {
+                "internal_nodes": [
+                    {
+                        "id": "inside_a",
+                        "kind": "Agent",
+                        "name": "Inside A",
+                        "runtime": "echo-test.generic",
+                        "input": {"message": "inside a"},
+                    },
+                    {
+                        "id": "inside_b",
+                        "kind": "Agent",
+                        "name": "Inside B",
+                        "runtime": "echo-test.generic",
+                        "input": {"message": "inside b"},
+                    },
+                ],
+                "internal_edges": [
+                    {"id": "c_ab", "from": "inside_a", "to": "inside_b"}
+                ],
+            },
+        }
+    ]
+
+    response = client.post("/api/workflows", json={"graph": graph, "force": True})
+
+    assert response.status_code == 200, response.text
+    saved = load_json(project_root / "workflows" / "inline_container_graph.graph.json")
+    child = load_json(
+        project_root / "workflows" / "inline_container_graph__container.accflow.json"
+    )
+    assert saved["nodes"][0]["kind"] == "workflow"
+    assert saved["nodes"][0]["workflow_ref"] == "inline_container_graph__container.accflow.json"
+    assert saved["nodes"][0]["ui"]["inline_workflow_ref"] == (
+        "inline_container_graph__container.accflow.json"
+    )
+    assert [node["id"] for node in child["nodes"]] == ["inside_a", "inside_b"]
+    assert child["workflow_input_bindings"][0]["target"]["node"] == "inside_a"
+    assert child["control_edges"][0]["context"] == "upstream_output"
+
+
+def test_post_workflow_materializes_inline_workflow_boundary_edges(client, project_root) -> None:
+    graph = simple_graph()
+    graph["id"] = "inline_boundary_graph"
+    graph["nodes"] = [
+        {
+            "id": "container",
+            "capsule_id": "fake-agent.generic",
+            "kind": "workflow",
+            "input_ports": [{"id": "main", "direction": "input"}],
+            "output_ports": [{"id": "main", "direction": "output"}],
+            "ui": {
+                "internal_nodes": [
+                    {
+                        "id": "inside_a",
+                        "kind": "Agent",
+                        "name": "Inside A",
+                        "runtime": "echo-test.generic",
+                        "input": {"message": "inside a"},
+                    },
+                    {
+                        "id": "inside_b",
+                        "kind": "Agent",
+                        "name": "Inside B",
+                        "runtime": "echo-test.generic",
+                        "input": {"message": "inside b"},
+                    },
+                ],
+                "internal_edges": [
+                    {
+                        "id": "input_to_b",
+                        "from": "container__workflow_inputs",
+                        "to": "inside_b",
+                    },
+                    {
+                        "id": "a_to_output",
+                        "from": "inside_a",
+                        "to": "container__workflow_outputs",
+                    },
+                    {"id": "c_ab", "from": "inside_a", "to": "inside_b"},
+                ],
+            },
+        }
+    ]
+
+    response = client.post("/api/workflows", json={"graph": graph, "force": True})
+
+    assert response.status_code == 200, response.text
+    child = load_json(
+        project_root / "workflows" / "inline_boundary_graph__container.accflow.json"
+    )
+    assert child["workflow_input_bindings"] == [
+        {
+            "source_port": "main",
+            "target": {"node": "inside_b", "port": "main"},
+            "required": False,
+            "materialization": "copy",
+        }
+    ]
+    assert child["workflow_output_bindings"][0]["source"]["node"] == "inside_a"
+    assert child["control_edges"] == [
+        {
+            "id": "c_ab",
+            "from": "inside_a",
+            "to": "inside_b",
+            "condition": None,
+            "context": "upstream_output",
+        }
+    ]
+
+
 def test_validate_graph_endpoint_catches_invalid_edges(client) -> None:
     graph = simple_graph()
     graph["edges"] = [{"id": "bad", "from": "missing", "to": "echo"}]
