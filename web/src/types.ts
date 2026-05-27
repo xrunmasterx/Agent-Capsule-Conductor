@@ -1,4 +1,4 @@
-export type ViewKey = 'runs' | 'capsules' | 'artifacts' | 'workflows' | 'control';
+export type ViewKey = 'runs' | 'capsules' | 'artifacts' | 'workflows' | 'control' | 'decisions';
 
 export type NodeRunSummary = {
   node_id: string;
@@ -126,7 +126,8 @@ export type WorkflowDetail = {
 export type WorkflowGraphNode = {
   id: string;
   capsule_id: string;
-  kind?: 'agent_session' | 'tool' | 'workflow' | string;
+  kind?: 'workflow' | 'agent_session' | 'tool' | string;
+  workflow_ref?: string;
   label?: string;
   input?: Record<string, unknown>;
   input_mapping?: Record<string, unknown>;
@@ -139,6 +140,9 @@ export type WorkflowGraphNode = {
   ui?: {
     collapsed?: boolean;
     color?: string;
+    binding_ref?: string;
+    internal_nodes?: unknown[];
+    internal_edges?: Array<WorkflowDataEdge | WorkflowGraphEdge>;
   };
 };
 
@@ -204,6 +208,91 @@ export type WorkflowRunResult = {
   nodes: NodeRunSummary[];
   edges: WorkflowGraphEdge[];
   errors?: string[];
+};
+
+export type DecisionInboxAction = {
+  id: string;
+  label: string;
+  kind:
+    | 'view_run'
+    | 'view_node'
+    | 'replay'
+    | 'rerun_node'
+    | 'rerun_from'
+    | 'fork'
+    | 'validate_patch'
+    | 'dry_run_patch';
+  method: 'GET' | 'POST';
+  url: string;
+  destructive: boolean;
+};
+
+export type DecisionInboxItem = {
+  id: string;
+  kind:
+    | 'manual_review'
+    | 'run_failed'
+    | 'node_failed'
+    | 'graphops_proposal'
+    | 'validation_warning';
+  status: 'open';
+  severity: 'high' | 'medium' | 'low';
+  title: string;
+  summary: string;
+  run?: {
+    run_id: string;
+    workflow_id?: string | null;
+    status: string;
+    run_dir: string;
+  };
+  node?: {
+    node_id: string;
+    capsule_id: string;
+    status: string;
+    summary?: string;
+  };
+  graphops?: {
+    patch_id: string;
+    patch_path: string;
+    target_type: string;
+    target_path: string;
+    operation_count: number;
+    apply_requires_human_approval: true;
+    semantic_status?: 'valid' | 'invalid';
+  };
+  evidence: Array<{
+    label: string;
+    kind: string;
+    path?: string;
+    url?: string;
+  }>;
+  actions: DecisionInboxAction[];
+};
+
+export type DecisionInbox = {
+  version: '1.0';
+  generated_at: string;
+  counts: {
+    open: number;
+    manual_review: number;
+    failed_runs: number;
+    failed_nodes: number;
+    graphops_proposals: number;
+  };
+  items: DecisionInboxItem[];
+};
+
+export type WorkflowBindingView = {
+  workflow_id?: string;
+  workflowId?: string;
+  binding_path?: string;
+  bindingPath?: string;
+  workspace_root?: string | null;
+  workspaceRoot?: string | null;
+  exists: boolean;
+  status: 'unbound' | 'valid' | 'missing' | 'invalid' | string;
+  valid?: boolean;
+  error?: string | null;
 };
 
 export type ReplayPayload = {

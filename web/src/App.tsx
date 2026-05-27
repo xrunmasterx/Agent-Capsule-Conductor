@@ -1,12 +1,12 @@
-import { Box, Database, FileText, GitBranch, Layers, Workflow } from 'lucide-react';
+import { Box, Database, FileText, GitBranch, Inbox, Layers, Workflow } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { api } from './api';
 import { ArtifactViewer } from './components/ArtifactViewer';
 import { CapsuleBrowser } from './components/CapsuleBrowser';
 import { ControlPlanePanel } from './components/ControlPlanePanel';
-import { RunInspector } from './components/RunInspector';
-import { RunList } from './components/RunList';
+import { DecisionInboxPanel } from './components/DecisionInboxPanel';
+import { RunMonitorPage } from './components/RunMonitorPage';
 import { WorkflowViewer } from './components/WorkflowViewer';
 import { zhCN as t } from './i18n/zh-CN';
 import type { CapsuleSummary, RunSummary, ViewKey, WorkflowSummary } from './types';
@@ -16,6 +16,7 @@ const navigation = [
   { key: 'capsules', label: t.capsuleLibrary, icon: Box },
   { key: 'artifacts', label: t.artifacts, icon: FileText },
   { key: 'workflows', label: t.workflow, icon: GitBranch },
+  { key: 'decisions', label: '决策', icon: Inbox },
   { key: 'control', label: t.controlPlane, icon: Layers },
 ] as const;
 
@@ -107,14 +108,11 @@ export function App() {
       <section className="workspace">
         {apiState === 'error' ? <div className="notice">API error: {error}</div> : null}
         {view === 'runs' ? (
-          <div className="split">
-            <RunList
-              runs={runs}
-              selectedRunId={selectedRun?.run_id || ''}
-              onSelect={(runId) => setSelectedRunId(runId)}
-            />
-            <RunInspector runId={selectedRun?.run_id || ''} />
-          </div>
+          <RunMonitorPage
+            runs={runs}
+            selectedRunId={selectedRun?.run_id || ''}
+            onSelectRun={(runId) => setSelectedRunId(runId)}
+          />
         ) : null}
         {view === 'capsules' ? (
           <CapsuleBrowser
@@ -132,6 +130,14 @@ export function App() {
             selectedWorkflowId={selectedWorkflowId}
             onSelect={setSelectedWorkflowId}
             onChanged={() => loadInitialData()}
+          />
+        ) : null}
+        {view === 'decisions' ? (
+          <DecisionInboxPanel
+            onViewRun={(runId) => {
+              setSelectedRunId(runId);
+              setView('runs');
+            }}
           />
         ) : null}
         {view === 'control' ? (

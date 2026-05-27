@@ -69,12 +69,32 @@ class DataEdge:
 
 
 @dataclass(frozen=True)
+class WorkflowInputBinding:
+    source_port: str
+    target: DataEndpoint
+    materialization: MaterializationMode = "copy"
+    required: bool = True
+
+
+@dataclass(frozen=True)
+class WorkflowOutputBinding:
+    source: DataEndpoint
+    target_port: str
+    materialization: MaterializationMode = "copy"
+    required: bool = True
+
+
+@dataclass(frozen=True)
 class WorkflowTemplate:
     id: str
     version: str
     nodes: dict[str, NodeSpec]
     control_edges: list[ControlEdge]
     data_edges: list[DataEdge]
+    exposed_inputs: dict[str, PortContract] = field(default_factory=dict)
+    exposed_outputs: dict[str, PortContract] = field(default_factory=dict)
+    workflow_input_bindings: list[WorkflowInputBinding] = field(default_factory=list)
+    workflow_output_bindings: list[WorkflowOutputBinding] = field(default_factory=list)
     policies: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
     source_path: Path | None = None

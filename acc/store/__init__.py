@@ -10,10 +10,12 @@ from acc.domain import (
     AccError,
     ArtifactBundle,
     DataEdge,
+    DataEndpoint,
     EnvironmentBinding,
     EnvironmentFrame,
     NodeSpec,
     PortContract,
+    WorkflowInputBinding,
     WorkflowTemplate,
 )
 from acc.session import utc_now_iso
@@ -145,6 +147,76 @@ class FileSystemWorkflowStore:
         frame = require_frame(self.frame)
         return materialize_clean_inbox_edge(edge, frame, node_dir, source_outboxes)
 
+    def write_workflow_input_bundles(
+        self,
+        workflow_input: dict[str, Any],
+    ) -> dict[str, Path]:
+        frame = require_frame(self.frame)
+        input_root = self.run_dir / "workflow_inputs"
+        input_outboxes: dict[str, Path] = {}
+        for port_id, value in workflow_input.items():
+            if port_id not in self.template.exposed_inputs:
+                continue
+            port_dir = input_root / port_id
+            port_dir.mkdir(parents=True, exist_ok=True)
+            write_json(port_dir / "input.json", value)
+            artifact = file_record(port_dir / "input.json", port_dir)
+            bundle = {
+                "bundle_id": f"bundle_{self.template.id}_workflow_input_{port_id}",
+                "producer_node_id": f"{self.template.id}__workflow_inputs",
+                "producer_session_id": None,
+                "artifacts": [artifact],
+                "outputs": {port_id: value},
+                "created_at": utc_now_iso(),
+                "provenance": {
+                    "workflow_id": self.template.id,
+                    "workflow_port_id": port_id,
+                    "boundary": "input",
+                },
+            }
+            write_json(port_dir / "artifact_bundle.json", bundle)
+            write_json(
+                port_dir / "outbox_manifest.json",
+                {
+                    "port_id": port_id,
+                    "node_id": f"{self.template.id}__workflow_inputs",
+                    "direction": "output",
+                    "session_id": None,
+                    "bundle": bundle,
+                    "artifacts": [artifact],
+                },
+            )
+            mirror_dir = frame.inbox_root / "__workflow_inputs" / port_id
+            if mirror_dir.exists():
+                shutil.rmtree(mirror_dir)
+            shutil.copytree(port_dir, mirror_dir)
+            input_outboxes[port_id] = port_dir
+        return input_outboxes
+
+    def materialize_workflow_input_binding(
+        self,
+        binding: WorkflowInputBinding,
+        node_dir: Path,
+        workflow_input_outboxes: dict[str, Path],
+    ) -> dict[str, Any] | None:
+        source_dir = workflow_input_outboxes.get(binding.source_port)
+        if source_dir is None:
+            return None
+        edge = DataEdge(
+            source=DataEndpoint(
+                node=f"{self.template.id}__workflow_inputs",
+                port=binding.source_port,
+            ),
+            target=binding.target,
+            materialization=binding.materialization,
+        )
+        return materialize_clean_inbox_edge(
+            edge,
+            require_frame(self.frame),
+            node_dir,
+            {edge.source.node: {edge.source.port: source_dir}},
+        )
+
     def write_artifact_bundle(
         self,
         node: NodeSpec,
@@ -185,6 +257,57 @@ class FileSystemWorkflowStore:
                 shutil.rmtree(mirror_dir)
             shutil.copytree(source_dir, mirror_dir)
         return outboxes
+
+    def publish_workflow_outputs_for_node(
+        self,
+        node: NodeSpec,
+        outboxes: dict[str, Path],
+    ) -> dict[str, dict[str, Any]]:
+        frame = require_frame(self.frame)
+        published: dict[str, dict[str, Any]] = {}
+        for binding in self.template.workflow_output_bindings:
+            if binding.source.node != node.id:
+                continue
+            source_dir = outboxes.get(binding.source.port)
+            if source_dir is None:
+                continue
+            output_dir = self.run_dir / "workflow_outputs" / binding.target_port
+            if output_dir.exists():
+                shutil.rmtree(output_dir)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            if binding.materialization == "reference":
+                write_json(
+                    output_dir / "reference_manifest.json",
+                    {"source_outbox": str(source_dir.resolve())},
+                )
+            else:
+                for child in source_dir.iterdir():
+                    if child.name == "artifact_bundle.json":
+                        continue
+                    copy_path(child, output_dir / child.name)
+            artifacts = [
+                file_record(path, output_dir)
+                for path in sorted(output_dir.iterdir())
+                if path.is_file()
+            ]
+            manifest = {
+                "port_id": binding.target_port,
+                "workflow_id": self.template.id,
+                "direction": "output",
+                "source_node_id": binding.source.node,
+                "source_port_id": binding.source.port,
+                "source_outbox": str(source_dir.resolve()),
+                "workflow_output_dir": str(output_dir.resolve()),
+                "materialization": binding.materialization,
+                "artifacts": artifacts,
+            }
+            write_json(output_dir / "workflow_output_manifest.json", manifest)
+            mirror_dir = frame.outbox_root / "__workflow_outputs" / binding.target_port
+            if mirror_dir.exists():
+                shutil.rmtree(mirror_dir)
+            shutil.copytree(output_dir, mirror_dir)
+            published[binding.target_port] = manifest
+        return published
 
     def write_node_manifest(self, node_dir: Path, payload: dict[str, Any]) -> None:
         write_json(node_dir / "node_run_manifest.json", payload)

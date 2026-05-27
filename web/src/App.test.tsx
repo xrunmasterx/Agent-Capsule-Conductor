@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
@@ -81,6 +81,14 @@ const routes: Record<string, unknown> = {
         name: 'Echo Test',
         description: 'Echo fixture capsule',
         runtime: 'generic_cli',
+        workspace: 'existing_dir',
+      },
+      {
+        id: 'nested-workflow.example',
+        version: '0.1.0',
+        name: 'Nested Workflow',
+        description: 'Workflow capsule fixture',
+        runtime: 'codex_cli',
         workspace: 'existing_dir',
       },
       {
@@ -227,6 +235,29 @@ const routes: Record<string, unknown> = {
     edges: [{ id: 'edge_echo_fake', from: 'echo', to: 'fake' }],
     errors: [],
   },
+  'POST /api/workflows/acc_workspace_canvas/validate': { status: 'valid', workflow_id: 'acc_workspace_canvas' },
+  'POST /api/workflows/acc_workspace_canvas/run': {
+    workflow_id: 'acc_workspace_canvas',
+    status: 'success',
+    run_dir: 'runs/ui_workflow_acc_workspace_canvas',
+    nodes: [
+      {
+        node_id: 'Research_Flow',
+        capsule_id: 'fake-agent.generic',
+        status: 'success',
+        run_dir: 'runs/ui_workflow_acc_workspace_canvas/nodes/Research_Flow',
+        input_path: 'runs/ui_workflow_acc_workspace_canvas/nodes/Research_Flow/input.json',
+        prompt_path: 'runs/ui_workflow_acc_workspace_canvas/nodes/Research_Flow/resolved_prompt.md',
+        output_path: 'runs/ui_workflow_acc_workspace_canvas/nodes/Research_Flow/output.json',
+        artifact_dir: 'runs/ui_workflow_acc_workspace_canvas/nodes/Research_Flow/artifacts',
+        event_log: 'runs/ui_workflow_acc_workspace_canvas/nodes/Research_Flow/events.jsonl',
+        stdout_log: 'runs/ui_workflow_acc_workspace_canvas/nodes/Research_Flow/stdout.log',
+        stderr_log: 'runs/ui_workflow_acc_workspace_canvas/nodes/Research_Flow/stderr.log',
+      },
+    ],
+    edges: [],
+    errors: [],
+  },
   '/api/graphops/examples': {
     patches: [
       {
@@ -353,7 +384,7 @@ describe('Agent Capsule Workbench editable UI', () => {
     await user.click(await screen.findByRole('button', { name: /产物/i }));
     await user.click(await screen.findByRole('button', { name: /report.md/i }));
 
-    expect(await screen.findByLabelText('report.md')).toHaveTextContent(
+    expect(await screen.findByLabelText('产物 report.md')).toHaveTextContent(
       'Semiconductor analysis fixture.',
     );
   });
@@ -366,17 +397,26 @@ describe('Agent Capsule Workbench editable UI', () => {
 
     const browser = await screen.findByLabelText('节点库');
     expect(within(browser).getByRole('heading', { name: 'Echo Test' })).toBeInTheDocument();
-    expect(browser).toHaveTextContent('"sandbox": "read-only"');
+    expect(browser).toHaveTextContent('沙箱');
+    expect(browser).toHaveTextContent('read-only');
   });
 
-  test('Workflow Builder renders workflow nodes and capsule link text', async () => {
+  test('Workflow Builder renders graph-first workspace canvas', async () => {
     const user = userEvent.setup();
     render(<App />);
 
     await user.click(await screen.findByRole('button', { name: /工作流/i }));
 
-    expect(await screen.findByLabelText('图谱画布')).toHaveTextContent('输入回显');
-    expect(screen.getByLabelText('图谱画布')).toHaveTextContent('fake-agent.generic');
+    const canvas = await screen.findByLabelText('Workspace Canvas');
+    expect(canvas).toHaveTextContent('Research_Flow');
+    expect(canvas).toHaveTextContent('Implementation_Flow');
+    expect(canvas).toHaveTextContent('Review_Flow');
+    expect(canvas).toHaveTextContent('Paper_Digest_Pipeline');
+    expect(canvas).toHaveTextContent('F:\\UE5_Project_A\\workflows\\research');
+    expect(canvas).toHaveTextContent('in_requirements');
+    expect(canvas).toHaveTextContent('out_report');
+    expect(canvas).toHaveTextContent('Codex CLI');
+    expect(canvas).toHaveTextContent('Merge');
   });
 
   test('Capsule Library exposes create, edit, validate, and test controls', async () => {
@@ -386,10 +426,11 @@ describe('Agent Capsule Workbench editable UI', () => {
     await user.click(await screen.findByRole('button', { name: /节点库/i }));
 
     expect(await screen.findByLabelText('创建 Capsule')).toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: /高级设置 \/ 原始文件/i }));
     expect(await screen.findByLabelText('Capsule 编辑器')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /保存/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /校验/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /测试/i })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /保存/i }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: /校验/i }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: /测试/i }).length).toBeGreaterThan(0);
   });
 
   test('Capsule scaffold defaults stay least-privilege for codex and expand for generic cli', async () => {
@@ -398,10 +439,11 @@ describe('Agent Capsule Workbench editable UI', () => {
 
     await user.click(await screen.findByRole('button', { name: /节点库/i }));
 
-    const runtime = await screen.findByRole('combobox', { name: 'Runtime' });
-    const sandbox = screen.getByRole('combobox', { name: 'Sandbox' });
-    const network = screen.getByLabelText('Network');
-    const writeFiles = screen.getByLabelText('Write files');
+    const runtime = await screen.findByRole('combobox', { name: 'Capsule 类型' });
+    const sandbox = screen.getByRole('combobox', { name: '沙箱' });
+    await user.click(screen.getByText('高级设置'));
+    const network = screen.getByLabelText('允许网络');
+    const writeFiles = screen.getByLabelText('允许写文件');
 
     expect(runtime).toHaveValue('codex_cli');
     expect(sandbox).toHaveValue('read-only');
@@ -434,26 +476,13 @@ describe('Agent Capsule Workbench editable UI', () => {
     });
   });
 
-  test('New workflow graph saves newly added nodes instead of an empty canvas snapshot', async () => {
+  test('New workflow graph saves workflow containers and semantic edges', async () => {
     const user = userEvent.setup();
-    const { container } = render(<App />);
+    render(<App />);
 
-    const navButtons = container.querySelectorAll<HTMLButtonElement>('.nav-button');
-    await user.click(navButtons[3]);
-
-    await waitFor(() =>
-      expect(container.querySelector('.graph-toolbar .toolbar-actions')).toBeTruthy(),
-    );
-    const graphToolbar = container.querySelector<HTMLElement>('.graph-toolbar .toolbar-actions');
-    const graphToolbarButtons = graphToolbar?.querySelectorAll<HTMLButtonElement>('button');
-    expect(graphToolbarButtons).toBeTruthy();
-    await user.click(graphToolbarButtons![0]);
-
-    const addNodeButton = container.querySelector<HTMLButtonElement>('.node-library .primary-action');
-    expect(addNodeButton).toBeTruthy();
-    await user.click(addNodeButton!);
-    await user.click(addNodeButton!);
-    await user.click(graphToolbarButtons![3]);
+    await user.click(await screen.findByRole('button', { name: /工作流/i }));
+    const toolbar = await screen.findByLabelText('工作流工具栏');
+    await user.click(within(toolbar).getByRole('button', { name: /^保存$/i }));
 
     const calls = vi.mocked(fetch).mock.calls;
     const saveCall = calls
@@ -461,9 +490,64 @@ describe('Agent Capsule Workbench editable UI', () => {
       .at(-1);
     expect(saveCall).toBeTruthy();
     const savedPayload = JSON.parse(String(saveCall?.[1]?.body));
-    expect(savedPayload.graph.nodes).toHaveLength(2);
-    expect(savedPayload.graph.nodes[0].capsule_id).toBe('echo-test.generic');
-    expect(savedPayload.graph.edges).toHaveLength(0);
+    expect(savedPayload.graph.nodes).toHaveLength(5);
+    expect(savedPayload.graph.nodes[0].kind).toBe('workflow');
+    expect(savedPayload.graph.nodes[0].input_ports.length).toBeGreaterThan(0);
+    expect(savedPayload.graph.nodes[0].output_ports.length).toBeGreaterThan(0);
+    expect(savedPayload.graph.control_edges.length).toBeGreaterThan(0);
+    expect(savedPayload.graph.data_edges.length).toBeGreaterThan(0);
+    expect(savedPayload.graph.metadata.directory_display_only).toBe(true);
+    expect(savedPayload.graph.nodes.every((node: { relative_cwd?: string }) => !node.relative_cwd)).toBe(true);
+    expect(JSON.stringify(savedPayload.graph)).not.toContain('F:\\UE5_Project_A');
+    expect(savedPayload.graph.nodes[0].ui.binding_ref).toContain('bindings/');
+  });
+
+  /*
+  test('Workflow Focus Mode saves runnable internal node defaults', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: /宸ヤ綔娴?i }));
+    await user.dblClick(await screen.findByTestId('workflow-container-Research_Flow'));
+    const toolbar = await screen.findByLabelText('宸ヤ綔娴佸伐鍏锋爮');
+    await user.click(within(toolbar).getByRole('button', { name: /^淇濆瓨$/i }));
+
+    const calls = vi.mocked(fetch).mock.calls;
+    const saveCall = calls
+      .filter(([url, init]) => url === '/api/workflows' && init?.method === 'POST')
+      .at(-1);
+    expect(saveCall).toBeTruthy();
+    const savedPayload = JSON.parse(String(saveCall?.[1]?.body));
+    expect(savedPayload.graph.id).toBe('Research_Flow');
+    expect(savedPayload.graph.nodes.length).toBeGreaterThan(0);
+    expect(savedPayload.graph.nodes[0].capsule_id).toBe('fake-agent.generic');
+    expect(savedPayload.graph.nodes[0].input.topic).toBeTruthy();
+    expect(savedPayload.graph.control_edges.length).toBeGreaterThan(0);
+  });
+
+  */
+
+  test('Workflow Focus Mode saves runnable internal node defaults', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const navigation = await screen.findByLabelText('Workbench navigation');
+    await user.click(within(navigation).getByRole('button', { name: '工作流' }));
+    fireEvent.doubleClick(await screen.findByTestId('workflow-container-Research_Flow'));
+    await screen.findByText('返回 Workspace');
+    await user.click(screen.getAllByRole('button', { name: /^保存$/i })[0]);
+
+    const calls = vi.mocked(fetch).mock.calls;
+    const saveCall = calls
+      .filter(([url, init]) => url === '/api/workflows' && init?.method === 'POST')
+      .at(-1);
+    expect(saveCall).toBeTruthy();
+    const savedPayload = JSON.parse(String(saveCall?.[1]?.body));
+    expect(savedPayload.graph.id).toBe('Research_Flow');
+    expect(savedPayload.graph.nodes.length).toBeGreaterThan(0);
+    expect(savedPayload.graph.nodes[0].capsule_id).toBe('fake-agent.generic');
+    expect(savedPayload.graph.nodes[0].input.topic).toBeTruthy();
+    expect(savedPayload.graph.control_edges.length).toBeGreaterThan(0);
   });
 
   test('Workflow Builder exposes graph authoring controls', async () => {
@@ -472,16 +556,23 @@ describe('Agent Capsule Workbench editable UI', () => {
 
     await user.click(await screen.findByRole('button', { name: /工作流/i }));
 
-    expect(await screen.findByLabelText('节点库')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /添加节点/i })).toBeInTheDocument();
+    const navigator = await screen.findByLabelText('Workspace Navigator');
+    expect(navigator).toBeInTheDocument();
+    expect(navigator).toHaveTextContent('Fake Agent');
+    expect(navigator).toHaveTextContent('file-source.local');
+    expect(await screen.findByLabelText('Workspace Canvas')).toBeInTheDocument();
+    expect(await screen.findByLabelText('Canvas Toolbar')).toBeInTheDocument();
+    expect(await screen.findByLabelText('属性面板')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Connect Last Two/i })).not.toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: /保存/i }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole('button', { name: /校验/i }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole('button', { name: /运行/i }).length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: /自动布局/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^数据$/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^控制$/i })).toBeInTheDocument();
   });
 
-  test('Workflow Builder saves, validates, runs, and can load a parallel graph', async () => {
+  test('Workflow Builder saves, validates, and runs workspace canvas', async () => {
     const user = userEvent.setup();
     render(<App />);
 
@@ -495,23 +586,19 @@ describe('Agent Capsule Workbench editable UI', () => {
     const calls = vi.mocked(fetch).mock.calls;
     const saveCall = calls.find(([url, init]) => url === '/api/workflows' && init?.method === 'POST');
     const validateCall = calls.find(
-      ([url, init]) => url === '/api/workflows/demo_serial/validate' && init?.method === 'POST',
+      ([url, init]) => url === '/api/workflows/acc_workspace_canvas/validate' && init?.method === 'POST',
     );
     const runCall = calls.find(
-      ([url, init]) => url === '/api/workflows/demo_serial/run' && init?.method === 'POST',
+      ([url, init]) => url === '/api/workflows/acc_workspace_canvas/run' && init?.method === 'POST',
     );
     expect(saveCall).toBeTruthy();
     expect(validateCall).toBeTruthy();
     expect(runCall).toBeTruthy();
     const savedPayload = JSON.parse(String(saveCall?.[1]?.body));
-    expect(savedPayload.graph.nodes).toHaveLength(2);
-    expect(savedPayload.graph.edges).toHaveLength(1);
-
-    await user.click(within(toolbar).getByRole('button', { name: /加载 Demo 并行/i }));
-    const canvas = screen.getByLabelText('图谱画布');
-    expect(canvas).toHaveTextContent('分支 A');
-    expect(canvas).toHaveTextContent('分支 B');
-    expect(canvas).toHaveTextContent('结果汇总');
+    expect(savedPayload.graph.nodes).toHaveLength(5);
+    expect(savedPayload.graph.data_edges.length).toBeGreaterThan(0);
+    expect(savedPayload.graph.control_edges.length).toBeGreaterThan(0);
+    expect(await screen.findByText(/运行 acc_workspace_canvas: 成功/i)).toBeInTheDocument();
   });
 
   test('Run Inspector exposes debugger actions and diff results', async () => {

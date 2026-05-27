@@ -19,6 +19,10 @@ type Props = {
 };
 
 export function RunInspector({ runId }: Props) {
+  return <RunInspectorCore runId={runId} />;
+}
+
+export function RunInspectorCore({ runId }: Props) {
   const [run, setRun] = useState<RunSummary | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string>('');
   const [artifacts, setArtifacts] = useState<ArtifactLink[]>([]);

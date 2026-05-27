@@ -4,6 +4,7 @@ import type {
   CapsuleDetail,
   CapsuleSummary,
   GraphOpsExample,
+  DecisionInbox,
   NodeRunSummary,
   ReplayPayload,
   RunEvent,
@@ -11,6 +12,7 @@ import type {
   RunIndex,
   RunSummary,
   WorkflowDetail,
+  WorkflowBindingView,
   WorkflowGraph,
   WorkflowRunResult,
   WorkflowSummary,
@@ -127,20 +129,51 @@ export const api = {
       `/api/workflows/${encodeURIComponent(workflowId)}/validate`,
       {},
     ),
-  runWorkflow: (workflowId: string, runDir: string) =>
+  workflowBinding: (workflowId: string) =>
+    getJson<WorkflowBindingView>(`/api/workflows/${encodeURIComponent(workflowId)}/binding`),
+  validateWorkflowBinding: (workflowId: string, workspaceRoot: string) =>
+    sendJson<WorkflowBindingView>(
+      'POST',
+      `/api/workflows/${encodeURIComponent(workflowId)}/binding/validate`,
+      { workspace_root: workspaceRoot },
+    ),
+  saveWorkflowBinding: (workflowId: string, workspaceRoot: string) =>
+    sendJson<WorkflowBindingView>(
+      'PUT',
+      `/api/workflows/${encodeURIComponent(workflowId)}/binding`,
+      { workspace_root: workspaceRoot },
+    ),
+  openWorkflowBindingFolder: (workflowId: string) =>
+    sendJson<{ workflow_id: string; path: string; opened: boolean }>(
+      'POST',
+      `/api/workflows/${encodeURIComponent(workflowId)}/binding/open-folder`,
+      {},
+    ),
+  runWorkflow: (
+    workflowId: string,
+    runDir: string,
+    options?: { bindingPath?: string; workspace?: string; input?: Record<string, unknown> },
+  ) =>
     sendJson<WorkflowRunResult>(
       'POST',
       `/api/workflows/${encodeURIComponent(workflowId)}/run`,
-      { run_dir: runDir },
+      {
+        run_dir: runDir,
+        ...(options?.bindingPath ? { binding_path: options.bindingPath } : {}),
+        ...(options?.workspace ? { workspace: options.workspace } : {}),
+        ...(options?.input ? { input: options.input } : {}),
+      },
     ),
-  runEvents: (runId: string) =>
+  runEvents: (runId: string, limit = 200) =>
     getJson<{ run_id: string; event_log: string; events: RunEvent[] }>(
-      `/api/runs/${encodeURIComponent(runId)}/events?limit=200`,
+      `/api/runs/${encodeURIComponent(runId)}/events?limit=${encodeURIComponent(String(limit))}`,
     ),
-  nodeEvents: (runId: string, nodeId: string) =>
+  nodeEvents: (runId: string, nodeId: string, limit = 200) =>
     getJson<{ run_id: string; node_id: string; event_log: string; events: RunEvent[] }>(
-      `/api/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/events?limit=200`,
+      `/api/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/events?limit=${encodeURIComponent(String(limit))}`,
     ),
+  decisions: (limit = 100) =>
+    getJson<DecisionInbox>(`/api/decisions?limit=${encodeURIComponent(String(limit))}`),
   replayRun: (runId: string, nodeId?: string) =>
     sendJson<ReplayPayload>('POST', `/api/debugger/runs/${encodeURIComponent(runId)}/replay`, {
       node_id: nodeId,

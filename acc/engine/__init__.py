@@ -12,6 +12,8 @@ from acc.domain import (
     NodeSpec,
     PermissionProfile,
     PortContract,
+    WorkflowInputBinding,
+    WorkflowOutputBinding,
     WorkflowTemplate,
 )
 
@@ -55,6 +57,16 @@ def parse_clean_workflow_template(
     data_edges = [
         parse_data_edge(edge, index) for index, edge in enumerate(payload.get("data_edges") or [])
     ]
+    exposed_inputs = parse_port_value(payload.get("exposed_inputs"), "input")
+    exposed_outputs = parse_port_value(payload.get("exposed_outputs"), "output")
+    workflow_input_bindings = [
+        parse_workflow_input_binding(binding, index)
+        for index, binding in enumerate(payload.get("workflow_input_bindings") or [])
+    ]
+    workflow_output_bindings = [
+        parse_workflow_output_binding(binding, index)
+        for index, binding in enumerate(payload.get("workflow_output_bindings") or [])
+    ]
     policies = payload.get("policies") or payload.get("policy") or {}
     if not isinstance(policies, dict):
         raise AccError("WorkflowTemplate policies must be an object")
@@ -67,6 +79,10 @@ def parse_clean_workflow_template(
         nodes=nodes,
         control_edges=control_edges,
         data_edges=data_edges,
+        exposed_inputs=exposed_inputs,
+        exposed_outputs=exposed_outputs,
+        workflow_input_bindings=workflow_input_bindings,
+        workflow_output_bindings=workflow_output_bindings,
         policies=policies,
         metadata=metadata,
         source_path=source_path,
@@ -224,6 +240,63 @@ def parse_data_edge(payload: Any, index: int) -> DataEdge:
     )
 
 
+def parse_workflow_input_binding(payload: Any, index: int) -> WorkflowInputBinding:
+    if not isinstance(payload, dict):
+        raise AccError("workflow input binding must be an object")
+    source_port = str(payload.get("source_port") or payload.get("from_port") or "")
+    if not source_port:
+        source = payload.get("from")
+        if isinstance(source, dict):
+            source_port = str(source.get("port") or "")
+    if not source_port:
+        raise AccError(f"workflow input binding {index} requires source_port")
+    target_payload = payload.get("target") or payload.get("to")
+    if not isinstance(target_payload, dict):
+        raise AccError(f"workflow input binding {index} target must be an object")
+    return WorkflowInputBinding(
+        source_port=source_port,
+        target=DataEndpoint(
+            node=require_string(target_payload, "node", f"workflow input binding {index} target"),
+            port=str(target_payload.get("port") or target_payload.get("input") or "main"),
+        ),
+        materialization=parse_materialization(payload.get("materialization")),
+        required=bool(payload.get("required", True)),
+    )
+
+
+def parse_workflow_output_binding(payload: Any, index: int) -> WorkflowOutputBinding:
+    if not isinstance(payload, dict):
+        raise AccError("workflow output binding must be an object")
+    target_port = str(payload.get("target_port") or payload.get("to_port") or "")
+    if not target_port:
+        target = payload.get("target") or payload.get("to")
+        if isinstance(target, dict):
+            target_port = str(target.get("port") or "")
+    if not target_port:
+        raise AccError(f"workflow output binding {index} requires target_port")
+    source_payload = payload.get("source") or payload.get("from")
+    if not isinstance(source_payload, dict):
+        raise AccError(f"workflow output binding {index} source must be an object")
+    return WorkflowOutputBinding(
+        source=DataEndpoint(
+            node=require_string(source_payload, "node", f"workflow output binding {index} source"),
+            port=str(source_payload.get("port") or source_payload.get("output") or "main"),
+        ),
+        target_port=target_port,
+        materialization=parse_materialization(payload.get("materialization")),
+        required=bool(payload.get("required", True)),
+    )
+
+
+def parse_materialization(value: Any) -> str:
+    materialization = str(value or "copy")
+    if materialization == "link":
+        materialization = "symlink"
+    if materialization not in {"copy", "reference", "symlink"}:
+        raise AccError(f"Unsupported materialization mode: {materialization}")
+    return materialization
+
+
 def validate_clean_workflow_template(
     template: WorkflowTemplate,
     *,
@@ -248,6 +321,7 @@ def validate_clean_workflow_template(
     for edge in template.data_edges:
         validate_data_endpoint(template, edge.source, direction="output")
         validate_data_endpoint(template, edge.target, direction="input")
+    validate_workflow_boundary_contract(template)
     levels = topological_levels(template)
     validate_data_edges_follow_control_dependencies(template, levels=levels)
 
@@ -313,6 +387,45 @@ def validate_data_endpoint(
             f"Data edge references missing {direction} port "
             f"{endpoint.node}.{endpoint.port}"
         )
+
+
+def validate_workflow_boundary_contract(template: WorkflowTemplate) -> None:
+    for port_id, port in template.exposed_inputs.items():
+        validate_identifier(port_id, "workflow input port id")
+        if port.direction != "input":
+            raise AccError(f"Workflow exposed input {port_id} must have input direction")
+    for port_id, port in template.exposed_outputs.items():
+        validate_identifier(port_id, "workflow output port id")
+        if port.direction != "output":
+            raise AccError(f"Workflow exposed output {port_id} must have output direction")
+
+    seen_input_bindings: set[tuple[str, str, str]] = set()
+    for binding in template.workflow_input_bindings:
+        if binding.source_port not in template.exposed_inputs:
+            raise AccError(
+                f"Workflow input binding references missing exposed input "
+                f"{binding.source_port!r}"
+            )
+        validate_data_endpoint(template, binding.target, direction="input")
+        key = (binding.source_port, binding.target.node, binding.target.port)
+        if key in seen_input_bindings:
+            raise AccError(
+                f"Duplicate workflow input binding "
+                f"{binding.source_port} -> {binding.target.node}.{binding.target.port}"
+            )
+        seen_input_bindings.add(key)
+
+    seen_output_ports: set[str] = set()
+    for binding in template.workflow_output_bindings:
+        if binding.target_port not in template.exposed_outputs:
+            raise AccError(
+                f"Workflow output binding references missing exposed output "
+                f"{binding.target_port!r}"
+            )
+        validate_data_endpoint(template, binding.source, direction="output")
+        if binding.target_port in seen_output_ports:
+            raise AccError(f"Duplicate workflow output binding for {binding.target_port!r}")
+        seen_output_ports.add(binding.target_port)
 
 
 def topological_levels(template: WorkflowTemplate) -> list[list[str]]:

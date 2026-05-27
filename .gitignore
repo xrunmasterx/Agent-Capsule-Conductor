@@ -4,6 +4,7 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 runs/
+bindings/*.binding.local.json
 acceptance_*.stdout.json
 acceptance_*.stderr.txt
 *.tsbuildinfo

@@ -4,7 +4,15 @@ import re
 from pathlib import Path
 from typing import Any
 
-from acc.domain import ControlEdge, DataEdge, DataEndpoint, NodeSpec, WorkflowTemplate
+from acc.domain import (
+    ControlEdge,
+    DataEdge,
+    DataEndpoint,
+    NodeSpec,
+    WorkflowInputBinding,
+    WorkflowOutputBinding,
+    WorkflowTemplate,
+)
 from acc.engine import DEFAULT_PERMISSION_PROFILE
 from acc.store import load_json
 from acc.utils import AccError
@@ -42,6 +50,26 @@ def workflow_template_to_accflow_payload(template: WorkflowTemplate) -> dict[str
             }
             for edge in template.data_edges
         ],
+        "exposed_inputs": [port_to_payload(port) for port in template.exposed_inputs.values()],
+        "exposed_outputs": [port_to_payload(port) for port in template.exposed_outputs.values()],
+        "workflow_input_bindings": [
+            {
+                "source_port": binding.source_port,
+                "target": {"node": binding.target.node, "port": binding.target.port},
+                "materialization": binding.materialization,
+                "required": binding.required,
+            }
+            for binding in template.workflow_input_bindings
+        ],
+        "workflow_output_bindings": [
+            {
+                "source": {"node": binding.source.node, "port": binding.source.port},
+                "target_port": binding.target_port,
+                "materialization": binding.materialization,
+                "required": binding.required,
+            }
+            for binding in template.workflow_output_bindings
+        ],
         "policies": template.policies,
         "metadata": template.metadata,
     }
@@ -70,6 +98,16 @@ def node_to_payload(node: NodeSpec) -> dict[str, Any]:
     return {key: value for key, value in payload.items() if value is not None}
 
 
+def port_to_payload(port: Any) -> dict[str, Any]:
+    return {
+        "id": port.id,
+        "direction": port.direction,
+        "type": port.type,
+        "required": port.required,
+        "cardinality": port.cardinality,
+    }
+
+
 def import_legacy_graph_template(
     payload: dict[str, Any],
     *,
@@ -94,6 +132,13 @@ def import_legacy_graph_template(
     }
     policy = {**DEFAULT_LEGACY_POLICY, **dict(payload.get("policy") or {})}
     metadata = dict(payload.get("metadata") or {})
+    workflow_id = require_string(payload, "id", "workflow graph")
+    exposed_inputs = parse_legacy_ports(payload.get("exposed_inputs"), "input")
+    exposed_outputs = parse_legacy_ports(payload.get("exposed_outputs"), "output")
+    input_bindings, output_bindings = parse_workflow_port_edges(
+        metadata.get("workflow_port_edges"),
+        workflow_id=workflow_id,
+    )
     metadata.update(
         {
             "canonical_format": "accflow",
@@ -103,15 +148,81 @@ def import_legacy_graph_template(
         }
     )
     return WorkflowTemplate(
-        id=require_string(payload, "id", "workflow graph"),
+        id=workflow_id,
         version=str(payload.get("version") or "0.1.0"),
         nodes=nodes,
         control_edges=control_edges,
         data_edges=data_edges,
+        exposed_inputs=exposed_inputs,
+        exposed_outputs=exposed_outputs,
+        workflow_input_bindings=input_bindings,
+        workflow_output_bindings=output_bindings,
         policies=policy,
         metadata=metadata,
         source_path=source_path,
     )
+
+
+def parse_workflow_port_edges(
+    value: Any,
+    *,
+    workflow_id: str,
+) -> tuple[list[WorkflowInputBinding], list[WorkflowOutputBinding]]:
+    if value is None:
+        return [], []
+    if not isinstance(value, list):
+        raise AccError("metadata.workflow_port_edges must be an array")
+    input_node = f"{workflow_id}__workflow_inputs"
+    output_node = f"{workflow_id}__workflow_outputs"
+    input_bindings: list[WorkflowInputBinding] = []
+    output_bindings: list[WorkflowOutputBinding] = []
+    for index, edge in enumerate(value):
+        if not isinstance(edge, dict):
+            raise AccError("Workflow boundary edge must be an object")
+        source = edge.get("from")
+        target = edge.get("to")
+        if not isinstance(source, dict) or not isinstance(target, dict):
+            raise AccError("Workflow boundary edge endpoints must be objects")
+        source_node = require_string(source, "node", f"workflow boundary edge {index} source")
+        target_node = require_string(target, "node", f"workflow boundary edge {index} target")
+        materialization = normalize_materialization(edge.get("materialization"))
+        required = bool(edge.get("required", True))
+        if source_node == input_node and target_node != output_node:
+            input_bindings.append(
+                WorkflowInputBinding(
+                    source_port=str(source.get("port") or "main"),
+                    target=DataEndpoint(
+                        node=target_node,
+                        port=str(target.get("port") or target.get("input") or "main"),
+                    ),
+                    materialization=materialization,  # type: ignore[arg-type]
+                    required=False,
+                )
+            )
+            continue
+        if target_node == output_node and source_node != input_node:
+            output_bindings.append(
+                WorkflowOutputBinding(
+                    source=DataEndpoint(
+                        node=source_node,
+                        port=str(source.get("port") or source.get("output") or "main"),
+                    ),
+                    target_port=str(target.get("port") or "main"),
+                    materialization=materialization,  # type: ignore[arg-type]
+                    required=required,
+                )
+            )
+            continue
+        if source_node in {input_node, output_node} or target_node in {input_node, output_node}:
+            raise AccError(
+                "Workflow boundary edge direction must be "
+                "Workflow Inputs -> node input or node output -> Workflow Outputs"
+            )
+        raise AccError(
+            f"Unknown workflow boundary pseudo node in metadata.workflow_port_edges: "
+            f"{source_node} -> {target_node}"
+        )
+    return input_bindings, output_bindings
 
 
 def legacy_control_edge_payloads(

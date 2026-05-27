@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "UX Metric Report",
+  "type": "object",
+  "required": ["chinese_label_coverage", "journey_results", "performance"],
+  "properties": {
+    "chinese_label_coverage": { "type": "number", "minimum": 0, "maximum": 1 },
+    "journey_results": { "type": "object" },
+    "performance": {
+      "type": "object",
+      "properties": {
+        "initial_load_ms": { "type": "number" },
+        "node_select_ms": { "type": "number" },
+        "auto_layout_ms": { "type": "number" }
+      }
+    }
+  }
+}

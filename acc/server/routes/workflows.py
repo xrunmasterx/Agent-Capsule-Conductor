@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -35,6 +37,15 @@ class WorkflowRunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     run_dir: str
+    binding_path: str | None = None
+    workspace: str | None = None
+    input: dict[str, Any] | None = None
+
+
+class WorkflowBindingRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    workspace_root: str
 
 
 @router.get("")
@@ -146,6 +157,106 @@ def validate_workflow_endpoint(workflow_id: str, request: Request) -> dict[str, 
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.get("/{workflow_id}/binding")
+def get_workflow_binding(workflow_id: str, request: Request) -> dict[str, Any]:
+    project_root = get_project_root(request)
+    path = default_binding_path(project_root, workflow_id)
+    if not path.exists():
+        return {
+            "workflow_id": workflow_id,
+            "binding_path": relative_project_path(project_root, path),
+            "workspace_root": None,
+            "exists": False,
+            "status": "unbound",
+        }
+    try:
+        payload = load_json(path)
+    except AccError as exc:
+        return {
+            "workflow_id": workflow_id,
+            "binding_path": relative_project_path(project_root, path),
+            "workspace_root": None,
+            "exists": True,
+            "status": "invalid",
+            "error": str(exc),
+        }
+    workspace_root = str(payload.get("workspace_root") or "")
+    validation = validate_workspace_root(workspace_root)
+    return {
+        "workflow_id": workflow_id,
+        "binding_path": relative_project_path(project_root, path),
+        "workspace_root": workspace_root or None,
+        "exists": True,
+        "status": "valid" if validation["valid"] else "missing",
+        "error": validation.get("error"),
+    }
+
+
+@router.post("/{workflow_id}/binding/validate")
+def validate_workflow_binding(
+    workflow_id: str,
+    payload: WorkflowBindingRequest,
+    request: Request,
+) -> dict[str, Any]:
+    validation = validate_workspace_root(payload.workspace_root)
+    return {
+        "workflow_id": workflow_id,
+        "workspace_root": validation["workspace_root"],
+        "valid": validation["valid"],
+        "status": "valid" if validation["valid"] else "missing",
+        "error": validation.get("error"),
+    }
+
+
+@router.put("/{workflow_id}/binding")
+def save_workflow_binding(
+    workflow_id: str,
+    payload: WorkflowBindingRequest,
+    request: Request,
+) -> dict[str, Any]:
+    validation = validate_workspace_root(payload.workspace_root)
+    if not validation["valid"]:
+        raise HTTPException(status_code=400, detail=validation["error"])
+    project_root = get_project_root(request)
+    path = default_binding_path(project_root, workflow_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    binding = {
+        "workflow_id": workflow_id,
+        "binding_name": f"{workflow_id}.local",
+        "state_mode": "stateful",
+        "workspace_root": validation["workspace_root"],
+        "behavior_policy": {"mode": "workspace_native"},
+    }
+    temp_path = path.with_suffix(f"{path.suffix}.{uuid4().hex}.tmp")
+    temp_path.write_text(
+        json.dumps(binding, ensure_ascii=False, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    temp_path.replace(path)
+    return {
+        "status": "saved",
+        "workflow_id": workflow_id,
+        "binding_path": relative_project_path(project_root, path),
+        "workspace_root": validation["workspace_root"],
+        "exists": True,
+    }
+
+
+@router.post("/{workflow_id}/binding/open-folder")
+def open_workflow_binding_folder(workflow_id: str, request: Request) -> dict[str, Any]:
+    project_root = get_project_root(request)
+    bindings_dir = (project_root / "bindings").resolve()
+    if not bindings_dir.is_relative_to(project_root):
+        raise HTTPException(status_code=400, detail="Bindings directory is outside project root")
+    bindings_dir.mkdir(parents=True, exist_ok=True)
+    opened = open_local_folder(bindings_dir)
+    return {
+        "workflow_id": workflow_id,
+        "path": relative_project_path(project_root, bindings_dir),
+        "opened": opened,
+    }
+
+
 @router.post("/{workflow_id}/run")
 def run_workflow_endpoint(
     workflow_id: str,
@@ -157,8 +268,27 @@ def run_workflow_endpoint(
     run_dir = (project_root / payload.run_dir).resolve()
     if not run_dir.is_relative_to(project_root):
         raise HTTPException(status_code=400, detail="Run directory is outside project root")
+    if payload.workspace and payload.binding_path:
+        raise HTTPException(status_code=400, detail="Provide workspace or binding_path, not both")
+    workspace = None
+    binding_path = None
+    if payload.workspace:
+        workspace = Path(payload.workspace).expanduser().resolve()
+        if not workspace.exists() or not workspace.is_dir():
+            raise HTTPException(
+                status_code=400,
+                detail=f"Workspace directory not found: {workspace}",
+            )
+    if payload.binding_path:
+        binding_path = resolve_binding_path(project_root, payload.binding_path)
     try:
-        return WorkflowAppService(registry=server_registry(request)).run_sync(graph_path, run_dir)
+        return WorkflowAppService(registry=server_registry(request)).run_sync(
+            graph_path,
+            run_dir,
+            workspace=workspace,
+            binding_path=binding_path,
+            input_payload=payload.input,
+        )
     except AccError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -216,10 +346,41 @@ def save_graph(path: Path, graph: dict[str, Any], request: Request) -> dict[str,
 
 def legacy_graph_payload_for_save(graph: dict[str, Any]) -> dict[str, Any]:
     payload = json.loads(json.dumps(graph))
+    recover_wrapped_capsule_nodes(payload)
     if "control_edges" not in payload and isinstance(payload.get("edges"), list):
         payload["control_edges"] = payload["edges"]
     payload.setdefault("data_edges", [])
     return payload
+
+
+def recover_wrapped_capsule_nodes(graph: dict[str, Any]) -> None:
+    nodes = graph.get("nodes")
+    if not isinstance(nodes, list):
+        return
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        if node.get("kind") != "workflow":
+            continue
+        if node.get("capsule_id") != "fake-agent.generic":
+            continue
+        if node.get("workflow_ref"):
+            continue
+        ui = node.get("ui")
+        if not isinstance(ui, dict):
+            continue
+        internal_nodes = ui.get("internal_nodes")
+        if not isinstance(internal_nodes, list) or len(internal_nodes) != 1:
+            continue
+        internal_node = internal_nodes[0]
+        if not isinstance(internal_node, dict):
+            continue
+        runtime = internal_node.get("runtime")
+        if not isinstance(runtime, str) or runtime == "fake-agent.generic":
+            continue
+        node["capsule_id"] = runtime
+        node["kind"] = "tool" if internal_node.get("kind") == "Tool" else "agent_session"
+        node.pop("ui", None)
 
 
 def replace_workflow_file(temp_path: Path, target_path: Path) -> None:
@@ -231,6 +392,47 @@ def replace_workflow_file(temp_path: Path, target_path: Path) -> None:
             os.chmod(target_path, 0o666)
             target_path.unlink()
         temp_path.replace(target_path)
+
+
+def default_binding_path(project_root: Path, workflow_id: str) -> Path:
+    safe_id = workflow_id.replace("/", "_").replace("\\", "_")
+    return (project_root / "bindings" / f"{safe_id}.binding.local.json").resolve()
+
+
+def resolve_binding_path(project_root: Path, path_value: str) -> Path:
+    candidate = (project_root / path_value).resolve()
+    bindings_root = (project_root / "bindings").resolve()
+    if not candidate.is_relative_to(bindings_root):
+        raise HTTPException(status_code=400, detail="Binding path is outside bindings directory")
+    if not candidate.exists() or not candidate.is_file():
+        raise HTTPException(status_code=404, detail="Binding file not found")
+    return candidate
+
+
+def validate_workspace_root(path_value: str) -> dict[str, Any]:
+    if not path_value:
+        return {"workspace_root": "", "valid": False, "error": "Workspace directory is required"}
+    workspace = Path(path_value).expanduser().resolve()
+    if not workspace.exists() or not workspace.is_dir():
+        return {
+            "workspace_root": str(workspace),
+            "valid": False,
+            "error": f"Workspace directory not found: {workspace}",
+        }
+    return {"workspace_root": str(workspace), "valid": True}
+
+
+def open_local_folder(path: Path) -> bool:
+    try:
+        if sys.platform.startswith("win"):
+            os.startfile(str(path))  # type: ignore[attr-defined]
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", str(path)])
+        else:
+            subprocess.Popen(["xdg-open", str(path)])
+    except OSError:
+        return False
+    return True
 
 
 def find_graph_path(workflow_id: str, request: Request) -> Path:

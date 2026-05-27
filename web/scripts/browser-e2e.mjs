@@ -245,8 +245,9 @@ try {
     await toolbar.getByRole("button", { name: "保存", exact: true }).waitFor();
     await toolbar.getByRole("button", { name: "校验", exact: true }).waitFor();
     await toolbar.getByRole("button", { name: "运行", exact: true }).waitFor();
-    await page.getByText("CLI 可见输出").waitFor();
-    appendStep(journey, "打开首页并验证中文核心标签", "pass", "工作流、节点库、产物、控制平面、图谱画布、属性面板、保存、校验、运行可见");
+    await page.getByRole("button", { name: "日志" }).waitFor();
+    await page.getByRole("button", { name: "原始数据" }).waitFor();
+    appendStep(journey, "打开首页并验证中文核心标签", "pass", "工作流、节点库、产物、日志、原始数据、控制平面、图谱画布、属性面板、保存、校验、运行可见");
     journey.fixes_applied.push({
       summary: "修正和补齐中文文案，确保中文优先标签在真实 UI 可见。",
       retest_status: "pass",
@@ -258,12 +259,15 @@ try {
     const capsuleId = `browser-e2e-${Date.now()}.generic`;
     createdCapsuleIds.push(capsuleId);
     await navButton(page, "节点库").click();
-    const createPanel = page.getByLabel("创建 Capsule");
+    const createPanel = page.getByRole("region", { name: "创建 Capsule" });
     await createPanel.waitFor();
+    await page.getByLabel("Capsule 类型").selectOption("generic_cli");
+    await createPanel.getByRole("button", { name: "基本信息" }).click();
     await page.getByLabel("新 Capsule id").fill(capsuleId);
     await page.getByLabel("新 Capsule 名称").fill("Browser E2E Capsule");
-    await page.getByLabel("Runtime").selectOption("generic_cli");
-    await createPanel.getByRole("button", { name: "创建", exact: true }).click();
+    await createPanel.getByRole("button", { name: "创建并校验", exact: true }).click();
+    await page.getByText(new RegExp(`已创建并校验 ${capsuleId}:`)).first().waitFor({ timeout: 20000 });
+    await page.getByRole("button", { name: "高级设置 / 原始文件" }).click();
     await page.getByText("Capsule 编辑器").waitFor();
     await page.getByRole("button", { name: "校验", exact: true }).click();
     await page.getByRole("button", { name: "测试", exact: true }).click();
@@ -298,11 +302,13 @@ try {
     );
     assert((await page.locator(".react-flow__edge").count()) >= 1, "未看到连接边");
     await echoNode.click();
+    await page.getByRole("button", { name: "输入", exact: true }).click();
     await page
       .getByRole("textbox", { name: "输入" })
       .fill('{\n  "message": "hello from browser e2e"\n}');
     await page.getByRole("button", { name: "保存 输入" }).click();
     await fakeNode.click();
+    await page.getByRole("button", { name: "输入", exact: true }).click();
     await page
       .getByRole("textbox", { name: "映射" })
       .fill(`{\n  "topic": "{{ nodes.${echoNodeId}.output.summary }}"\n}`);
@@ -312,9 +318,10 @@ try {
     await toolbar.getByRole("button", { name: "运行" }).click();
     await page.getByText("运行 ui_demo_graph: 成功").waitFor({ timeout: 20000 });
     await echoNode.click();
+    await page.getByRole("button", { name: "输出", exact: true }).click();
     await page.locator(".path-grid").getByRole("button", { name: /^输出/ }).click();
     await fakeNode.click();
-    await page.locator(".path-grid").getByRole("button", { name: /^输入/ }).click();
+    await page.getByRole("button", { name: "输入", exact: true }).click();
     appendStep(journey, "从零添加两节点、连边、映射并运行", "pass", "连接边可见，运行成功，节点输入输出可检查");
     await capture(page, journey, "two_node_workflow");
   });
@@ -331,7 +338,8 @@ try {
     await toolbar.getByRole("button", { name: "运行" }).click();
     await page.getByText("运行 demo_parallel: 成功").waitFor({ timeout: 20000 });
     await page.getByTestId("workflow-node-merge").click({ force: true });
-    await page.getByRole("button", { name: "输出" }).click();
+    await page.getByRole("button", { name: "输出", exact: true }).click();
+    await page.locator(".path-grid").getByRole("button", { name: /^输出/ }).click();
     appendStep(journey, "加载并运行并行 Demo", "pass", "扇出/汇入结构可见，汇总节点输出可检查");
     await capture(page, journey, "parallel_workflow");
   });

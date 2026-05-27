@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import shutil
 from pathlib import Path
 from typing import Any
 
 from jinja2 import Environment, StrictUndefined, TemplateError
 
-from acc.domain import AccError, EnvironmentFrame, NodeSpec, WorkflowTemplate
+from acc.domain import AccError, EnvironmentFrame, NodeSpec, PermissionProfile, WorkflowTemplate
 from acc.engine import (
     parse_clean_workflow_template,
     topological_levels,
@@ -101,7 +102,11 @@ class WorkflowAppService:
             return validate_clean_workflow_file(workflow_path)
         template, raw_graph = load_legacy_graph_template(workflow_path)
         validate_legacy_capsule_references(template, self.registry)
-        validate_clean_workflow_template(template)
+        template = hydrate_legacy_capsule_permissions(template, self.registry)
+        validate_clean_workflow_template(
+            template,
+            hermetic=not external_agent_execution_enabled(),
+        )
         levels = topological_levels(template)
         return {
             "status": "valid",
@@ -136,6 +141,7 @@ class WorkflowAppService:
                 run_dir,
                 workspace=workspace,
                 binding_path=binding_path,
+                input_payload=input_payload,
                 inherited_workspace=inherited_workspace,
                 inherited_ephemeral=inherited_ephemeral,
                 node_executor=node_executor,
@@ -180,7 +186,11 @@ def load_clean_workflow_template(path: Path) -> WorkflowTemplate:
     if not isinstance(payload, dict):
         raise AccError(f"WorkflowTemplate must be a JSON object: {path}")
     template = parse_clean_workflow_template(payload, source_path=path)
-    validate_clean_workflow_template(template, raw_payload=payload)
+    validate_clean_workflow_template(
+        template,
+        raw_payload=payload,
+        hermetic=not external_agent_execution_enabled(),
+    )
     return template
 
 
@@ -232,6 +242,7 @@ async def run_clean_workflow_template(
     *,
     workspace: Path | None = None,
     binding_path: Path | None = None,
+    input_payload: dict[str, Any] | None = None,
     inherited_workspace: Path | None = None,
     inherited_ephemeral: bool = False,
     node_executor: NodeExecutor | None = None,
@@ -255,7 +266,9 @@ async def run_clean_workflow_template(
         template,
         workflow_path,
         store,
-        workflow_input=dict(template.metadata.get("legacy_workflow_input", {}) or {}),
+        workflow_input=dict(
+            input_payload or template.metadata.get("legacy_workflow_input", {}) or {}
+        ),
         node_executor=node_executor,
     )
 
@@ -272,7 +285,11 @@ async def run_legacy_graph_template(
     template, raw_graph = load_legacy_graph_template(workflow_path)
     service_registry = registry or CapsuleRegistry()
     validate_legacy_capsule_references(template, service_registry)
-    validate_clean_workflow_template(template)
+    template = hydrate_legacy_capsule_permissions(template, service_registry)
+    validate_clean_workflow_template(
+        template,
+        hermetic=not external_agent_execution_enabled(),
+    )
     workspace_for_store = workspace
     if binding_path is not None and workspace_for_store is None:
         from acc.environment import load_workspace_binding
@@ -329,6 +346,7 @@ async def run_workflow_template_instance(
     legacy_compatibility: bool = False,
     node_executor: NodeExecutor | None = None,
 ) -> dict[str, Any]:
+    validate_required_workflow_inputs(template, workflow_input)
     store.prepare_run_dir()
     frame = store.create_environment_frame()
     levels = topological_levels(template)
@@ -340,9 +358,20 @@ async def run_workflow_template_instance(
     )
 
     source_outboxes: dict[str, dict[str, Path]] = {}
+    workflow_input_outboxes = store.write_workflow_input_bundles(workflow_input)
+    for port_id in sorted(template.exposed_inputs):
+        if port_id not in workflow_input_outboxes and template.exposed_inputs[port_id].required:
+            continue
+        if port_id not in workflow_input_outboxes:
+            store.write_workflow_event(
+                "workflow_input_skipped",
+                status="skipped",
+                payload={"port_id": port_id, "reason": "optional input not provided"},
+            )
     node_results: dict[str, dict[str, Any]] = {}
     node_outputs: dict[str, dict[str, Any]] = {}
     materializations: list[dict[str, Any]] = []
+    workflow_outputs: dict[str, dict[str, Any]] = {}
     write_locks: dict[str, asyncio.Lock] = {frame.environment_id: asyncio.Lock()}
     max_concurrency = max(1, int(template.policies.get("max_concurrency") or 1))
     failure_mode = str(template.policies.get("failure_mode") or "fail_fast")
@@ -360,9 +389,11 @@ async def run_workflow_template_instance(
                 frame,
                 level_index,
                 source_outboxes,
+                workflow_input_outboxes,
                 node_outputs,
                 workflow_input,
                 materializations,
+                workflow_outputs,
                 semaphore,
                 write_locks[frame.environment_id],
                 legacy_compatibility=legacy_compatibility,
@@ -398,6 +429,7 @@ async def run_workflow_template_instance(
         "topological_levels": levels,
         "nodes": list(node_results.values()),
         "materializations": materializations,
+        "workflow_outputs": workflow_outputs,
         "errors": errors,
         "started_at": started_at,
         "ended_at": ended_at,
@@ -428,6 +460,21 @@ async def run_workflow_template_instance(
         payload={"errors": errors},
     )
     return payload
+
+
+def validate_required_workflow_inputs(
+    template: WorkflowTemplate,
+    workflow_input: dict[str, Any],
+) -> None:
+    missing = [
+        binding.source_port
+        for binding in template.workflow_input_bindings
+        if template.exposed_inputs.get(binding.source_port) is not None
+        and template.exposed_inputs[binding.source_port].required
+        and binding.source_port not in workflow_input
+    ]
+    if missing:
+        raise AccError(f"Missing required workflow input port(s): {', '.join(sorted(missing))}")
 
 
 def write_legacy_run_compatibility_files(
@@ -504,12 +551,67 @@ def validate_legacy_capsule_references(
             registry.get(capsule_id)
 
 
+def external_agent_execution_enabled() -> bool:
+    return os.getenv("ACC_RUN_EXTERNAL_AGENT_TESTS", "").strip().lower() in {"1", "true", "yes"}
+
+
+def hydrate_legacy_capsule_permissions(
+    template: WorkflowTemplate,
+    registry: CapsuleRegistry,
+) -> WorkflowTemplate:
+    nodes: dict[str, NodeSpec] = {}
+    for node_id, node in template.nodes.items():
+        capsule_id = node.raw.get("legacy_capsule_id")
+        if not isinstance(capsule_id, str):
+            nodes[node_id] = node
+            continue
+        capsule = registry.get(capsule_id)
+        permissions = capsule.spec.permissions
+        nodes[node_id] = NodeSpec(
+            id=node.id,
+            kind=node.kind,
+            runtime=node.runtime,
+            tool=node.tool,
+            workflow_ref=node.workflow_ref,
+            prompt=node.prompt,
+            permission_profile=PermissionProfile(
+                workspace_access="writes_workspace"
+                if permissions.write_files
+                else "read_only",
+                network=permissions.network,
+                shell=False,
+                dangerous=permissions.allow_dangerous,
+                env_policy="acc_whitelist",
+                allowed_env=(),
+                timeout_seconds=permissions.timeout_seconds,
+            ),
+            input_ports=node.input_ports,
+            output_ports=node.output_ports,
+            raw=node.raw,
+        )
+    return WorkflowTemplate(
+        id=template.id,
+        version=template.version,
+        nodes=nodes,
+        control_edges=template.control_edges,
+        data_edges=template.data_edges,
+        exposed_inputs=template.exposed_inputs,
+        exposed_outputs=template.exposed_outputs,
+        workflow_input_bindings=template.workflow_input_bindings,
+        workflow_output_bindings=template.workflow_output_bindings,
+        policies=template.policies,
+        metadata=template.metadata,
+        source_path=template.source_path,
+    )
+
+
 def run_clean_workflow_template_sync(
     workflow_path: Path,
     run_dir: Path,
     *,
     workspace: Path | None = None,
     binding_path: Path | None = None,
+    input_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return asyncio.run(
         run_clean_workflow_template(
@@ -517,6 +619,7 @@ def run_clean_workflow_template_sync(
             run_dir,
             workspace=workspace,
             binding_path=binding_path,
+            input_payload=input_payload,
         )
     )
 
@@ -529,9 +632,11 @@ async def run_clean_node(
     frame: EnvironmentFrame,
     level_index: int,
     source_outboxes: dict[str, dict[str, Path]],
+    workflow_input_outboxes: dict[str, Path],
     node_outputs: dict[str, dict[str, Any]],
     workflow_input: dict[str, Any],
     materializations: list[dict[str, Any]],
+    workflow_outputs: dict[str, dict[str, Any]],
     semaphore: asyncio.Semaphore,
     write_lock: asyncio.Lock,
     *,
@@ -555,6 +660,7 @@ async def run_clean_node(
                 store,
                 node_dir,
                 source_outboxes,
+                workflow_input_outboxes,
                 materializations,
             )
             if is_legacy_capsule_node(node):
@@ -584,6 +690,8 @@ async def run_clean_node(
                 prepare_attempt=store.cleanup_node_attempt,
             )
             outboxes = store.write_artifact_bundle(node, node_dir, result)
+            published_outputs = store.publish_workflow_outputs_for_node(node, outboxes)
+            workflow_outputs.update(published_outputs)
             result_payload = {
                 "node_id": node.id,
                 "capsule_id": str(node.raw.get("legacy_capsule_id") or ""),
@@ -609,6 +717,7 @@ async def run_clean_node(
                 else None,
                 "inbox_dir": str((node_dir / "inbox").resolve()),
                 "outboxes": {port: str(path.resolve()) for port, path in outboxes.items()},
+                "workflow_outputs": published_outputs,
             }
             store.write_node_manifest(node_dir, result_payload)
             store.write_workflow_event(
@@ -675,9 +784,38 @@ def materialize_clean_inboxes(
     store: FileSystemWorkflowStore,
     node_dir: Path,
     source_outboxes: dict[str, dict[str, Path]],
+    workflow_input_outboxes: dict[str, Path],
     materializations: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
+    for binding in template.workflow_input_bindings:
+        if binding.target.node != node.id:
+            continue
+        manifest = store.materialize_workflow_input_binding(
+            binding,
+            node_dir,
+            workflow_input_outboxes,
+        )
+        if manifest is None:
+            if binding.required:
+                raise AccError(f"Missing workflow input for port {binding.source_port!r}")
+            skipped = {
+                "port_id": binding.target.port,
+                "node_id": node.id,
+                "direction": "input",
+                "source_node_id": f"{template.id}__workflow_inputs",
+                "source_port_id": binding.source_port,
+                "target_node_id": node.id,
+                "target_port_id": binding.target.port,
+                "materialization": binding.materialization,
+                "skipped": True,
+                "reason": "optional workflow input not provided",
+            }
+            records.append(skipped)
+            materializations.append(skipped)
+            continue
+        records.append(manifest)
+        materializations.append(manifest)
     for edge in template.data_edges:
         if edge.target.node != node.id:
             continue
@@ -717,6 +855,7 @@ async def execute_app_clean_node(
     nested_result = await run_clean_workflow_template(
         child_path,
         node_dir / "nested_workflow",
+        input_payload={},
         inherited_workspace=frame.workspace_root,
         inherited_ephemeral=frame.ephemeral,
     )

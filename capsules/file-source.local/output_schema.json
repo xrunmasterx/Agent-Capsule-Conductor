@@ -1,0 +1,32 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "manifest_path": {
+      "type": "string"
+    },
+    "source_path": {
+      "type": "string"
+    },
+    "source_type": {
+      "enum": [
+        "file",
+        "directory"
+      ],
+      "type": "string"
+    },
+    "status": {
+      "type": "string"
+    },
+    "summary": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "status",
+    "summary",
+    "source_path",
+    "source_type",
+    "manifest_path"
+  ],
+  "type": "object"
+}

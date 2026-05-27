@@ -99,18 +99,21 @@ def build_codex_command(request: AgentRunRequest) -> list[str]:
     args = request.args_base or ["exec"]
     if args[:1] != ["exec"]:
         args = ["exec", *args]
+    workspace_dir = request.workspace_dir.resolve()
+    output_schema_path = request.output_schema_path.resolve()
+    output_json_path = request.output_json_path.resolve()
     return [
         command,
         *args,
         "--cd",
-        str(request.workspace_dir),
+        str(workspace_dir),
         "--sandbox",
         request.sandbox,
         "--json",
         "--output-schema",
-        str(request.output_schema_path),
+        str(output_schema_path),
         "-o",
-        str(request.output_json_path),
+        str(output_json_path),
         "-",
     ]
 

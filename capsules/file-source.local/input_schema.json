@@ -1,0 +1,13 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "path": {
+      "description": "File or directory path relative to the bound workflow workspace.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "path"
+  ],
+  "type": "object"
+}

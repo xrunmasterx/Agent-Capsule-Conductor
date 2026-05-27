@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 
 from acc.adapters.base import AgentRunRequest
-from acc.adapters.codex_cli import CodexCliAdapter
+from acc.adapters.codex_cli import CodexCliAdapter, build_codex_command
 from acc.artifact_store import ArtifactStore
 
 
@@ -91,6 +91,25 @@ def test_codex_command_and_capture(monkeypatch, tmp_path: Path) -> None:
         }
     ]
     assert request.stderr_log_path.read_text(encoding="utf-8") == "stderr\n"
+
+
+def test_codex_command_uses_absolute_paths_for_workspace_cwd(tmp_path: Path) -> None:
+    request = make_request(tmp_path)
+    workspace = tmp_path / "external-workspace"
+    workspace.mkdir()
+    request = AgentRunRequest(
+        **{
+            **request.__dict__,
+            "workspace_dir": workspace,
+            "output_schema_path": Path("capsules/example/output_schema.json"),
+        }
+    )
+
+    command = build_codex_command(request)
+
+    assert Path(command[command.index("--cd") + 1]).is_absolute()
+    assert Path(command[command.index("--output-schema") + 1]).is_absolute()
+    assert Path(command[command.index("-o") + 1]).is_absolute()
 
 
 def test_codex_nonzero_exit_returns_failed(monkeypatch, tmp_path: Path) -> None:

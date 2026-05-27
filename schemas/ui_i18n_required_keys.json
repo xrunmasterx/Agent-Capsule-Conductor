@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Required Chinese UI Labels",
+  "type": "object",
+  "required": [
+    "workflow",
+    "capsuleLibrary",
+    "createCapsule",
+    "save",
+    "validate",
+    "run",
+    "autoLayout",
+    "input",
+    "output",
+    "artifacts",
+    "logs",
+    "rawData"
+  ],
+  "properties": {
+    "workflow": { "const": "工作流" },
+    "capsuleLibrary": { "const": "节点库" },
+    "createCapsule": { "const": "创建 Capsule" },
+    "save": { "const": "保存" },
+    "validate": { "const": "校验" },
+    "run": { "const": "运行" },
+    "autoLayout": { "const": "自动布局" },
+    "input": { "const": "输入" },
+    "output": { "const": "输出" },
+    "artifacts": { "const": "产物" },
+    "logs": { "const": "日志" },
+    "rawData": { "const": "原始数据" }
+  }
+}
