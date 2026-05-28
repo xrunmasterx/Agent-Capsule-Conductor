@@ -1,0 +1,63 @@
+{
+  "id": "callable_main_function_demo",
+  "version": "0.1.0",
+  "name": "Callable Main Function Demo",
+  "nodes": [
+    {
+      "id": "produce",
+      "kind": "tool",
+      "tool": "fake_producer",
+      "ports": {
+        "outputs": {
+          "main": {
+            "type": "artifact"
+          }
+        }
+      }
+    },
+    {
+      "id": "summarize",
+      "kind": "agent",
+      "runtime": "generic_fake_agent",
+      "prompt": "Summarize the explicitly materialized input.",
+      "ports": {
+        "inputs": {
+          "main": {
+            "type": "artifact"
+          }
+        },
+        "outputs": {
+          "report": {
+            "type": "artifact"
+          }
+        }
+      }
+    }
+  ],
+  "control_edges": [
+    {
+      "from": "produce",
+      "to": "summarize"
+    }
+  ],
+  "data_edges": [
+    {
+      "from": {
+        "node": "produce",
+        "port": "main"
+      },
+      "to": {
+        "node": "summarize",
+        "port": "main"
+      },
+      "materialization": "copy"
+    }
+  ],
+  "policies": {
+    "max_concurrency": 2,
+    "failure_mode": "fail_fast"
+  },
+  "metadata": {
+    "layout": "left-to-right"
+  }
+}

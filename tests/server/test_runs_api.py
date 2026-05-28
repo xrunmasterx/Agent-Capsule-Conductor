@@ -59,6 +59,32 @@ def test_get_run_events(client, project_root) -> None:
     assert payload["events"][1]["node_id"] == "server_node"
 
 
+def test_get_run_events_includes_nested_workflow_node_events(client, project_root) -> None:
+    run_dir = project_root / "runs" / "server_run"
+    event_log = run_dir / "workflow_events.jsonl"
+    event_log.write_text(
+        '{"type":"workflow_started","timestamp":"2026-05-29T01:00:00Z","status":"running"}\n'
+        '{"type":"node_started","timestamp":"2026-05-29T01:00:01Z","node_id":"container","status":"running"}\n',
+        encoding="utf-8",
+    )
+    nested_event_log = run_dir / "nodes" / "container" / "nested_workflow" / "workflow_events.jsonl"
+    nested_event_log.parent.mkdir(parents=True)
+    nested_event_log.write_text(
+        '{"type":"node_started","timestamp":"2026-05-29T01:00:02Z","node_id":"inner_agent","status":"running"}\n',
+        encoding="utf-8",
+    )
+
+    response = client.get("/api/runs/server_run/events")
+
+    assert response.status_code == 200
+    events = response.json()["events"]
+    nested_events = [event for event in events if event.get("nested")]
+    assert len(nested_events) == 1
+    assert nested_events[0]["node_id"] == "inner_agent"
+    assert nested_events[0]["parent_node_id"] == "container"
+    assert nested_events[0]["ui_node_id"] == "container__internal__inner_agent"
+
+
 def test_get_run_events_returns_tail_limit(client, project_root) -> None:
     event_log = project_root / "runs" / "server_run" / "workflow_events.jsonl"
     event_log.write_text(

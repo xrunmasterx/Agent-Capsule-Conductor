@@ -117,6 +117,18 @@ export const api = {
     getJson<WorkflowDetail>(`/api/workflows/${encodeURIComponent(workflowId)}`),
   saveWorkflow: (graph: WorkflowGraph, force = true) =>
     sendJson<{ status: string; workflow_id: string }>('POST', '/api/workflows', { graph, force }),
+  runGraph: (
+    graph: WorkflowGraph,
+    runDir: string,
+    options?: { bindingPath?: string; workspace?: string; input?: Record<string, unknown> },
+  ) =>
+    sendJson<WorkflowRunResult>('POST', '/api/workflows/run-graph', {
+      graph,
+      run_dir: runDir,
+      ...(options?.bindingPath ? { binding_path: options.bindingPath } : {}),
+      ...(options?.workspace ? { workspace: options.workspace } : {}),
+      ...(options?.input ? { input: options.input } : {}),
+    }),
   updateWorkflow: (workflowId: string, graph: WorkflowGraph) =>
     sendJson<{ status: string; workflow_id: string }>(
       'PUT',

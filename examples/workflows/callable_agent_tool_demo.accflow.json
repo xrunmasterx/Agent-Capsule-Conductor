@@ -1,0 +1,95 @@
+{
+  "id": "callable_agent_tool_demo",
+  "version": "0.1.0",
+  "name": "Callable Agent Tool Demo",
+  "nodes": [
+    {
+      "id": "collect",
+      "kind": "tool",
+      "tool": "fake_producer",
+      "ports": {
+        "outputs": {
+          "raw": {
+            "type": "artifact"
+          }
+        }
+      }
+    },
+    {
+      "id": "review",
+      "kind": "agent",
+      "runtime": "generic_fake_agent",
+      "prompt": "Review the collected artifact.",
+      "ports": {
+        "inputs": {
+          "raw": {
+            "type": "artifact"
+          }
+        },
+        "outputs": {
+          "review": {
+            "type": "artifact"
+          }
+        }
+      }
+    },
+    {
+      "id": "merge",
+      "kind": "tool",
+      "tool": "merge",
+      "ports": {
+        "inputs": {
+          "review": {
+            "type": "artifact"
+          }
+        },
+        "outputs": {
+          "bundle": {
+            "type": "artifact"
+          }
+        }
+      }
+    }
+  ],
+  "control_edges": [
+    {
+      "from": "collect",
+      "to": "review"
+    },
+    {
+      "from": "review",
+      "to": "merge"
+    }
+  ],
+  "data_edges": [
+    {
+      "from": {
+        "node": "collect",
+        "port": "raw"
+      },
+      "to": {
+        "node": "review",
+        "port": "raw"
+      },
+      "materialization": "copy"
+    },
+    {
+      "from": {
+        "node": "review",
+        "port": "review"
+      },
+      "to": {
+        "node": "merge",
+        "port": "review"
+      },
+      "materialization": "copy"
+    }
+  ],
+  "policies": {
+    "max_concurrency": 2,
+    "failure_mode": "fail_fast"
+  },
+  "metadata": {
+    "layout": "left-to-right"
+  }
+}

@@ -1,0 +1,19 @@
+/goal Implement ACC Callable Semantics Refactor according to docs/codex_goal_callable_semantics/GOAL.md, SPEC.md, DESIGN.md, DOMAIN_MODEL.md, WORKFLOW_AS_FUNCTION_SPEC.md, AGENT_TOOL_AS_CLASS_SPEC.md, SCOPE_FRAME_SPEC.md, PORT_DATA_FLOW_SPEC.md, EXECUTION_BOUNDARIES.md, TERMINATION_CONDITIONS.md, TEST_PLAN.md, ACCEPTANCE.md, IMPLEMENTATION_ORDER.md, MIGRATION_PLAN.md, MIGRATION_NOTES.md, RISK_REGISTER.md, FINDINGS.md, QUALITY_REPORT.md, PROGRESS.md, docs/human/ACC_CALLABLE_SEMANTICS_PLAIN_LANGUAGE.md, and USAGE_WITH_GOAL.md.
+
+Read AGENTS.md first. Preserve all existing public contracts: do not rewrite acc run, do not break --emit-conductor-json or --emit-json stdout single-JSON contracts, do not require real Codex/Claude/Cursor/Gemini/Hermes/Conductor/network in default tests, and do not implement a custom LLM agent loop.
+
+Refactor the current Clean Core semantics so Agent and Tool are first-class reusable ClassTemplates, Workflow is a first-class reusable WorkflowFunctionTemplate, workflow execution creates FunctionInvocation and ScopeFrame records, and every agent/tool execution creates a SessionInstance. Existing .accflow.json files must continue to validate/run through a normalization layer that maps legacy NodeSpec fields into NodeInvocationSpec and CallableRef. Existing CapsuleSpec-based capsules must remain supported through a compatibility adapter; do not remove legacy behavior without migration notes and tests.
+
+Implement explicit nested workflow function-call semantics: parent workflow input/inbox data must be bound to child workflow exposed_inputs, child exposed_outputs must return through the parent workflow-node outbox, and downstream nodes must consume only from that parent outbox. Keep upstream_context only as optional control context, not as the primary data protocol.
+
+Add engine validation for callable references, workflow function boundaries, data/control edge consistency, parent-child workflow boundary isolation, recursion guard, max call depth, stateful-in-stateful rejection by default, absolute workspace path rejection, dangerous permission rejection, hermetic network rejection, and full host env inheritance rejection.
+
+Add store support for function_invocation_manifest.json, scope_frame_manifest.json, session_instance_manifest.json, workflow call manifests, node events, workflow events, inbox/outbox materialization, and artifact bundle lineage. Store must remain the only owner of filesystem materialization and must reject path traversal.
+
+Keep runtime focused on execution only: it must enforce permission profiles, env whitelist, cwd, timeout, workspace write policy, and output/artifact validation, but must not mutate workflow graph semantics or call app/store orchestration directly.
+
+Split acc.app if necessary so workflow service, execution loop, node invocation, workflow call handling, and legacy compatibility are separate enough to keep boundaries clear. Preserve CLI/server public behavior.
+
+Before code changes, update docs/codex_goal_callable_semantics/FINDINGS.md with current architecture findings, root causes, smallest safe fix, risks, and baseline test results. Implement in milestones. After every meaningful milestone, run relevant tests. Completion requires all commands in docs/codex_goal_callable_semantics/ACCEPTANCE.md to pass, including uv run pytest -q, uv run ruff check ., architecture boundary tests, callable domain/schema/engine/store/session/nested workflow tests, CLI JSON stdout regression, and legacy acc run --emit-conductor-json regression.
+
+Final QUALITY_REPORT.md must explain what was added, deleted, renamed, preserved, how old Capsule/NodeSpec concepts map to new Class/Function/Invocation/Scope/Session concepts, which tests prove correctness, and what risks remain.

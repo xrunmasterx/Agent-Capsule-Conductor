@@ -6,12 +6,22 @@ from typing import Any
 
 from acc.domain import (
     AccError,
+    CallableOverride,
+    CallableRef,
+    CallDepthPolicy,
     ControlEdge,
     DataEdge,
     DataEndpoint,
+    EnvironmentPolicy,
+    InvocationPolicy,
+    NodeInvocationSpec,
     NodeSpec,
     PermissionProfile,
     PortContract,
+    RecursionPolicy,
+    WorkflowCallInputBinding,
+    WorkflowCallOutputBinding,
+    WorkflowFunctionTemplate,
     WorkflowInputBinding,
     WorkflowOutputBinding,
     WorkflowTemplate,
@@ -21,6 +31,13 @@ IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 PATH_KEYS = {"workspace", "workspace_root", "workspace_path", "local_path"}
 NODE_STATUSES_OK = {"success", "skipped"}
 DEFAULT_PERMISSION_PROFILE = PermissionProfile()
+ENVIRONMENT_POLICIES = {
+    "inherit_parent",
+    "new_ephemeral",
+    "binding_required",
+    "forbidden",
+}
+CALLABLE_KINDS = {"agent_class", "tool_class", "workflow_function", "legacy_capsule"}
 
 
 def is_clean_workflow_payload(payload: dict[str, Any]) -> bool:
@@ -350,11 +367,18 @@ def validate_node_spec(
         raise AccError(f"Tool node {node.id} requires tool")
     if node.kind == "workflow" and not node.workflow_ref:
         raise AccError(f"Workflow node {node.id} requires workflow_ref")
-    validate_permission_profile(
-        node.permission_profile or DEFAULT_PERMISSION_PROFILE,
-        allow_dangerous=allow_dangerous,
-        hermetic=hermetic,
-    )
+    try:
+        validate_permission_profile(
+            node.permission_profile or DEFAULT_PERMISSION_PROFILE,
+            allow_dangerous=allow_dangerous,
+            hermetic=hermetic,
+        )
+    except AccError as exc:
+        capsule_id = node.raw.get("legacy_capsule_id") or node.raw.get("capsule_id")
+        capsule_suffix = (
+            f" capsule {capsule_id!r}" if isinstance(capsule_id, str) and capsule_id else ""
+        )
+        raise AccError(f"Node {node.id!r}{capsule_suffix} permission rejected: {exc}") from exc
 
 
 def validate_permission_profile(
@@ -371,6 +395,369 @@ def validate_permission_profile(
         raise AccError(f"Unsupported env_policy: {profile.env_policy}")
     if "ALL" in profile.allowed_env or "*" in profile.allowed_env:
         raise AccError("full host environment inheritance is rejected")
+
+
+def validate_callable_workflow_function(
+    template: WorkflowFunctionTemplate,
+    *,
+    known_callable_refs: set[tuple[str, str]] | None = None,
+    call_depth: int = 0,
+    call_depth_policy: CallDepthPolicy | None = None,
+    recursion_policy: RecursionPolicy | None = None,
+    parent_stateful: bool = False,
+) -> None:
+    validate_identifier(template.id, "workflow function id")
+    depth_policy = call_depth_policy or CallDepthPolicy()
+    recursion = recursion_policy or RecursionPolicy()
+    if call_depth > depth_policy.default_max_depth:
+        raise AccError("workflow call depth exceeds policy")
+    node_ids = set(template.node_invocations)
+    for node in template.node_invocations.values():
+        validate_node_invocation_spec(
+            template,
+            node,
+            known_callable_refs=known_callable_refs,
+            recursion_policy=recursion,
+            parent_stateful=parent_stateful,
+        )
+    validate_callable_control_edges(template, node_ids)
+    validate_callable_data_edges(template, node_ids)
+    levels = callable_topological_levels(template)
+    validate_callable_data_edges_follow_control_dependencies(template, levels=levels)
+
+
+def validate_node_invocation_spec(
+    template: WorkflowFunctionTemplate,
+    node: NodeInvocationSpec,
+    *,
+    known_callable_refs: set[tuple[str, str]] | None,
+    recursion_policy: RecursionPolicy,
+    parent_stateful: bool,
+) -> None:
+    validate_identifier(node.id, "node invocation id")
+    validate_callable_ref(node.callable_ref, known_callable_refs=known_callable_refs)
+    if node.callable_ref.kind == "workflow_function":
+        recursive_ids = {template.id}
+        if template.source_path is not None:
+            recursive_ids.add(template.source_path.name)
+        if node.callable_ref.id in recursive_ids and not recursion_policy.allow_recursive:
+            raise AccError("recursive workflow call requires explicit allow policy")
+        if (
+            parent_stateful
+            and node.environment_policy == "binding_required"
+            and not template.policies.get("allow_nested_stateful_environment")
+        ):
+            raise AccError("stateful-in-stateful workflow nesting is rejected by default")
+        validate_workflow_call_input_boundary(template, node)
+        validate_workflow_call_output_boundary(node)
+
+
+def validate_callable_ref(
+    ref: CallableRef,
+    *,
+    known_callable_refs: set[tuple[str, str]] | None,
+) -> None:
+    if ref.kind not in CALLABLE_KINDS:
+        raise AccError(f"Unsupported callable kind: {ref.kind}")
+    if not ref.id:
+        raise AccError("callable_ref.id is required")
+    if known_callable_refs is not None and (ref.kind, ref.id) not in known_callable_refs:
+        raise AccError(f"Unknown callable reference: {ref.kind}:{ref.id}")
+
+
+def validate_workflow_call_input_boundary(
+    template: WorkflowFunctionTemplate,
+    node: NodeInvocationSpec,
+) -> None:
+    for binding in node.workflow_call_input_bindings:
+        if binding.source is None:
+            if binding.required and binding.static_value is None:
+                raise AccError(
+                    f"Workflow call input {binding.workflow_input!r} requires a source"
+                )
+            continue
+        if binding.source.node not in template.node_invocations:
+            raise AccError(
+                "workflow call input binding references missing parent node "
+                f"{binding.source.node!r}"
+            )
+        has_matching_data_edge = any(
+            edge.source.node == binding.source.node
+            and edge.source.port == binding.source.port
+            and edge.target.node == node.id
+            for edge in template.data_edges
+        )
+        if not has_matching_data_edge:
+            raise AccError(
+                "workflow call input must be bound through parent workflow-node inbox: "
+                f"{binding.source.node}.{binding.source.port} -> "
+                f"{node.id}.{binding.workflow_input}"
+            )
+
+
+def validate_workflow_call_output_boundary(node: NodeInvocationSpec) -> None:
+    for binding in node.workflow_call_output_bindings:
+        validate_identifier(binding.workflow_output, "workflow call output port id")
+        validate_identifier(binding.parent_port, "workflow node output port id")
+        if node.output_ports and binding.parent_port not in node.output_ports:
+            raise AccError(
+                "workflow call output binding references missing parent output port "
+                f"{binding.parent_port!r}"
+            )
+
+
+def validate_callable_control_edges(
+    template: WorkflowFunctionTemplate,
+    node_ids: set[str],
+) -> None:
+    for edge in template.control_edges:
+        if edge.source not in node_ids:
+            raise AccError(f"Control edge points from missing node {edge.source!r}")
+        if edge.target not in node_ids:
+            raise AccError(f"Control edge points to missing node {edge.target!r}")
+        if edge.source == edge.target:
+            raise AccError(f"Control edge cannot connect node {edge.source!r} to itself")
+
+
+def validate_callable_data_edges(
+    template: WorkflowFunctionTemplate,
+    node_ids: set[str],
+) -> None:
+    for edge in template.data_edges:
+        if edge.source.node not in node_ids:
+            raise AccError(f"Data edge points from missing node {edge.source.node!r}")
+        if edge.target.node not in node_ids:
+            raise AccError(f"Data edge points to missing node {edge.target.node!r}")
+        validate_identifier(edge.source.port, "port id")
+        validate_identifier(edge.target.port, "port id")
+
+
+def callable_topological_levels(template: WorkflowFunctionTemplate) -> list[list[str]]:
+    outgoing: dict[str, list[str]] = {node_id: [] for node_id in template.node_invocations}
+    incoming_count: dict[str, int] = {node_id: 0 for node_id in template.node_invocations}
+    for edge in template.control_edges:
+        outgoing[edge.source].append(edge.target)
+        incoming_count[edge.target] += 1
+    ready = deque(node_id for node_id, count in incoming_count.items() if count == 0)
+    levels: list[list[str]] = []
+    processed = 0
+    while ready:
+        level = list(ready)
+        ready.clear()
+        levels.append(level)
+        processed += len(level)
+        for node_id in level:
+            for target in outgoing[node_id]:
+                incoming_count[target] -= 1
+                if incoming_count[target] == 0:
+                    ready.append(target)
+    if processed != len(template.node_invocations):
+        raise AccError("WorkflowFunctionTemplate control graph contains a cycle")
+    return levels
+
+
+def validate_callable_data_edges_follow_control_dependencies(
+    template: WorkflowFunctionTemplate,
+    *,
+    levels: list[list[str]] | None = None,
+) -> None:
+    ancestors = callable_control_ancestors(template, levels=levels)
+    for edge in template.data_edges:
+        if edge.source.node == edge.target.node:
+            raise AccError(f"Data edge cannot connect node {edge.source.node!r} to itself")
+        if edge.source.node not in ancestors[edge.target.node]:
+            raise AccError(
+                "Data edge source must be an upstream control dependency: "
+                f"{edge.source.node}.{edge.source.port} -> "
+                f"{edge.target.node}.{edge.target.port}"
+            )
+
+
+def callable_control_ancestors(
+    template: WorkflowFunctionTemplate,
+    *,
+    levels: list[list[str]] | None = None,
+) -> dict[str, set[str]]:
+    incoming: dict[str, list[str]] = {node_id: [] for node_id in template.node_invocations}
+    for edge in template.control_edges:
+        incoming[edge.target].append(edge.source)
+    levels = levels or callable_topological_levels(template)
+    ancestors: dict[str, set[str]] = {node_id: set() for node_id in template.node_invocations}
+    for level in levels:
+        for node_id in level:
+            for predecessor in incoming[node_id]:
+                ancestors[node_id].add(predecessor)
+                ancestors[node_id].update(ancestors[predecessor])
+    return ancestors
+
+
+def normalize_workflow_function_template(template: WorkflowTemplate) -> WorkflowFunctionTemplate:
+    """Return the callable semantic view of a legacy clean workflow template."""
+    return WorkflowFunctionTemplate(
+        id=template.id,
+        version=template.version,
+        node_invocations={
+            node_id: normalize_node_invocation_spec(node)
+            for node_id, node in template.nodes.items()
+        },
+        control_edges=list(template.control_edges),
+        data_edges=list(template.data_edges),
+        exposed_inputs=dict(template.exposed_inputs),
+        exposed_outputs=dict(template.exposed_outputs),
+        workflow_input_bindings=list(template.workflow_input_bindings),
+        workflow_output_bindings=list(template.workflow_output_bindings),
+        policies=dict(template.policies),
+        metadata={
+            **template.metadata,
+            "legacy_template_kind": "WorkflowTemplate",
+        },
+        source_path=template.source_path,
+    )
+
+
+def normalize_node_invocation_spec(node: NodeSpec) -> NodeInvocationSpec:
+    return NodeInvocationSpec(
+        id=node.id,
+        callable_ref=callable_ref_from_node_spec(node),
+        overrides=callable_override_from_node_spec(node),
+        workflow_call_input_bindings=parse_workflow_call_input_bindings(
+            node.raw.get("workflow_call_input_bindings")
+        ),
+        workflow_call_output_bindings=parse_workflow_call_output_bindings(
+            node.raw.get("workflow_call_output_bindings")
+        ),
+        environment_policy=parse_environment_policy(node.raw.get("environment_policy")),
+        invocation_policy=InvocationPolicy(
+            retry=node.raw.get("retry") if isinstance(node.raw.get("retry"), dict) else {},
+            timeout_seconds=node.raw.get("timeout_seconds")
+            if isinstance(node.raw.get("timeout_seconds"), int)
+            else None,
+            permission_profile=node.permission_profile,
+        ),
+        input_ports=dict(node.input_ports),
+        output_ports=dict(node.output_ports),
+        metadata={
+            "legacy_node_kind": node.kind,
+            "legacy_runtime": node.runtime,
+            "legacy_tool": node.tool,
+            "legacy_workflow_ref": node.workflow_ref,
+        },
+    )
+
+
+def callable_ref_from_node_spec(node: NodeSpec) -> CallableRef:
+    version = node.raw.get("callable_version")
+    version = version if isinstance(version, str) else None
+    explicit_id = node.raw.get("callable_id")
+    explicit_id = explicit_id if isinstance(explicit_id, str) and explicit_id else None
+    if node.kind == "agent":
+        return CallableRef(
+            kind="agent_class",
+            id=explicit_id or require_node_value(node.runtime, node.id, "runtime"),
+            version=version,
+        )
+    if node.kind == "tool":
+        return CallableRef(
+            kind="tool_class",
+            id=explicit_id or require_node_value(node.tool, node.id, "tool"),
+            version=version,
+        )
+    if node.kind == "workflow":
+        return CallableRef(
+            kind="workflow_function",
+            id=explicit_id or require_node_value(node.workflow_ref, node.id, "workflow_ref"),
+            version=version,
+        )
+    raise AccError(f"Unsupported node kind for callable normalization: {node.kind}")
+
+
+def callable_override_from_node_spec(node: NodeSpec) -> CallableOverride:
+    return CallableOverride(
+        prompt=node.prompt,
+        permission_profile=node.permission_profile,
+        timeout_seconds=node.raw.get("timeout_seconds")
+        if isinstance(node.raw.get("timeout_seconds"), int)
+        else None,
+        retry=node.raw.get("retry") if isinstance(node.raw.get("retry"), dict) else {},
+        static_input=node.raw.get("input") if isinstance(node.raw.get("input"), dict) else {},
+        behavior_overlay=node.raw.get("behavior_overlay")
+        if isinstance(node.raw.get("behavior_overlay"), dict)
+        else {},
+    )
+
+
+def parse_environment_policy(value: Any) -> EnvironmentPolicy:
+    policy = str(value or "inherit_parent")
+    if policy not in ENVIRONMENT_POLICIES:
+        raise AccError(f"Unsupported environment_policy: {policy}")
+    return policy  # type: ignore[return-value]
+
+
+def parse_workflow_call_input_bindings(value: Any) -> list[WorkflowCallInputBinding]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise AccError("workflow_call_input_bindings must be an array")
+    return [parse_workflow_call_input_binding(item, index) for index, item in enumerate(value)]
+
+
+def parse_workflow_call_input_binding(value: Any, index: int) -> WorkflowCallInputBinding:
+    if not isinstance(value, dict):
+        raise AccError(f"workflow_call_input_bindings[{index}] must be an object")
+    source = value.get("source") or value.get("from")
+    source_endpoint = parse_optional_data_endpoint(source, f"workflow call input {index} source")
+    workflow_input = str(value.get("workflow_input") or value.get("to_input") or "")
+    if not workflow_input:
+        raise AccError(f"workflow call input binding {index} requires workflow_input")
+    return WorkflowCallInputBinding(
+        source=source_endpoint,
+        workflow_input=workflow_input,
+        static_value=value.get("static_value"),
+        materialization=parse_materialization(value.get("materialization")),
+        required=bool(value.get("required", True)),
+    )
+
+
+def parse_workflow_call_output_bindings(value: Any) -> list[WorkflowCallOutputBinding]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise AccError("workflow_call_output_bindings must be an array")
+    return [parse_workflow_call_output_binding(item, index) for index, item in enumerate(value)]
+
+
+def parse_workflow_call_output_binding(value: Any, index: int) -> WorkflowCallOutputBinding:
+    if not isinstance(value, dict):
+        raise AccError(f"workflow_call_output_bindings[{index}] must be an object")
+    workflow_output = str(value.get("workflow_output") or value.get("from_output") or "")
+    parent_port = str(value.get("parent_port") or value.get("to_port") or "")
+    if not workflow_output:
+        raise AccError(f"workflow call output binding {index} requires workflow_output")
+    if not parent_port:
+        raise AccError(f"workflow call output binding {index} requires parent_port")
+    return WorkflowCallOutputBinding(
+        workflow_output=workflow_output,
+        parent_port=parent_port,
+        materialization=parse_materialization(value.get("materialization")),
+        required=bool(value.get("required", True)),
+    )
+
+
+def parse_optional_data_endpoint(value: Any, context: str) -> DataEndpoint | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise AccError(f"{context} must be an object")
+    return DataEndpoint(
+        node=require_string(value, "node", context),
+        port=str(value.get("port") or "main"),
+    )
+
+
+def require_node_value(value: str | None, node_id: str, field_name: str) -> str:
+    if not value:
+        raise AccError(f"node {node_id} requires {field_name} for callable normalization")
+    return value
 
 
 def validate_workflow_policy(policies: dict[str, Any]) -> None:
@@ -443,6 +830,11 @@ def validate_nested_internal_node_boundaries(payload: dict[str, Any]) -> None:
     nodes = payload.get("nodes") or []
     if not isinstance(nodes, list):
         return
+    top_level_node_ids = {
+        node.get("id")
+        for node in nodes
+        if isinstance(node, dict) and isinstance(node.get("id"), str) and node.get("id")
+    }
     internal_node_ids: set[str] = set()
     for node in nodes:
         if not isinstance(node, dict):
@@ -467,7 +859,12 @@ def validate_nested_internal_node_boundaries(payload: dict[str, Any]) -> None:
                 continue
             source = edge.get("from")
             target = edge.get("to")
-            if source in internal_node_ids or target in internal_node_ids:
+            if (
+                source in internal_node_ids
+                and source not in top_level_node_ids
+                or target in internal_node_ids
+                and target not in top_level_node_ids
+            ):
                 raise AccError(
                     f"{edge_key[:-1]} {index} crosses workflow boundary by "
                     "referencing an internal workflow node"
@@ -479,7 +876,12 @@ def validate_nested_internal_node_boundaries(payload: dict[str, Any]) -> None:
         target = edge.get("to")
         source_node = source.get("node") if isinstance(source, dict) else None
         target_node = target.get("node") if isinstance(target, dict) else None
-        if source_node in internal_node_ids or target_node in internal_node_ids:
+        if (
+            source_node in internal_node_ids
+            and source_node not in top_level_node_ids
+            or target_node in internal_node_ids
+            and target_node not in top_level_node_ids
+        ):
             raise AccError(
                 f"data edge {index} crosses workflow boundary by "
                 "referencing an internal workflow node"

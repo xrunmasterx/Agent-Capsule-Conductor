@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FunctionInvocation",
+  "type": "object",
+  "required": [
+    "invocation_id",
+    "workflow_function_id",
+    "run_id",
+    "status",
+    "input_payload",
+    "root_scope_frame_id"
+  ],
+  "properties": {
+    "invocation_id": {"type": "string"},
+    "workflow_function_id": {"type": "string"},
+    "run_id": {"type": "string"},
+    "status": {"type": "string"},
+    "input_payload": {"type": "object"},
+    "root_scope_frame_id": {"type": "string"},
+    "parent_invocation_id": {"type": ["string", "null"]},
+    "started_at": {"type": ["string", "null"]},
+    "ended_at": {"type": ["string", "null"]}
+  },
+  "additionalProperties": false
+}

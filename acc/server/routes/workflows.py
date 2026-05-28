@@ -42,6 +42,10 @@ class WorkflowRunRequest(BaseModel):
     input: dict[str, Any] | None = None
 
 
+class WorkflowRunGraphRequest(WorkflowRunRequest):
+    graph: dict[str, Any]
+
+
 class WorkflowBindingRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -89,6 +93,94 @@ def list_workflows(request: Request) -> dict[str, Any]:
             }
         )
     return {"workflows": workflows}
+
+
+@router.post("/run-graph")
+def run_graph_endpoint(payload: WorkflowRunGraphRequest, request: Request) -> dict[str, Any]:
+    project_root = get_project_root(request)
+    run_dir = resolve_run_dir(project_root, payload.run_dir)
+    graph = legacy_graph_payload_for_save(payload.graph)
+    workflow_id = str(graph.get("id") or "")
+    if not workflow_id:
+        raise HTTPException(status_code=400, detail="Workflow graph id is required")
+    graph_dir = project_root / "runs" / "_workflow_graph_specs" / run_dir.name
+    graph_dir.mkdir(parents=True, exist_ok=True)
+    graph_path = graph_dir / f"{workflow_id}.graph.json"
+    normalize_capsule_node_inputs(graph, request)
+    materialize_inline_workflow_nodes(graph_path, graph, request)
+    temp_path = graph_path.with_suffix(f"{graph_path.suffix}.{uuid4().hex}.tmp")
+    temp_path.write_text(
+        json.dumps(graph, ensure_ascii=False, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    try:
+        WorkflowAppService(registry=server_registry(request)).validate(temp_path)
+    except (AccError, JsonSchemaValidationError) as exc:
+        temp_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    replace_workflow_file(temp_path, graph_path)
+    workspace, binding_path = resolve_run_environment(project_root, payload)
+    try:
+        result = WorkflowAppService(registry=server_registry(request)).run_sync(
+            graph_path,
+            run_dir,
+            workspace=workspace,
+            binding_path=binding_path,
+            input_payload=payload.input,
+        )
+        return enrich_inline_nested_node_runs(result)
+    except AccError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def enrich_inline_nested_node_runs(result: dict[str, Any]) -> dict[str, Any]:
+    """Expose nested workflow node statuses for the Workbench run overlay.
+
+    The clean runtime correctly records nested node runs under
+    nodes/<workflow_node>/nested_workflow/workflow_run.json. The Workbench
+    needs those node statuses in the immediate run response so internal nodes
+    can render success/failure without treating runtime state as canvas state.
+    """
+    nodes = result.get("nodes")
+    if not isinstance(nodes, list):
+        return result
+    existing_node_ids = {str(node.get("node_id")) for node in nodes if isinstance(node, dict)}
+    expanded_nodes = list(nodes)
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        node_id = str(node.get("node_id") or "")
+        run_dir = node.get("run_dir")
+        if not node_id or not isinstance(run_dir, str):
+            continue
+        nested_run_path = Path(run_dir) / "nested_workflow" / "workflow_run.json"
+        if not nested_run_path.exists():
+            continue
+        try:
+            nested_run = load_json(nested_run_path)
+        except AccError:
+            continue
+        nested_nodes = nested_run.get("nodes")
+        if not isinstance(nested_nodes, list):
+            continue
+        for nested_node in nested_nodes:
+            if not isinstance(nested_node, dict):
+                continue
+            nested_node_id = str(nested_node.get("node_id") or "")
+            if not nested_node_id:
+                continue
+            ui_node_id = f"{node_id}__internal__{nested_node_id}"
+            if ui_node_id in existing_node_ids:
+                continue
+            existing_node_ids.add(ui_node_id)
+            expanded_nodes.append(
+                {
+                    **nested_node,
+                    "parent_node_id": node_id,
+                    "ui_node_id": ui_node_id,
+                }
+            )
+    return {**result, "nodes": expanded_nodes}
 
 
 @router.get("/{workflow_id}")
@@ -265,9 +357,31 @@ def run_workflow_endpoint(
 ) -> dict[str, Any]:
     project_root = get_project_root(request)
     graph_path = find_graph_path(workflow_id, request)
-    run_dir = (project_root / payload.run_dir).resolve()
+    run_dir = resolve_run_dir(project_root, payload.run_dir)
+    workspace, binding_path = resolve_run_environment(project_root, payload)
+    try:
+        return WorkflowAppService(registry=server_registry(request)).run_sync(
+            graph_path,
+            run_dir,
+            workspace=workspace,
+            binding_path=binding_path,
+            input_payload=payload.input,
+        )
+    except AccError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def resolve_run_dir(project_root: Path, run_dir_value: str) -> Path:
+    run_dir = (project_root / run_dir_value).resolve()
     if not run_dir.is_relative_to(project_root):
         raise HTTPException(status_code=400, detail="Run directory is outside project root")
+    return run_dir
+
+
+def resolve_run_environment(
+    project_root: Path,
+    payload: WorkflowRunRequest,
+) -> tuple[Path | None, Path | None]:
     if payload.workspace and payload.binding_path:
         raise HTTPException(status_code=400, detail="Provide workspace or binding_path, not both")
     workspace = None
@@ -281,16 +395,7 @@ def run_workflow_endpoint(
             )
     if payload.binding_path:
         binding_path = resolve_binding_path(project_root, payload.binding_path)
-    try:
-        return WorkflowAppService(registry=server_registry(request)).run_sync(
-            graph_path,
-            run_dir,
-            workspace=workspace,
-            binding_path=binding_path,
-            input_payload=payload.input,
-        )
-    except AccError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return workspace, binding_path
 
 
 def load_yaml(path: Path) -> dict[str, Any]:
@@ -324,6 +429,7 @@ def workflow_graph_path(workflows_dir: Path, path_value: str) -> Path:
 
 def save_graph(path: Path, graph: dict[str, Any], request: Request) -> dict[str, Any]:
     graph = legacy_graph_payload_for_save(graph)
+    normalize_capsule_node_inputs(graph, request)
     materialize_inline_workflow_nodes(path, graph, request)
     path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = path.with_suffix(f"{path.suffix}.{uuid4().hex}.tmp")
@@ -354,6 +460,35 @@ def legacy_graph_payload_for_save(graph: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def normalize_capsule_node_inputs(graph: dict[str, Any], request: Request) -> None:
+    nodes = graph.get("nodes")
+    if not isinstance(nodes, list):
+        return
+    for node in nodes:
+        if not isinstance(node, dict) or is_inline_workflow_container(node):
+            continue
+        kind = str(node.get("kind") or "agent_session")
+        if kind == "workflow":
+            continue
+        capsule_id = (
+            node.get("legacy_capsule_id")
+            or node.get("capsule_id")
+            or node.get("capsuleId")
+            or node.get("runtime")
+        )
+        if not isinstance(capsule_id, str) or not capsule_id:
+            continue
+        input_payload, receive_upstream_context, upstream_context_fields = (
+            inline_capsule_input_payload(node, capsule_id, request)
+        )
+        node["input"] = input_payload
+        node["acc_receive_upstream_context"] = receive_upstream_context
+        if upstream_context_fields:
+            node["acc_upstream_context_fields"] = upstream_context_fields
+        else:
+            node.pop("acc_upstream_context_fields", None)
+
+
 def materialize_inline_workflow_nodes(path: Path, graph: dict[str, Any], request: Request) -> None:
     nodes = graph.get("nodes")
     if not isinstance(nodes, list):
@@ -361,7 +496,7 @@ def materialize_inline_workflow_nodes(path: Path, graph: dict[str, Any], request
     for node in nodes:
         if not is_inline_workflow_container(node):
             continue
-        child_payload = inline_workflow_payload(graph, node)
+        child_payload = inline_workflow_payload(graph, node, request)
         child_path = path.parent / f"{graph['id']}__{node['id']}.accflow.json"
         child_path.parent.mkdir(parents=True, exist_ok=True)
         temp_path = child_path.with_name(f"{child_path.stem}.{uuid4().hex}.accflow.json")
@@ -378,6 +513,7 @@ def materialize_inline_workflow_nodes(path: Path, graph: dict[str, Any], request
         node["workflow_ref"] = child_path.name
         node["capsule_id"] = "fake-agent.generic"
         node["kind"] = "workflow"
+        node.setdefault("timeout_seconds", inline_workflow_timeout_seconds(node, request))
         node.setdefault("input_ports", [{"id": "main", "direction": "input"}])
         node.setdefault("output_ports", [{"id": "main", "direction": "output"}])
         ui = node.get("ui")
@@ -395,7 +531,11 @@ def is_inline_workflow_container(node: Any) -> bool:
     return isinstance(internal_nodes, list) and len(internal_nodes) > 0
 
 
-def inline_workflow_payload(parent_graph: dict[str, Any], node: dict[str, Any]) -> dict[str, Any]:
+def inline_workflow_payload(
+    parent_graph: dict[str, Any],
+    node: dict[str, Any],
+    request: Request,
+) -> dict[str, Any]:
     ui = node.get("ui") if isinstance(node.get("ui"), dict) else {}
     internal_nodes = ui.get("internal_nodes") if isinstance(ui, dict) else []
     internal_edges = ui.get("internal_edges") if isinstance(ui, dict) else []
@@ -474,7 +614,7 @@ def inline_workflow_payload(parent_graph: dict[str, Any], node: dict[str, Any]) 
         "version": "0.4.0",
         "name": str(node.get("label") or node.get("id")),
         "nodes": [
-            inline_internal_node_payload(item)
+            inline_internal_node_payload(item, request)
             for item in internal_nodes
             if isinstance(item, dict)
         ],
@@ -514,23 +654,50 @@ def inline_workflow_payload(parent_graph: dict[str, Any], node: dict[str, Any]) 
     }
 
 
-def inline_internal_node_payload(node: dict[str, Any]) -> dict[str, Any]:
+def inline_workflow_timeout_seconds(node: dict[str, Any], request: Request) -> int:
+    ui = node.get("ui") if isinstance(node.get("ui"), dict) else {}
+    internal_nodes = ui.get("internal_nodes") if isinstance(ui, dict) else []
+    if not isinstance(internal_nodes, list):
+        return 600
+    registry = server_registry(request)
+    timeout_sum = 0
+    for internal_node in internal_nodes:
+        if not isinstance(internal_node, dict):
+            continue
+        capsule_id = (
+            internal_node.get("capsuleId")
+            or internal_node.get("capsule_id")
+            or internal_node.get("runtime")
+        )
+        if not isinstance(capsule_id, str) or not capsule_id:
+            timeout_sum += 60
+            continue
+        try:
+            timeout_sum += registry.get(capsule_id).spec.permissions.timeout_seconds
+        except AccError:
+            timeout_sum += 60
+    return max(600, min(timeout_sum or 600, 3600))
+
+
+def inline_internal_node_payload(node: dict[str, Any], request: Request) -> dict[str, Any]:
     capsule_id = str(
         node.get("capsuleId")
         or node.get("capsule_id")
         or node.get("runtime")
         or "fake-agent.generic"
     )
-    input_payload = node.get("input") if isinstance(node.get("input"), dict) else {}
-    if not input_payload:
-        input_payload = {"topic": str(node.get("task") or node.get("name") or node.get("id"))}
-    return {
+    input_payload, receive_upstream_context, upstream_context_fields = (
+        inline_capsule_input_payload(node, capsule_id, request)
+    )
+    timeout_seconds = inline_capsule_timeout_seconds(capsule_id, request)
+    payload = {
         "id": str(node["id"]),
         "kind": "agent",
         "runtime": "capsule",
         "legacy_capsule_id": capsule_id,
+        "timeout_seconds": timeout_seconds,
         "input": input_payload,
-        "acc_receive_upstream_context": True,
+        "acc_receive_upstream_context": receive_upstream_context,
         "input_ports": normalize_inline_ports(
             node.get("inputPorts") or node.get("input_ports"),
             "input",
@@ -541,6 +708,85 @@ def inline_internal_node_payload(node: dict[str, Any]) -> dict[str, Any]:
         ),
         "position": node.get("position"),
     }
+    if upstream_context_fields:
+        payload["acc_upstream_context_fields"] = upstream_context_fields
+    return payload
+
+
+def inline_capsule_input_payload(
+    node: dict[str, Any],
+    capsule_id: str,
+    request: Request,
+) -> tuple[dict[str, Any], bool, list[str]]:
+    raw_input = node.get("input") if isinstance(node.get("input"), dict) else {}
+    fallback_text = str(
+        raw_input.get("topic")
+        or raw_input.get("task")
+        or node.get("task")
+        or node.get("name")
+        or node.get("label")
+        or node.get("id")
+    )
+    try:
+        schema = load_json(server_registry(request).get(capsule_id).input_schema_path)
+    except AccError:
+        return raw_input or {"topic": fallback_text}, True, []
+
+    properties = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
+    allows_extra = schema.get("additionalProperties", True) is not False
+    input_payload = dict(raw_input)
+    if not allows_extra:
+        input_payload = {key: value for key, value in input_payload.items() if key in properties}
+
+    upstream_context_fields: list[str] = []
+    required = schema.get("required") if isinstance(schema.get("required"), list) else []
+    for key, property_schema in properties.items():
+        if key in input_payload:
+            continue
+        if not isinstance(property_schema, dict):
+            continue
+        property_type = property_schema.get("type")
+        if key in required or property_type == "string":
+            input_payload[key] = default_inline_schema_value(key, property_type, fallback_text)
+            if should_fill_from_upstream_context(key, property_type):
+                upstream_context_fields.append(key)
+    if not input_payload and (allows_extra or "topic" in properties):
+        input_payload = {"topic": fallback_text}
+
+    receive_upstream_context = allows_extra or "upstream_context" in properties
+    return input_payload, receive_upstream_context, upstream_context_fields
+
+
+def default_inline_schema_value(key: str, property_type: Any, fallback_text: str) -> Any:
+    if property_type == "array":
+        return []
+    if property_type == "object":
+        return {}
+    if property_type in {"integer", "number"}:
+        return 0
+    if property_type == "boolean":
+        return False
+    if key == "time_scope":
+        return "最近24小时"
+    return fallback_text
+
+
+def should_fill_from_upstream_context(key: str, property_type: Any) -> bool:
+    return property_type == "string" and key not in {
+        "task",
+        "topic",
+        "focus",
+        "time_scope",
+        "query",
+        "keyword",
+    }
+
+
+def inline_capsule_timeout_seconds(capsule_id: str, request: Request) -> int:
+    try:
+        return int(server_registry(request).get(capsule_id).spec.permissions.timeout_seconds)
+    except AccError:
+        return 60
 
 
 def normalize_inline_ports(value: Any, direction: str) -> list[dict[str, Any]]:
@@ -576,6 +822,8 @@ def recover_wrapped_capsule_nodes(graph: dict[str, Any]) -> None:
             continue
         ui = node.get("ui")
         if not isinstance(ui, dict):
+            continue
+        if ui.get("semantic_kind") == "workflow_container":
             continue
         internal_nodes = ui.get("internal_nodes")
         if not isinstance(internal_nodes, list) or len(internal_nodes) != 1:

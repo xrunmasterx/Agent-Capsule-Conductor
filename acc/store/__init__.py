@@ -9,12 +9,17 @@ from typing import Any
 from acc.domain import (
     AccError,
     ArtifactBundle,
+    CallableRef,
     DataEdge,
     DataEndpoint,
     EnvironmentBinding,
     EnvironmentFrame,
+    FunctionInvocation,
     NodeSpec,
     PortContract,
+    ScopeFrame,
+    SessionInstance,
+    WorkflowCallOutputBinding,
     WorkflowInputBinding,
     WorkflowTemplate,
 )
@@ -64,6 +69,9 @@ class FileSystemWorkflowStore:
         binding: EnvironmentBinding | None = None,
         inherited_workspace: Path | None = None,
         inherited_ephemeral: bool = False,
+        parent_invocation_id: str | None = None,
+        parent_scope_frame_id: str | None = None,
+        call_depth: int = 0,
     ) -> None:
         self.template = template
         self.workflow_path = workflow_path
@@ -72,15 +80,54 @@ class FileSystemWorkflowStore:
         self.binding = binding
         self.inherited_workspace = inherited_workspace
         self.inherited_ephemeral = inherited_ephemeral
+        self.parent_invocation_id = parent_invocation_id
+        self.parent_scope_frame_id = parent_scope_frame_id
+        self.call_depth = call_depth
         self.event_log = self.run_dir / "workflow_events.jsonl"
         self.workflow_run_id = f"workflow_{self.run_dir.name}"
         self.frame: EnvironmentFrame | None = None
+        self.function_invocation: FunctionInvocation | None = None
+        self.scope_frame: ScopeFrame | None = None
 
     def prepare_run_dir(self) -> None:
         prepare_run_dir(self.run_dir)
         self.event_log.write_text("", encoding="utf-8")
 
-    def create_environment_frame(self) -> EnvironmentFrame:
+    def create_function_invocation(
+        self,
+        *,
+        input_payload: dict[str, Any],
+        status: str,
+        started_at: str,
+        ended_at: str | None = None,
+    ) -> FunctionInvocation:
+        invocation = FunctionInvocation(
+            invocation_id=self.invocation_id,
+            workflow_function_id=self.template.id,
+            run_id=self.run_dir.name,
+            status=status,
+            input_payload=input_payload,
+            root_scope_frame_id=self.scope_frame_id,
+            parent_invocation_id=self.parent_invocation_id,
+            started_at=started_at,
+            ended_at=ended_at,
+        )
+        self.function_invocation = invocation
+        self.write_function_invocation_manifest(invocation)
+        return invocation
+
+    @property
+    def invocation_id(self) -> str:
+        return f"invocation_{self.run_dir.name}"
+
+    @property
+    def scope_frame_id(self) -> str:
+        return f"scope_{self.run_dir.name}_root"
+
+    def create_environment_frame(
+        self,
+        invocation: FunctionInvocation | None = None,
+    ) -> EnvironmentFrame:
         frame = create_environment_frame(
             self.template,
             self.run_dir,
@@ -88,8 +135,16 @@ class FileSystemWorkflowStore:
             binding=self.binding,
             inherited_workspace=self.inherited_workspace,
             inherited_ephemeral=self.inherited_ephemeral,
+            invocation_id=(invocation or self.function_invocation).invocation_id
+            if (invocation or self.function_invocation)
+            else None,
+            scope_frame_id=self.scope_frame_id,
+            parent_scope_frame_id=self.parent_scope_frame_id,
+            call_depth=self.call_depth,
         )
         self.frame = frame
+        self.scope_frame = scope_frame_from_environment_frame(frame)
+        self.write_scope_frame_manifest(self.scope_frame)
         return frame
 
     def create_node_attempt(self, node_id: str) -> Path:
@@ -309,8 +364,119 @@ class FileSystemWorkflowStore:
             published[binding.target_port] = manifest
         return published
 
+    def apply_workflow_call_output_bindings(
+        self,
+        node: NodeSpec,
+        node_dir: Path,
+        child_run_dir: Path,
+        bindings: list[WorkflowCallOutputBinding],
+    ) -> dict[str, Path]:
+        if not bindings:
+            return {}
+        frame = require_frame(self.frame)
+        returned: dict[str, Path] = {}
+        for binding in bindings:
+            source_dir = child_run_dir / "workflow_outputs" / binding.workflow_output
+            if not source_dir.exists():
+                if binding.required:
+                    raise AccError(
+                        "Missing child workflow output "
+                        f"{binding.workflow_output!r} for workflow node {node.id}"
+                    )
+                continue
+            target_dir = node_dir / "outbox" / binding.parent_port
+            if target_dir.exists():
+                shutil.rmtree(target_dir)
+            target_dir.mkdir(parents=True, exist_ok=True)
+            if binding.materialization == "reference":
+                write_json(
+                    target_dir / "reference_manifest.json",
+                    {"source_workflow_output": str(source_dir.resolve())},
+                )
+            else:
+                for child in source_dir.iterdir():
+                    copy_path(child, target_dir / child.name)
+            artifacts = [
+                file_record(path, target_dir)
+                for path in sorted(target_dir.iterdir())
+                if path.is_file()
+            ]
+            bundle = {
+                "bundle_id": f"bundle_{node.id}_{binding.parent_port}",
+                "producer_node_id": node.id,
+                "producer_session_id": None,
+                "artifacts": artifacts,
+                "provenance": {
+                    "workflow_id": self.template.id,
+                    "node_kind": node.kind,
+                    "node_run_dir": str(node_dir.resolve()),
+                    "child_workflow_run_dir": str(child_run_dir.resolve()),
+                    "child_workflow_output": binding.workflow_output,
+                    "parent_port": binding.parent_port,
+                    "boundary": "workflow_call_return",
+                },
+            }
+            write_json(target_dir / "artifact_bundle.json", bundle)
+            write_json(
+                target_dir / "outbox_manifest.json",
+                {
+                    "port_id": binding.parent_port,
+                    "node_id": node.id,
+                    "direction": "output",
+                    "session_id": None,
+                    "bundle": bundle,
+                    "artifacts": artifacts,
+                    "source_workflow_output": str(source_dir.resolve()),
+                    "child_workflow_output": binding.workflow_output,
+                    "materialization": binding.materialization,
+                },
+            )
+            mirror_dir = frame.outbox_root / node.id / binding.parent_port
+            if mirror_dir.exists():
+                shutil.rmtree(mirror_dir)
+            shutil.copytree(target_dir, mirror_dir)
+            returned[binding.parent_port] = target_dir
+        return returned
+
     def write_node_manifest(self, node_dir: Path, payload: dict[str, Any]) -> None:
         write_json(node_dir / "node_run_manifest.json", payload)
+
+    def write_session_instance_manifest(
+        self,
+        *,
+        node: NodeSpec,
+        node_dir: Path,
+        frame: EnvironmentFrame,
+        callable_ref: CallableRef,
+        status: str,
+        started_at: str,
+        ended_at: str,
+        error: str | None = None,
+    ) -> SessionInstance:
+        session_id = session_id_from_node_dir(node_dir) or f"session_{self.run_dir.name}_{node.id}"
+        instance = SessionInstance(
+            session_id=session_id,
+            invocation_id=frame.function_invocation_id or self.invocation_id,
+            scope_frame_id=frame.scope_frame_id or self.scope_frame_id,
+            node_id=node.id,
+            callable_ref=callable_ref,
+            callable_kind=callable_ref.kind,
+            status=status,
+            cwd=frame.workspace_root,
+            env_keys=("ACC_RUN_DIR", "ACC_NODE_ID"),
+            input_path=(node_dir / "input.json").resolve(),
+            output_path=(node_dir / "output.json").resolve(),
+            artifact_dir=(node_dir / "artifacts").resolve(),
+            event_log_path=(node_dir / "events.jsonl").resolve(),
+            started_at=started_at,
+            ended_at=ended_at,
+            error=error,
+        )
+        write_json(
+            node_dir / "session_instance_manifest.json",
+            session_instance_payload(instance),
+        )
+        return instance
 
     def write_workflow_manifests(
         self,
@@ -329,6 +495,56 @@ class FileSystemWorkflowStore:
             started_at,
             ended_at,
         )
+        if self.function_invocation is not None:
+            final_invocation = FunctionInvocation(
+                invocation_id=self.function_invocation.invocation_id,
+                workflow_function_id=self.function_invocation.workflow_function_id,
+                run_id=self.function_invocation.run_id,
+                status=str(payload["status"]),
+                input_payload=self.function_invocation.input_payload,
+                root_scope_frame_id=self.function_invocation.root_scope_frame_id,
+                parent_invocation_id=self.function_invocation.parent_invocation_id,
+                started_at=started_at,
+                ended_at=ended_at,
+            )
+            self.function_invocation = final_invocation
+            self.write_function_invocation_manifest(final_invocation)
+
+    def write_function_invocation_manifest(self, invocation: FunctionInvocation) -> None:
+        write_json(
+            self.run_dir / "function_invocation_manifest.json",
+            {
+                "invocation_id": invocation.invocation_id,
+                "workflow_function_id": invocation.workflow_function_id,
+                "run_id": invocation.run_id,
+                "status": invocation.status,
+                "input_payload": invocation.input_payload,
+                "root_scope_frame_id": invocation.root_scope_frame_id,
+                "parent_invocation_id": invocation.parent_invocation_id,
+                "started_at": invocation.started_at,
+                "ended_at": invocation.ended_at,
+            },
+        )
+
+    def write_scope_frame_manifest(self, scope_frame: ScopeFrame) -> None:
+        write_json(
+            self.run_dir / "scope_frame_manifest.json",
+            {
+                "frame_id": scope_frame.frame_id,
+                "invocation_id": scope_frame.invocation_id,
+                "parent_frame_id": scope_frame.parent_frame_id,
+                "call_depth": scope_frame.call_depth,
+                "workflow_id": scope_frame.workflow_id,
+                "workspace_root": str(scope_frame.workspace_root),
+                "environment_root": str(scope_frame.environment_root),
+                "inbox_root": str(scope_frame.inbox_root),
+                "outbox_root": str(scope_frame.outbox_root),
+                "artifact_root": str(scope_frame.artifact_root),
+                "behavior_snapshot_path": str(scope_frame.behavior_snapshot_path),
+                "ephemeral": scope_frame.ephemeral,
+                "binding_path": str(scope_frame.binding_path) if scope_frame.binding_path else None,
+            },
+        )
 
 
 def require_frame(frame: EnvironmentFrame | None) -> EnvironmentFrame:
@@ -345,6 +561,10 @@ def create_environment_frame(
     binding: EnvironmentBinding | None,
     inherited_workspace: Path | None,
     inherited_ephemeral: bool,
+    invocation_id: str | None = None,
+    scope_frame_id: str | None = None,
+    parent_scope_frame_id: str | None = None,
+    call_depth: int = 0,
 ) -> EnvironmentFrame:
     environment_root = run_dir / "environments" / "root_env"
     if workspace is not None:
@@ -380,6 +600,10 @@ def create_environment_frame(
         ).resolve(),
         ephemeral=ephemeral,
         binding_path=binding_path,
+        function_invocation_id=invocation_id,
+        scope_frame_id=scope_frame_id,
+        parent_scope_frame_id=parent_scope_frame_id,
+        call_depth=call_depth,
     )
     for path in (frame.inbox_root, frame.outbox_root, frame.artifact_root):
         path.mkdir(parents=True, exist_ok=True)
@@ -400,9 +624,31 @@ def create_environment_frame(
             "behavior_snapshot_path": str(frame.behavior_snapshot_path),
             "ephemeral": frame.ephemeral,
             "binding_path": str(frame.binding_path.resolve()) if frame.binding_path else None,
+            "function_invocation_id": frame.function_invocation_id,
+            "scope_frame_id": frame.scope_frame_id,
+            "parent_scope_frame_id": frame.parent_scope_frame_id,
+            "call_depth": frame.call_depth,
         },
     )
     return frame
+
+
+def scope_frame_from_environment_frame(frame: EnvironmentFrame) -> ScopeFrame:
+    return ScopeFrame(
+        frame_id=frame.scope_frame_id or f"scope_{frame.run_id}_root",
+        invocation_id=frame.function_invocation_id or f"invocation_{frame.run_id}",
+        parent_frame_id=frame.parent_scope_frame_id,
+        call_depth=frame.call_depth,
+        workflow_id=frame.workflow_id,
+        workspace_root=frame.workspace_root,
+        environment_root=frame.environment_root,
+        inbox_root=frame.inbox_root,
+        outbox_root=frame.outbox_root,
+        artifact_root=frame.artifact_root,
+        behavior_snapshot_path=frame.behavior_snapshot_path,
+        ephemeral=frame.ephemeral,
+        binding_path=frame.binding_path,
+    )
 
 
 def write_behavior_snapshot(frame: EnvironmentFrame) -> None:
@@ -670,6 +916,51 @@ def write_json(path: Path, payload: Any) -> None:
         json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True),
         encoding="utf-8",
     )
+
+
+def session_id_from_node_dir(node_dir: Path) -> str | None:
+    conductor_output_path = node_dir / "conductor_output.json"
+    if conductor_output_path.exists():
+        conductor_output = load_json(conductor_output_path)
+        if isinstance(conductor_output, dict) and isinstance(
+            conductor_output.get("session_id"),
+            str,
+        ):
+            return conductor_output["session_id"]
+    session_manifest_path = node_dir / "session_manifest.json"
+    if session_manifest_path.exists():
+        session_manifest = load_json(session_manifest_path)
+        if isinstance(session_manifest, dict) and isinstance(
+            session_manifest.get("session_id"),
+            str,
+        ):
+            return session_manifest["session_id"]
+    return None
+
+
+def session_instance_payload(instance: SessionInstance) -> dict[str, Any]:
+    return {
+        "session_id": instance.session_id,
+        "invocation_id": instance.invocation_id,
+        "scope_frame_id": instance.scope_frame_id,
+        "node_id": instance.node_id,
+        "callable_ref": {
+            "kind": instance.callable_ref.kind,
+            "id": instance.callable_ref.id,
+            "version": instance.callable_ref.version,
+        },
+        "callable_kind": instance.callable_kind,
+        "status": instance.status,
+        "cwd": str(instance.cwd),
+        "env_keys": list(instance.env_keys),
+        "input_path": str(instance.input_path),
+        "output_path": str(instance.output_path),
+        "artifact_dir": str(instance.artifact_dir),
+        "event_log_path": str(instance.event_log_path),
+        "started_at": instance.started_at,
+        "ended_at": instance.ended_at,
+        "error": instance.error,
+    }
 
 
 def require_string(payload: dict[str, Any], key: str, context: str) -> str:

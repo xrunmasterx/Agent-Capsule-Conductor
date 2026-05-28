@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SessionInstance",
+  "type": "object",
+  "required": [
+    "session_id",
+    "invocation_id",
+    "scope_frame_id",
+    "node_id",
+    "callable_ref",
+    "callable_kind",
+    "status",
+    "cwd",
+    "env_keys",
+    "input_path",
+    "output_path",
+    "artifact_dir",
+    "event_log_path"
+  ],
+  "properties": {
+    "session_id": {"type": "string"},
+    "invocation_id": {"type": "string"},
+    "scope_frame_id": {"type": "string"},
+    "node_id": {"type": "string"},
+    "callable_ref": {"$ref": "#/$defs/callable_ref"},
+    "callable_kind": {
+      "type": "string",
+      "enum": ["agent_class", "tool_class", "workflow_function", "legacy_capsule"]
+    },
+    "status": {"type": "string"},
+    "cwd": {"type": "string"},
+    "env_keys": {"type": "array", "items": {"type": "string"}},
+    "input_path": {"type": "string"},
+    "output_path": {"type": "string"},
+    "artifact_dir": {"type": "string"},
+    "event_log_path": {"type": "string"},
+    "started_at": {"type": ["string", "null"]},
+    "ended_at": {"type": ["string", "null"]},
+    "error": {"type": ["string", "null"]}
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "callable_ref": {
+      "type": "object",
+      "required": ["kind", "id"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["agent_class", "tool_class", "workflow_function", "legacy_capsule"]
+        },
+        "id": {"type": "string"},
+        "version": {"type": ["string", "null"]}
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -17,6 +17,12 @@ Use these concepts consistently:
 - **Artifact Bundle**: stable files produced by one session.
 - **GraphOps Control Plane**: controlled interface for editing workflows/capsules.
 - **Human Authority**: humans author and approve workflows; LLMs may assist by proposing patches.
+- **AgentClassTemplate / ToolClassTemplate**: reusable callable class definitions for agent/tool behavior.
+- **WorkflowFunctionTemplate**: reusable stateless workflow function definition.
+- **NodeInvocationSpec**: a call site inside a workflow function body.
+- **FunctionInvocation**: one runtime call of a workflow function.
+- **ScopeFrame**: the runtime function scope that owns cwd, inbox, outbox, artifacts, and behavior snapshot.
+- **SessionInstance**: one concrete agent/tool execution inside a scope frame.
 
 ## Mandatory working rules
 
@@ -396,3 +402,106 @@ Before changing code, read:
 - Every security contract must have negative tests.
 - The final report must explain what was deleted, kept, renamed, and why.
 
+# Phase 11: Callable Semantics Refactor Rules
+
+This phase upgrades ACC Clean Core from a node/capsule-oriented runtime into an explicit callable runtime. It must preserve the correct mechanics already achieved by Clean Core and Ideal Layering.
+
+## Mandatory goal docs
+
+Before changing code for this phase, read:
+
+- docs/codex_goal_callable_semantics/GOAL.md
+- docs/codex_goal_callable_semantics/SPEC.md
+- docs/codex_goal_callable_semantics/DESIGN.md
+- docs/codex_goal_callable_semantics/DOMAIN_MODEL.md
+- docs/codex_goal_callable_semantics/WORKFLOW_AS_FUNCTION_SPEC.md
+- docs/codex_goal_callable_semantics/AGENT_TOOL_AS_CLASS_SPEC.md
+- docs/codex_goal_callable_semantics/SCOPE_FRAME_SPEC.md
+- docs/codex_goal_callable_semantics/PORT_DATA_FLOW_SPEC.md
+- docs/codex_goal_callable_semantics/EXECUTION_BOUNDARIES.md
+- docs/codex_goal_callable_semantics/TERMINATION_CONDITIONS.md
+- docs/codex_goal_callable_semantics/TEST_PLAN.md
+- docs/codex_goal_callable_semantics/ACCEPTANCE.md
+- docs/codex_goal_callable_semantics/IMPLEMENTATION_ORDER.md
+- docs/codex_goal_callable_semantics/MIGRATION_PLAN.md
+- docs/codex_goal_callable_semantics/MIGRATION_NOTES.md
+- docs/codex_goal_callable_semantics/RISK_REGISTER.md
+- docs/human/ACC_CALLABLE_SEMANTICS_PLAIN_LANGUAGE.md
+
+## Core semantic rules
+
+- Agent and Tool are reusable ClassTemplates.
+- Workflow is a reusable WorkflowFunctionTemplate.
+- A workflow node is a NodeInvocationSpec, not a session and not a class definition.
+- A workflow run is a FunctionInvocation.
+- The working directory, inbox, outbox, artifacts, and behavior snapshot belong to a ScopeFrame.
+- Every agent/tool execution creates a SessionInstance.
+- Templates are stateless; runtime state belongs to invocations, scope frames, sessions, events, inboxes, outboxes, and artifacts.
+- Workflow templates must not store local absolute workspace paths, run directories, session ids, prior outputs, or agent conversation memory.
+
+## Non-negotiable constraints
+
+1. Do not rewrite `acc run`.
+2. Do not break `--emit-conductor-json` or workflow `--emit-json` stdout single-JSON contracts.
+3. Do not require real Codex, Claude, Cursor, Gemini, Hermes, Conductor, network, or paid credentials in default tests.
+4. Do not implement a custom LLM agent loop.
+5. Do not introduce database, cloud, Kubernetes, distributed worker, SaaS, or marketplace infrastructure.
+6. Do not let sender nodes write directly into receiver workspaces or inboxes.
+7. Do not let child workflows read parent data unless it was explicitly bound into child exposed inputs.
+8. Do not use `upstream_context` as the primary nested workflow data protocol.
+9. Do not let runtime mutate workflow graph semantics or call app/store orchestration directly.
+10. Do not let engine perform filesystem IO, read host env, spawn processes, or import app/store/runtime/cli/server/ui.
+11. Do not remove legacy CapsuleSpec/NodeSpec behavior without compatibility mapping, migration notes, and tests.
+12. Do not allow GraphOps or LLM-generated changes to auto-apply destructive mutations.
+
+## Required implementation direction
+
+- Add callable domain types before changing behavior.
+- Normalize legacy `.accflow.json` fields into callable semantics instead of breaking existing examples.
+- Map existing CapsuleSpec paths to AgentClassTemplate, ToolClassTemplate, or WorkflowFunctionTemplate compatibility views.
+- Add `function_invocation_manifest.json`, `scope_frame_manifest.json`, `session_instance_manifest.json`, and workflow-call evidence as additive runtime evidence.
+- Refactor nested workflow execution into explicit input/output function-call bindings.
+- Keep store as the only owner of inbox/outbox materialization and path traversal protection.
+- Keep runtime focused on cwd/env/permission/timeout/workspace execution policy.
+- Split `acc.app` coordination if needed so workflow service, execution loop, node invocation, workflow call handling, and legacy compatibility do not collapse into one unbounded runner.
+
+## Completion discipline
+
+- Update `docs/codex_goal_callable_semantics/FINDINGS.md` before code changes.
+- Implement milestone by milestone according to `IMPLEMENTATION_ORDER.md`.
+- Every new semantic rule must have positive and negative tests.
+- Every security contract must have negative tests.
+- Performance claims require at least the large-DAG sanity test described in `ACCEPTANCE.md`.
+- Do not mark the goal complete until every command in `docs/codex_goal_callable_semantics/ACCEPTANCE.md` passes.
+- Final `QUALITY_REPORT.md` must document what was added, deleted, renamed, preserved, how legacy concepts map to callable concepts, exact test evidence, stdout contract evidence, and remaining risks.
+
+# Phase UI: Visual Workbench UX Refactor Rules
+
+## Objective
+
+This phase improves the usability and visual clarity of the existing ACC Workbench. It must not rewrite the Clean Core, the workflow kernel, or the capsule runtime.
+
+## Mandatory principles
+
+1. Chinese is the default UI language.
+2. Graph-first workflow editing is mandatory. Button-only node connection is not acceptable.
+3. Raw JSON/YAML must not be the default reading experience. Raw views may exist behind tabs or details panels.
+4. UI must use progressive disclosure: simple first, advanced details hidden until requested.
+5. The workbench must make serial, parallel, fan-out, fan-in, branch, and failure states visually obvious.
+6. Existing core acceptance tests must continue passing.
+7. Browser E2E evidence is required: screenshots, console logs, network logs, and journey reports.
+8. Do not introduce database, cloud backend, new LLM agent framework, or unrelated product features.
+9. Do not degrade stdout JSON contract for CLI commands.
+10. Do not bypass the existing app/core/runtime contracts.
+
+## Design tone
+
+Aim for a calm, high-end engineering tool:
+
+- low visual noise;
+- crisp typography;
+- subtle borders and muted surfaces;
+- clear hierarchy;
+- concise Chinese copy;
+- strong artifact readability;
+- minimal but obvious action buttons.

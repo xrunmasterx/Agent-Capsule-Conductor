@@ -117,7 +117,10 @@ def write_capsule_files(destination: Path, blueprint: dict[str, Any]) -> None:
         encoding="utf-8",
     )
     (destination / "prompt_template.md").write_text(blueprint["prompt"] + "\n", encoding="utf-8")
-    write_json(destination / "input_schema.json", json_schema(blueprint["input_fields"]))
+    write_json(
+        destination / "input_schema.json",
+        json_schema(blueprint["input_fields"], include_upstream_context=True),
+    )
     write_json(destination / "output_schema.json", output_schema(blueprint["output_fields"]))
     (destination / "artifact_manifest.yaml").write_text(
         yaml.safe_dump(artifact_manifest(blueprint), sort_keys=False, allow_unicode=True),
@@ -168,13 +171,27 @@ def runtime_spec(runtime: str, blueprint: dict[str, Any]) -> dict[str, Any]:
     return {"type": runtime}
 
 
-def json_schema(fields: list[dict[str, Any]]) -> dict[str, Any]:
+def json_schema(
+    fields: list[dict[str, Any]],
+    *,
+    include_upstream_context: bool = False,
+) -> dict[str, Any]:
     required = [field["name"] for field in fields if field.get("required")]
+    properties = {field["name"]: field_schema(field) for field in fields}
+    if include_upstream_context:
+        properties.setdefault(
+            "upstream_context",
+            {
+                "type": "array",
+                "description": "ACC-provided upstream node context for workflow data flow.",
+                "items": {"type": "object"},
+            },
+        )
     return {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "required": required,
-        "properties": {field["name"]: field_schema(field) for field in fields},
+        "properties": properties,
         "additionalProperties": False,
     }
 

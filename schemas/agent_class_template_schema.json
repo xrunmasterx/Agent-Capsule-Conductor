@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AgentClassTemplate",
+  "type": "object",
+  "required": ["id", "version", "runtime"],
+  "properties": {
+    "id": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+$"},
+    "version": {"type": "string"},
+    "runtime": {"type": "string"},
+    "default_prompt": {"type": "string"},
+    "default_rules": {"type": "array", "items": {"type": "string"}, "default": []},
+    "default_skills": {"type": "array", "items": {"type": "string"}, "default": []},
+    "default_permissions": {"$ref": "#/$defs/permission_profile"},
+    "input_ports": {"$ref": "#/$defs/ports"},
+    "output_ports": {"$ref": "#/$defs/ports"},
+    "artifact_contract": {"type": "object"},
+    "metadata": {"type": "object"}
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "permission_profile": {
+      "type": "object",
+      "required": ["workspace_access", "network", "shell", "dangerous"],
+      "properties": {
+        "workspace_access": {
+          "type": "string",
+          "enum": ["read_only", "writes_run_only", "writes_workspace"]
+        },
+        "network": {"type": "boolean"},
+        "shell": {"type": "boolean"},
+        "dangerous": {"type": "boolean"},
+        "env_policy": {
+          "type": "string",
+          "enum": ["acc_whitelist", "explicit_allowlist"],
+          "default": "acc_whitelist"
+        },
+        "allowed_env": {
+          "type": "array",
+          "items": {"type": "string"},
+          "not": {
+            "anyOf": [
+              {"contains": {"const": "*"}},
+              {"contains": {"const": "ALL"}}
+            ]
+          },
+          "default": []
+        },
+        "timeout_seconds": {"type": "integer", "minimum": 1, "default": 60}
+      },
+      "additionalProperties": false
+    },
+    "ports": {
+      "type": "object",
+      "additionalProperties": {"$ref": "#/$defs/port"}
+    },
+    "port": {
+      "type": "object",
+      "properties": {
+        "type": {"type": "string", "default": "artifact"},
+        "required": {"type": "boolean", "default": false},
+        "cardinality": {"type": "string", "enum": ["one", "many"], "default": "one"}
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -9,6 +9,7 @@ from acc.engine import (
     parse_clean_workflow_template,
     topological_levels,
     validate_clean_workflow_template,
+    validate_nested_internal_node_boundaries,
     validate_permission_profile,
 )
 from acc.runtime import build_allowed_env, validate_workspace_access
@@ -63,6 +64,47 @@ def test_network_rejected_in_hermetic_mode() -> None:
 
     with pytest.raises(AccError, match="network access"):
         validate_clean_workflow_template(template)
+
+
+def test_nested_boundary_allows_top_level_node_id_that_collides_with_internal_id() -> None:
+    payload = {
+        "id": "legacy_collision",
+        "nodes": [
+            {
+                "id": "container",
+                "kind": "workflow",
+                "ui": {
+                    "semantic_kind": "workflow_container",
+                    "internal_nodes": [{"id": "node"}],
+                },
+            },
+            {"id": "node", "kind": "agent_session", "capsule_id": "fake-agent.generic"},
+        ],
+        "control_edges": [{"id": "edge", "from": "container", "to": "node"}],
+    }
+
+    validate_nested_internal_node_boundaries(payload)
+
+
+def test_nested_boundary_rejects_unscoped_edge_to_internal_only_node() -> None:
+    payload = {
+        "id": "legacy_cross_boundary",
+        "nodes": [
+            {
+                "id": "container",
+                "kind": "workflow",
+                "ui": {
+                    "semantic_kind": "workflow_container",
+                    "internal_nodes": [{"id": "inside"}],
+                },
+            },
+            {"id": "outside", "kind": "agent_session", "capsule_id": "fake-agent.generic"},
+        ],
+        "control_edges": [{"id": "edge", "from": "container", "to": "inside"}],
+    }
+
+    with pytest.raises(AccError, match="crosses workflow boundary"):
+        validate_nested_internal_node_boundaries(payload)
 
 
 def test_full_host_env_inheritance_rejected() -> None:

@@ -1,7 +1,9 @@
-export type ViewKey = 'runs' | 'capsules' | 'artifacts' | 'workflows' | 'control' | 'decisions';
+export type ViewKey = 'tasks' | 'resources' | 'runs' | 'artifacts' | 'control' | 'decisions';
 
 export type NodeRunSummary = {
   node_id: string;
+  ui_node_id?: string;
+  parent_node_id?: string;
   capsule_id: string;
   session_id?: string | null;
   status: string;
@@ -16,6 +18,7 @@ export type NodeRunSummary = {
   stdout_log?: string | null;
   stderr_log?: string | null;
   workspace_dir?: string | null;
+  error?: string | null;
   artifacts_url?: string;
   errors?: Array<{ error_class: string; message: string; paths: Record<string, string> }>;
 };
@@ -140,6 +143,7 @@ export type WorkflowGraphNode = {
   ui?: {
     collapsed?: boolean;
     color?: string;
+    semantic_kind?: 'workflow_container' | 'wrapped_capsule';
     binding_ref?: string;
     internal_nodes?: unknown[];
     internal_edges?: Array<WorkflowDataEdge | WorkflowGraphEdge>;

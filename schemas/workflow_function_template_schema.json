@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "WorkflowFunctionTemplate",
+  "type": "object",
+  "required": ["id", "version", "node_invocations", "control_edges", "data_edges"],
+  "properties": {
+    "id": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+$"},
+    "version": {"type": "string"},
+    "exposed_inputs": {"type": "object"},
+    "exposed_outputs": {"type": "object"},
+    "workflow_input_bindings": {"type": "array", "items": {"type": "object"}},
+    "workflow_output_bindings": {"type": "array", "items": {"type": "object"}},
+    "node_invocations": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/node_invocation"}
+    },
+    "control_edges": {"type": "array", "items": {"$ref": "#/$defs/control_edge"}},
+    "data_edges": {"type": "array", "items": {"$ref": "#/$defs/data_edge"}},
+    "policies": {"type": "object"},
+    "metadata": {"type": "object"}
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "control_edge": {
+      "type": "object",
+      "required": ["from", "to"],
+      "properties": {
+        "from": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+$"},
+        "to": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+$"},
+        "condition": {"type": ["string", "null"]},
+        "context": {"type": "string", "enum": ["upstream_output", "none"]}
+      },
+      "additionalProperties": false
+    },
+    "data_edge": {
+      "type": "object",
+      "required": ["from", "to"],
+      "properties": {
+        "from": {"$ref": "#/$defs/data_endpoint"},
+        "to": {"$ref": "#/$defs/data_endpoint"},
+        "materialization": {
+          "type": "string",
+          "enum": ["copy", "reference", "symlink"],
+          "default": "copy"
+        }
+      },
+      "additionalProperties": false
+    },
+    "data_endpoint": {
+      "type": "object",
+      "required": ["node", "port"],
+      "properties": {
+        "node": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+$"},
+        "port": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+$"}
+      },
+      "additionalProperties": false
+    },
+    "node_invocation": {
+      "type": "object",
+      "required": ["id", "callable_ref"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+$"},
+        "callable_ref": {"$ref": "#/$defs/callable_ref"},
+        "overrides": {"type": "object"},
+        "input_bindings": {"type": "array"},
+        "output_bindings": {"type": "array"},
+        "workflow_call_input_bindings": {"type": "array"},
+        "workflow_call_output_bindings": {"type": "array"},
+        "environment_policy": {
+          "type": "string",
+          "enum": ["inherit_parent", "new_ephemeral", "binding_required", "forbidden"]
+        },
+        "invocation_policy": {"type": "object"},
+        "input_ports": {"type": "object"},
+        "output_ports": {"type": "object"},
+        "metadata": {"type": "object"}
+      },
+      "additionalProperties": false
+    },
+    "callable_ref": {
+      "type": "object",
+      "required": ["kind", "id"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["agent_class", "tool_class", "workflow_function", "legacy_capsule"]
+        },
+        "id": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+$"},
+        "version": {"type": ["string", "null"]}
+      },
+      "additionalProperties": false
+    }
+  }
+}

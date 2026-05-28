@@ -14,3 +14,8 @@ web/vite.config.d.ts
 capsules/browser-stock-*.codex/
 capsules/stock-market-*.codex/
 workflows/stock_market_daily_research.graph.json
+workflows/acc_workspace_canvas*.graph.json
+workflows/acc_workspace_canvas__*.accflow.json
+workflows/task_canvas_*.graph.json
+workflows/task_canvas_*__*.accflow.json
+workflows/*_single_node.graph.json

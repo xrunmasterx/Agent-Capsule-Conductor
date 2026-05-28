@@ -9,8 +9,20 @@ from typing import Any
 
 from jinja2 import Environment, StrictUndefined, TemplateError
 
+from acc.app.inspect import workflow_inspect_payload
+from acc.app.node_invocation import (
+    build_clean_node_input_payload,
+    collect_upstream_context,
+    collect_workflow_input_context,
+    materialize_clean_inboxes,
+)
+from acc.app.workflow_call import (
+    build_nested_workflow_input_payload,
+    workflow_call_manifest_payload,
+)
 from acc.domain import AccError, EnvironmentFrame, NodeSpec, PermissionProfile, WorkflowTemplate
 from acc.engine import (
+    normalize_node_invocation_spec,
     parse_clean_workflow_template,
     topological_levels,
     validate_clean_workflow_template,
@@ -133,6 +145,9 @@ class WorkflowAppService:
         input_payload: dict[str, Any] | None = None,
         inherited_workspace: Path | None = None,
         inherited_ephemeral: bool = False,
+        parent_invocation_id: str | None = None,
+        parent_scope_frame_id: str | None = None,
+        call_depth: int = 0,
         node_executor: NodeExecutor | None = None,
     ) -> dict[str, Any]:
         if is_clean_workflow_path(workflow_path):
@@ -144,6 +159,9 @@ class WorkflowAppService:
                 input_payload=input_payload,
                 inherited_workspace=inherited_workspace,
                 inherited_ephemeral=inherited_ephemeral,
+                parent_invocation_id=parent_invocation_id,
+                parent_scope_frame_id=parent_scope_frame_id,
+                call_depth=call_depth,
                 node_executor=node_executor,
             )
         return await run_legacy_graph_template(
@@ -245,6 +263,9 @@ async def run_clean_workflow_template(
     input_payload: dict[str, Any] | None = None,
     inherited_workspace: Path | None = None,
     inherited_ephemeral: bool = False,
+    parent_invocation_id: str | None = None,
+    parent_scope_frame_id: str | None = None,
+    call_depth: int = 0,
     node_executor: NodeExecutor | None = None,
 ) -> dict[str, Any]:
     template = load_clean_workflow_template(workflow_path)
@@ -261,6 +282,9 @@ async def run_clean_workflow_template(
         binding=binding,
         inherited_workspace=inherited_workspace,
         inherited_ephemeral=inherited_ephemeral,
+        parent_invocation_id=parent_invocation_id,
+        parent_scope_frame_id=parent_scope_frame_id,
+        call_depth=call_depth,
     )
     return await run_workflow_template_instance(
         template,
@@ -347,10 +371,15 @@ async def run_workflow_template_instance(
     node_executor: NodeExecutor | None = None,
 ) -> dict[str, Any]:
     validate_required_workflow_inputs(template, workflow_input)
-    store.prepare_run_dir()
-    frame = store.create_environment_frame()
-    levels = topological_levels(template)
     started_at = utc_now_iso()
+    store.prepare_run_dir()
+    invocation = store.create_function_invocation(
+        input_payload=workflow_input,
+        status="running",
+        started_at=started_at,
+    )
+    frame = store.create_environment_frame(invocation)
+    levels = topological_levels(template)
     store.write_workflow_event(
         "workflow_started",
         status="running",
@@ -424,6 +453,10 @@ async def run_workflow_template_instance(
         "run_id": store.run_dir.name,
         "run_dir": str(store.run_dir),
         "workflow_run_manifest": str((store.run_dir / "workflow_run_manifest.json").resolve()),
+        "function_invocation_manifest": str(
+            (store.run_dir / "function_invocation_manifest.json").resolve()
+        ),
+        "scope_frame_manifest": str((store.run_dir / "scope_frame_manifest.json").resolve()),
         "environment_manifest": str(frame.environment_root / "environment_manifest.json"),
         "event_log": str(store.event_log.resolve()),
         "topological_levels": levels,
@@ -654,6 +687,7 @@ async def run_clean_node(
         )
         store.write_node_event(node.id, "node_scheduled", status="scheduled")
         try:
+            node_started_at = utc_now_iso()
             inbox_records = materialize_clean_inboxes(
                 template,
                 node,
@@ -675,6 +709,7 @@ async def run_clean_node(
             )
             if is_legacy_capsule_node(node):
                 input_payload = resolve_legacy_node_input(node, workflow_input, node_outputs)
+                fill_legacy_upstream_context_fields(input_payload, node, upstream_context)
                 if node.raw.get("acc_receive_upstream_context") is True:
                     input_payload["upstream_context"] = upstream_context
                 write_json(node_dir / "input.json", input_payload)
@@ -718,8 +753,37 @@ async def run_clean_node(
                 prepare_attempt=store.cleanup_node_attempt,
             )
             outboxes = store.write_artifact_bundle(node, node_dir, result)
+            workflow_call_output_bindings = (
+                normalize_node_invocation_spec(node).workflow_call_output_bindings
+                if node.kind == "workflow"
+                else []
+            )
+            if workflow_call_output_bindings and isinstance(
+                result.get("child_workflow_run_dir"),
+                str,
+            ):
+                outboxes.update(
+                    store.apply_workflow_call_output_bindings(
+                        node,
+                        node_dir,
+                        Path(result["child_workflow_run_dir"]),
+                        workflow_call_output_bindings,
+                    )
+                )
             published_outputs = store.publish_workflow_outputs_for_node(node, outboxes)
             workflow_outputs.update(published_outputs)
+            node_ended_at = utc_now_iso()
+            session_instance = None
+            if node.kind in {"agent", "tool"}:
+                session_instance = store.write_session_instance_manifest(
+                    node=node,
+                    node_dir=node_dir,
+                    frame=frame,
+                    callable_ref=normalize_node_invocation_spec(node).callable_ref,
+                    status="success",
+                    started_at=node_started_at,
+                    ended_at=node_ended_at,
+                )
             result_payload = {
                 "node_id": node.id,
                 "capsule_id": str(node.raw.get("legacy_capsule_id") or ""),
@@ -746,7 +810,14 @@ async def run_clean_node(
                 "inbox_dir": str((node_dir / "inbox").resolve()),
                 "outboxes": {port: str(path.resolve()) for port, path in outboxes.items()},
                 "workflow_outputs": published_outputs,
+                "invocation_id": frame.function_invocation_id,
+                "scope_frame_id": frame.scope_frame_id,
             }
+            if session_instance is not None:
+                result_payload["session_id"] = session_instance.session_id
+                result_payload["session_instance_manifest"] = str(
+                    (node_dir / "session_instance_manifest.json").resolve()
+                )
             store.write_node_manifest(node_dir, result_payload)
             store.write_workflow_event(
                 "node_completed",
@@ -765,6 +836,19 @@ async def run_clean_node(
                 mirror_legacy_node_run(node_dir, store.run_dir / "node_runs" / node.id)
             return result_payload
         except Exception as exc:  # noqa: BLE001 - keep workflow failure manifest complete.
+            node_ended_at = utc_now_iso()
+            session_instance = None
+            if node.kind in {"agent", "tool"}:
+                session_instance = store.write_session_instance_manifest(
+                    node=node,
+                    node_dir=node_dir,
+                    frame=frame,
+                    callable_ref=normalize_node_invocation_spec(node).callable_ref,
+                    status="failed",
+                    started_at=locals().get("node_started_at", node_ended_at),
+                    ended_at=node_ended_at,
+                    error=str(exc),
+                )
             result_payload = {
                 "node_id": node.id,
                 "capsule_id": str(node.raw.get("legacy_capsule_id") or ""),
@@ -786,7 +870,14 @@ async def run_clean_node(
                 if (node_dir / "stderr.log").exists()
                 else None,
                 "error": str(exc),
+                "invocation_id": frame.function_invocation_id,
+                "scope_frame_id": frame.scope_frame_id,
             }
+            if session_instance is not None:
+                result_payload["session_id"] = session_instance.session_id
+                result_payload["session_instance_manifest"] = str(
+                    (node_dir / "session_instance_manifest.json").resolve()
+                )
             store.write_node_manifest(node_dir, result_payload)
             store.write_workflow_event(
                 "node_failed",
@@ -804,188 +895,6 @@ async def run_clean_node(
             if legacy_compatibility:
                 mirror_legacy_node_run(node_dir, store.run_dir / "node_runs" / node.id)
             return result_payload
-
-
-def materialize_clean_inboxes(
-    template: WorkflowTemplate,
-    node: NodeSpec,
-    store: FileSystemWorkflowStore,
-    node_dir: Path,
-    source_outboxes: dict[str, dict[str, Path]],
-    workflow_input_outboxes: dict[str, Path],
-    workflow_input: dict[str, Any],
-    materializations: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    records: list[dict[str, Any]] = []
-    for binding in template.workflow_input_bindings:
-        if binding.target.node != node.id:
-            continue
-        if is_control_context_payload(workflow_input.get(binding.source_port)):
-            skipped = {
-                "port_id": binding.target.port,
-                "node_id": node.id,
-                "direction": "input",
-                "source_node_id": f"{template.id}__workflow_inputs",
-                "source_port_id": binding.source_port,
-                "target_node_id": node.id,
-                "target_port_id": binding.target.port,
-                "materialization": binding.materialization,
-                "skipped": True,
-                "reason": "workflow input carries control context",
-            }
-            records.append(skipped)
-            materializations.append(skipped)
-            continue
-        manifest = store.materialize_workflow_input_binding(
-            binding,
-            node_dir,
-            workflow_input_outboxes,
-        )
-        if manifest is None:
-            if binding.required:
-                raise AccError(f"Missing workflow input for port {binding.source_port!r}")
-            skipped = {
-                "port_id": binding.target.port,
-                "node_id": node.id,
-                "direction": "input",
-                "source_node_id": f"{template.id}__workflow_inputs",
-                "source_port_id": binding.source_port,
-                "target_node_id": node.id,
-                "target_port_id": binding.target.port,
-                "materialization": binding.materialization,
-                "skipped": True,
-                "reason": "optional workflow input not provided",
-            }
-            records.append(skipped)
-            materializations.append(skipped)
-            continue
-        records.append(manifest)
-        materializations.append(manifest)
-    for edge in template.data_edges:
-        if edge.target.node != node.id:
-            continue
-        manifest = store.materialize_data_edge(edge, node_dir, source_outboxes)
-        records.append(manifest)
-        materializations.append(manifest)
-    return records
-
-
-def build_clean_node_input_payload(
-    node: NodeSpec,
-    workflow_input: dict[str, Any],
-    upstream_context: list[dict[str, Any]],
-    inbox_records: list[dict[str, Any]],
-) -> dict[str, Any]:
-    static_input = node.raw.get("input") if isinstance(node.raw.get("input"), dict) else {}
-    return {
-        "node": {"id": node.id, "kind": node.kind},
-        "input": dict(static_input),
-        "workflow": {"input": workflow_input},
-        "upstream_context": upstream_context,
-        "inbox": {"records": inbox_records},
-    }
-
-
-def collect_upstream_context(
-    template: WorkflowTemplate,
-    node: NodeSpec,
-    run_dir: Path,
-    node_outputs: dict[str, dict[str, Any]],
-) -> list[dict[str, Any]]:
-    context: list[dict[str, Any]] = []
-    for edge in template.control_edges:
-        if edge.target != node.id or edge.context == "none":
-            continue
-        output = node_outputs.get(edge.source)
-        if output is None:
-            continue
-        output_path = run_dir / "nodes" / edge.source / "output.json"
-        context.append(
-            {
-                "node_id": edge.source,
-                "status": str(output.get("status") or "success"),
-                "output_path": str(output_path.resolve()),
-                "output_summary": summarize_upstream_output(output),
-                **inline_upstream_output(output),
-            }
-        )
-    return context
-
-
-def collect_workflow_input_context(
-    template: WorkflowTemplate,
-    node: NodeSpec,
-    workflow_input: dict[str, Any],
-) -> list[dict[str, Any]]:
-    context: list[dict[str, Any]] = []
-    for binding in template.workflow_input_bindings:
-        if binding.target.node != node.id:
-            continue
-        value = workflow_input.get(binding.source_port)
-        if not is_control_context_payload(value):
-            continue
-        upstream_context = value.get("upstream_context")
-        if not isinstance(upstream_context, list):
-            continue
-        for item in upstream_context:
-            if not isinstance(item, dict):
-                continue
-            context.append(
-                {
-                    **item,
-                    "via": "workflow_input_boundary",
-                    "workflow_input_port": binding.source_port,
-                    "target_port": binding.target.port,
-                }
-            )
-    return context
-
-
-def summarize_upstream_output(output: dict[str, Any]) -> str:
-    summary = output.get("summary")
-    if isinstance(summary, str) and summary:
-        return summary
-    compact = json.dumps(output, ensure_ascii=False, sort_keys=True)
-    return compact[:240] + ("..." if len(compact) > 240 else "")
-
-
-def inline_upstream_output(output: dict[str, Any]) -> dict[str, Any]:
-    compact = json.dumps(output, ensure_ascii=False, sort_keys=True)
-    if len(compact.encode("utf-8")) > 8192:
-        return {"output_bytes": len(compact.encode("utf-8")), "output_inline": None}
-    return {"output_bytes": len(compact.encode("utf-8")), "output_inline": output}
-
-
-def is_control_context_payload(value: Any) -> bool:
-    return isinstance(value, dict) and value.get("__acc_control_context") is True
-
-
-def build_nested_workflow_input_payload(
-    node_dir: Path,
-    child_template: WorkflowTemplate,
-) -> dict[str, Any]:
-    if not child_template.exposed_inputs:
-        return {}
-    input_path = node_dir / "input.json"
-    if not input_path.exists():
-        return {}
-    parent_input = load_json(input_path)
-    if not isinstance(parent_input, dict) or not parent_input.get("upstream_context"):
-        return {}
-    target_port = (
-        "main"
-        if "main" in child_template.exposed_inputs
-        else sorted(child_template.exposed_inputs)[0]
-    )
-    upstream_context = parent_input.get("upstream_context")
-    if not isinstance(upstream_context, list):
-        return {}
-    return {
-        target_port: {
-            "__acc_control_context": True,
-            "upstream_context": upstream_context,
-        }
-    }
 
 
 async def execute_app_clean_node(
@@ -1019,11 +928,23 @@ async def execute_app_clean_node(
     nested_result = await run_clean_workflow_template(
         child_path,
         node_dir / "nested_workflow",
-        input_payload=build_nested_workflow_input_payload(node_dir, child_template),
+        input_payload=build_nested_workflow_input_payload(node, node_dir, child_template),
         inherited_workspace=frame.workspace_root,
         inherited_ephemeral=frame.ephemeral,
+        parent_invocation_id=frame.function_invocation_id,
+        parent_scope_frame_id=frame.scope_frame_id,
+        call_depth=frame.call_depth + 1,
     )
     status = str(nested_result.get("status"))
+    write_json(
+        node_dir / "workflow_call_manifest.json",
+        workflow_call_manifest_payload(
+            node,
+            parent_invocation_id=frame.function_invocation_id,
+            parent_scope_frame_id=frame.scope_frame_id,
+            nested_result=nested_result,
+        ),
+    )
     output = {
         "status": status,
         "summary": f"Nested workflow {nested_result.get('workflow_id')} {status}",
@@ -1138,6 +1059,21 @@ def resolve_legacy_node_input(
     return result
 
 
+def fill_legacy_upstream_context_fields(
+    input_payload: dict[str, Any],
+    node: NodeSpec,
+    upstream_context: list[dict[str, Any]],
+) -> None:
+    fields = node.raw.get("acc_upstream_context_fields")
+    if not isinstance(fields, list) or not upstream_context:
+        return
+    context_text = json.dumps(upstream_context, ensure_ascii=False, sort_keys=True)
+    for field in fields:
+        if not isinstance(field, str) or not field:
+            continue
+        input_payload[field] = context_text
+
+
 def resolve_legacy_value_edge(
     edge: dict[str, Any],
     context: dict[str, Any],
@@ -1204,22 +1140,4 @@ def workflow_events_payload(run_dir: Path) -> dict[str, Any]:
         "run_dir": str(run_dir.resolve()),
         "event_log": str(event_log_path.resolve()),
         "events": events,
-    }
-
-
-def workflow_inspect_payload(run_dir: Path) -> dict[str, Any]:
-    summary_path = run_dir / "workflow_summary.json"
-    manifest_path = run_dir / "workflow_run_manifest.json"
-    event_log_path = run_dir / "workflow_events.jsonl"
-    summary = load_json(summary_path) if summary_path.exists() else None
-    manifest = load_json(manifest_path) if manifest_path.exists() else None
-    return {
-        "run_dir": str(run_dir.resolve()),
-        "status": (summary or {}).get("status") or (manifest or {}).get("status"),
-        "workflow_id": (summary or {}).get("workflow_id") or (manifest or {}).get("workflow_id"),
-        "event_log": str(event_log_path.resolve()),
-        "summary_path": str(summary_path.resolve()),
-        "manifest_path": str(manifest_path.resolve()),
-        "summary": summary,
-        "manifest": manifest,
     }

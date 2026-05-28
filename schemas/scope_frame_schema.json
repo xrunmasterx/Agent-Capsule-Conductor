@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ScopeFrame",
+  "type": "object",
+  "required": [
+    "frame_id",
+    "invocation_id",
+    "parent_frame_id",
+    "call_depth",
+    "workflow_id",
+    "workspace_root",
+    "environment_root",
+    "inbox_root",
+    "outbox_root",
+    "artifact_root",
+    "behavior_snapshot_path",
+    "ephemeral",
+    "binding_path"
+  ],
+  "properties": {
+    "frame_id": {"type": "string"},
+    "invocation_id": {"type": "string"},
+    "parent_frame_id": {"type": ["string", "null"]},
+    "call_depth": {"type": "integer", "minimum": 0},
+    "workflow_id": {"type": "string"},
+    "workspace_root": {"type": "string"},
+    "environment_root": {"type": "string"},
+    "inbox_root": {"type": "string"},
+    "outbox_root": {"type": "string"},
+    "artifact_root": {"type": "string"},
+    "behavior_snapshot_path": {"type": "string"},
+    "ephemeral": {"type": "boolean"},
+    "binding_path": {"type": ["string", "null"]}
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "topic": {
+      "description": "任务主题",
+      "type": "string"
+    },
+    "upstream_context": {
+      "description": "ACC-provided upstream node context for workflow data flow.",
+      "items": {
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "topic"
+  ],
+  "type": "object"
+}

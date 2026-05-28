@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 
@@ -152,6 +153,89 @@ def test_post_workflow_materializes_inline_workflow_container(client, project_ro
     assert child["control_edges"][0]["context"] == "upstream_output"
 
 
+def test_post_workflow_inline_capsule_input_respects_strict_schema(
+    client,
+    project_root,
+) -> None:
+    create_strict_report_capsule(project_root)
+    graph = simple_graph()
+    graph["id"] = "inline_strict_schema_graph"
+    graph["nodes"] = [
+        {
+            "id": "container",
+            "capsule_id": "fake-agent.generic",
+            "kind": "workflow",
+            "input_ports": [{"id": "main", "direction": "input"}],
+            "output_ports": [{"id": "main", "direction": "output"}],
+            "ui": {
+                "semantic_kind": "workflow_container",
+                "internal_nodes": [
+                    {
+                        "id": "strict_a",
+                        "kind": "Agent",
+                        "name": "Strict A",
+                        "runtime": "strict-report.generic",
+                        "input": {"topic": "must be removed"},
+                    },
+                    {
+                        "id": "strict_b",
+                        "kind": "Agent",
+                        "name": "Strict B",
+                        "runtime": "strict-report.generic",
+                        "input": {"topic": "must be removed"},
+                    },
+                ],
+                "internal_edges": [
+                    {"id": "strict_ab", "from": "strict_a", "to": "strict_b"}
+                ],
+            },
+        }
+    ]
+
+    response = client.post("/api/workflows", json={"graph": graph, "force": True})
+
+    assert response.status_code == 200, response.text
+    child = load_json(
+        project_root / "workflows" / "inline_strict_schema_graph__container.accflow.json"
+    )
+    for node in child["nodes"]:
+        assert "topic" not in node["input"]
+        assert "upstream_context" not in node["input"]
+        assert node["acc_receive_upstream_context"] is False
+        assert node["input"]["task"] == "must be removed"
+        assert node["input"]["required_report"] == "must be removed"
+        assert node["acc_upstream_context_fields"] == ["required_report"]
+
+
+def test_post_workflow_top_level_capsule_input_respects_strict_schema(
+    client,
+    project_root,
+) -> None:
+    create_strict_report_capsule(project_root)
+    graph = simple_graph()
+    graph["id"] = "top_level_strict_schema_graph"
+    graph["nodes"] = [
+        {
+            "id": "strict_root",
+            "capsule_id": "strict-report.generic",
+            "kind": "agent_session",
+            "input": {"topic": "must be removed"},
+        }
+    ]
+
+    response = client.post("/api/workflows", json={"graph": graph, "force": True})
+
+    assert response.status_code == 200, response.text
+    saved = load_json(project_root / "workflows" / "top_level_strict_schema_graph.graph.json")
+    node = saved["nodes"][0]
+    assert "topic" not in node["input"]
+    assert "upstream_context" not in node["input"]
+    assert node["acc_receive_upstream_context"] is False
+    assert node["input"]["task"] == "must be removed"
+    assert node["input"]["required_report"] == "must be removed"
+    assert node["acc_upstream_context_fields"] == ["required_report"]
+
+
 def test_post_workflow_materializes_inline_workflow_boundary_edges(client, project_root) -> None:
     graph = simple_graph()
     graph["id"] = "inline_boundary_graph"
@@ -245,6 +329,153 @@ def test_validate_and_run_graph_endpoint(client, project_root) -> None:
     assert run_response.status_code == 200, run_response.text
     assert run_response.json()["status"] == "success"
     assert (project_root / "runs" / "server_graph_run" / "workflow_run.json").exists()
+
+
+def test_run_graph_payload_does_not_persist_workflow_template(client, project_root) -> None:
+    graph = simple_graph()
+    graph["id"] = "runtime_only_graph"
+
+    response = client.post(
+        "/api/workflows/run-graph",
+        json={"graph": graph, "run_dir": "runs/runtime_only_graph_run"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "success"
+    assert not (project_root / "workflows" / "runtime_only_graph.graph.json").exists()
+    assert (
+        project_root
+        / "runs"
+        / "_workflow_graph_specs"
+        / "runtime_only_graph_run"
+        / "runtime_only_graph.graph.json"
+    ).exists()
+
+
+def test_run_graph_response_includes_inline_nested_node_statuses(client) -> None:
+    graph = simple_graph()
+    graph["id"] = "runtime_inline_status"
+    graph["nodes"] = [
+        {
+            "id": "container",
+            "kind": "workflow",
+            "capsule_id": "fake-agent.generic",
+            "label": "Inline Workflow",
+            "input_ports": [{"id": "main", "direction": "input"}],
+            "output_ports": [{"id": "main", "direction": "output"}],
+            "ui": {
+                "semantic_kind": "workflow_container",
+                "internal_nodes": [
+                    {
+                        "id": "inside_a",
+                        "kind": "Agent",
+                        "name": "Inside A",
+                        "runtime": "echo-test.generic",
+                        "input": {"message": "inside a"},
+                    },
+                    {
+                        "id": "inside_b",
+                        "kind": "Agent",
+                        "name": "Inside B",
+                        "runtime": "echo-test.generic",
+                        "input": {"message": "inside b"},
+                    },
+                ],
+                "internal_edges": [{"id": "c_ab", "from": "inside_a", "to": "inside_b"}],
+            },
+        }
+    ]
+    graph["control_edges"] = []
+    graph["data_edges"] = []
+
+    response = client.post(
+        "/api/workflows/run-graph",
+        json={"graph": graph, "run_dir": "runs/runtime_inline_status_run"},
+    )
+
+    assert response.status_code == 200, response.text
+    nodes = response.json()["nodes"]
+    status_by_ui_id = {
+        node.get("ui_node_id", node["node_id"]): node["status"]
+        for node in nodes
+    }
+    assert status_by_ui_id["container"] == "success"
+    assert status_by_ui_id["container__internal__inside_a"] == "success"
+    assert status_by_ui_id["container__internal__inside_b"] == "success"
+
+
+def test_run_graph_inline_workflow_timeout_covers_child_capsules(
+    project_root,
+    monkeypatch,
+) -> None:
+    capsule_path = project_root / "capsules" / "echo-test.generic" / "capsule.yaml"
+    capsule_path.write_text(
+        capsule_path.read_text(encoding="utf-8").replace(
+            "timeout_seconds: 30",
+            "timeout_seconds: 600",
+        ),
+        encoding="utf-8",
+    )
+    client = TestClient(create_app(project_root))
+    graph = {
+        "id": "runtime_inline_timeout",
+        "version": "0.4.0",
+        "name": "Runtime Inline Timeout",
+        "nodes": [
+            {
+                "id": "inline_workflow",
+                "kind": "workflow",
+                "capsule_id": "fake-agent.generic",
+                "label": "Inline Workflow",
+                "input_ports": [{"id": "main", "direction": "input"}],
+                "output_ports": [{"id": "main", "direction": "output"}],
+                "ui": {
+                    "semantic_kind": "workflow_container",
+                    "internal_nodes": [
+                        {
+                            "id": "collector",
+                            "kind": "Agent",
+                            "capsuleId": "echo-test.generic",
+                            "runtime": "echo-test.generic",
+                            "input": {"message": "hello"},
+                        }
+                    ],
+                    "internal_edges": [],
+                },
+            }
+        ],
+        "control_edges": [],
+        "data_edges": [],
+    }
+    captured = {}
+
+    class FakeWorkflowAppService:
+        def __init__(self, registry=None) -> None:
+            self.registry = registry
+
+        def validate(self, graph_path):
+            payload = load_json(graph_path)
+            if "__inline_workflow" in Path(graph_path).name:
+                captured["child_graph"] = payload
+            return {"status": "valid", "workflow_id": Path(graph_path).stem}
+
+        def run_sync(self, graph_path, run_dir, **kwargs):
+            captured["graph"] = load_json(graph_path)
+            return {"status": "success", "workflow_id": "runtime_inline_timeout", "nodes": []}
+
+    monkeypatch.setattr(
+        "acc.server.routes.workflows.WorkflowAppService",
+        FakeWorkflowAppService,
+    )
+
+    response = client.post(
+        "/api/workflows/run-graph",
+        json={"graph": graph, "run_dir": "runs/runtime_inline_timeout_run"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert captured["graph"]["nodes"][0]["timeout_seconds"] >= 600
+    assert captured["child_graph"]["nodes"][0]["timeout_seconds"] == 600
 
 
 def test_run_graph_endpoint_routes_through_workflow_app_service(
@@ -474,4 +705,86 @@ def test_relative_project_path_survives_atomic_replace_race(tmp_path, monkeypatc
 
     assert relative_project_path(project_root, workflow_path) == (
         "workflows/ui_demo_graph.graph.json"
+    )
+
+
+def create_strict_report_capsule(project_root: Path) -> None:
+    capsule_dir = project_root / "capsules" / "strict-report.generic"
+    capsule_dir.mkdir(parents=True)
+    (capsule_dir / "capsule.yaml").write_text(
+        "\n".join(
+            [
+                "id: strict-report.generic",
+                "version: 0.1.0",
+                "name: Strict Report",
+                "description: Strict schema capsule for inline workflow tests.",
+                "runtime:",
+                "  type: generic_cli",
+                "  command: python",
+                "  args_base:",
+                "    - -c",
+                "    - >-",
+                "      import json, os, pathlib;",
+                "      data=json.load(open(os.environ['ACC_INPUT_PATH'], encoding='utf-8'));",
+                "      pathlib.Path(os.environ['ACC_OUTPUT_JSON']).write_text(",
+                "      json.dumps({'status':'success',",
+                "      'summary':data['required_report']}), encoding='utf-8')",
+                "workspace:",
+                "  mode: existing_dir",
+                "permissions:",
+                "  sandbox: read-only",
+                "  network: false",
+                "  write_files: false",
+                "  timeout_seconds: 30",
+                "  allow_dangerous: false",
+                "prompt:",
+                "  template: prompt_template.md",
+                "schema:",
+                "  input: input_schema.json",
+                "  output: output_schema.json",
+                "artifacts:",
+                "  manifest: artifact_manifest.yaml",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (capsule_dir / "prompt_template.md").write_text(
+        "Task: {{ input.task }}\nReport: {{ input.required_report }}\n",
+        encoding="utf-8",
+    )
+    (capsule_dir / "input_schema.json").write_text(
+        json.dumps(
+            {
+                "type": "object",
+                "required": ["task", "required_report"],
+                "properties": {
+                    "task": {"type": "string"},
+                    "required_report": {"type": "string"},
+                },
+                "additionalProperties": False,
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    (capsule_dir / "output_schema.json").write_text(
+        json.dumps(
+            {
+                "type": "object",
+                "required": ["status", "summary"],
+                "properties": {
+                    "status": {"type": "string"},
+                    "summary": {"type": "string"},
+                },
+                "additionalProperties": False,
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    (capsule_dir / "artifact_manifest.yaml").write_text(
+        "version: '2.0'\nrequired: []\n",
+        encoding="utf-8",
     )

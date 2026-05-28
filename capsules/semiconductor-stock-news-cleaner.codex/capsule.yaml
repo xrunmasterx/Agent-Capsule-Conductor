@@ -1,0 +1,21 @@
+id: semiconductor-stock-news-cleaner.codex
+version: 0.1.0
+name: 半导体股市信息清洗
+description: 清洗上游半导体股市新闻并筛选最高价值5条。
+runtime:
+  type: codex_cli
+workspace:
+  mode: existing_dir
+permissions:
+  sandbox: read-only
+  network: true
+  write_files: false
+  timeout_seconds: 600
+  allow_dangerous: false
+prompt:
+  template: prompt_template.md
+schema:
+  input: input_schema.json
+  output: output_schema.json
+artifacts:
+  manifest: artifact_manifest.yaml

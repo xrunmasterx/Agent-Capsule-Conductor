@@ -80,7 +80,7 @@ def get_run_events(
     return {
         "run_id": run_id,
         "event_log": relative_project_path(project_root, event_log),
-        "events": read_jsonl_tolerant(event_log, limit=limit),
+        "events": read_run_events_with_nested(run_dir, limit=limit),
     }
 
 
@@ -148,6 +148,41 @@ def read_jsonl_tolerant(path: Path, limit: int = 200) -> list[dict[str, Any]]:
             if event is not None:
                 events.append(event)
     return list(events)
+
+
+def read_run_events_with_nested(run_dir: Path, limit: int = 200) -> list[dict[str, Any]]:
+    ordered_events: list[tuple[str, int, dict[str, Any]]] = []
+    sequence = 0
+    for event in read_jsonl_tolerant(run_dir / "workflow_events.jsonl", limit=limit):
+        ordered_events.append((event_sort_key(event), sequence, event))
+        sequence += 1
+
+    nodes_dir = run_dir / "nodes"
+    if nodes_dir.exists() and nodes_dir.is_dir():
+        for node_dir in sorted(item for item in nodes_dir.iterdir() if item.is_dir()):
+            nested_event_log = node_dir / "nested_workflow" / "workflow_events.jsonl"
+            for event in read_jsonl_tolerant(nested_event_log, limit=limit):
+                nested_event = annotate_nested_event(event, node_dir.name)
+                ordered_events.append((event_sort_key(nested_event), sequence, nested_event))
+                sequence += 1
+
+    ordered_events.sort(key=lambda item: (item[0], item[1]))
+    return [event for _, _, event in ordered_events[-limit:]]
+
+
+def annotate_nested_event(event: dict[str, Any], parent_node_id: str) -> dict[str, Any]:
+    nested_event = dict(event)
+    nested_event["nested"] = True
+    nested_event["parent_node_id"] = parent_node_id
+    node_id = nested_event.get("node_id")
+    if isinstance(node_id, str) and node_id:
+        nested_event.setdefault("ui_node_id", f"{parent_node_id}__internal__{node_id}")
+    return nested_event
+
+
+def event_sort_key(event: dict[str, Any]) -> str:
+    timestamp = event.get("timestamp")
+    return timestamp if isinstance(timestamp, str) else ""
 
 
 def parse_jsonl_event(line: str, line_number: int) -> dict[str, Any] | None:

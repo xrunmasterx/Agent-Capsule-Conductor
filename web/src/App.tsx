@@ -1,4 +1,4 @@
-import { Box, Database, FileText, GitBranch, Inbox, Layers, Workflow } from 'lucide-react';
+import { Boxes, Database, FileText, Inbox, Layers, ListChecks, Workflow } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { api } from './api';
@@ -12,16 +12,16 @@ import { zhCN as t } from './i18n/zh-CN';
 import type { CapsuleSummary, RunSummary, ViewKey, WorkflowSummary } from './types';
 
 const navigation = [
+  { key: 'tasks', label: '任务', icon: ListChecks },
+  { key: 'resources', label: '资源', icon: Boxes },
   { key: 'runs', label: t.runs, icon: Database },
-  { key: 'capsules', label: t.capsuleLibrary, icon: Box },
   { key: 'artifacts', label: t.artifacts, icon: FileText },
-  { key: 'workflows', label: t.workflow, icon: GitBranch },
   { key: 'decisions', label: '决策', icon: Inbox },
   { key: 'control', label: t.controlPlane, icon: Layers },
 ] as const;
 
 export function App() {
-  const [view, setView] = useState<ViewKey>('runs');
+  const [view, setView] = useState<ViewKey>('tasks');
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [capsules, setCapsules] = useState<CapsuleSummary[]>([]);
   const [workflows, setWorkflows] = useState<WorkflowSummary[]>([]);
@@ -114,7 +114,7 @@ export function App() {
             onSelectRun={(runId) => setSelectedRunId(runId)}
           />
         ) : null}
-        {view === 'capsules' ? (
+        {view === 'resources' ? (
           <CapsuleBrowser
             capsules={capsules}
             selectedCapsuleId={selectedCapsuleId}
@@ -123,7 +123,7 @@ export function App() {
           />
         ) : null}
         {view === 'artifacts' ? <ArtifactViewer run={selectedRun} /> : null}
-        {view === 'workflows' ? (
+        {view === 'tasks' ? (
           <WorkflowViewer
             workflows={workflows}
             capsules={capsules}

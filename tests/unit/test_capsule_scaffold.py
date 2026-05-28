@@ -52,6 +52,23 @@ def test_generated_example_input_matches_input_schema(tmp_path: Path) -> None:
     )
 
 
+def test_generated_input_schema_allows_acc_upstream_context(tmp_path: Path) -> None:
+    capsules_dir = tmp_path / "capsules"
+    scaffold_capsule(
+        blueprint_path=Path("examples/blueprints/simple_research_capsule.json"),
+        capsules_dir=capsules_dir,
+    )
+    capsule_dir = capsules_dir / "demo-research.generic"
+
+    validate_payload(
+        {
+            "topic": "example topic",
+            "upstream_context": [{"node_id": "source", "output_path": "runs/source/output.json"}],
+        },
+        capsule_dir / "input_schema.json",
+    )
+
+
 def test_generated_example_input_includes_optional_fields(tmp_path: Path) -> None:
     capsules_dir = tmp_path / "capsules"
     blueprint = load_json(Path("examples/blueprints/simple_research_capsule.json"))
