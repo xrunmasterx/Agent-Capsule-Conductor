@@ -277,9 +277,52 @@ const routes: Record<string, unknown> = {
         stdout_log: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/stdout.log',
         stderr_log: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/stderr.log',
       },
+      {
+        node_id: 'research_codex',
+        ui_node_id: 'Research_Flow__internal__research_codex',
+        parent_node_id: 'Research_Flow',
+        capsule_id: 'fake-agent.generic',
+        status: 'success',
+        run_dir: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_codex',
+        input_path: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_codex/input.json',
+        prompt_path: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_codex/resolved_prompt.md',
+        output_path: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_codex/output.json',
+        artifact_dir: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_codex/artifacts',
+        event_log: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_codex/events.jsonl',
+        stdout_log: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_codex/stdout.log',
+        stderr_log: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_codex/stderr.log',
+      },
     ],
     edges: [],
     errors: [],
+  },
+  '/api/artifacts/read?path=runs%2Fui_workflow_acc_workspace_canvas_fixture%2Fnodes%2FResearch_Flow%2Finput.json': {
+    path: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/input.json',
+    name: 'input.json',
+    type: 'json',
+    content: '{"topic":"Research input fixture","upstream":"真实上游输入"}',
+    size_bytes: 64,
+  },
+  '/api/artifacts/read?path=runs%2Fui_workflow_acc_workspace_canvas_fixture%2Fnodes%2FResearch_Flow%2Foutput.json': {
+    path: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/output.json',
+    name: 'output.json',
+    type: 'json',
+    content: '{"status":"success","summary":"Research output fixture"}',
+    size_bytes: 56,
+  },
+  '/api/artifacts/read?path=runs%2Fui_workflow_acc_workspace_canvas_fixture%2Fnodes%2FResearch_Flow%2Finternal%2Fresearch_codex%2Finput.json': {
+    path: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_codex/input.json',
+    name: 'input.json',
+    type: 'json',
+    content: '{"topic":"Codex CLI","upstream":"真实上游输入"}',
+    size_bytes: 49,
+  },
+  '/api/artifacts/read?path=runs%2Fui_workflow_acc_workspace_canvas_fixture%2Fnodes%2FResearch_Flow%2Finternal%2Fresearch_codex%2Foutput.json': {
+    path: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_codex/output.json',
+    name: 'output.json',
+    type: 'json',
+    content: '{"status":"success","summary":"Codex agent output fixture"}',
+    size_bytes: 59,
   },
   '/api/graphops/examples': {
     patches: [
@@ -354,12 +397,143 @@ const routes: Record<string, unknown> = {
   },
 };
 
+function workspaceCanvasRunSummary(runId: string) {
+  return {
+    run_id: runId,
+    workflow_id: 'ui_workflow_acc_workspace_canvas_fixture',
+    status: 'success',
+    started_at: '2026-05-24T00:00:00Z',
+    ended_at: '2026-05-24T00:00:01Z',
+    duration_ms: 1000,
+    run_dir: `runs/${runId}`,
+    node_count: 2,
+    failed_nodes: [],
+    output_path: `runs/${runId}/workflow_summary.json`,
+    artifact_dir: `runs/${runId}/artifacts`,
+    nodes: [
+      {
+        node_id: 'Research_Flow',
+        capsule_id: 'fake-agent.generic',
+        status: 'success',
+        run_dir: `runs/${runId}/nodes/Research_Flow`,
+        input_path: `runs/${runId}/nodes/Research_Flow/input.json`,
+        prompt_path: `runs/${runId}/nodes/Research_Flow/resolved_prompt.md`,
+        output_path: `runs/${runId}/nodes/Research_Flow/output.json`,
+        artifact_dir: `runs/${runId}/nodes/Research_Flow/artifacts`,
+        event_log: `runs/${runId}/nodes/Research_Flow/events.jsonl`,
+        stdout_log: `runs/${runId}/nodes/Research_Flow/stdout.log`,
+        stderr_log: `runs/${runId}/nodes/Research_Flow/stderr.log`,
+      },
+      {
+        node_id: 'research_codex',
+        ui_node_id: 'Research_Flow__internal__research_codex',
+        parent_node_id: 'Research_Flow',
+        capsule_id: 'fake-agent.generic',
+        status: 'success',
+        run_dir: `runs/${runId}/nodes/Research_Flow/internal/research_codex`,
+        input_path: `runs/${runId}/nodes/Research_Flow/internal/research_codex/input.json`,
+        prompt_path: `runs/${runId}/nodes/Research_Flow/internal/research_codex/resolved_prompt.md`,
+        output_path: `runs/${runId}/nodes/Research_Flow/internal/research_codex/output.json`,
+        artifact_dir: `runs/${runId}/nodes/Research_Flow/internal/research_codex/artifacts`,
+        event_log: `runs/${runId}/nodes/Research_Flow/internal/research_codex/events.jsonl`,
+        stdout_log: `runs/${runId}/nodes/Research_Flow/internal/research_codex/stdout.log`,
+        stderr_log: `runs/${runId}/nodes/Research_Flow/internal/research_codex/stderr.log`,
+      },
+    ],
+  };
+}
+
+function workspaceCanvasRunEvents(runId: string) {
+  return {
+    run_id: runId,
+    event_log: `runs/${runId}/workflow_events.jsonl`,
+    events: [
+      { type: 'workflow_started', status: 'running' },
+      { type: 'node_completed', node_id: 'Research_Flow', status: 'success' },
+      {
+        type: 'node_completed',
+        node_id: 'research_codex',
+        ui_node_id: 'Research_Flow__internal__research_codex',
+        parent_node_id: 'Research_Flow',
+        status: 'success',
+      },
+      { type: 'workflow_completed', status: 'success' },
+    ],
+  };
+}
+
 beforeEach(() => {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input.toString();
       const method = init?.method || 'GET';
+      if (method === 'POST' && url === '/api/workflows/run-graph/submit') {
+        const body = JSON.parse(String(init?.body || '{}'));
+        const runId = String(body.run_dir || '').split('/').pop() || body.graph?.id || 'ui_workflow_acc_workspace_canvas_fixture';
+        return new Response(
+          JSON.stringify({
+            run_id: runId,
+            task_id: body.task_id,
+            status: 'running',
+            run_dir: `runs/${runId}`,
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        );
+      }
+      const workspaceCanvasRun = url.match(/^\/api\/runs\/(ui_workflow_acc_workspace_canvas(?:_fixture)?_\d+)$/u);
+      if (method === 'GET' && workspaceCanvasRun) {
+        return new Response(JSON.stringify(workspaceCanvasRunSummary(workspaceCanvasRun[1])), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      const workspaceCanvasEvents = url.match(
+        /^\/api\/runs\/(ui_workflow_acc_workspace_canvas(?:_fixture)?_\d+)\/events\?limit=\d+$/u,
+      );
+      if (method === 'GET' && workspaceCanvasEvents) {
+        return new Response(JSON.stringify(workspaceCanvasRunEvents(workspaceCanvasEvents[1])), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (
+        method === 'GET' &&
+        /^\/api\/artifacts\/read\?path=runs%2Fui_workflow_acc_workspace_canvas(?:_fixture)?_\d+%2Fnodes%2FResearch_Flow%2Finternal%2Fresearch_codex%2Finput\.json$/u.test(
+          url,
+        )
+      ) {
+        return new Response(
+          JSON.stringify({
+            path: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_codex/input.json',
+            name: 'input.json',
+            type: 'json',
+            content: '{"topic":"Codex CLI","upstream":"真实上游输入"}',
+            size_bytes: 49,
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      if (
+        method === 'GET' &&
+        /^\/api\/artifacts\/read\?path=runs%2Fui_workflow_acc_workspace_canvas(?:_fixture)?_\d+%2Fnodes%2FResearch_Flow%2Finternal%2Fresearch_codex%2Foutput\.json$/u.test(
+          url,
+        )
+      ) {
+        return new Response(
+          JSON.stringify({
+            path: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_codex/output.json',
+            name: 'output.json',
+            type: 'json',
+            content: '{"status":"success","summary":"Codex agent output fixture"}',
+            size_bytes: 59,
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
       const payload = routes[`${method} ${url}`] ?? routes[url];
       if (!payload) {
         return new Response(JSON.stringify({ detail: `Missing route ${url}` }), {
@@ -376,6 +550,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  window.localStorage.clear();
   vi.unstubAllGlobals();
 });
 
@@ -388,6 +563,11 @@ describe('Agent Capsule Workbench editable UI', () => {
   async function openNavIndex(user: ReturnType<typeof userEvent.setup>, index: number) {
     const navigation = await screen.findByLabelText('Workbench navigation');
     await user.click(within(navigation).getAllByRole('button')[index]);
+  }
+
+  async function loadWorkspaceDemo(user: ReturnType<typeof userEvent.setup>) {
+    const toolbar = await screen.findByLabelText('工作流工具栏');
+    await user.click(within(toolbar).getByRole('button', { name: '加载示例' }));
   }
 
   test('Run List and Run Inspector render fixture run from acc-server APIs', async () => {
@@ -442,8 +622,9 @@ describe('Agent Capsule Workbench editable UI', () => {
     render(<App />);
 
     await openNavIndex(user, 0);
+    await loadWorkspaceDemo(user);
 
-    const canvas = await screen.findByLabelText('Workspace Canvas');
+    const canvas = await screen.findByLabelText('任务画布');
     expect(canvas).toHaveTextContent('Research_Flow');
     expect(canvas).toHaveTextContent('Implementation_Flow');
     expect(canvas).toHaveTextContent('Review_Flow');
@@ -456,6 +637,74 @@ describe('Agent Capsule Workbench editable UI', () => {
     expect(canvas).toHaveTextContent('out_report');
     expect(canvas).toHaveTextContent('Codex CLI');
     expect(canvas).toHaveTextContent('Merge');
+  });
+
+  test('Primary navigation shows readable Chinese icon labels', async () => {
+    render(<App />);
+
+    const navigation = await screen.findByLabelText('Workbench navigation');
+    for (const label of ['任务', '资源', '运行记录', '产物', '决策', '控制平面']) {
+      expect(within(navigation).getByRole('button', { name: label })).toBeInTheDocument();
+    }
+    expect(navigation).not.toHaveTextContent('浠诲姟');
+    expect(navigation).not.toHaveTextContent('璧勬簮');
+  });
+
+  test('Task list persists across navigation switches and supports explicit delete', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await openNavIndex(user, 0);
+    const workbench = await screen.findByLabelText('ACC Workbench');
+    expect(await screen.findByLabelText('任务画布')).not.toHaveTextContent('Research_Flow');
+
+    await user.click(within(workbench).getByRole('button', { name: '新建任务' }));
+    expect((await screen.findAllByText('任务 2')).length).toBeGreaterThan(0);
+
+    await openNavIndex(user, 1);
+    await openNavIndex(user, 0);
+    expect((await screen.findAllByText('任务 2')).length).toBeGreaterThan(0);
+
+    await user.click(screen.getByRole('button', { name: '删除任务 任务 2' }));
+    await waitFor(() => expect(screen.queryByText('任务 2')).not.toBeInTheDocument());
+  });
+
+  test('Completed task restores its previous run state when selected again', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await openNavIndex(user, 0);
+    await loadWorkspaceDemo(user);
+
+    const toolbar = await screen.findByLabelText('工作流工具栏');
+    await user.click(within(toolbar).getByRole('button', { name: /^运行$/i }));
+    await screen.findByText(/ui_workflow_acc_workspace_canvas_fixture: 成功/i);
+
+    const runCallsBeforeSwitch = vi.mocked(fetch).mock.calls.filter(
+      ([url, init]) => url === '/api/workflows/run-graph/submit' && init?.method === 'POST',
+    ).length;
+
+    const workbench = await screen.findByLabelText('ACC Workbench');
+    await user.click(within(workbench).getByRole('button', { name: '新建任务' }));
+    await waitFor(() =>
+      expect(screen.queryByTestId('workflow-container-Research_Flow')).not.toBeInTheDocument(),
+    );
+
+    const taskRail = await screen.findByLabelText('任务列表');
+    await user.click(taskRail.querySelector('.task-rail-select') as HTMLButtonElement);
+
+    const restoredWorkflow = await screen.findByTestId('workflow-container-Research_Flow');
+    await waitFor(() => expect(restoredWorkflow).toHaveClass('status-success'));
+    await waitFor(() =>
+      expect(screen.getByTestId('agent-tool-node-Research_Flow__internal__research_codex')).toHaveClass(
+        'status-success',
+      ),
+    );
+
+    const runCallsAfterSwitch = vi.mocked(fetch).mock.calls.filter(
+      ([url, init]) => url === '/api/workflows/run-graph/submit' && init?.method === 'POST',
+    ).length;
+    expect(runCallsAfterSwitch).toBe(runCallsBeforeSwitch);
   });
 
   test('Resource drawer can create a workflow and add selected agents into it', async () => {
@@ -474,7 +723,11 @@ describe('Agent Capsule Workbench editable UI', () => {
     expect(workflowNode).toHaveTextContent('New Workflow');
     const fakeAgentResource = within(navigator).getByText('Fake Agent').closest('article');
     expect(fakeAgentResource).toBeTruthy();
-    expect(within(fakeAgentResource as HTMLElement).getByRole('button', { name: '加入' })).toBeInTheDocument();
+    expect(
+      within(fakeAgentResource as HTMLElement).getByRole('button', {
+        name: '加入到选中 Workflow',
+      }),
+    ).toBeInTheDocument();
   });
 
   test('Node create menu is dismissed when switching to a new task', async () => {
@@ -483,7 +736,7 @@ describe('Agent Capsule Workbench editable UI', () => {
 
     await openNavIndex(user, 0);
 
-    const canvas = await screen.findByLabelText('Workspace Canvas');
+    const canvas = await screen.findByLabelText('任务画布');
     fireEvent.contextMenu(canvas, { clientX: 1200, clientY: 600 });
     expect(await screen.findByRole('menu', { name: /新增节点/ })).toBeInTheDocument();
 
@@ -564,6 +817,39 @@ describe('Agent Capsule Workbench editable UI', () => {
     const position = helpers.nextRootPalettePosition(canvas);
 
     expect(position.x).toBeGreaterThan(160 + 430);
+  });
+
+  test('Root resource add keeps consecutive agents in the visible row before wrapping', () => {
+    const helpers = __workflowViewerTestables as any;
+    const baseCanvas = {
+      id: 'root_task',
+      name: 'Root Task',
+      rootWorkflowId: 'root_task',
+      layout: 'workspace-canvas',
+      workflows: [],
+      edges: [],
+    };
+    const first = helpers.addCapsuleNodeFromPalette(
+      baseCanvas,
+      { kind: 'agent', capsuleId: 'semiconductor-stock-news-collector.codex', label: '半导体股市信息收集' },
+      helpers.nextRootPalettePosition(baseCanvas),
+    );
+    const second = helpers.addCapsuleNodeFromPalette(
+      first,
+      { kind: 'agent', capsuleId: 'semiconductor-stock-news-cleaner.codex', label: '半导体股市信息清洗' },
+      helpers.nextRootPalettePosition(first),
+    );
+    const third = helpers.addCapsuleNodeFromPalette(
+      second,
+      { kind: 'agent', capsuleId: 'semiconductor-stock-analysis-advisor.codex', label: '半导体股市分析和建议' },
+      helpers.nextRootPalettePosition(second),
+    );
+
+    expect(third.workflows.map((workflow: any) => workflow.position)).toEqual([
+      { x: 120, y: 180 },
+      { x: 500, y: 180 },
+      { x: 880, y: 180 },
+    ]);
   });
 
   test('Chinese resource labels use stable capsule ids instead of colliding node fallback ids', () => {
@@ -1065,6 +1351,7 @@ describe('Agent Capsule Workbench editable UI', () => {
     render(<App />);
 
     await openNavIndex(user, 0);
+    await loadWorkspaceDemo(user);
     const toolbar = await screen.findByLabelText('工作流工具栏');
     await user.click(within(toolbar).getByRole('button', { name: /\u4fdd\u5b58/i }));
 
@@ -1122,6 +1409,7 @@ describe('Agent Capsule Workbench editable UI', () => {
 
     const navigation = await screen.findByLabelText('Workbench navigation');
     await user.click(within(navigation).getAllByRole('button')[0]);
+    await loadWorkspaceDemo(user);
     fireEvent.doubleClick(await screen.findByTestId('workflow-container-Research_Flow'));
     expect(screen.queryByText('返回 Workspace')).not.toBeInTheDocument();
     await user.click(screen.getAllByRole('button', { name: /\u4fdd\u5b58/i })[0]);
@@ -1145,6 +1433,7 @@ describe('Agent Capsule Workbench editable UI', () => {
 
     const navigation = await screen.findByLabelText('Workbench navigation');
     await user.click(within(navigation).getAllByRole('button')[0]);
+    await loadWorkspaceDemo(user);
     const container = await screen.findByTestId('workflow-container-Research_Flow');
     fireEvent.drop(container, {
       clientX: 180,
@@ -1190,13 +1479,101 @@ describe('Agent Capsule Workbench editable UI', () => {
     expect(dropped.position.y).toBeGreaterThanOrEqual(0);
   });
 
+  test('Palette add targets the newly created selected workflow container', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await openNavIndex(user, 0);
+    const toolbar = await screen.findByLabelText('工作流工具栏');
+    await user.click(within(toolbar).getByRole('button', { name: '资源' }));
+    await user.click(await screen.findByRole('button', { name: '拖入 Workflow' }));
+
+    const fakeAgentCard = screen.getByText('Fake Agent').closest('article');
+    expect(fakeAgentCard).toBeTruthy();
+    await user.click(
+      within(fakeAgentCard as HTMLElement).getByRole('button', {
+        name: '加入到选中 Workflow',
+      }),
+    );
+    await user.click(within(toolbar).getByRole('button', { name: /\u4fdd\u5b58/i }));
+
+    const calls = vi.mocked(fetch).mock.calls;
+    const saveCall = calls
+      .filter(([url, init]) => url === '/api/workflows' && init?.method === 'POST')
+      .at(-1);
+    expect(saveCall).toBeTruthy();
+    const savedPayload = JSON.parse(String(saveCall?.[1]?.body));
+    const workflow = savedPayload.graph.nodes.find((node: { id: string }) => node.id === 'New_Workflow');
+    expect(workflow).toBeTruthy();
+    expect(workflow.ui.internal_nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          capsuleId: 'fake-agent.generic',
+          name: 'Fake Agent',
+        }),
+      ]),
+    );
+    expect(
+      savedPayload.graph.nodes.some((node: { id: string }) => node.id === 'fake_agent_generic'),
+    ).toBe(false);
+  });
+
+  test('Palette can add a root node while a workflow container is selected', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await openNavIndex(user, 0);
+    const toolbar = await screen.findByLabelText('工作流工具栏');
+    await user.click(within(toolbar).getByRole('button', { name: '资源' }));
+    await user.click(await screen.findByRole('button', { name: '拖入 Workflow' }));
+
+    const fakeAgentCard = screen.getByText('Fake Agent').closest('article');
+    expect(fakeAgentCard).toBeTruthy();
+    await user.click(
+      within(fakeAgentCard as HTMLElement).getByRole('button', {
+        name: '加入到选中 Workflow',
+      }),
+    );
+    await user.click(
+      within(fakeAgentCard as HTMLElement).getByRole('button', {
+        name: '根画布',
+      }),
+    );
+    await user.click(within(toolbar).getByRole('button', { name: /\u4fdd\u5b58/i }));
+
+    const calls = vi.mocked(fetch).mock.calls;
+    const saveCall = calls
+      .filter(([url, init]) => url === '/api/workflows' && init?.method === 'POST')
+      .at(-1);
+    expect(saveCall).toBeTruthy();
+    const savedPayload = JSON.parse(String(saveCall?.[1]?.body));
+    const workflow = savedPayload.graph.nodes.find((node: { id: string }) => node.id === 'New_Workflow');
+    expect(workflow.ui.internal_nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          capsuleId: 'fake-agent.generic',
+          name: 'Fake Agent',
+        }),
+      ]),
+    );
+    expect(savedPayload.graph.nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'fake_agent_generic',
+          capsule_id: 'fake-agent.generic',
+          label: 'Fake Agent',
+        }),
+      ]),
+    );
+  });
+
   test('Workflow Builder drops palette capsule on root as plain executable node', async () => {
     const user = userEvent.setup();
     render(<App />);
 
     const navigation = await screen.findByLabelText('Workbench navigation');
     await user.click(within(navigation).getAllByRole('button')[0]);
-    const canvas = await screen.findByLabelText('Workspace Canvas');
+    const canvas = await screen.findByLabelText('任务画布');
     fireEvent.drop(canvas, {
       clientX: 980,
       clientY: 180,
@@ -1211,7 +1588,7 @@ describe('Agent Capsule Workbench editable UI', () => {
             : '',
       },
     });
-    await user.click(screen.getAllByRole('button', { name: /保存|淇濆瓨/ })[0]);
+    await user.click(screen.getAllByRole('button', { name: /保存/ })[0]);
 
     const calls = vi.mocked(fetch).mock.calls;
     const saveCall = calls
@@ -1233,6 +1610,7 @@ describe('Agent Capsule Workbench editable UI', () => {
 
     const navigation = await screen.findByLabelText('Workbench navigation');
     await user.click(within(navigation).getAllByRole('button')[0]);
+    await loadWorkspaceDemo(user);
     const container = await screen.findByTestId('workflow-container-Research_Flow');
     fireEvent.drop(container, {
       clientX: 720,
@@ -1248,7 +1626,7 @@ describe('Agent Capsule Workbench editable UI', () => {
             : '',
       },
     });
-    await user.click(screen.getAllByRole('button', { name: /保存|淇濆瓨/ })[0]);
+    await user.click(screen.getAllByRole('button', { name: /保存/ })[0]);
 
     const calls = vi.mocked(fetch).mock.calls;
     const saveCall = calls
@@ -1276,7 +1654,8 @@ describe('Agent Capsule Workbench editable UI', () => {
 
     const navigation = await screen.findByLabelText('Workbench navigation');
     await user.click(within(navigation).getAllByRole('button')[0]);
-    await user.click(screen.getAllByRole('button', { name: /保存|淇濆瓨/ })[0]);
+    await loadWorkspaceDemo(user);
+    await user.click(screen.getAllByRole('button', { name: /保存/ })[0]);
 
     const calls = vi.mocked(fetch).mock.calls;
     const saveCall = calls
@@ -1310,7 +1689,7 @@ describe('Agent Capsule Workbench editable UI', () => {
     expect(navigator).toBeInTheDocument();
     expect(navigator).toHaveTextContent('Fake Agent');
     expect(navigator).toHaveTextContent('file-source.local');
-    const workspaceCanvas = await screen.findByLabelText('Workspace Canvas');
+    const workspaceCanvas = await screen.findByLabelText('任务画布');
     expect(workspaceCanvas).toBeInTheDocument();
     expect(await screen.findByLabelText('Canvas Toolbar')).toBeInTheDocument();
     await user.click(within(toolbar).getByRole('button', { name: /^属性$/i }));
@@ -1333,6 +1712,7 @@ describe('Agent Capsule Workbench editable UI', () => {
     render(<App />);
 
     await openNavIndex(user, 0);
+    await loadWorkspaceDemo(user);
 
     const toolbar = await screen.findByLabelText('工作流工具栏');
     await user.click(within(toolbar).getByRole('button', { name: /\u4fdd\u5b58/i }));
@@ -1345,7 +1725,7 @@ describe('Agent Capsule Workbench editable UI', () => {
     const validateCall = calls.find(
       ([url, init]) => url === '/api/workflows/acc_workspace_canvas/validate' && init?.method === 'POST',
     );
-    const runCall = calls.find(([url, init]) => url === '/api/workflows/run-graph' && init?.method === 'POST');
+    const runCall = calls.find(([url, init]) => url === '/api/workflows/run-graph/submit' && init?.method === 'POST');
     expect(saveCall).toBeTruthy();
     expect(validateCall).toBeTruthy();
     expect(runCall).toBeTruthy();
@@ -1361,6 +1741,45 @@ describe('Agent Capsule Workbench editable UI', () => {
       default_state_mode: 'stateful',
     });
     expect(await screen.findByText(/ui_workflow_acc_workspace_canvas_fixture: 成功/i)).toBeInTheDocument();
+  });
+
+  test('Workflow node inspector shows real input and output evidence after a run', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await openNavIndex(user, 0);
+    await loadWorkspaceDemo(user);
+    const codexLabel = (await screen.findAllByText('Codex CLI'))[0];
+    const codexButton = codexLabel.closest('button');
+    expect(codexButton).toBeTruthy();
+    fireEvent.click(codexButton as HTMLButtonElement);
+
+    const toolbar = await screen.findByLabelText('工作流工具栏');
+    await user.click(within(toolbar).getByRole('button', { name: /^运行$/i }));
+    await screen.findByText(/ui_workflow_acc_workspace_canvas_fixture: 成功/i);
+
+    const inspector = await screen.findByLabelText('属性面板');
+
+    expect(inspector).toHaveTextContent(/系统提示词.*资源库/);
+    expect(within(inspector).queryByRole('textbox', { name: /系统提示词/ })).not.toBeInTheDocument();
+    expect(await within(inspector).findByLabelText(/真实输入 input\.json/)).toHaveTextContent(
+      'Codex CLI',
+    );
+    expect(within(inspector).getByLabelText(/真实输入 input\.json/)).toHaveTextContent('真实上游输入');
+    expect(await within(inspector).findByLabelText(/真实输出 output\.json/)).toHaveTextContent(
+      'Codex agent output fixture',
+    );
+
+    await user.click(within(inspector).getByRole('button', { name: '输入' }));
+    expect(await within(inspector).findByLabelText(/input\.json/)).toHaveTextContent(
+      'Codex CLI',
+    );
+    expect(within(inspector).getByLabelText(/input\.json/)).toHaveTextContent('真实上游输入');
+
+    await user.click(within(inspector).getByRole('button', { name: '输出' }));
+    expect(await within(inspector).findByLabelText(/output\.json/)).toHaveTextContent(
+      'Codex agent output fixture',
+    );
   });
 
   test('Run Inspector exposes debugger actions and diff results', async () => {

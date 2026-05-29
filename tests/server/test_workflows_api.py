@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import shutil
 from pathlib import Path
@@ -283,6 +284,16 @@ def test_post_workflow_materializes_inline_workflow_boundary_edges(client, proje
     response = client.post("/api/workflows", json={"graph": graph, "force": True})
 
     assert response.status_code == 200, response.text
+    saved = load_json(project_root / "workflows" / "inline_boundary_graph.graph.json")
+    saved_container = saved["nodes"][0]
+    assert saved_container["workflow_call_output_bindings"] == [
+        {
+            "workflow_output": "main",
+            "parent_port": "main",
+            "required": False,
+            "materialization": "copy",
+        }
+    ]
     child = load_json(
         project_root / "workflows" / "inline_boundary_graph__container.accflow.json"
     )
@@ -302,6 +313,50 @@ def test_post_workflow_materializes_inline_workflow_boundary_edges(client, proje
             "to": "inside_b",
             "condition": None,
             "context": "upstream_output",
+        }
+    ]
+
+
+def test_inline_workflow_output_binding_uses_parent_output_port_id(
+    client,
+    project_root,
+) -> None:
+    graph = simple_graph()
+    graph["id"] = "inline_parent_output_port_graph"
+    graph["nodes"] = [
+        {
+            "id": "container",
+            "capsule_id": "fake-agent.generic",
+            "kind": "workflow",
+            "input_ports": [{"id": "in_main", "direction": "input"}],
+            "output_ports": [{"id": "out_main", "direction": "output"}],
+            "ui": {
+                "semantic_kind": "workflow_container",
+                "internal_nodes": [
+                    {
+                        "id": "inside",
+                        "kind": "Agent",
+                        "name": "Inside",
+                        "runtime": "echo-test.generic",
+                        "input": {"message": "inside"},
+                    }
+                ],
+                "internal_edges": [],
+            },
+        }
+    ]
+
+    response = client.post("/api/workflows", json={"graph": graph, "force": True})
+
+    assert response.status_code == 200, response.text
+    saved = load_json(project_root / "workflows" / "inline_parent_output_port_graph.graph.json")
+    saved_container = saved["nodes"][0]
+    assert saved_container["workflow_call_output_bindings"] == [
+        {
+            "workflow_output": "main",
+            "parent_port": "out_main",
+            "required": False,
+            "materialization": "copy",
         }
     ]
 
@@ -548,6 +603,111 @@ def test_run_graph_endpoint_accepts_workflow_input(client, monkeypatch) -> None:
 
     assert response.status_code == 200, response.text
     assert calls == [{"main": {"topic": "rendering"}}]
+
+
+def test_submit_run_graph_endpoint_creates_async_run_summary(
+    project_root,
+    monkeypatch,
+) -> None:
+    calls = []
+
+    class FakeWorkflowAppService:
+        def __init__(self, registry=None) -> None:
+            self.registry = registry
+
+        def validate(self, graph_path):
+            return {"status": "valid", "workflow_id": Path(graph_path).stem}
+
+        async def run(self, graph_path, run_dir, **kwargs):
+            calls.append((Path(graph_path).name, Path(run_dir).name, kwargs.get("input_payload")))
+            await asyncio.sleep(0.01)
+            return {
+                "status": "success",
+                "workflow_id": "async_graph",
+                "run_id": Path(run_dir).name,
+                "run_dir": str(Path(run_dir).resolve()),
+                "nodes": [],
+                "errors": [],
+            }
+
+    monkeypatch.setattr(
+        "acc.server.routes.workflows.WorkflowAppService",
+        FakeWorkflowAppService,
+    )
+    custom_client = TestClient(create_app(project_root))
+    graph = simple_graph()
+    graph["id"] = "async_graph"
+
+    response = custom_client.post(
+        "/api/workflows/run-graph/submit",
+        json={
+            "graph": graph,
+            "run_dir": "runs/async_graph_run",
+            "task_id": "task_a",
+            "input": {"message": "async input"},
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["run_id"] == "async_graph_run"
+    assert response.json()["status"] in {"queued", "running"}
+    summary_response = custom_client.get("/api/runs/async_graph_run")
+    assert summary_response.status_code == 200, summary_response.text
+    assert summary_response.json()["status"] in {"queued", "running", "success"}
+    assert calls == [("async_graph.graph.json", "async_graph_run", {"message": "async input"})]
+
+
+def test_submit_run_graph_respects_run_limit_and_cancels_queued_run(
+    project_root,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("ACC_WORKBENCH_MAX_ACTIVE_RUNS", "1")
+
+    class SlowWorkflowAppService:
+        def __init__(self, registry=None) -> None:
+            self.registry = registry
+
+        def validate(self, graph_path):
+            return {"status": "valid", "workflow_id": Path(graph_path).stem}
+
+        async def run(self, graph_path, run_dir, **kwargs):
+            await asyncio.sleep(0.2)
+            return {
+                "status": "success",
+                "workflow_id": Path(graph_path).stem,
+                "run_id": Path(run_dir).name,
+                "run_dir": str(Path(run_dir).resolve()),
+                "nodes": [],
+                "errors": [],
+            }
+
+    monkeypatch.setattr(
+        "acc.server.routes.workflows.WorkflowAppService",
+        SlowWorkflowAppService,
+    )
+    graph = simple_graph()
+    graph["id"] = "limited_graph"
+
+    with TestClient(create_app(project_root)) as custom_client:
+        first = custom_client.post(
+            "/api/workflows/run-graph/submit",
+            json={"graph": graph, "run_dir": "runs/limited_graph_run_a"},
+        )
+        second = custom_client.post(
+            "/api/workflows/run-graph/submit",
+            json={"graph": graph, "run_dir": "runs/limited_graph_run_b"},
+        )
+        cancel = custom_client.post("/api/runs/limited_graph_run_b/cancel", json={})
+
+        assert first.status_code == 200, first.text
+        assert first.json()["status"] == "running"
+        assert second.status_code == 200, second.text
+        assert second.json()["status"] == "queued"
+        assert cancel.status_code == 200, cancel.text
+        assert cancel.json()["status"] == "cancelled"
+        summary = custom_client.get("/api/runs/limited_graph_run_b")
+        assert summary.status_code == 200, summary.text
+        assert summary.json()["status"] == "cancelled"
 
 
 def test_workflow_binding_validates_and_saves_real_workspace(client, project_root) -> None:

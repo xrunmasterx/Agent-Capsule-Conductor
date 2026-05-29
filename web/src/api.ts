@@ -15,6 +15,7 @@ import type {
   WorkflowBindingView,
   WorkflowGraph,
   WorkflowRunResult,
+  WorkflowRunSubmitResult,
   WorkflowSummary,
 } from './types';
 
@@ -70,6 +71,12 @@ export const api = {
   health: () => getJson<{ status: string }>('/api/health'),
   runs: () => getJson<RunIndex>('/api/runs'),
   run: (runId: string) => getJson<RunSummary>(`/api/runs/${encodeURIComponent(runId)}`),
+  cancelRun: (runId: string) =>
+    sendJson<{ run_id: string; status: string }>(
+      'POST',
+      `/api/runs/${encodeURIComponent(runId)}/cancel`,
+      {},
+    ),
   node: (runId: string, nodeId: string) =>
     getJson<NodeRunSummary>(
       `/api/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}`,
@@ -125,6 +132,24 @@ export const api = {
     sendJson<WorkflowRunResult>('POST', '/api/workflows/run-graph', {
       graph,
       run_dir: runDir,
+      ...(options?.bindingPath ? { binding_path: options.bindingPath } : {}),
+      ...(options?.workspace ? { workspace: options.workspace } : {}),
+      ...(options?.input ? { input: options.input } : {}),
+    }),
+  submitGraphRun: (
+    graph: WorkflowGraph,
+    runDir: string,
+    options?: {
+      taskId?: string;
+      bindingPath?: string;
+      workspace?: string;
+      input?: Record<string, unknown>;
+    },
+  ) =>
+    sendJson<WorkflowRunSubmitResult>('POST', '/api/workflows/run-graph/submit', {
+      graph,
+      run_dir: runDir,
+      ...(options?.taskId ? { task_id: options.taskId } : {}),
       ...(options?.bindingPath ? { binding_path: options.bindingPath } : {}),
       ...(options?.workspace ? { workspace: options.workspace } : {}),
       ...(options?.input ? { input: options.input } : {}),

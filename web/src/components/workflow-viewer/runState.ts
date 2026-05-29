@@ -2,10 +2,14 @@ import type { NodeRunSummary, RunEvent, WorkflowGraph, WorkflowRunResult } from 
 
 export type WorkflowStatus =
   | 'not_run'
+  | 'queued'
   | 'scheduled'
   | 'running'
   | 'success'
   | 'failed'
+  | 'cancel_requested'
+  | 'cancelled'
+  | 'crashed'
   | 'schema_error'
   | 'artifact_error'
   | 'manual_review';
@@ -248,6 +252,10 @@ function normalizeWorkflowStatus(status: string): WorkflowStatus {
     status === 'artifact_error' ||
     status === 'manual_review' ||
     status === 'running' ||
+    status === 'queued' ||
+    status === 'cancel_requested' ||
+    status === 'cancelled' ||
+    status === 'crashed' ||
     status === 'scheduled' ||
     status === 'not_run'
   ) {
@@ -260,7 +268,7 @@ function normalizeWorkflowStatus(status: string): WorkflowStatus {
 }
 
 function isFailedStatus(status: WorkflowStatus): boolean {
-  return status === 'failed' || status === 'schema_error' || status === 'artifact_error';
+  return status === 'failed' || status === 'schema_error' || status === 'artifact_error' || status === 'crashed';
 }
 
 function internalFlowNodeId(workflowId: string, nodeId: string): string {

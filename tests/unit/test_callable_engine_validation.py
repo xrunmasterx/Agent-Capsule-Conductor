@@ -17,7 +17,7 @@ from acc.domain import (
     WorkflowCallOutputBinding,
     WorkflowFunctionTemplate,
 )
-from acc.engine import validate_callable_workflow_function
+from acc.engine import validate_callable_workflow_function, validate_workflow_call_contract
 from acc.utils import AccError
 
 
@@ -129,6 +129,59 @@ def test_callable_workflow_validation_rejects_parent_output_port_mismatch() -> N
 
     with pytest.raises(AccError, match="missing parent output port"):
         validate_callable_workflow_function(template)
+
+
+def test_workflow_call_contract_rejects_missing_child_input_port() -> None:
+    child_template = WorkflowFunctionTemplate(
+        id="child",
+        version="0.1.0",
+        exposed_inputs={
+            "brief": PortContract(id="brief", direction="input", required=False)
+        },
+        exposed_outputs={
+            "report": PortContract(id="report", direction="output", required=True)
+        },
+        node_invocations={"child_tool": tool_node("child_tool")},
+        control_edges=[],
+        data_edges=[],
+    )
+
+    node = workflow_node("subflow")
+    bad_node = NodeInvocationSpec(
+        id=node.id,
+        callable_ref=node.callable_ref,
+        input_ports=node.input_ports,
+        output_ports=node.output_ports,
+        workflow_call_input_bindings=[
+            WorkflowCallInputBinding(
+                source=DataEndpoint(node="producer", port="main"),
+                workflow_input="missing",
+            )
+        ],
+        workflow_call_output_bindings=node.workflow_call_output_bindings,
+    )
+
+    with pytest.raises(AccError, match="missing child workflow input port"):
+        validate_workflow_call_contract(bad_node, child_template)
+
+
+def test_workflow_call_contract_rejects_missing_child_output_port() -> None:
+    child_template = WorkflowFunctionTemplate(
+        id="child",
+        version="0.1.0",
+        exposed_inputs={
+            "brief": PortContract(id="brief", direction="input", required=True)
+        },
+        exposed_outputs={
+            "other": PortContract(id="other", direction="output", required=True)
+        },
+        node_invocations={"child_tool": tool_node("child_tool")},
+        control_edges=[],
+        data_edges=[],
+    )
+
+    with pytest.raises(AccError, match="missing child workflow output port"):
+        validate_workflow_call_contract(workflow_node("subflow"), child_template)
 
 
 def test_callable_workflow_validation_rejects_recursive_call_by_default() -> None:

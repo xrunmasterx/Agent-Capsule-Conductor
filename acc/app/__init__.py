@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import shutil
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,7 @@ from acc.engine import (
     parse_clean_workflow_template,
     topological_levels,
     validate_clean_workflow_template,
+    validate_workflow_call_contract,
     workflow_status_after_node_failure,
 )
 from acc.legacy_graph_importer import load_legacy_graph_template
@@ -149,6 +151,7 @@ class WorkflowAppService:
         parent_scope_frame_id: str | None = None,
         call_depth: int = 0,
         node_executor: NodeExecutor | None = None,
+        should_cancel: Callable[[], bool] | None = None,
     ) -> dict[str, Any]:
         if is_clean_workflow_path(workflow_path):
             return await run_clean_workflow_template(
@@ -163,6 +166,7 @@ class WorkflowAppService:
                 parent_scope_frame_id=parent_scope_frame_id,
                 call_depth=call_depth,
                 node_executor=node_executor,
+                should_cancel=should_cancel,
             )
         return await run_legacy_graph_template(
             workflow_path,
@@ -171,6 +175,7 @@ class WorkflowAppService:
             workspace=workspace,
             binding_path=binding_path,
             input_payload=input_payload,
+            should_cancel=should_cancel,
         )
 
     def run_sync(
@@ -267,6 +272,7 @@ async def run_clean_workflow_template(
     parent_scope_frame_id: str | None = None,
     call_depth: int = 0,
     node_executor: NodeExecutor | None = None,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     template = load_clean_workflow_template(workflow_path)
     binding = load_clean_environment_binding(binding_path) if binding_path is not None else None
@@ -294,6 +300,7 @@ async def run_clean_workflow_template(
             input_payload or template.metadata.get("legacy_workflow_input", {}) or {}
         ),
         node_executor=node_executor,
+        should_cancel=should_cancel,
     )
 
 
@@ -305,6 +312,7 @@ async def run_legacy_graph_template(
     workspace: Path | None = None,
     binding_path: Path | None = None,
     input_payload: dict[str, Any] | None = None,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     template, raw_graph = load_legacy_graph_template(workflow_path)
     service_registry = registry or CapsuleRegistry()
@@ -353,6 +361,7 @@ async def run_legacy_graph_template(
         legacy_graph=raw_graph,
         legacy_compatibility=True,
         node_executor=legacy_executor,
+        should_cancel=should_cancel,
     )
     result["format"] = "legacy_graph"
     result["canonical_format"] = "accflow"
@@ -369,6 +378,7 @@ async def run_workflow_template_instance(
     legacy_graph: dict[str, Any] | None = None,
     legacy_compatibility: bool = False,
     node_executor: NodeExecutor | None = None,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     validate_required_workflow_inputs(template, workflow_input)
     started_at = utc_now_iso()
@@ -385,6 +395,7 @@ async def run_workflow_template_instance(
         status="running",
         payload={"workflow_id": template.id, "levels": levels},
     )
+    write_running_workflow_run_summary(store.run_dir, template.id, started_at)
 
     source_outboxes: dict[str, dict[str, Path]] = {}
     workflow_input_outboxes = store.write_workflow_input_bundles(workflow_input)
@@ -408,6 +419,15 @@ async def run_workflow_template_instance(
     errors: list[str] = []
 
     for level_index, level in enumerate(levels):
+        if should_cancel is not None and should_cancel():
+            workflow_status = "cancelled"
+            errors.append("Workflow run cancelled before scheduling next level")
+            store.write_workflow_event(
+                "workflow_cancelled",
+                status="cancelled",
+                payload={"level": level_index, "reason": "cancel_requested"},
+            )
+            break
         semaphore = asyncio.Semaphore(max_concurrency)
         tasks = [
             run_clean_node(
@@ -444,6 +464,15 @@ async def run_workflow_template_instance(
                 workflow_status = workflow_status_after_node_failure(failure_mode)
                 errors.append(str(result.get("error") or result.get("summary")))
         if workflow_status != "success" and failure_mode != "continue_on_error":
+            break
+        if should_cancel is not None and should_cancel():
+            workflow_status = "cancelled"
+            errors.append("Workflow run cancelled after current level completed")
+            store.write_workflow_event(
+                "workflow_cancelled",
+                status="cancelled",
+                payload={"level": level_index, "reason": "cancel_requested"},
+            )
             break
 
     ended_at = utc_now_iso()
@@ -486,9 +515,11 @@ async def run_workflow_template_instance(
             started_at,
             ended_at,
         )
+    else:
+        write_workflow_run_summary_file(store.run_dir, template.id, payload, started_at, ended_at)
     update_project_run_index(store.run_dir)
     store.write_workflow_event(
-        "workflow_completed" if workflow_status == "success" else "workflow_failed",
+        workflow_terminal_event_type(workflow_status),
         status=workflow_status,
         payload={"errors": errors},
     )
@@ -562,6 +593,70 @@ def write_legacy_run_compatibility_files(
         nodes=node_summaries,
     )
     write_json(run_dir / "run_summary.json", summary.model_dump())
+
+
+def write_running_workflow_run_summary(run_dir: Path, workflow_id: str, started_at: str) -> None:
+    summary = RunSummary(
+        run_id=run_dir.name,
+        workflow_id=workflow_id,
+        status="running",
+        started_at=started_at,
+        run_dir=str(run_dir.resolve()),
+        node_count=0,
+        failed_nodes=[],
+        nodes=[],
+    )
+    write_json(run_dir / "run_summary.json", summary.model_dump())
+
+
+def write_workflow_run_summary_file(
+    run_dir: Path,
+    workflow_id: str,
+    payload: dict[str, Any],
+    started_at: str,
+    ended_at: str,
+) -> None:
+    node_summaries = [
+        NodeRunSummary(
+            node_id=str(node.get("node_id")),
+            capsule_id=str(node.get("capsule_id") or ""),
+            status=str(node.get("status") or "failed"),
+            summary=str(node.get("summary") or ""),
+            run_dir=str(node.get("run_dir") or ""),
+            input_path=node.get("input_path"),
+            prompt_path=node.get("prompt_path"),
+            output_path=node.get("output_path"),
+            artifact_dir=node.get("artifact_dir"),
+            event_log=node.get("event_log"),
+            stdout_log=node.get("stdout_log"),
+            stderr_log=node.get("stderr_log"),
+            workspace_dir=node.get("workspace_dir"),
+        )
+        for node in payload.get("nodes", [])
+        if isinstance(node, dict)
+    ]
+    summary = RunSummary(
+        run_id=run_dir.name,
+        workflow_id=workflow_id,
+        status=str(payload.get("status") or "failed"),
+        started_at=started_at,
+        ended_at=ended_at,
+        run_dir=str(run_dir.resolve()),
+        node_count=len(node_summaries),
+        failed_nodes=[
+            node.node_id for node in node_summaries if node.status not in {"success"}
+        ],
+        nodes=node_summaries,
+    )
+    write_json(run_dir / "run_summary.json", summary.model_dump())
+
+
+def workflow_terminal_event_type(status: str) -> str:
+    if status == "success":
+        return "workflow_completed"
+    if status == "cancelled":
+        return "workflow_cancelled"
+    return "workflow_failed"
 
 
 def legacy_summary_capsule_id(template: WorkflowTemplate, node: dict[str, Any]) -> str:
@@ -925,6 +1020,10 @@ async def execute_app_clean_node(
     if not child_path.exists():
         raise AccError(f"Nested workflow not found: {node.workflow_ref}")
     child_template = load_clean_workflow_template(child_path)
+    validate_workflow_call_contract(
+        normalize_node_invocation_spec(node),
+        child_template,
+    )
     nested_result = await run_clean_workflow_template(
         child_path,
         node_dir / "nested_workflow",
@@ -945,17 +1044,65 @@ async def execute_app_clean_node(
             nested_result=nested_result,
         ),
     )
-    output = {
-        "status": status,
-        "summary": f"Nested workflow {nested_result.get('workflow_id')} {status}",
-        "child_workflow_id": nested_result.get("workflow_id"),
-        "child_workflow_run_dir": nested_result.get("run_dir"),
-        "child_errors": nested_result.get("errors", []),
-    }
+    output = workflow_node_output_payload(node, nested_result)
     write_json(node_dir / "output.json", output)
     if status != "success":
         raise AccError(output["summary"])
     return output
+
+
+def workflow_node_output_payload(
+    node: NodeSpec,
+    nested_result: dict[str, Any],
+) -> dict[str, Any]:
+    status = str(nested_result.get("status"))
+    summary = f"Nested workflow {nested_result.get('workflow_id')} {status}"
+    fallback = {
+        "status": status,
+        "summary": summary,
+        "child_workflow_id": nested_result.get("workflow_id"),
+        "child_workflow_run_dir": nested_result.get("run_dir"),
+        "child_errors": nested_result.get("errors", []),
+    }
+    if status != "success":
+        return fallback
+
+    child_run_dir_value = nested_result.get("run_dir")
+    if not isinstance(child_run_dir_value, str):
+        return fallback
+    child_run_dir = Path(child_run_dir_value)
+    bindings = normalize_node_invocation_spec(node).workflow_call_output_bindings
+    if not bindings:
+        return fallback
+
+    public_outputs: dict[str, Any] = {}
+    for binding in bindings:
+        output_path = child_run_dir / "workflow_outputs" / binding.workflow_output / "output.json"
+        if not output_path.exists():
+            if binding.required:
+                raise AccError(
+                    "Missing child workflow output "
+                    f"{binding.workflow_output!r} for workflow node {node.id}"
+                )
+            continue
+        payload = load_json(output_path)
+        public_outputs[binding.parent_port] = payload
+
+    if len(public_outputs) == 1:
+        only_output = next(iter(public_outputs.values()))
+        output = dict(only_output) if isinstance(only_output, dict) else {"value": only_output}
+        output.setdefault("status", status)
+        output.setdefault("summary", summary)
+        output.setdefault("child_workflow_id", nested_result.get("workflow_id"))
+        output.setdefault("child_workflow_run_dir", nested_result.get("run_dir"))
+        output.setdefault("child_errors", nested_result.get("errors", []))
+        return output
+    if public_outputs:
+        return {
+            **fallback,
+            "workflow_outputs": public_outputs,
+        }
+    return fallback
 
 
 def is_legacy_capsule_node(node: NodeSpec) -> bool:

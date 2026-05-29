@@ -34,6 +34,7 @@ import {
   Save,
   Search,
   TestTube,
+  Trash2,
 } from 'lucide-react';
 import dagre from 'dagre';
 import {
@@ -56,7 +57,9 @@ import { shortPath, statusTone } from '../format';
 import type {
   ArtifactContent,
   CapsuleSummary,
+  NodeRunSummary,
   RunEvent,
+  RunSummary,
   WorkflowDataEdge,
   WorkflowBindingView,
   WorkflowDetail,
@@ -174,6 +177,10 @@ type PaletteItem =
   | { kind: 'tool'; capsuleId: string; label: string }
   | { kind: 'file_source'; capsuleId: 'file-source.local'; label: string };
 
+type PaletteAddOptions = {
+  forceRoot?: boolean;
+};
+
 type PendingCanvasConnection = {
   nodeId: string;
   handleId: string | null;
@@ -211,8 +218,18 @@ type WorkbenchTask = {
   title: string;
   canvas: WorkspaceCanvasModel;
   savedWorkflowRef?: string;
-  status: Extract<WorkflowStatus, 'not_run' | 'running' | 'success' | 'failed'>;
+  status: Extract<
+    WorkflowStatus,
+    'not_run' | 'queued' | 'running' | 'success' | 'failed' | 'cancel_requested' | 'cancelled' | 'crashed'
+  >;
   activeRunId?: string;
+  latestRunId?: string;
+};
+
+type WorkbenchTaskStorePayload = {
+  version: 1;
+  activeTaskId: string;
+  tasks: WorkbenchTask[];
 };
 
 type ResourceTemplate =
@@ -224,6 +241,21 @@ type WorkbenchChromeState = {
   leftPanel: 'none' | 'tasks' | 'resources';
   rightPanel: 'none' | 'inspector' | 'resourceDetail' | 'runEvidence';
   inspectorWidth: number;
+};
+
+type RunProjection = {
+  runId: string;
+  taskId: string;
+  status: WorkflowStatus;
+  scope: RunOverlayState['scope'];
+  targetId: string;
+  graph: WorkflowGraph;
+  runDir: string;
+  summary?: RunSummary;
+  run: WorkflowRunResult | null;
+  events: RunEvent[];
+  overlay: RunOverlayState | null;
+  pollState: 'idle' | 'polling' | 'error';
 };
 
 type EdgeViewMode = 'all' | 'control' | 'data';
@@ -275,6 +307,8 @@ const INSPECTOR_MIN_WIDTH = 320;
 const INSPECTOR_MAX_WIDTH = 640;
 const ROOT_WORKSPACE = 'F:\\UE5_Project_A';
 const MAX_LOG_PREVIEW_LINES = 180;
+const TASK_STORE_KEY = 'acc.workbench.tasks.v1';
+const DEFAULT_TASK_ID = 'task_canvas_default';
 
 export function WorkflowViewer({
   workflows,
@@ -283,30 +317,30 @@ export function WorkflowViewer({
   onSelect,
   onChanged,
 }: Props) {
-  const initialCanvas = useMemo(() => workspaceDemoCanvas(), []);
-  const [tasks, setTasks] = useState<WorkbenchTask[]>(() => [
-    {
-      taskId: initialCanvas.id,
-      title: initialCanvas.name,
-      canvas: initialCanvas,
-      status: 'not_run',
-    },
-  ]);
-  const [activeTaskId, setActiveTaskId] = useState(initialCanvas.id);
-  const [canvas, setCanvas] = useState<WorkspaceCanvasModel>(() => initialCanvas);
+  const initialTaskStore = useMemo(() => loadTaskStore(), []);
+  const initialTask = useMemo(
+    () =>
+      initialTaskStore.tasks.find((task) => task.taskId === initialTaskStore.activeTaskId) ||
+      initialTaskStore.tasks[0],
+    [initialTaskStore],
+  );
+  const [tasks, setTasks] = useState<WorkbenchTask[]>(() => initialTaskStore.tasks);
+  const [activeTaskId, setActiveTaskId] = useState(initialTaskStore.activeTaskId);
+  const currentTask = useMemo(
+    () => tasks.find((task) => task.taskId === activeTaskId) || tasks[0],
+    [activeTaskId, tasks],
+  );
+  const [canvas, setCanvas] = useState<WorkspaceCanvasModel>(() => initialTask.canvas);
   const [sourceGraph, setSourceGraph] = useState<WorkflowGraph>(() =>
-    canvasToWorkflowGraph(initialCanvas),
+    canvasToWorkflowGraph(initialTask.canvas),
   );
   const [selection, setSelection] = useState<CanvasSelection>({
     type: 'task_canvas',
-    taskId: initialCanvas.id,
+    taskId: initialTask.canvas.id,
   });
   const [connectionMode, setConnectionMode] = useState<ConnectionMode>('control');
-  const [message, setMessage] = useState('已加载 Workspace Canvas Demo');
-  const [workflowRun, setWorkflowRun] = useState<WorkflowRunResult | null>(null);
-  const [workflowEvents, setWorkflowEvents] = useState<RunEvent[]>([]);
-  const [runOverlay, setRunOverlay] = useState<RunOverlayState | null>(null);
-  const [isRunning, setIsRunning] = useState(false);
+  const [message, setMessage] = useState('已加载持久任务');
+  const [runsById, setRunsById] = useState<Record<string, RunProjection>>({});
   const [openedExternalWorkflow, setOpenedExternalWorkflow] = useState(false);
   const [focusedWorkflowId, setFocusedWorkflowId] = useState<string | null>(null);
   const [chrome, setChrome] = useState<WorkbenchChromeState>({
@@ -324,6 +358,12 @@ export function WorkflowViewer({
     content: null,
   });
   const graphRef = useRef(sourceGraph);
+  const selectedRunId = currentTask?.activeRunId || currentTask?.latestRunId || null;
+  const selectedRunProjection = selectedRunId ? runsById[selectedRunId] : undefined;
+  const workflowRun = selectedRunProjection?.run || null;
+  const workflowEvents = selectedRunProjection?.events || [];
+  const runOverlay = selectedRunProjection?.overlay || null;
+  const isRunning = currentTask ? isActiveTaskStatus(currentTask.status) : false;
   const paletteOpen = chrome.leftPanel === 'resources';
   const inspectorOpen = chrome.rightPanel === 'inspector';
   const resourceDetailOpen = chrome.rightPanel === 'resourceDetail';
@@ -336,6 +376,20 @@ export function WorkflowViewer({
   function closeEvidenceDock() {
     setEvidenceDock({ open: false, title: '运行证据', content: null });
   }
+
+  const updateRunProjection = useCallback((runId: string, update: (current: RunProjection) => RunProjection) => {
+    setRunsById((current) => {
+      const projection = current[runId];
+      if (!projection) {
+        return current;
+      }
+      return { ...current, [runId]: update(projection) };
+    });
+  }, []);
+
+  useEffect(() => {
+    saveTaskStore({ version: 1, activeTaskId, tasks });
+  }, [activeTaskId, tasks]);
 
   const updateCanvas = useCallback((next: SetStateAction<WorkspaceCanvasModel>) => {
     setCanvas((current) => {
@@ -392,6 +446,79 @@ export function WorkflowViewer({
   }, [sourceGraph]);
 
   useEffect(() => {
+    if (!currentTask) {
+      return;
+    }
+    const runId = currentTask.activeRunId || currentTask.latestRunId;
+    if (!runId || runsById[runId]?.run) {
+      return;
+    }
+
+    let ignore = false;
+    const taskGraph = canvasToWorkflowGraph(currentTask.canvas);
+    api
+      .run(runId)
+      .then(async (summary) => {
+        if (ignore) {
+          return;
+        }
+        const restoredRun = workflowRunFromRunSummary(summary, taskGraph);
+        const overlay = runOverlayFromRun(restoredRun, {
+          runId,
+          scope: 'task',
+          targetId: taskGraph.id,
+        });
+        const events = await api.runEvents(runId).catch(() => null);
+        if (ignore) {
+          return;
+        }
+        setRunsById((current) => ({
+          ...current,
+          [runId]: {
+            runId,
+            taskId: currentTask.taskId,
+            status: normalizeTaskRunStatus(restoredRun.status),
+            scope: 'task',
+            targetId: taskGraph.id,
+            graph: taskGraph,
+            runDir: summary.run_dir,
+            summary,
+            run: restoredRun,
+            events: events?.events || [],
+            overlay,
+            pollState: 'idle',
+          },
+        }));
+        setTasks((current) =>
+          current.map((task) =>
+            task.taskId === currentTask.taskId
+              ? {
+                  ...task,
+                  status: taskStatusFromRunStatus(restoredRun.status),
+                  latestRunId: runId,
+                  activeRunId: isActiveRunStatus(restoredRun.status) ? runId : undefined,
+                }
+              : task,
+          ),
+        );
+      })
+      .catch(() => {
+        if (ignore) {
+          return;
+        }
+        setRunsById((current) => {
+          const next = { ...current };
+          delete next[runId];
+          return next;
+        });
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [currentTask?.activeRunId, currentTask?.latestRunId, currentTask?.taskId, runsById]);
+
+  useEffect(() => {
     let ignore = false;
     const workflowIds = Array.from(new Set([canvas.id, ...canvas.workflows.map((item) => item.id)]));
     Promise.all(
@@ -444,8 +571,6 @@ export function WorkflowViewer({
           : { type: 'workflow', id: nextCanvas.rootWorkflowId },
       );
       setMessage(`已打开 ${workflow.workflow_id}`);
-      setWorkflowRun(null);
-      setWorkflowEvents([]);
       closeEvidenceDock();
     });
     return () => {
@@ -475,6 +600,14 @@ export function WorkflowViewer({
     selection.type === 'internal'
       ? selectedWorkflow?.internalNodes.find((node) => node.id === selection.nodeId)
       : undefined;
+  const paletteTargetWorkflow =
+    focusedWorkflowId
+      ? canvas.workflows.find((workflow) => workflow.id === focusedWorkflowId)
+      : selection.type === 'workflow' &&
+          selectedWorkflow &&
+          !isExecutableNodeWorkflow(selectedWorkflow)
+        ? selectedWorkflow
+        : null;
   const canRunSelectedWorkflow = Boolean(selectedWorkflow && !isExecutableNodeWorkflow(selectedWorkflow));
   const canRunSelectedNode = Boolean(
     selectedInternalNode || (selection.type === 'workflow' && selectedWorkflow && isExecutableNodeWorkflow(selectedWorkflow)),
@@ -484,8 +617,6 @@ export function WorkflowViewer({
     const nextCanvas = workspaceDemoCanvas();
     resetCanvas(nextCanvas);
     setSelection({ type: 'task_canvas', taskId: nextCanvas.id });
-    setWorkflowRun(null);
-    setWorkflowEvents([]);
     setOpenedExternalWorkflow(false);
     setMessage('已重置为 Workspace Canvas Demo');
   }
@@ -505,38 +636,42 @@ export function WorkflowViewer({
     graphRef.current = nextGraph;
     setSourceGraph(nextGraph);
     setCanvas(task.canvas);
-    setRunOverlay(null);
-    setWorkflowRun(null);
-    setWorkflowEvents([]);
     setSelection({ type: 'task_canvas', taskId: task.canvas.id });
   }
 
   function newTask() {
     const taskId = `task_canvas_${Date.now()}`;
-    const nextCanvas = {
-      ...workspaceDemoCanvas(),
-      id: taskId,
-      name: `任务 ${tasks.length + 1}`,
-      workflows: [],
-      edges: [],
-      rootWorkflowId: taskId,
-    };
-    const task: WorkbenchTask = {
-      taskId: nextCanvas.id,
-      title: nextCanvas.name,
-      canvas: nextCanvas,
-      status: 'not_run',
-    };
+    const task = createEmptyTask(taskId, nextTaskTitle(tasks));
+    const nextCanvas = task.canvas;
     setTasks((current) => [...current, task]);
     setActiveTaskId(task.taskId);
     const nextGraph = canvasToWorkflowGraph(nextCanvas);
     graphRef.current = nextGraph;
     setSourceGraph(nextGraph);
     setCanvas(nextCanvas);
-    setRunOverlay(null);
-    setWorkflowRun(null);
-    setWorkflowEvents([]);
     setSelection({ type: 'task_canvas', taskId: nextCanvas.id });
+  }
+
+  function deleteTask(taskId: string) {
+    const targetTask = tasks.find((task) => task.taskId === taskId);
+    if (targetTask && isActiveTaskStatus(targetTask.status)) {
+      setMessage('任务正在运行，请先停止后再删除');
+      return;
+    }
+    const remaining = tasks.filter((task) => task.taskId !== taskId);
+    const nextTasks = remaining.length > 0 ? remaining : [createEmptyTask(DEFAULT_TASK_ID, '任务 1')];
+    const nextActiveTask =
+      taskId === activeTaskId
+        ? nextTasks[0]
+        : nextTasks.find((task) => task.taskId === activeTaskId) || nextTasks[0];
+    setTasks(nextTasks);
+    setActiveTaskId(nextActiveTask.taskId);
+    const nextGraph = canvasToWorkflowGraph(nextActiveTask.canvas);
+    graphRef.current = nextGraph;
+    setSourceGraph(nextGraph);
+    setCanvas(nextActiveTask.canvas);
+    setSelection({ type: 'task_canvas', taskId: nextActiveTask.canvas.id });
+    setMessage(`已删除任务 ${taskId}`);
   }
 
   function autoLayout() {
@@ -672,37 +807,64 @@ export function WorkflowViewer({
     };
     const binding = workflowBindings[graph.id];
     const bindingPath = binding?.exists ? bindingPathOf(binding) : '';
-    let pollTimer: number | undefined;
-    let pollingStopped = false;
+    const taskId = activeTaskId;
 
-    async function pollWorkflowEvents() {
+    async function pollRunUntilTerminal() {
       try {
-        const result = await api.runEvents(runId);
-        const liveRun = liveWorkflowRunFromEvents(runnableGraph, runDir, result.events);
-        setWorkflowEvents(result.events);
-        setWorkflowRun(liveRun);
-        setRunOverlay(
-          runOverlayFromRun(liveRun, {
-            runId,
-            scope,
-            targetId,
-          }),
+        const [summary, result] = await Promise.all([
+          api.run(runId),
+          api.runEvents(runId).catch(() => ({ events: [] as RunEvent[] })),
+        ]);
+        const liveRun =
+          summary.nodes.length > 0
+            ? workflowRunFromRunSummary(summary, runnableGraph)
+            : liveWorkflowRunFromEvents(runnableGraph, runDir, result.events);
+        const runStatus = normalizeTaskRunStatus(summary.status || liveRun.status);
+        const overlay = runOverlayFromRun({ ...liveRun, status: runStatus }, { runId, scope, targetId });
+        setRunsById((current) => ({
+          ...current,
+          [runId]: {
+            ...(current[runId] || {
+              runId,
+              taskId,
+              scope,
+              targetId,
+              graph: runnableGraph,
+              runDir,
+            }),
+            status: runStatus,
+            summary,
+            run: { ...liveRun, status: runStatus },
+            events: result.events,
+            overlay,
+            pollState: 'polling',
+          },
+        }));
+        setTasks((current) =>
+          current.map((task) =>
+            task.taskId === taskId
+              ? {
+                  ...task,
+                  status: taskStatusFromRunStatus(runStatus),
+                  activeRunId: isActiveRunStatus(runStatus) ? runId : undefined,
+                  latestRunId: runId,
+                }
+              : task,
+          ),
         );
+        if (isActiveRunStatus(runStatus)) {
+          window.setTimeout(() => {
+            void pollRunUntilTerminal();
+          }, selectedRunId === runId ? 1000 : 2500);
+          return;
+        }
+        setMessage(`运行 ${liveRun.workflow_id}: ${statusLabel(runStatus)}`);
+        onChanged?.();
       } catch {
-        const liveRun = liveWorkflowRunFromEvents(runnableGraph, runDir, []);
-        setWorkflowRun(liveRun);
-        setRunOverlay(
-          runOverlayFromRun(liveRun, {
-            runId,
-            scope,
-            targetId,
-          }),
-        );
-      }
-      if (!pollingStopped) {
-        pollTimer = window.setTimeout(() => {
-          void pollWorkflowEvents();
-        }, 1000);
+        updateRunProjection(runId, (current) => ({ ...current, pollState: 'error' }));
+        window.setTimeout(() => {
+          void pollRunUntilTerminal();
+        }, 2500);
       }
     }
 
@@ -711,76 +873,53 @@ export function WorkflowViewer({
         graphRef.current = graph;
         setSourceGraph(graph);
       }
-      setIsRunning(true);
-      setWorkflowEvents([]);
       const initialRun = liveWorkflowRunFromEvents(runnableGraph, runDir, []);
-      setWorkflowRun(initialRun);
-      setRunOverlay(
-        runOverlayFromRun(
-          { ...initialRun, status: 'running' },
-          {
-            runId,
-            scope,
-            targetId,
-          },
-        ),
-      );
+      const initialOverlay = runOverlayFromRun({ ...initialRun, status: 'queued' }, { runId, scope, targetId });
+      setRunsById((current) => ({
+        ...current,
+        [runId]: {
+          runId,
+          taskId,
+          status: 'queued',
+          scope,
+          targetId,
+          graph: runnableGraph,
+          runDir,
+          run: { ...initialRun, status: 'queued' },
+          events: [],
+          overlay: initialOverlay,
+          pollState: 'idle',
+        },
+      }));
       setTasks((current) =>
         current.map((task) =>
-          task.taskId === activeTaskId ? { ...task, status: 'running', activeRunId: runId } : task,
+          task.taskId === taskId
+            ? { ...task, status: 'queued', activeRunId: runId, latestRunId: runId }
+            : task,
         ),
       );
       setMessage(`运行 ${graph.id}: 已提交，等待节点事件...`);
-      const runPromise = api.runGraph(
+      const submitted = await api.submitGraphRun(
         runnableGraph,
         runDir,
-        bindingPath ? { bindingPath } : undefined,
-      );
-      pollTimer = window.setTimeout(() => {
-        void pollWorkflowEvents();
-      }, 300);
-      const result = await runPromise;
-      pollingStopped = true;
-      if (pollTimer !== undefined) {
-        window.clearTimeout(pollTimer);
-      }
-      setWorkflowRun(result);
-      setRunOverlay(
-        runOverlayFromRun(result, {
-          runId,
-          scope,
-          targetId,
-        }),
+        { taskId, ...(bindingPath ? { bindingPath } : {}) },
       );
       setTasks((current) =>
         current.map((task) =>
-          task.taskId === activeTaskId
+          task.taskId === taskId
             ? {
                 ...task,
-                status: result.status === 'success' ? 'success' : 'failed',
+                status: taskStatusFromRunStatus(submitted.status),
                 activeRunId: runId,
+                latestRunId: runId,
               }
             : task,
         ),
       );
-      const events = await api.runEvents(runId).catch(() => null);
-      setWorkflowEvents(events?.events || []);
-      if (result.status === 'success') {
-        closeEvidenceDock();
-      } else {
-        setEvidenceDock({
-          open: true,
-          title: '运行失败',
-          content: textArtifact('run-error.log', workflowRunFailureText(result), 'log'),
-        });
-      }
-      setMessage(`运行 ${result.workflow_id}: ${statusLabel(result.status)}`);
+      void pollRunUntilTerminal();
+      setMessage(`运行 ${runId}: 已提交`);
       onChanged?.();
     } catch (error) {
-      pollingStopped = true;
-      if (pollTimer !== undefined) {
-        window.clearTimeout(pollTimer);
-      }
       const text = error instanceof Error ? error.message : String(error);
       setMessage(`运行失败: ${text}`);
       setEvidenceDock({
@@ -788,14 +927,14 @@ export function WorkflowViewer({
         title: '运行错误',
         content: textArtifact('run-error.log', text, 'log'),
       });
-      setRunOverlay((current) => (current ? { ...current, status: 'failed' } : current));
+      updateRunProjection(runId, (current) => ({ ...current, status: 'failed', pollState: 'error' }));
       setTasks((current) =>
         current.map((task) =>
-          task.taskId === activeTaskId ? { ...task, status: 'failed', activeRunId: runId } : task,
+          task.taskId === taskId
+            ? { ...task, status: 'failed', activeRunId: undefined, latestRunId: runId }
+            : task,
         ),
       );
-    } finally {
-      setIsRunning(false);
     }
   }
 
@@ -840,6 +979,7 @@ export function WorkflowViewer({
         subtitle="Workflow Template / EnvironmentFrame / Port / Artifact 统一视图"
         isRunning={isRunning}
         onNew={newTask}
+        onLoadDemo={createDemo}
         onSave={saveGraph}
         onValidate={validateGraph}
         onRun={runGraph}
@@ -870,7 +1010,13 @@ export function WorkflowViewer({
         onPointerDownCapture={handleCanvasLayoutPointerDown}
         onClickCapture={handleCanvasLayoutClick}
       >
-        <TaskRail tasks={tasks} activeTaskId={activeTaskId} onSelectTask={switchTask} onNewTask={newTask} />
+        <TaskRail
+          tasks={tasks}
+          activeTaskId={activeTaskId}
+          onSelectTask={switchTask}
+          onNewTask={newTask}
+          onDeleteTask={deleteTask}
+        />
         {paletteOpen ? (
           <div className="canvas-drawer canvas-drawer-left">
             <div className="drawer-title-row">
@@ -892,21 +1038,30 @@ export function WorkflowViewer({
                 setChrome((current) => ({ ...current, rightPanel: 'resourceDetail' }));
               }}
               focusedWorkflowId={focusedWorkflowId}
-              onAddPaletteItem={(item) => {
+              addTargetLabel={paletteTargetWorkflow?.title}
+              onAddPaletteItem={(item, options) => {
                 const selectedContainerId =
                   selection.type === 'workflow' &&
                   selectedWorkflow &&
                   !isExecutableNodeWorkflow(selectedWorkflow)
                     ? selectedWorkflow.id
                     : null;
-                const requestedTargetWorkflowId = focusedWorkflowId || selectedContainerId;
+                const requestedTargetWorkflowId = options?.forceRoot
+                  ? null
+                  : focusedWorkflowId || selectedContainerId;
                 if (item.kind === 'workflow') {
+                  const nextWorkflowId = uniqueId(
+                    slugId(item.workflowRef || item.label || 'workflow') || 'workflow',
+                    new Set(canvas.workflows.map((workflow) => workflow.id)),
+                  );
                   updateCanvas((current) =>
                     addWorkflowFromPalette(current, item, {
                       x: 160 + current.workflows.length * 80,
                       y: 180 + current.workflows.length * 40,
                     }),
                   );
+                  setSelection({ type: 'workflow', id: nextWorkflowId });
+                  setChrome((current) => ({ ...current, rightPanel: 'inspector' }));
                   setMessage(`已加入 ${item.label}`);
                   return;
                 }
@@ -1072,11 +1227,13 @@ function TaskRail({
   activeTaskId,
   onSelectTask,
   onNewTask,
+  onDeleteTask,
 }: {
   tasks: WorkbenchTask[];
   activeTaskId: string;
   onSelectTask: (taskId: string) => void;
   onNewTask: () => void;
+  onDeleteTask: (taskId: string) => void;
 }) {
   return (
     <aside className="task-rail" aria-label="任务列表">
@@ -1084,9 +1241,8 @@ function TaskRail({
         新建任务
       </button>
       {tasks.map((task) => (
-        <button
+        <article
           key={task.taskId}
-          type="button"
           className={[
             'task-rail-item',
             task.taskId === activeTaskId ? 'active' : '',
@@ -1094,11 +1250,24 @@ function TaskRail({
           ]
             .filter(Boolean)
             .join(' ')}
-          onClick={() => onSelectTask(task.taskId)}
         >
-          <strong>{task.title}</strong>
-          <small>{task.activeRunId || '未运行'}</small>
-        </button>
+          <button type="button" className="task-rail-select" onClick={() => onSelectTask(task.taskId)}>
+            <strong>{task.title}</strong>
+            <small>{task.activeRunId || task.latestRunId || '未运行'}</small>
+          </button>
+          <button
+            type="button"
+            className="task-rail-delete"
+            aria-label={`删除任务 ${task.title}`}
+            title="删除任务"
+            onClick={(event) => {
+              event.stopPropagation();
+              onDeleteTask(task.taskId);
+            }}
+          >
+            <Trash2 aria-hidden="true" size={15} />
+          </button>
+        </article>
       ))}
     </aside>
   );
@@ -1109,6 +1278,7 @@ function TopBar({
   subtitle,
   isRunning,
   onNew,
+  onLoadDemo,
   onSave,
   onValidate,
   onRun,
@@ -1122,6 +1292,7 @@ function TopBar({
   subtitle: string;
   isRunning: boolean;
   onNew: () => void;
+  onLoadDemo: () => void;
   onSave: () => void;
   onValidate: () => void;
   onRun: () => void;
@@ -1159,6 +1330,10 @@ function TopBar({
           <GitBranch aria-hidden="true" size={16} />
           新建
         </button>
+        <button type="button" onClick={onLoadDemo}>
+          <LayoutDashboard aria-hidden="true" size={16} />
+          加载示例
+        </button>
         <button type="button" onClick={onSave} disabled={isRunning}>
           <Save aria-hidden="true" size={16} />
           保存任务为 Workflow
@@ -1187,6 +1362,7 @@ function LeftNavigator({
   onOpenWorkflow,
   onSelectResource,
   focusedWorkflowId,
+  addTargetLabel,
   onAddPaletteItem,
 }: {
   workflows: WorkflowSummary[];
@@ -1195,12 +1371,19 @@ function LeftNavigator({
   onOpenWorkflow: (workflowId: string) => void;
   onSelectResource: (resource: ResourceTemplate) => void;
   focusedWorkflowId: string | null;
-  onAddPaletteItem: (item: PaletteItem) => void;
+  addTargetLabel?: string;
+  onAddPaletteItem: (item: PaletteItem, options?: PaletteAddOptions) => void;
 }) {
   const paletteCapsules = capsules.filter((capsule) => capsule.id !== 'file-source.local').slice(0, 40);
   const workflowCapsuleCount = capsules.filter((capsule) =>
     /workflow|subworkflow|agent-workflow/u.test(capsule.id),
   );
+  const addButtonLabel = addTargetLabel ? '加入到选中 Workflow' : '加入';
+  const addHint = addTargetLabel
+    ? `将加入 ${addTargetLabel} 的内部节点`
+    : focusedWorkflowId
+      ? '双击加入当前 Workflow'
+      : '拖到画布或 Workflow 容器';
   return (
     <aside className="left-navigator" aria-label="Workspace Navigator">
       <section className="navigator-section">
@@ -1265,7 +1448,7 @@ function LeftNavigator({
             key={capsule.id}
             className="capsule-palette-item"
             draggable
-            title={focusedWorkflowId ? '双击加入当前 Workflow' : '拖到画布或 Workflow 容器'}
+            title={addHint}
             onClick={() =>
               onSelectResource({
                 kind: item.kind === 'tool' ? 'tool_class' : 'agent_class',
@@ -1281,17 +1464,34 @@ function LeftNavigator({
               <strong>{capsule.name || capsule.id}</strong>
               <small>{capsule.id}</small>
             </div>
-            <button
-              type="button"
-              className="palette-add-action"
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                onAddPaletteItem(item);
-              }}
-            >
-              加入
-            </button>
+            <div className="palette-add-actions">
+              <button
+                type="button"
+                className="palette-add-action"
+                title={addHint}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onAddPaletteItem(item);
+                }}
+              >
+                {addButtonLabel}
+              </button>
+              {addTargetLabel ? (
+                <button
+                  type="button"
+                  className="palette-add-action palette-add-action-secondary"
+                  title="加入到根画布"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onAddPaletteItem(item, { forceRoot: true });
+                  }}
+                >
+                  根画布
+                </button>
+              ) : null}
+            </div>
           </article>
           );
         })}
@@ -1303,7 +1503,7 @@ function LeftNavigator({
         <article
           className="capsule-palette-item"
           draggable
-          title={focusedWorkflowId ? '双击加入当前 Workflow' : '拖到画布或 Workflow 容器'}
+          title={addHint}
           onClick={() =>
             onSelectResource({
               kind: 'tool_class',
@@ -1331,21 +1531,45 @@ function LeftNavigator({
             <strong>File Source</strong>
             <small>file-source.local</small>
           </div>
-          <button
-            type="button"
-            className="palette-add-action"
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              onAddPaletteItem({
-                kind: 'file_source',
-                capsuleId: 'file-source.local',
-                label: 'File Source',
-              });
-            }}
-          >
-            加入
-          </button>
+          <div className="palette-add-actions">
+            <button
+              type="button"
+              className="palette-add-action"
+              title={addHint}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                onAddPaletteItem({
+                  kind: 'file_source',
+                  capsuleId: 'file-source.local',
+                  label: 'File Source',
+                });
+              }}
+            >
+              {addButtonLabel}
+            </button>
+            {addTargetLabel ? (
+              <button
+                type="button"
+                className="palette-add-action palette-add-action-secondary"
+                title="加入到根画布"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onAddPaletteItem(
+                    {
+                      kind: 'file_source',
+                      capsuleId: 'file-source.local',
+                      label: 'File Source',
+                    },
+                    { forceRoot: true },
+                  );
+                }}
+              >
+                根画布
+              </button>
+            ) : null}
+          </div>
         </article>
       </section>
     </aside>
@@ -1812,7 +2036,7 @@ function WorkspaceCanvas({
   return (
     <main
       className={isDraggingNode ? 'workspace-canvas-surface dragging-node' : 'workspace-canvas-surface'}
-      aria-label="Workspace Canvas"
+      aria-label="任务画布"
       onDrop={handleDrop}
       onDragOver={(event) => event.preventDefault()}
       onContextMenu={openCreateMenu}
@@ -2477,7 +2701,13 @@ function RightInspector({
         <EdgeInspector edge={selectedEdge} tab={tab} canvas={canvas} />
       ) : null}
       {selection.type === 'internal' && selectedWorkflow && selectedInternalNode ? (
-        <InternalNodeInspector workflow={selectedWorkflow} node={selectedInternalNode} tab={tab} />
+        <InternalNodeInspector
+          workflow={selectedWorkflow}
+          node={selectedInternalNode}
+          tab={tab}
+          workflowRun={workflowRun}
+          onReadEvidence={onReadEvidence}
+        />
       ) : null}
     </aside>
   );
@@ -2501,6 +2731,10 @@ function InspectorTabs({
           ? ['overview', 'input', 'output', 'artifacts', 'events', 'logs', 'raw']
           : ['overview', 'input', 'output', 'config', 'history', 'raw'];
   const labels: Record<string, string> = {
+    queued: '排队中',
+    cancel_requested: '停止中',
+    cancelled: '已取消',
+    crashed: '已中断',
     overview: '概览',
     input: '输入',
     output: '输出',
@@ -2550,11 +2784,46 @@ function WorkflowInspector({
   onReadEvidence: (path: string | null | undefined, title?: string) => void;
   onConfigureBinding: (workflowId: string) => void;
 }) {
-  const nodeRun = workflowRun?.nodes.find((node) => node.node_id === workflow.id);
+  const nodeRun = nodeRunForWorkflow(workflowRun, workflow);
+  const executable = isExecutableNodeWorkflow(workflow);
   if (tab === 'input') {
+    if (executable) {
+      return (
+        <section className="inspector-stack">
+          <h4>有效输入</h4>
+          <EvidencePreview
+            path={nodeRun?.input_path}
+            title="input.json"
+            emptyText="尚未运行；当前节点没有真实 input.json。"
+          />
+          <CodeBlock
+            title="静态输入"
+            content={JSON.stringify(workflow.sourceInput || {}, null, 2)}
+            variant="json"
+          />
+          <CodeBlock
+            title="输入映射"
+            content={JSON.stringify(workflow.sourceInputMapping || {}, null, 2)}
+            variant="json"
+          />
+        </section>
+      );
+    }
     return <PortList title="输入端口" ports={workflow.inputPorts} />;
   }
   if (tab === 'output') {
+    if (executable) {
+      return (
+        <section className="inspector-stack">
+          <h4>真实输出</h4>
+          <EvidencePreview
+            path={nodeRun?.output_path}
+            title="output.json"
+            emptyText="尚未运行；当前节点没有真实 output.json。"
+          />
+        </section>
+      );
+    }
     return <PortList title="输出端口" ports={workflow.outputPorts} />;
   }
   if (tab === 'config') {
@@ -2605,6 +2874,49 @@ function WorkflowInspector({
         content={JSON.stringify(workflow, null, 2)}
         variant="json"
       />
+    );
+  }
+  if (executable) {
+    return (
+      <section className="inspector-stack">
+        <dl className="definition-grid compact">
+          <dt>Agent</dt>
+          <dd>{workflow.title}</dd>
+          <dt>capsule</dt>
+          <dd>{workflow.capsuleId || 'n/a'}</dd>
+          <dt>runtime</dt>
+          <dd>{workflow.sourceKind === 'tool' ? 'Tool' : 'Agent'}</dd>
+          <dt>状态</dt>
+          <dd>{statusLabel(workflow.status)}</dd>
+          <dt>run</dt>
+          <dd>{nodeRun?.run_dir ? shortPath(nodeRun.run_dir) : '尚未运行'}</dd>
+        </dl>
+        <div className="inspector-note">
+          系统提示词属于资源库里的 Agent Class；这里是本次任务里的调用实例，只显示用户输入、映射和运行证据。
+        </div>
+        <CodeBlock
+          title="用户提示词 / 静态输入"
+          content={JSON.stringify(workflow.sourceInput || {}, null, 2)}
+          variant="json"
+        />
+        <CodeBlock
+          title="上游输入映射"
+          content={JSON.stringify(workflow.sourceInputMapping || {}, null, 2)}
+          variant="json"
+        />
+        <div className="inspector-run-evidence-grid">
+          <EvidencePreview
+            path={nodeRun?.input_path}
+            title="真实输入 input.json"
+            emptyText="尚未运行；当前 Agent 实例没有真实 input.json。"
+          />
+          <EvidencePreview
+            path={nodeRun?.output_path}
+            title="真实输出 output.json"
+            emptyText="尚未运行；当前 Agent 实例没有真实 output.json。"
+          />
+        </div>
+      </section>
     );
   }
   return (
@@ -2719,11 +3031,53 @@ function InternalNodeInspector({
   workflow,
   node,
   tab,
+  workflowRun,
+  onReadEvidence,
 }: {
   workflow: WorkflowContainerModel;
   node: InternalNodeView;
   tab: string;
+  workflowRun: WorkflowRunResult | null;
+  onReadEvidence: (path: string | null | undefined, title?: string) => void;
 }) {
+  const nodeRun = nodeRunForInternalNode(workflowRun, workflow.id, node.id);
+  if (tab === 'input') {
+    return (
+      <section className="inspector-stack">
+        <h4>有效输入</h4>
+        <EvidencePreview
+          path={nodeRun?.input_path}
+          title="input.json"
+          emptyText="尚未运行；当前内部节点没有真实 input.json。"
+        />
+        <CodeBlock
+          title="用户提示词 / 静态输入"
+          content={JSON.stringify(node.input || {}, null, 2)}
+          variant="json"
+        />
+      </section>
+    );
+  }
+  if (tab === 'output') {
+    return (
+      <section className="inspector-stack">
+        <h4>真实输出</h4>
+        <EvidencePreview
+          path={nodeRun?.output_path}
+          title="output.json"
+          emptyText="尚未运行；当前内部节点没有真实 output.json。"
+        />
+      </section>
+    );
+  }
+  if (tab === 'artifacts' || tab === 'logs' || tab === 'events') {
+    return (
+      <NodeEvidencePaths
+        nodeRun={nodeRun}
+        onReadEvidence={onReadEvidence}
+      />
+    );
+  }
   if (tab === 'raw') {
     return (
       <CodeBlock
@@ -2734,18 +3088,140 @@ function InternalNodeInspector({
     );
   }
   return (
-    <dl className="definition-grid compact">
-      <dt>节点</dt>
-      <dd>{node.name}</dd>
-      <dt>任务</dt>
-      <dd>{node.task}</dd>
-      <dt>类型</dt>
-      <dd>{node.kind}</dd>
-      <dt>状态</dt>
-      <dd>{statusLabel(node.status)}</dd>
-      <dt>runtime</dt>
-      <dd>{node.runtime || 'n/a'}</dd>
-    </dl>
+    <section className="inspector-stack">
+      <dl className="definition-grid compact">
+        <dt>节点</dt>
+        <dd>{node.name}</dd>
+        <dt>任务</dt>
+        <dd>{node.task}</dd>
+        <dt>类型</dt>
+        <dd>{node.kind}</dd>
+        <dt>状态</dt>
+        <dd>{statusLabel(node.status)}</dd>
+        <dt>capsule</dt>
+        <dd>{node.capsuleId || 'n/a'}</dd>
+        <dt>runtime</dt>
+        <dd>{node.runtime || 'n/a'}</dd>
+      </dl>
+      <div className="inspector-note">
+        这是工作流容器内部的调用实例；系统提示词仍由资源库 Agent Class 管理。
+      </div>
+      <CodeBlock
+        title="用户提示词 / 静态输入"
+        content={JSON.stringify(node.input || {}, null, 2)}
+        variant="json"
+      />
+      <div className="inspector-run-evidence-grid">
+        <EvidencePreview
+          path={nodeRun?.input_path}
+          title="真实输入 input.json"
+          emptyText="尚未运行；当前内部 Agent 实例没有真实 input.json。"
+        />
+        <EvidencePreview
+          path={nodeRun?.output_path}
+          title="真实输出 output.json"
+          emptyText="尚未运行；当前内部 Agent 实例没有真实 output.json。"
+        />
+      </div>
+    </section>
+  );
+}
+
+function EvidencePreview({
+  path,
+  title,
+  emptyText,
+}: {
+  path?: string | null;
+  title: string;
+  emptyText: string;
+}) {
+  const [state, setState] = useState<{ status: 'empty' | 'loading' | 'loaded' | 'error'; content: string; type: ArtifactContent['type'] }>({
+    status: path ? 'loading' : 'empty',
+    content: '',
+    type: 'text',
+  });
+
+  useEffect(() => {
+    let ignore = false;
+    if (!path) {
+      setState({ status: 'empty', content: '', type: 'text' });
+      return () => {
+        ignore = true;
+      };
+    }
+    setState({ status: 'loading', content: '', type: 'text' });
+    api
+      .artifact(path)
+      .then((artifact) => {
+        if (!ignore) {
+          setState({ status: 'loaded', content: artifact.content, type: artifact.type });
+        }
+      })
+      .catch((error) => {
+        if (!ignore) {
+          setState({
+            status: 'error',
+            content: error instanceof Error ? error.message : String(error),
+            type: 'log',
+          });
+        }
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [path]);
+
+  if (state.status === 'empty') {
+    return <p className="empty-state">{emptyText}</p>;
+  }
+  if (state.status === 'loading') {
+    return <p className="empty-state">正在读取 {shortPath(path)}...</p>;
+  }
+  return (
+    <CodeBlock
+      title={`${title}${path ? ` - ${shortPath(path)}` : ''}`}
+      content={state.content}
+      variant={state.type}
+    />
+  );
+}
+
+function NodeEvidencePaths({
+  nodeRun,
+  onReadEvidence,
+}: {
+  nodeRun?: NodeRunSummary;
+  onReadEvidence: (path: string | null | undefined, title?: string) => void;
+}) {
+  const paths = [
+    ['输入', nodeRun?.input_path],
+    ['提示词', nodeRun?.prompt_path],
+    ['输出', nodeRun?.output_path],
+    ['事件', nodeRun?.event_log],
+    ['stdout', nodeRun?.stdout_log],
+    ['stderr', nodeRun?.stderr_log],
+  ] as const;
+  return (
+    <section className="inspector-stack">
+      {paths.map(([label, pathValue]) => (
+        <button
+          key={label}
+          type="button"
+          className="path-button"
+          disabled={!pathValue}
+          onClick={() => onReadEvidence(pathValue, label)}
+        >
+          <FileText aria-hidden="true" size={16} />
+          <span>{label}</span>
+          <small>{shortPath(pathValue)}</small>
+        </button>
+      ))}
+      <dl className="definition-grid compact">
+        <dt>artifacts</dt>
+        <dd>{nodeRun?.artifact_dir ? shortPath(nodeRun.artifact_dir) : '尚未运行'}</dd>
+      </dl>
+    </section>
   );
 }
 
@@ -3642,6 +4118,163 @@ function workflowToGraphNode(workflow: WorkflowContainerModel): WorkflowGraphNod
   };
 }
 
+function createEmptyTask(taskId: string, title: string): WorkbenchTask {
+  const canvas = emptyWorkspaceCanvas(taskId, title);
+  return {
+    taskId,
+    title,
+    canvas,
+    status: 'not_run',
+  };
+}
+
+function emptyWorkspaceCanvas(taskId = DEFAULT_TASK_ID, title = '任务 1'): WorkspaceCanvasModel {
+  return {
+    ...workspaceDemoCanvas(),
+    id: taskId,
+    name: title,
+    rootWorkflowId: taskId,
+    workflows: [],
+    edges: [],
+  };
+}
+
+function nextTaskTitle(tasks: WorkbenchTask[]): string {
+  const used = new Set(tasks.map((task) => task.title));
+  let index = tasks.length + 1;
+  let title = `任务 ${index}`;
+  while (used.has(title)) {
+    index += 1;
+    title = `任务 ${index}`;
+  }
+  return title;
+}
+
+function loadTaskStore(): WorkbenchTaskStorePayload {
+  const fallbackTask = createEmptyTask(DEFAULT_TASK_ID, '任务 1');
+  if (typeof window === 'undefined') {
+    return { version: 1, activeTaskId: fallbackTask.taskId, tasks: [fallbackTask] };
+  }
+  const stored = window.localStorage.getItem(TASK_STORE_KEY);
+  if (!stored) {
+    return { version: 1, activeTaskId: fallbackTask.taskId, tasks: [fallbackTask] };
+  }
+  try {
+    const payload = JSON.parse(stored) as Partial<WorkbenchTaskStorePayload>;
+    const tasks = Array.isArray(payload.tasks)
+      ? payload.tasks.filter(isStoredWorkbenchTask).map(migrateStoredWorkbenchTask)
+      : [];
+    if (!tasks.length) {
+      return { version: 1, activeTaskId: fallbackTask.taskId, tasks: [fallbackTask] };
+    }
+    const activeTaskId =
+      typeof payload.activeTaskId === 'string' &&
+      tasks.some((task) => task.taskId === payload.activeTaskId)
+        ? payload.activeTaskId
+        : tasks[0].taskId;
+    return { version: 1, activeTaskId, tasks };
+  } catch {
+    return { version: 1, activeTaskId: fallbackTask.taskId, tasks: [fallbackTask] };
+  }
+}
+
+function saveTaskStore(payload: WorkbenchTaskStorePayload): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  window.localStorage.setItem(TASK_STORE_KEY, JSON.stringify(payload));
+}
+
+function isStoredWorkbenchTask(value: unknown): value is WorkbenchTask {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    typeof value.taskId === 'string' &&
+    typeof value.title === 'string' &&
+    isRecord(value.canvas) &&
+    typeof value.canvas.id === 'string' &&
+    Array.isArray(value.canvas.workflows) &&
+    Array.isArray(value.canvas.edges) &&
+    ['not_run', 'queued', 'running', 'success', 'failed', 'cancel_requested', 'cancelled', 'crashed'].includes(
+      String(value.status),
+    )
+  );
+}
+
+function migrateStoredWorkbenchTask(task: WorkbenchTask): WorkbenchTask {
+  if (task.latestRunId || !task.activeRunId) {
+    return task;
+  }
+  return { ...task, latestRunId: task.activeRunId };
+}
+
+function workflowRunFromRunSummary(summary: RunSummary, graph: WorkflowGraph): WorkflowRunResult {
+  return {
+    workflow_id: summary.workflow_id || graph.id,
+    status: summary.status,
+    run_dir: summary.run_dir,
+    started_at: summary.started_at || undefined,
+    ended_at: summary.ended_at || undefined,
+    nodes: summary.nodes,
+    edges: graph.edges,
+    errors: [],
+  };
+}
+
+function taskStatusFromRunStatus(status: string): WorkbenchTask['status'] {
+  if (status === 'queued') {
+    return 'queued';
+  }
+  if (status === 'success') {
+    return 'success';
+  }
+  if (status === 'running' || status === 'scheduled') {
+    return 'running';
+  }
+  if (status === 'cancel_requested') {
+    return 'cancel_requested';
+  }
+  if (status === 'cancelled') {
+    return 'cancelled';
+  }
+  if (status === 'crashed') {
+    return 'crashed';
+  }
+  if (status === 'not_run') {
+    return 'not_run';
+  }
+  return 'failed';
+}
+
+function normalizeTaskRunStatus(status: string): WorkflowStatus {
+  if (
+    status === 'queued' ||
+    status === 'running' ||
+    status === 'scheduled' ||
+    status === 'success' ||
+    status === 'failed' ||
+    status === 'cancel_requested' ||
+    status === 'cancelled' ||
+    status === 'crashed' ||
+    status === 'not_run' ||
+    status === 'schema_error' ||
+    status === 'artifact_error' ||
+    status === 'manual_review'
+  ) {
+    return status;
+  }
+  return status ? 'failed' : 'not_run';
+}
+
+function isActiveRunStatus(status: string): boolean {
+  return status === 'queued' || status === 'running' || status === 'scheduled' || status === 'cancel_requested';
+}
+
+function isActiveTaskStatus(status: WorkbenchTask['status']): boolean {
+  return status === 'queued' || status === 'running' || status === 'cancel_requested';
+}
+
 function workspaceDemoCanvas(): WorkspaceCanvasModel {
   return {
     id: 'acc_workspace_canvas',
@@ -4294,6 +4927,38 @@ function internalEdgeEndpointToFlowId(workflowId: string, nodeId: string): strin
     return workflowId;
   }
   return internalFlowNodeId(workflowId, nodeId);
+}
+
+function nodeRunForWorkflow(
+  workflowRun: WorkflowRunResult | null,
+  workflow: WorkflowContainerModel,
+): NodeRunSummary | undefined {
+  if (!workflowRun) {
+    return undefined;
+  }
+  return workflowRun.nodes.find((nodeRun) => {
+    if (nodeRun.ui_node_id === workflow.id || nodeRun.node_id === workflow.id) {
+      return true;
+    }
+    return Boolean(workflow.capsuleId && nodeRun.capsule_id === workflow.capsuleId && nodeRun.node_id === workflow.id);
+  });
+}
+
+function nodeRunForInternalNode(
+  workflowRun: WorkflowRunResult | null,
+  workflowId: string,
+  nodeId: string,
+): NodeRunSummary | undefined {
+  if (!workflowRun) {
+    return undefined;
+  }
+  const uiNodeId = internalFlowNodeId(workflowId, nodeId);
+  return workflowRun.nodes.find((nodeRun) => {
+    if (nodeRun.ui_node_id === uiNodeId || nodeRun.node_id === uiNodeId) {
+      return true;
+    }
+    return nodeRun.parent_node_id === workflowId && nodeRun.node_id === nodeId;
+  });
 }
 
 function normalizeBinding(
@@ -5056,13 +5721,13 @@ function nextRootPalettePosition(canvas: WorkspaceCanvasModel): { x: number; y: 
   if (!rootNodes.length) {
     return { x: 120, y: 180 };
   }
-  const maxRight = Math.max(
-    ...rootNodes.map((workflow) => workflow.position.x + workflow.size.width),
-  );
   const rootAgentCount = rootNodes.filter(isExecutableNodeWorkflow).length;
+  const lastRootNode = rootNodes[rootNodes.length - 1];
+  const nextX = lastRootNode.position.x + lastRootNode.size.width + 120;
+  const rowIndex = Math.floor(rootAgentCount / 4);
   return {
-    x: maxRight + AGENT_TOOL_NODE_SIZE.width + 120,
-    y: 180 + rootAgentCount * 140,
+    x: rootAgentCount > 0 && rootAgentCount % 4 === 0 ? 120 : nextX,
+    y: 180 + rowIndex * 160,
   };
 }
 

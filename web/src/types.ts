@@ -38,6 +38,13 @@ export type RunSummary = {
   nodes: NodeRunSummary[];
 };
 
+export type WorkflowRunSubmitResult = {
+  run_id: string;
+  task_id?: string | null;
+  status: 'queued' | 'running' | string;
+  run_dir: string;
+};
+
 export type RunIndex = {
   version: string;
   runs: RunSummary[];

@@ -823,7 +823,12 @@ def prepare_run_dir(run_dir: Path) -> None:
     children = list(run_dir.iterdir())
     if not children:
         return
-    markers = {"workflow_run_manifest.json", "workflow_summary.json", "workflow_run.json"}
+    markers = {
+        "workflow_run_manifest.json",
+        "workflow_summary.json",
+        "workflow_run.json",
+        "run_summary.json",
+    }
     if not any((run_dir / marker).exists() for marker in markers):
         raise AccError(f"Refusing to reuse non-ACC workflow run directory: {run_dir}")
     for child in children:

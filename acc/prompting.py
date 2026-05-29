@@ -18,10 +18,20 @@ def render_prompt(template_path: Path, input_payload: dict[str, Any]) -> str:
     environment = Environment(undefined=StrictUndefined, autoescape=False)
     try:
         template = environment.from_string(template_text)
-        return template.render(
+        input_json = json.dumps(input_payload, ensure_ascii=False, indent=2, sort_keys=True)
+        rendered = template.render(
             input=input_payload,
-            input_json=json.dumps(input_payload, indent=2, sort_keys=True),
+            input_json=input_json,
             **input_payload,
+        )
+        if "input_json" in template_text:
+            return rendered
+        return (
+            rendered.rstrip()
+            + "\n\n## ACC Runtime Input\n"
+            + "```json\n"
+            + input_json
+            + "\n```\n"
         )
     except TemplateError as exc:
         raise AccError(f"Failed to render prompt {template_path}: {exc}") from exc

@@ -506,6 +506,45 @@ def validate_workflow_call_output_boundary(node: NodeInvocationSpec) -> None:
             )
 
 
+def validate_workflow_call_contract(
+    node: NodeInvocationSpec,
+    child_template: WorkflowTemplate | WorkflowFunctionTemplate,
+) -> None:
+    """Validate a resolved workflow call against the child function signature.
+
+    Parent-only validation cannot know the child workflow's exposed ports. The app
+    layer calls this after resolving the child template and before invoking it.
+    """
+    for binding in node.workflow_call_input_bindings:
+        if binding.workflow_input not in child_template.exposed_inputs:
+            raise AccError(
+                "workflow call binding references missing child workflow input port "
+                f"{binding.workflow_input!r}"
+            )
+
+    explicitly_bound_inputs = {
+        binding.workflow_input for binding in node.workflow_call_input_bindings
+    }
+    if explicitly_bound_inputs:
+        missing_required_inputs = [
+            port_id
+            for port_id, port in child_template.exposed_inputs.items()
+            if port.required and port_id not in explicitly_bound_inputs
+        ]
+        if missing_required_inputs:
+            raise AccError(
+                "workflow call is missing required child workflow input port(s): "
+                + ", ".join(sorted(missing_required_inputs))
+            )
+
+    for binding in node.workflow_call_output_bindings:
+        if binding.workflow_output not in child_template.exposed_outputs:
+            raise AccError(
+                "workflow call binding references missing child workflow output port "
+                f"{binding.workflow_output!r}"
+            )
+
+
 def validate_callable_control_edges(
     template: WorkflowFunctionTemplate,
     node_ids: set[str],

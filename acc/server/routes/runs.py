@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from acc.run_index import NodeRunSummary, load_or_rebuild_run_index, load_run_summary_by_id
 from acc.server.context import (
     get_project_root,
+    get_workbench_run_manager,
     is_relative_to,
     reject_secret_like_path,
     relative_project_path,
@@ -29,6 +30,15 @@ def list_runs(request: Request) -> dict[str, Any]:
 @router.get("/{run_id}")
 def get_run(run_id: str, request: Request) -> dict[str, Any]:
     return load_run_or_404(run_id, request).model_dump()
+
+
+@router.post("/{run_id}/cancel")
+async def cancel_run(run_id: str, request: Request) -> dict[str, Any]:
+    validate_path_component(run_id, "run_id")
+    try:
+        return await get_workbench_run_manager(request).cancel(run_id)
+    except AccError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/{run_id}/nodes/{node_id}")
@@ -75,7 +85,20 @@ def get_run_events(
     limit: int = Query(200, ge=1, le=1000),
 ) -> dict[str, Any]:
     project_root = get_project_root(request)
-    run_dir = resolve_run_dir_or_404(run_id, request)
+    try:
+        run_dir = resolve_run_dir_or_404(run_id, request)
+    except HTTPException as exc:
+        if exc.status_code != 404:
+            raise
+        if not run_id.startswith("ui_workflow_"):
+            raise
+        validate_path_component(run_id, "run_id")
+        event_log = project_root / "runs" / run_id / "workflow_events.jsonl"
+        return {
+            "run_id": run_id,
+            "event_log": relative_project_path(project_root, event_log),
+            "events": [],
+        }
     event_log = run_dir / "workflow_events.jsonl"
     return {
         "run_id": run_id,

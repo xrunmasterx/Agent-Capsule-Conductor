@@ -8,6 +8,8 @@ from acc.domain import NodeSpec, WorkflowTemplate
 from acc.store import FileSystemWorkflowStore
 from acc.utils import AccError
 
+MAX_UPSTREAM_CONTEXT_INLINE_BYTES = 256 * 1024
+
 
 def materialize_clean_inboxes(
     template: WorkflowTemplate,
@@ -154,9 +156,14 @@ def summarize_upstream_output(output: dict[str, Any]) -> str:
 
 def inline_upstream_output(output: dict[str, Any]) -> dict[str, Any]:
     compact = json.dumps(output, ensure_ascii=False, sort_keys=True)
-    if len(compact.encode("utf-8")) > 8192:
-        return {"output_bytes": len(compact.encode("utf-8")), "output_inline": None}
-    return {"output_bytes": len(compact.encode("utf-8")), "output_inline": output}
+    output_bytes = len(compact.encode("utf-8"))
+    if output_bytes > MAX_UPSTREAM_CONTEXT_INLINE_BYTES:
+        return {
+            "output_bytes": output_bytes,
+            "output_inline": None,
+            "output_inline_limit_bytes": MAX_UPSTREAM_CONTEXT_INLINE_BYTES,
+        }
+    return {"output_bytes": output_bytes, "output_inline": output}
 
 
 def is_control_context_payload(value: Any) -> bool:

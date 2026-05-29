@@ -6,6 +6,8 @@ from typing import Any
 
 from fastapi import HTTPException, Request
 
+from acc.server.run_manager import WorkbenchRunManager
+
 SECRET_EXACT_NAMES = {
     ".env",
     ".env.local",
@@ -35,6 +37,16 @@ def get_project_root(request: Request) -> Path:
     if root is None:
         return Path.cwd().resolve()
     return Path(root).resolve()
+
+
+def get_workbench_run_manager(request: Request) -> WorkbenchRunManager:
+    manager = getattr(request.app.state, "workbench_run_manager", None)
+    project_root = get_project_root(request)
+    if isinstance(manager, WorkbenchRunManager) and manager.project_root == project_root:
+        return manager
+    manager = WorkbenchRunManager(project_root)
+    request.app.state.workbench_run_manager = manager
+    return manager
 
 
 def project_path(request: Request, *parts: str) -> Path:

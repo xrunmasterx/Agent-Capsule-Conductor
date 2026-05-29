@@ -18,8 +18,10 @@ from acc.registry import CapsuleRegistry
 from acc.server.context import (
     configured_project_dir,
     get_project_root,
+    get_workbench_run_manager,
     relative_project_path,
 )
+from acc.server.run_manager import WorkbenchRunJob
 from acc.utils import AccError, load_json
 
 router = APIRouter(prefix="/workflows", tags=["workflows"])
@@ -44,6 +46,7 @@ class WorkflowRunRequest(BaseModel):
 
 class WorkflowRunGraphRequest(WorkflowRunRequest):
     graph: dict[str, Any]
+    task_id: str | None = None
 
 
 class WorkflowBindingRequest(BaseModel):
@@ -99,7 +102,57 @@ def list_workflows(request: Request) -> dict[str, Any]:
 def run_graph_endpoint(payload: WorkflowRunGraphRequest, request: Request) -> dict[str, Any]:
     project_root = get_project_root(request)
     run_dir = resolve_run_dir(project_root, payload.run_dir)
-    graph = legacy_graph_payload_for_save(payload.graph)
+    graph_path = prepare_runtime_graph(payload.graph, run_dir, request)
+    workspace, binding_path = resolve_run_environment(project_root, payload)
+    try:
+        result = WorkflowAppService(registry=server_registry(request)).run_sync(
+            graph_path,
+            run_dir,
+            workspace=workspace,
+            binding_path=binding_path,
+            input_payload=payload.input,
+        )
+        return enrich_inline_nested_node_runs(result)
+    except AccError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/run-graph/submit")
+async def submit_run_graph_endpoint(
+    payload: WorkflowRunGraphRequest,
+    request: Request,
+) -> dict[str, Any]:
+    project_root = get_project_root(request)
+    run_dir = resolve_run_dir(project_root, payload.run_dir)
+    graph_path = prepare_runtime_graph(payload.graph, run_dir, request)
+    workspace, binding_path = resolve_run_environment(project_root, payload)
+    workflow_id = str(legacy_graph_payload_for_save(payload.graph).get("id") or graph_path.stem)
+    registry = server_registry(request)
+    manager = get_workbench_run_manager(request)
+    try:
+        return await manager.submit(
+            WorkbenchRunJob(
+                graph_path=graph_path,
+                run_dir=run_dir,
+                workflow_id=workflow_id,
+                task_id=payload.task_id,
+                workspace=workspace,
+                binding_path=binding_path,
+                input_payload=payload.input,
+                service_factory=lambda: WorkflowAppService(registry=registry),
+            )
+        )
+    except AccError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def prepare_runtime_graph(
+    graph_payload: dict[str, Any],
+    run_dir: Path,
+    request: Request,
+) -> Path:
+    project_root = get_project_root(request)
+    graph = legacy_graph_payload_for_save(graph_payload)
     workflow_id = str(graph.get("id") or "")
     if not workflow_id:
         raise HTTPException(status_code=400, detail="Workflow graph id is required")
@@ -119,18 +172,7 @@ def run_graph_endpoint(payload: WorkflowRunGraphRequest, request: Request) -> di
         temp_path.unlink(missing_ok=True)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     replace_workflow_file(temp_path, graph_path)
-    workspace, binding_path = resolve_run_environment(project_root, payload)
-    try:
-        result = WorkflowAppService(registry=server_registry(request)).run_sync(
-            graph_path,
-            run_dir,
-            workspace=workspace,
-            binding_path=binding_path,
-            input_payload=payload.input,
-        )
-        return enrich_inline_nested_node_runs(result)
-    except AccError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return graph_path
 
 
 def enrich_inline_nested_node_runs(result: dict[str, Any]) -> dict[str, Any]:
@@ -516,9 +558,34 @@ def materialize_inline_workflow_nodes(path: Path, graph: dict[str, Any], request
         node.setdefault("timeout_seconds", inline_workflow_timeout_seconds(node, request))
         node.setdefault("input_ports", [{"id": "main", "direction": "input"}])
         node.setdefault("output_ports", [{"id": "main", "direction": "output"}])
+        child_output_ports = workflow_port_ids(child_payload.get("exposed_outputs")) or ["main"]
+        parent_output_ports = workflow_port_ids(node.get("output_ports")) or ["main"]
+        node["workflow_call_output_bindings"] = [
+            {
+                "workflow_output": child_port,
+                "parent_port": parent_output_ports[index]
+                if index < len(parent_output_ports)
+                else child_port,
+                "required": False,
+                "materialization": "copy",
+            }
+            for index, child_port in enumerate(child_output_ports)
+        ]
         ui = node.get("ui")
         if isinstance(ui, dict):
             ui["inline_workflow_ref"] = child_path.name
+
+
+def workflow_port_ids(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [
+            str(item["id"])
+            for item in value
+            if isinstance(item, dict) and isinstance(item.get("id"), str)
+        ]
+    if isinstance(value, dict):
+        return [str(key) for key in value if isinstance(key, str)]
+    return []
 
 
 def is_inline_workflow_container(node: Any) -> bool:

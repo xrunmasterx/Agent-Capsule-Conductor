@@ -197,6 +197,60 @@ def test_control_edge_default_passes_upstream_context_without_inbox(tmp_path: Pa
     assert Path(consumer_input["upstream_context"][0]["output_path"]).parent.name == "producer"
 
 
+def test_control_edge_default_inlines_large_but_bounded_upstream_output(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "large_control_context.accflow.json"
+    write_template(
+        path,
+        clean_template(
+            [tool_node("producer"), agent_node("consumer")],
+            control_edges=[{"from": "producer", "to": "consumer"}],
+        ),
+    )
+
+    async def executor(node, _workflow_path, _run_dir, node_dir, frame):
+        if node.id == "producer":
+            news = [
+                {"title": f"semiconductor news {index}", "body": "x" * 300}
+                for index in range(80)
+            ]
+            output = {
+                "status": "success",
+                "summary": "Produced a larger upstream payload",
+                "news": news,
+            }
+        else:
+            node_input = json.loads((node_dir / "input.json").read_text(encoding="utf-8"))
+            output = {
+                "status": "success",
+                "summary": "Consumer inspected upstream context",
+                "cwd": str(frame.workspace_root),
+                "upstream_context": node_input["upstream_context"],
+            }
+        (node_dir / "output.json").write_text(
+            json.dumps(output, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        return output
+
+    result = asyncio.run(
+        run_clean_workflow_template(path, tmp_path / "run", node_executor=executor)
+    )
+
+    assert result["status"] == "success"
+    consumer_input = json.loads(
+        (tmp_path / "run" / "nodes" / "consumer" / "input.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    upstream = consumer_input["upstream_context"][0]
+    assert upstream["output_bytes"] > 8192
+    assert upstream["output_inline"]["news"][0]["title"] == "semiconductor news 0"
+    assert len(upstream["output_inline"]["news"]) == 80
+    assert "output_inline_limit_bytes" not in upstream
+
+
 def test_control_edge_context_none_disables_upstream_context(tmp_path: Path) -> None:
     path = tmp_path / "control_context_none.accflow.json"
     write_template(
@@ -342,6 +396,81 @@ def test_nested_workflow_boundary_passes_context_only_to_bound_internal_nodes(
     assert bound_input["inbox"]["records"][0]["skipped"] is True
     assert not list((child_run / "nodes" / "bound" / "inbox").rglob("*"))
     assert unbound_input["upstream_context"] == []
+
+
+def test_nested_workflow_single_output_binding_becomes_parent_node_output(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    child_path = tmp_path / "child_output.accflow.json"
+    write_template(
+        child_path,
+        clean_template(
+            [tool_node("cleaner")],
+            id="child_output",
+            exposed_outputs=[{"id": "main", "direction": "output"}],
+            workflow_output_bindings=[
+                {
+                    "source": {"node": "cleaner", "port": "main"},
+                    "target_port": "main",
+                    "materialization": "copy",
+                }
+            ],
+        ),
+    )
+    parent_path = tmp_path / "parent_output.accflow.json"
+    write_template(
+        parent_path,
+        clean_template(
+            [
+                workflow_node(
+                    "subflow",
+                    str(child_path),
+                    workflow_call_output_bindings=[
+                        {"workflow_output": "main", "parent_port": "main"}
+                    ],
+                ),
+                agent_node("advisor"),
+            ],
+            id="parent_output",
+            control_edges=[{"from": "subflow", "to": "advisor"}],
+        ),
+    )
+
+    async def fake_execute(node, _workflow_path, _run_dir, node_dir, _frame):
+        if node.id == "cleaner":
+            output = {"status": "success", "summary": "cleaned", "top_news": [1, 2, 3, 4, 5]}
+        else:
+            output = {"status": "success", "summary": f"ran {node.id}"}
+        (node_dir / "output.json").write_text(
+            json.dumps(output, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        return output
+
+    monkeypatch.setattr("acc.app.execute_clean_node", fake_execute)
+
+    result = asyncio.run(run_clean_workflow_template(parent_path, tmp_path / "run"))
+
+    assert result["status"] == "success"
+    subflow_output = json.loads(
+        (tmp_path / "run" / "nodes" / "subflow" / "output.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    advisor_input = json.loads(
+        (tmp_path / "run" / "nodes" / "advisor" / "input.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert subflow_output["top_news"] == [1, 2, 3, 4, 5]
+    assert advisor_input["upstream_context"][0]["output_inline"]["top_news"] == [
+        1,
+        2,
+        3,
+        4,
+        5,
+    ]
 
 
 def test_clean_template_rejects_parent_edge_to_internal_workflow_node(

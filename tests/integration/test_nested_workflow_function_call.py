@@ -108,3 +108,107 @@ def test_nested_workflow_missing_required_parent_binding_fails(tmp_path: Path) -
     payload = json.loads(result.stdout)
     assert payload["status"] == "failed"
     assert "Missing parent data for workflow call input" in payload["errors"][0]
+
+
+def test_nested_workflow_rejects_binding_to_missing_child_input_port(
+    tmp_path: Path,
+) -> None:
+    child_workflow = tmp_path / "child_optional_input.accflow.json"
+    child_workflow.write_text(
+        json.dumps(
+            {
+                "id": "child_optional_input",
+                "version": "0.1.0",
+                "exposed_inputs": {
+                    "brief": {
+                        "direction": "input",
+                        "type": "artifact",
+                        "required": False,
+                    }
+                },
+                "exposed_outputs": {
+                    "report": {
+                        "direction": "output",
+                        "type": "artifact",
+                        "required": True,
+                    }
+                },
+                "workflow_output_bindings": [
+                    {
+                        "source": {"node": "child_agent", "port": "summary"},
+                        "target_port": "report",
+                    }
+                ],
+                "nodes": [
+                    {
+                        "id": "child_agent",
+                        "kind": "agent",
+                        "runtime": "generic_fake_agent",
+                        "output_ports": {"summary": {"type": "artifact"}},
+                    }
+                ],
+                "control_edges": [],
+                "data_edges": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    bad_workflow = tmp_path / "bad_child_signature.accflow.json"
+    bad_workflow.write_text(
+        json.dumps(
+            {
+                "id": "bad_child_signature",
+                "version": "0.1.0",
+                "nodes": [
+                    {
+                        "id": "producer",
+                        "kind": "tool",
+                        "tool": "fake_producer",
+                        "output_ports": {"main": {"type": "artifact"}},
+                    },
+                    {
+                        "id": "subflow",
+                        "kind": "workflow",
+                        "workflow_ref": str(child_workflow.resolve()),
+                        "input_ports": {"brief": {"type": "artifact"}},
+                        "output_ports": {"summary": {"type": "artifact"}},
+                        "workflow_call_input_bindings": [
+                            {
+                                "source": {"node": "producer", "port": "main"},
+                                "workflow_input": "missing_child_input",
+                                "required": True,
+                            }
+                        ],
+                        "workflow_call_output_bindings": [
+                            {"workflow_output": "report", "parent_port": "summary"}
+                        ],
+                    },
+                ],
+                "control_edges": [{"from": "producer", "to": "subflow"}],
+                "data_edges": [
+                    {
+                        "from": {"node": "producer", "port": "main"},
+                        "to": {"node": "subflow", "port": "brief"},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "workflow",
+            "run",
+            str(bad_workflow),
+            "--run-dir",
+            str(tmp_path / "bad_child_signature_run"),
+            "--emit-json",
+        ],
+    )
+
+    assert result.exit_code == 1, result.output
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "failed"
+    assert "missing child workflow input port" in payload["errors"][0]

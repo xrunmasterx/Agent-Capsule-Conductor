@@ -26,6 +26,16 @@ def test_missing_run_returns_404(client) -> None:
     assert response.status_code == 404
 
 
+def test_missing_run_events_returns_empty_stream_for_live_polling(client) -> None:
+    response = client.get("/api/runs/ui_workflow_pending/events")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["run_id"] == "ui_workflow_pending"
+    assert payload["events"] == []
+    assert payload["event_log"].endswith("runs/ui_workflow_pending/workflow_events.jsonl")
+
+
 def test_get_node_details(client) -> None:
     response = client.get("/api/runs/server_run/nodes/server_node")
 
