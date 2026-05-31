@@ -2728,7 +2728,7 @@ function InspectorTabs({
       : selection.type === 'port'
         ? ['overview', 'contract', 'connections', 'evidence']
         : selection.type === 'internal'
-          ? ['overview', 'input', 'output', 'artifacts', 'events', 'logs', 'raw']
+          ? ['overview', 'steps', 'artifacts', 'logs']
           : ['overview', 'input', 'output', 'config', 'history', 'raw'];
   const labels: Record<string, string> = {
     queued: '排队中',
@@ -2749,7 +2749,8 @@ function InspectorTabs({
     mapping: '数据映射',
     artifacts: '产物',
     events: '事件',
-    logs: '日志',
+    steps: '步骤',
+    logs: '详细日志',
   };
   return (
     <div className="tab-strip compact-tabs" role="tablist" aria-label="Inspector tabs">
@@ -3070,12 +3071,44 @@ function InternalNodeInspector({
       </section>
     );
   }
-  if (tab === 'artifacts' || tab === 'logs' || tab === 'events') {
+  if (tab === 'steps') {
+    return (
+      <section className="inspector-stack">
+        <h4>运行步骤</h4>
+        {nodeRun?.steps?.length ? (
+          <ul className="inspector-step-list">
+            {nodeRun.steps.map((step, index) => (
+              <li key={step.event_id || `${step.type}-${index}`}>
+                <strong>{step.type || 'event'}</strong>
+                <span>{step.summary || step.status || ''}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="empty-state">尚无事件摘要。</p>
+        )}
+      </section>
+    );
+  }
+  if (tab === 'artifacts') {
     return (
       <NodeEvidencePaths
         nodeRun={nodeRun}
         onReadEvidence={onReadEvidence}
       />
+    );
+  }
+  if (tab === 'logs') {
+    return (
+      <section className="inspector-stack">
+        <h4>日志摘要</h4>
+        {nodeRun?.log_excerpt ? (
+          <CodeBlock title="log excerpt" content={nodeRun.log_excerpt} variant="log" />
+        ) : (
+          <p className="empty-state">尚无日志摘要。</p>
+        )}
+        <NodeEvidencePaths nodeRun={nodeRun} onReadEvidence={onReadEvidence} />
+      </section>
     );
   }
   if (tab === 'raw') {
@@ -3103,26 +3136,25 @@ function InternalNodeInspector({
         <dt>runtime</dt>
         <dd>{node.runtime || 'n/a'}</dd>
       </dl>
+      {nodeRun?.summary ? (
+        <div className="inspector-note">{nodeRun.summary}</div>
+      ) : null}
       <div className="inspector-note">
         这是工作流容器内部的调用实例；系统提示词仍由资源库 Agent Class 管理。
       </div>
-      <CodeBlock
-        title="用户提示词 / 静态输入"
-        content={JSON.stringify(node.input || {}, null, 2)}
-        variant="json"
-      />
-      <div className="inspector-run-evidence-grid">
-        <EvidencePreview
-          path={nodeRun?.input_path}
-          title="真实输入 input.json"
-          emptyText="尚未运行；当前内部 Agent 实例没有真实 input.json。"
+      {nodeRun?.output_preview ? (
+        <CodeBlock
+          title="输出摘要"
+          content={JSON.stringify(nodeRun.output_preview, null, 2)}
+          variant="json"
         />
+      ) : (
         <EvidencePreview
           path={nodeRun?.output_path}
-          title="真实输出 output.json"
-          emptyText="尚未运行；当前内部 Agent 实例没有真实 output.json。"
+          title="output.json"
+          emptyText="尚未运行；当前内部节点没有真实 output.json。"
         />
-      </div>
+      )}
     </section>
   );
 }
@@ -3938,7 +3970,15 @@ function graphForCurrentView(
 }
 
 function reusableWorkflowClassGraph(graph: WorkflowGraph): WorkflowGraph {
-  const metadata = omitEmptyRecord(omitKeys(graph.metadata || {}, ['binding_ref']));
+  const metadata = omitEmptyRecord(
+    omitKeys(
+      {
+        canonical_format: 'accflow',
+        ...(graph.metadata || {}),
+      },
+      ['binding_ref'],
+    ),
+  );
   return {
     ...graph,
     nodes: graph.nodes.map(reusableWorkflowClassNode),
@@ -4289,8 +4329,8 @@ function workspaceDemoCanvas(): WorkspaceCanvasModel {
         directory: `${ROOT_WORKSPACE}\\workflows\\research`,
         status: 'not_run',
         inputPorts: [
-          port('in_requirements', '需求文档', 'input', true),
-          port('in_constraints', '约束条件', 'input', true),
+          port('in_requirements', '需求文档', 'input'),
+          port('in_constraints', '约束条件', 'input'),
           port('in_reference', '参考资料', 'input'),
         ],
         outputPorts: [

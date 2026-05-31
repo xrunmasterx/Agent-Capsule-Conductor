@@ -1,5 +1,11 @@
 # Agent Capsule Workbench Roadmap
 
+Status: historical Phase 2 roadmap.
+
+Current reading rule: this roadmap predates the editable/run-scoped Workbench. Use
+`docs/CURRENT_ARCHITECTURE.md`, `web/README.md`, and
+`docs/codex_goal_visual_workbench_ux_refactor/QUALITY_REPORT.md` for current Workbench behavior.
+
 ## Context
 
 The current repository already implements the Agent Capsule Conductor MVP:

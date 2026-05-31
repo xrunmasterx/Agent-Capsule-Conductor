@@ -132,3 +132,120 @@ Next action:
 1. Fix High 1, High 2, and High 3 first.
 2. Add regression coverage for each high-severity fix.
 3. Re-run baseline and browser evidence after fixes.
+
+## 2026-05-29 Architecture Feasibility Audit Addendum
+
+Status: completed for the user-requested architecture feasibility validation pass.
+
+Audit scope:
+
+- Capsule Template -> Session execution compatibility.
+- WorkflowFunctionTemplate -> FunctionInvocation -> ScopeFrame runtime evidence.
+- Nested workflow call input/output binding semantics.
+- Store-owned inbox/outbox materialization.
+- GraphOps proposal/dry-run/human approval boundary.
+- CLI stdout JSON contracts.
+
+### Finding A1: Nested workflow call contracts need child signature validation
+
+Severity: High
+
+Status: Resolved
+
+Evidence to validate:
+
+- Existing tests prove a correct explicit nested workflow binding works.
+- The current architecture also needs a negative case: a parent workflow node may declare a `workflow_call_input_binding` to a child input port that the child workflow does not expose.
+- If this is not rejected before child execution, the child workflow can silently run without the intended function argument, which violates the callable model.
+
+Root cause hypothesis:
+
+- Parent workflow validation currently sees only the parent graph.
+- The child workflow template is resolved later in the app layer, and that is the first point where the parent call site can be checked against the child function signature.
+
+First-principles violation:
+
+- A workflow call is a function call. Function arguments and return ports must match the callee signature before execution.
+
+Smallest safe fix:
+
+- Add a pure contract check after resolving the child workflow template and before invoking it.
+- Keep legacy fallback behavior for workflow nodes without explicit call bindings.
+- Add a hermetic regression test that fails on a missing child input port.
+
+Implemented fix:
+
+- Added `validate_workflow_call_contract(...)` in `acc.engine` so the child workflow signature is checked as soon as the app resolves the child template.
+- `execute_app_clean_node(...)` now validates explicit workflow-call input/output bindings before invoking the nested workflow.
+- The compatibility fallback remains: workflow nodes without explicit call bindings can still use legacy behavior.
+
+Regression coverage:
+
+- `tests/unit/test_callable_engine_validation.py` now rejects bindings to missing child input and output ports.
+- `tests/integration/test_nested_workflow_function_call.py` now covers the previously silent case where the child input was optional and the parent binding pointed to a nonexistent child port.
+- `tests/integration/test_architecture_feasibility.py` adds a hermetic architecture journey covering capsule session execution, workflow validation/run, callable manifests, nested workflow return lineage, inspect, GraphOps dry-run, GraphOps human-approval rejection, and stdout JSON contracts.
+
+Verification:
+
+```text
+uv run pytest -q tests/unit/test_callable_engine_validation.py tests/integration/test_nested_workflow_function_call.py tests/integration/test_architecture_feasibility.py tests/integration/test_callable_inspect.py
+  PASSED, 16 passed.
+
+uv run pytest -q
+  PASSED, 314 passed.
+
+uv run ruff check .
+  PASSED.
+
+cd web && npm run test -- --run
+  PASSED, 46 passed.
+
+cd web && npm run build
+  PASSED, with the existing Vite chunk-size warning.
+```
+
+### Finding A2: Browser E2E drifted from the current Workbench UX and produced false failures
+
+Severity: Medium
+
+Status: Resolved
+
+Evidence:
+
+- `npm run test:e2e` initially failed because the browser script still looked for older Workbench labels and controls such as `工作流`, `节点库`, `图谱画布`, `搜索节点`, and `加载 Demo 并行`.
+- The current Workbench UX uses `任务`, `资源`, the resource drawer, `加载示例`, and the task canvas as the primary flow.
+- The browser report also recorded transient `/api/runs/<run_id>/events` 404s while live polling began before the run directory existed.
+
+Root cause:
+
+- The UI behavior changed in the visual Workbench refactor, but the long-running browser E2E script still encoded pre-refactor selectors and assumptions.
+- Event polling treated "run exists but events not yet materialized" and "run id is invalid" as the same 404 state.
+
+First-principles violation:
+
+- Browser E2E should validate the product path users actually operate. A stale test journey is not evidence.
+- Live event polling is a stream-style read; an empty stream is a valid initial state for a newly submitted UI run.
+
+Implemented fix:
+
+- Updated the browser journey to use the current `任务`/`资源` UX, `加载示例`, current run ids, and flexible debugger messages based on the selected node.
+- Changed the canvas accessible name to Chinese `任务画布`.
+- Adjusted Workbench unit tests to assert the Chinese canvas label.
+- Updated `/api/runs/{run_id}/events` so pending UI-created run ids return an empty event stream instead of a 404, while non-UI missing runs still return 404.
+
+Verification:
+
+```text
+npm run test:e2e
+  PASSED.
+  Report: runs/browser_e2e/2026-05-29T01-54-23-312Z/browser_e2e_report.json
+  Journeys A-F passed.
+  console_errors: []
+  network_errors: []
+
+uv run pytest -q tests/server/test_runs_api.py tests/integration/test_architecture_feasibility.py
+  PASSED, 14 passed.
+
+cd web && npm run test -- --run
+  PASSED, 46 passed.
+```

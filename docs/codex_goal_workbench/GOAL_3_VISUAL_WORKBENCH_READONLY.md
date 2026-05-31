@@ -1,5 +1,12 @@
 # Goal 3: Visual Workbench Read-only MVP
 
+Status: historical read-only Workbench goal.
+
+Current reading rule: this document is kept for implementation history. The current Workbench is no
+longer read-only; it supports graph-first task editing, workflow save, async run submission, and
+run-evidence inspection. For current behavior, read `docs/CURRENT_ARCHITECTURE.md` and
+`web/README.md`.
+
 ## Objective
 
 Build a read-only local web UI for inspecting Agent Capsule runs, capsules, artifacts, and workflows.

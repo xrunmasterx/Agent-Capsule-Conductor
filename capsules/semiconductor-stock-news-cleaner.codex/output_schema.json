@@ -2,25 +2,50 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
-    "report": {
-      "description": "结构化报告正文",
-      "type": "string"
-    },
     "status": {
-      "enum": [
-        "success"
-      ],
+      "enum": ["success"],
       "type": "string"
     },
     "summary": {
-      "description": "一句话结论",
+      "description": "一句话说明筛选结果。",
       "type": "string"
+    },
+    "top_news": {
+      "description": "最高价值的 5 条半导体股市信息。",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "title": { "type": "string" },
+          "source": { "type": "string" },
+          "published_at": { "type": "string" },
+          "summary": { "type": "string" },
+          "reason_selected": { "type": "string" },
+          "risk_or_uncertainty": { "type": "string" },
+          "affected_companies": {
+            "items": { "type": "string" },
+            "type": "array"
+          },
+          "possible_market_impact": { "type": "string" },
+          "url_or_reference": { "type": "string" }
+        },
+        "required": [
+          "title",
+          "source",
+          "published_at",
+          "summary",
+          "reason_selected",
+          "risk_or_uncertainty",
+          "affected_companies",
+          "possible_market_impact",
+          "url_or_reference"
+        ],
+        "type": "object"
+      },
+      "type": "array"
     }
   },
-  "required": [
-    "status",
-    "summary",
-    "report"
-  ],
+  "required": ["status", "summary", "top_news"],
   "type": "object"
 }

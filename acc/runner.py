@@ -7,7 +7,8 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from acc.adapters.base import AgentAdapter, AgentRunRequest, AgentRunResult
+from acc.adapters.base import AgentAdapter, AgentRunRequest, AgentRunResult, ResumeRequest
+from acc.adapters.capabilities import resolve_capsule_capabilities
 from acc.adapters.claude_sdk import ClaudeSdkAdapter
 from acc.adapters.codex_cli import CodexCliAdapter
 from acc.adapters.generic_cli import GenericCliAdapter, maybe_write_json_stdout
@@ -121,14 +122,16 @@ class CapsuleRunner:
                 status="created",
             )
 
-            workspace = self.workspace_manager.prepare(
-                capsule.spec.workspace,
-                input_payload,
-                store.run_dir,
-            ) if execution_context is None else None
-            workspace_path = (
-                workspace.path if workspace is not None else execution_context.cwd
+            workspace = (
+                self.workspace_manager.prepare(
+                    capsule.spec.workspace,
+                    input_payload,
+                    store.run_dir,
+                )
+                if execution_context is None
+                else None
             )
+            workspace_path = workspace.path if workspace is not None else execution_context.cwd
             workspace_mode = workspace.mode if workspace is not None else "environment"
             workspace_command = workspace.command if workspace is not None else None
             store.write_workspace_manifest(
@@ -157,37 +160,55 @@ class CapsuleRunner:
             )
 
             adapter = self.adapters[capsule.spec.runtime.type]
+            effective_caps = resolve_capsule_capabilities(capsule)
             env = dict(capsule.spec.runtime.env)
             if execution_context is not None:
                 env.update(execution_context.extra_env)
             event_emitter.emit(
                 "adapter_started",
                 status="running",
-                payload={"runtime": capsule.spec.runtime.type},
+                payload={
+                    "runtime": capsule.spec.runtime.type,
+                    "capabilities_effective": list(effective_caps.effective_keys()),
+                },
             )
-            result = await adapter.run(
-                AgentRunRequest(
-                    capsule_id=capsule_id,
-                    run_dir=store.run_dir,
-                    workspace_dir=workspace_path,
-                    prompt_path=store.prompt_path,
-                    input_payload=input_payload,
-                    output_schema_path=capsule.output_schema_path,
-                    timeout_seconds=capsule.spec.permissions.timeout_seconds,
-                    command=capsule.spec.runtime.command,
-                    args_base=capsule.spec.runtime.args_base,
-                    env=env,
-                    sandbox=capsule.spec.permissions.sandbox,
-                    allow_dangerous=capsule.spec.permissions.allow_dangerous,
-                    session_id=session_id,
-                    inbox_dir=execution_context.inbox_dir if execution_context else None,
-                    outbox_dir=execution_context.outbox_dir if execution_context else None,
-                    environment_id=execution_context.environment.environment_id
-                    if execution_context
-                    else None,
-                    node_id=execution_context.node_id if execution_context else None,
+            run_request = AgentRunRequest(
+                capsule_id=capsule_id,
+                run_dir=store.run_dir,
+                workspace_dir=workspace_path,
+                prompt_path=store.prompt_path,
+                input_payload=input_payload,
+                output_schema_path=capsule.output_schema_path,
+                timeout_seconds=capsule.spec.permissions.timeout_seconds,
+                command=capsule.spec.runtime.command,
+                args_base=capsule.spec.runtime.args_base,
+                env=env,
+                sandbox=capsule.spec.permissions.sandbox,
+                allow_dangerous=capsule.spec.permissions.allow_dangerous,
+                session_id=session_id,
+                inbox_dir=execution_context.inbox_dir if execution_context else None,
+                outbox_dir=execution_context.outbox_dir if execution_context else None,
+                environment_id=execution_context.environment.environment_id
+                if execution_context
+                else None,
+                node_id=execution_context.node_id if execution_context else None,
+                requested_capabilities=effective_caps.effective_keys(),
+            )
+            result = await adapter.run(run_request)
+            if not result.capabilities_effective:
+                result = AgentRunResult(
+                    status=result.status,
+                    summary=result.summary,
+                    output_json_path=result.output_json_path,
+                    event_log_path=result.event_log_path,
+                    artifacts_dir=result.artifacts_dir,
+                    exit_code=result.exit_code,
+                    error=result.error,
+                    external_session_id=result.external_session_id,
+                    capabilities_effective=effective_caps.effective_keys(),
+                    requested_capabilities=effective_caps.effective_keys(),
+                    capability_degraded=result.capability_degraded,
                 )
-            )
             conductor_output = self._finalize_result(
                 store,
                 session_id,
@@ -197,9 +218,7 @@ class CapsuleRunner:
                 manifest,
             )
             completion_event = (
-                "session_completed"
-                if conductor_output["status"] == "success"
-                else "session_failed"
+                "session_completed" if conductor_output["status"] == "success" else "session_failed"
             )
             event_emitter.emit(
                 completion_event,
@@ -238,6 +257,40 @@ class CapsuleRunner:
             self._write_summaries(store, manifest, conductor_output, status, str(exc))
             event_emitter.emit("session_failed", status=status, payload={"error": str(exc)})
             return conductor_output
+
+    async def resume(
+        self,
+        capsule_id: str,
+        external_session_id: str,
+        run_dir: Path,
+        *,
+        workspace_dir: Path,
+        timeout_seconds: int = 60,
+    ) -> dict[str, Any]:
+        capsule = self.registry.get(capsule_id)
+        adapter = self.adapters[capsule.spec.runtime.type]
+        effective_caps = resolve_capsule_capabilities(capsule)
+        if not effective_caps.resumable_session:
+            raise AccError(f"Capsule {capsule_id} does not support resumable_session")
+        adapter_caps = adapter.capabilities()
+        if not adapter_caps.resumable_session:
+            raise AccError(f"Adapter {capsule.spec.runtime.type} does not support resume")
+        result = await adapter.resume(
+            ResumeRequest(
+                capsule_id=capsule_id,
+                run_dir=run_dir,
+                workspace_dir=workspace_dir,
+                external_session_id=external_session_id,
+                timeout_seconds=timeout_seconds,
+            )
+        )
+        if result.status != "success":
+            raise AccError(result.error or "Resume failed")
+        return {
+            "status": result.status,
+            "summary": result.summary,
+            "external_session_id": external_session_id,
+        }
 
     def _finalize_result(
         self,
@@ -310,6 +363,10 @@ class CapsuleRunner:
             artifact_dir=conductor_output["artifact_dir"],
             event_log_path=conductor_output["event_log"],
             error=error,
+            capabilities_requested=list(result.requested_capabilities),
+            capabilities_effective=list(result.capabilities_effective),
+            external_session_id=result.external_session_id,
+            capability_degraded=result.capability_degraded,
         )
         store.write_conductor_output(conductor_output)
         self._write_summaries(store, manifest, conductor_output, error_class, error)

@@ -122,6 +122,20 @@ def dry_run_patch(patch: dict[str, Any], *, semantic: bool = False) -> dict[str,
     return result
 
 
+def dry_run_supervisor_proposal(
+    proposal: dict[str, Any],
+    *,
+    target_path: str,
+    semantic: bool = False,
+) -> dict[str, Any]:
+    from acc.app.supervisor import proposal_to_graphops_patch
+    from acc.engine.supervisor import parse_dynamic_invocation_proposal
+
+    parsed = parse_dynamic_invocation_proposal(proposal)
+    patch = proposal_to_graphops_patch(parsed, target_path=target_path)
+    return dry_run_patch(patch, semantic=semantic)
+
+
 def apply_patch_request(
     patch_path: Path,
     *,
@@ -146,10 +160,7 @@ def preview_operation(operation: dict[str, Any]) -> dict[str, Any]:
         capsule_id = operation.get("capsule_id") or node.get("capsule_id")
         return {
             "op": op,
-            "description": (
-                f"Would add node {node_id} "
-                f"using capsule {capsule_id}"
-            ),
+            "description": (f"Would add node {node_id} using capsule {capsule_id}"),
         }
     if op == "connect_nodes":
         return {

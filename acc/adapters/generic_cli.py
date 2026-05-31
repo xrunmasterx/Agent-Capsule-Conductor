@@ -5,10 +5,15 @@ import json
 import os
 import sys
 
-from acc.adapters.base import AgentRunRequest, AgentRunResult
+from acc.adapters.base import AgentRunRequest, AgentRunResult, ResumeRequest
+from acc.adapters.capabilities import default_adapter_capabilities
+from acc.domain import AccError, AgentCapabilities
 
 
 class GenericCliAdapter:
+    def capabilities(self) -> AgentCapabilities:
+        return default_adapter_capabilities("generic_cli")
+
     async def run(self, request: AgentRunRequest) -> AgentRunResult:
         if not request.command:
             return self._failed(request, "generic_cli runtime has no command")
@@ -115,6 +120,9 @@ class GenericCliAdapter:
             exit_code=exit_code,
             error=error,
         )
+
+    async def resume(self, request: ResumeRequest) -> AgentRunResult:
+        raise AccError("generic_cli adapter does not support resume")
 
 
 def resolve_command(command: str) -> str:

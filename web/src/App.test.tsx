@@ -41,6 +41,35 @@ const runSummary = {
 const routes: Record<string, unknown> = {
   '/api/runs': { version: '2.0', runs: [runSummary] },
   '/api/runs/ui_acceptance_fake': runSummary,
+  '/api/runs/ui_acceptance_fake/interactions': {
+    run_id: 'ui_acceptance_fake',
+    interactions: [
+      {
+        interaction_id: 'ix_pending',
+        run_id: 'ui_acceptance_fake',
+        node_id: 'ui_acceptance_fake',
+        kind: 'approval',
+        status: 'pending',
+        prompt: '是否继续部署？',
+        options: ['approve', 'reject'],
+        payload: {},
+        created_at: '2026-05-29T00:00:00Z',
+      },
+    ],
+  },
+  'POST /api/runs/ui_acceptance_fake/interactions/ix_pending/answer': {
+    interaction_id: 'ix_pending',
+    run_id: 'ui_acceptance_fake',
+    node_id: 'ui_acceptance_fake',
+    kind: 'approval',
+    status: 'answered',
+    prompt: '是否继续部署？',
+    options: ['approve', 'reject'],
+    payload: {},
+    created_at: '2026-05-29T00:00:00Z',
+    answered_at: '2026-05-29T00:00:01Z',
+    answer: { decision: 'approve' },
+  },
   '/api/runs/ui_acceptance_fake/nodes/ui_acceptance_fake/artifacts': {
     run_id: 'ui_acceptance_fake',
     node_id: 'ui_acceptance_fake',
@@ -1762,24 +1791,15 @@ describe('Agent Capsule Workbench editable UI', () => {
 
     expect(inspector).toHaveTextContent(/系统提示词.*资源库/);
     expect(within(inspector).queryByRole('textbox', { name: /系统提示词/ })).not.toBeInTheDocument();
-    expect(await within(inspector).findByLabelText(/真实输入 input\.json/)).toHaveTextContent(
-      'Codex CLI',
-    );
-    expect(within(inspector).getByLabelText(/真实输入 input\.json/)).toHaveTextContent('真实上游输入');
-    expect(await within(inspector).findByLabelText(/真实输出 output\.json/)).toHaveTextContent(
-      'Codex agent output fixture',
-    );
-
-    await user.click(within(inspector).getByRole('button', { name: '输入' }));
-    expect(await within(inspector).findByLabelText(/input\.json/)).toHaveTextContent(
-      'Codex CLI',
-    );
-    expect(within(inspector).getByLabelText(/input\.json/)).toHaveTextContent('真实上游输入');
-
-    await user.click(within(inspector).getByRole('button', { name: '输出' }));
     expect(await within(inspector).findByLabelText(/output\.json/)).toHaveTextContent(
       'Codex agent output fixture',
     );
+
+    await user.click(within(inspector).getByRole('button', { name: '产物' }));
+    const inputEvidence = await within(inspector).findByRole('button', { name: /输入/i });
+    await user.click(inputEvidence);
+    expect(await screen.findByLabelText(/input\.json/)).toHaveTextContent('Codex CLI');
+    expect(screen.getByLabelText(/input\.json/)).toHaveTextContent('真实上游输入');
   });
 
   test('Run Inspector exposes debugger actions and diff results', async () => {
@@ -1807,5 +1827,18 @@ describe('Agent Capsule Workbench editable UI', () => {
       'apply_requires_human_approval',
     );
     expect(screen.getByText(/\u5371\u9669 apply \u9ed8\u8ba4\u5173\u95ed/)).toBeInTheDocument();
+  });
+
+  test('Run Inspector renders pending interaction approval card', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await openNavigation(user, /运行记录/i);
+    expect(await screen.findByText('是否继续部署？')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '通过' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '通过' }));
+    await waitFor(() => {
+      expect(screen.queryByText('是否继续部署？')).not.toBeInTheDocument();
+    });
   });
 });

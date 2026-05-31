@@ -27,6 +27,7 @@ from acc.session import utc_now_iso
 
 
 def is_clean_workflow_path(path: Path) -> bool:
+    """Return True for canonical `.accflow.json` workflow templates."""
     return path.suffixes[-2:] == [".accflow", ".json"] or path.name.endswith(".accflow.json")
 
 
@@ -37,6 +38,8 @@ def load_json(path: Path) -> Any:
         raise AccError(f"JSON file not found: {path}") from exc
     except json.JSONDecodeError as exc:
         raise AccError(f"Invalid JSON in {path}: {exc}") from exc
+
+
 def load_clean_environment_binding(path: Path) -> EnvironmentBinding:
     payload = load_json(path)
     if not isinstance(payload, dict):
@@ -299,14 +302,17 @@ class FileSystemWorkflowStore:
                 "producer_session_id": session_id,
                 "artifacts": artifacts,
             }
-            write_json(source_dir / "outbox_manifest.json", {
-                "port_id": port_id,
-                "node_id": node.id,
-                "direction": "output",
-                "session_id": session_id,
-                "bundle": bundle,
-                "artifacts": artifacts,
-            })
+            write_json(
+                source_dir / "outbox_manifest.json",
+                {
+                    "port_id": port_id,
+                    "node_id": node.id,
+                    "direction": "output",
+                    "session_id": session_id,
+                    "bundle": bundle,
+                    "artifacts": artifacts,
+                },
+            )
             mirror_dir = frame.outbox_root / node.id / port_id
             if mirror_dir.exists():
                 shutil.rmtree(mirror_dir)
@@ -881,12 +887,14 @@ def emit_event(
     level: int | None = None,
     payload: dict[str, Any] | None = None,
 ) -> None:
+    from acc.events import sanitize_event_payload
+
     event = {
         "type": event_type,
         "timestamp": utc_now_iso(),
         "workflow_run_id": workflow_run_id,
         "status": status,
-        "payload": payload or {},
+        "payload": sanitize_event_payload(payload or {}),
     }
     if node_id is not None:
         event["node_id"] = node_id
@@ -904,12 +912,15 @@ def emit_node_event(
     status: str,
     payload: dict[str, Any] | None = None,
 ) -> None:
+    from acc.events import sanitize_event_payload
+
+    log_ref = str((path.parent / "stdout.log").resolve()) if path.parent.exists() else None
     event = {
         "type": event_type,
         "timestamp": utc_now_iso(),
         "node_id": node.id,
         "status": status,
-        "payload": payload or {},
+        "payload": sanitize_event_payload(payload or {}, log_ref=log_ref),
     }
     with path.open("a", encoding="utf-8") as file:
         file.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")

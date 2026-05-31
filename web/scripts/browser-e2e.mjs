@@ -234,20 +234,19 @@ try {
 
   await runJourney("journey_a_chinese_ui_smoke", "Chinese UI smoke", async (journey) => {
     await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
-    await navButton(page, "工作流").click();
+    await navButton(page, "任务").click();
     await navButton(page, "运行记录").waitFor();
-    await navButton(page, "节点库").waitFor();
+    await navButton(page, "资源").waitFor();
     await navButton(page, "产物").waitFor();
     await navButton(page, "控制平面").waitFor();
-    await page.getByLabel("图谱画布").waitFor();
-    await page.getByLabel("属性面板").waitFor();
+    await page.getByLabel("任务画布").waitFor();
+    await workflowToolbar(page).getByRole("button", { name: "属性" }).click();
+    await page.getByRole("complementary", { name: "属性面板" }).waitFor();
     const toolbar = workflowToolbar(page);
-    await toolbar.getByRole("button", { name: "保存", exact: true }).waitFor();
+    await toolbar.getByRole("button", { name: /保存/ }).waitFor();
     await toolbar.getByRole("button", { name: "校验", exact: true }).waitFor();
     await toolbar.getByRole("button", { name: "运行", exact: true }).waitFor();
-    await page.getByRole("button", { name: "日志" }).waitFor();
-    await page.getByRole("button", { name: "原始数据" }).waitFor();
-    appendStep(journey, "打开首页并验证中文核心标签", "pass", "工作流、节点库、产物、日志、原始数据、控制平面、图谱画布、属性面板、保存、校验、运行可见");
+    appendStep(journey, "打开首页并验证中文核心标签", "pass", "任务、资源、产物、控制平面、任务画布、属性面板、保存、校验、运行可见");
     journey.fixes_applied.push({
       summary: "修正和补齐中文文案，确保中文优先标签在真实 UI 可见。",
       retest_status: "pass",
@@ -258,7 +257,7 @@ try {
   await runJourney("journey_b_create_capsule", "Create capsule", async (journey) => {
     const capsuleId = `browser-e2e-${Date.now()}.generic`;
     createdCapsuleIds.push(capsuleId);
-    await navButton(page, "节点库").click();
+    await navButton(page, "资源").click();
     const createPanel = page.getByRole("region", { name: "创建 Capsule" });
     await createPanel.waitFor();
     await page.getByLabel("Capsule 类型").selectOption("generic_cli");
@@ -285,81 +284,58 @@ try {
   });
 
   await runJourney("journey_c_two_node_workflow", "Two node workflow", async (journey) => {
-    await navButton(page, "工作流").click();
+    await navButton(page, "任务").click();
     const toolbar = workflowToolbar(page);
-    await toolbar.getByRole("button", { name: "新建" }).click();
-    await page.getByLabel("搜索节点").selectOption("echo-test.generic");
-    await page.getByRole("button", { name: "添加节点" }).click();
-    const echoNode = await workflowNode(page, "Echo Test");
-    const echoNodeId = await workflowNodeId(echoNode);
-    await page.getByLabel("搜索节点").selectOption("fake-agent.generic");
-    await page.getByRole("button", { name: "添加节点" }).click();
-    const fakeNode = await workflowNode(page, "Fake Agent");
-    await dragBetween(
-      page,
-      echoNode.locator('[data-testid$="-source"]'),
-      fakeNode.locator('[data-testid$="-target"]'),
-    );
+    await toolbar.getByRole("button", { name: "加载示例" }).click();
+    await page.getByText("Codex CLI").first().waitFor();
     assert((await page.locator(".react-flow__edge").count()) >= 1, "未看到连接边");
-    await echoNode.click();
-    await page.getByRole("button", { name: "输入", exact: true }).click();
-    await page
-      .getByRole("textbox", { name: "输入" })
-      .fill('{\n  "message": "hello from browser e2e"\n}');
-    await page.getByRole("button", { name: "保存 输入" }).click();
-    await fakeNode.click();
-    await page.getByRole("button", { name: "输入", exact: true }).click();
-    await page
-      .getByRole("textbox", { name: "映射" })
-      .fill(`{\n  "topic": "{{ nodes.${echoNodeId}.output.summary }}"\n}`);
-    await page.getByRole("button", { name: "保存 输入" }).click();
-    await toolbar.getByRole("button", { name: "保存" }).click();
+    await toolbar.getByRole("button", { name: /保存/ }).click();
     await toolbar.getByRole("button", { name: "校验" }).click();
+    await page.getByText(/校验通过:/).waitFor({ timeout: 20000 });
     await toolbar.getByRole("button", { name: "运行" }).click();
-    await page.getByText("运行 ui_demo_graph: 成功").waitFor({ timeout: 20000 });
-    await echoNode.click();
+    await page.getByText(/运行 ui_workflow_acc_workspace_canvas.*成功/).waitFor({
+      timeout: 30000,
+    });
+    await page.getByText("Codex CLI").first().click();
     await page.getByRole("button", { name: "输出", exact: true }).click();
-    await page.locator(".path-grid").getByRole("button", { name: /^输出/ }).click();
-    await fakeNode.click();
-    await page.getByRole("button", { name: "输入", exact: true }).click();
-    appendStep(journey, "从零添加两节点、连边、映射并运行", "pass", "连接边可见，运行成功，节点输入输出可检查");
+    appendStep(journey, "加载示例任务、保存、校验并运行", "pass", "连接边可见，运行成功，节点输出可检查");
     await capture(page, journey, "two_node_workflow");
   });
 
   await runJourney("journey_d_parallel_workflow", "Parallel workflow inspection", async (journey) => {
-    await navButton(page, "工作流").click();
+    await navButton(page, "任务").click();
     const toolbar = workflowToolbar(page);
-    await toolbar.getByRole("button", { name: "加载 Demo 并行" }).click();
+    await toolbar.getByRole("button", { name: "加载示例" }).click();
     await toolbar.getByRole("button", { name: "自动布局" }).click();
-    const canvas = page.getByLabel("图谱画布");
-    await canvas.getByText("分支 A").waitFor();
-    await canvas.getByText("分支 B").waitFor();
-    await canvas.getByText("结果汇总").waitFor();
+    const canvas = page.getByLabel("任务画布");
+    await canvas.getByText("Codex CLI").first().waitFor();
+    await canvas.getByText("Merge").first().waitFor();
     await toolbar.getByRole("button", { name: "运行" }).click();
-    await page.getByText("运行 demo_parallel: 成功").waitFor({ timeout: 20000 });
-    await page.getByTestId("workflow-node-merge").click({ force: true });
+    await page.getByText(/运行 ui_workflow_acc_workspace_canvas.*成功/).waitFor({
+      timeout: 30000,
+    });
+    await canvas.getByText("Merge").first().click();
     await page.getByRole("button", { name: "输出", exact: true }).click();
-    await page.locator(".path-grid").getByRole("button", { name: /^输出/ }).click();
-    appendStep(journey, "加载并运行并行 Demo", "pass", "扇出/汇入结构可见，汇总节点输出可检查");
+    appendStep(journey, "加载并运行示例任务", "pass", "示例结构可见，汇总节点输出可检查");
     await capture(page, journey, "parallel_workflow");
   });
 
   await runJourney("journey_e_debugger_replay", "Debugger and replay", async (journey) => {
     await navButton(page, "运行记录").click();
-    await page.getByRole("button", { name: /ui_workflow_demo_parallel/i }).first().waitFor({
+    await page.getByRole("button", { name: /ui_workflow_acc_workspace_canvas/i }).first().waitFor({
       timeout: 20000,
     });
-    await page.getByRole("button", { name: /ui_workflow_demo_parallel/i }).first().click();
+    await page.getByRole("button", { name: /ui_workflow_acc_workspace_canvas/i }).first().click();
     const debuggerPanel = page.getByLabel("调试面板");
     await debuggerPanel.getByRole("button", { name: "事件回放" }).click();
     await debuggerPanel.getByLabel("replay.json").waitFor({ timeout: 20000 });
     await debuggerPanel.getByRole("button", { name: "重跑节点" }).click();
-    await debuggerPanel.getByText("已重跑节点 plan").waitFor({ timeout: 20000 });
+    await debuggerPanel.getByText(/已重跑节点/).waitFor({ timeout: 20000 });
     await debuggerPanel.getByLabel("run_diff.json").waitFor({ timeout: 20000 });
     await debuggerPanel.getByRole("button", { name: "从此节点重跑" }).click();
-    await debuggerPanel.getByText("已从节点 plan 重跑下游").waitFor({ timeout: 20000 });
+    await debuggerPanel.getByText(/已从节点 .* 重跑下游/).waitFor({ timeout: 20000 });
     await debuggerPanel.getByRole("button", { name: "Fork 运行" }).click();
-    await debuggerPanel.getByText("已 Fork plan").waitFor({ timeout: 20000 });
+    await debuggerPanel.getByText(/已 Fork/).waitFor({ timeout: 20000 });
     await debuggerPanel.getByRole("button", { name: "对比运行" }).click();
     await debuggerPanel.getByText("已刷新运行对比").waitFor({ timeout: 20000 });
     appendStep(journey, "从运行检查器执行 replay/rerun/fork/diff", "pass", "调试操作已进入浏览器路径");

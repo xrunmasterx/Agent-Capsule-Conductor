@@ -32,11 +32,15 @@ from acc.debugger import (
 )
 from acc.environment import create_workspace_binding, inspect_environment_run
 from acc.graphops import apply_patch_request, dry_run_patch, validate_patch_file
+from acc.legacy_graph_importer import (
+    accflow_path_from_legacy_graph_path,
+    legacy_graph_to_accflow_payload,
+)
 from acc.port_io import inspect_ports_run
 from acc.registry import CapsuleRegistry, validate_capsule_files
 from acc.run_index import load_or_rebuild_run_index, load_run_summary
 from acc.scaffold import scaffold_capsule
-from acc.store import is_clean_workflow_path
+from acc.store import is_clean_workflow_path, write_json
 from acc.utils import AccError, dump_json, load_json, log_stderr
 
 app = typer.Typer(help="Agent Capsule Conductor CLI.")
@@ -52,6 +56,7 @@ events_app = typer.Typer(help="Workflow event replay commands.")
 artifacts_app = typer.Typer(help="Artifact comparison commands.")
 environment_app = typer.Typer(help="Environment inspection commands.")
 ports_app = typer.Typer(help="Port inbox/outbox inspection commands.")
+template_app = typer.Typer(help="Template bundle export/import commands.")
 app.add_typer(session_app, name="session")
 app.add_typer(graphops_app, name="graphops")
 app.add_typer(runs_app, name="runs")
@@ -64,6 +69,7 @@ app.add_typer(events_app, name="events")
 app.add_typer(artifacts_app, name="artifacts")
 app.add_typer(environment_app, name="environment")
 app.add_typer(ports_app, name="ports")
+app.add_typer(template_app, name="template")
 
 
 @app.callback()
@@ -372,9 +378,9 @@ def batch_run_command(
     ] = None,
 ) -> None:
     try:
-        conductor_output = CapsuleAppService(
-            registry=CapsuleRegistry(capsules_dir)
-        ).run_batch_sync(spec, run_dir, max_concurrency)
+        conductor_output = CapsuleAppService(registry=CapsuleRegistry(capsules_dir)).run_batch_sync(
+            spec, run_dir, max_concurrency
+        )
     except AccError as exc:
         log_stderr(str(exc))
         raise typer.Exit(1) from exc
@@ -540,16 +546,72 @@ def capsule_scaffold(
 def workflow_validate(
     graph_path: Path,
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="Preview execution plan without creating a run."),
+    ] = False,
     capsules_dir: Annotated[
         Path | None,
         typer.Option("--capsules-dir", help="Capsule registry directory."),
     ] = None,
 ) -> None:
     try:
-        result = WorkflowAppService(registry=CapsuleRegistry(capsules_dir)).validate(graph_path)
+        result = WorkflowAppService(registry=CapsuleRegistry(capsules_dir)).validate(
+            graph_path,
+            dry_run=dry_run,
+            workflows_dir=graph_path.parent,
+        )
     except AccError as exc:
         log_stderr(str(exc))
         raise typer.Exit(1) from exc
+    if result.get("status") == "invalid":
+        log_stderr(json.dumps(result, ensure_ascii=False, indent=2))
+        raise typer.Exit(1)
+    if not is_clean_workflow_path(graph_path):
+        result = {
+            **result,
+            "import_hint": (
+                f"Legacy .graph.json is import-only; convert with "
+                f"`acc workflow import-graph {graph_path}`"
+            ),
+        }
+    typer.echo(dump_json(result))
+
+
+@workflow_app.command("import-graph")
+def workflow_import_graph(
+    graph_path: Path,
+    out: Annotated[
+        Path | None,
+        typer.Option("-o", "--out", help="Output .accflow.json path."),
+    ] = None,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
+    capsules_dir: Annotated[
+        Path | None,
+        typer.Option("--capsules-dir", help="Capsule registry directory."),
+    ] = None,
+) -> None:
+    if not graph_path.name.endswith(".graph.json"):
+        log_stderr("Input path must end with .graph.json")
+        raise typer.Exit(1)
+    output_path = out or accflow_path_from_legacy_graph_path(graph_path)
+    try:
+        payload = legacy_graph_to_accflow_payload(graph_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        write_json(output_path, payload)
+        validation = WorkflowAppService(registry=CapsuleRegistry(capsules_dir)).validate(
+            output_path
+        )
+    except AccError as exc:
+        log_stderr(str(exc))
+        raise typer.Exit(1) from exc
+    result = {
+        "status": "imported",
+        "source_path": str(graph_path.resolve()),
+        "output_path": str(output_path.resolve()),
+        "workflow_id": payload.get("id"),
+        "validation": validation,
+    }
     typer.echo(dump_json(result))
 
 
@@ -859,6 +921,57 @@ def inspect_session(run_dir: Path) -> dict:
         "session_manifest": session_manifest,
         "run_manifest": run_manifest,
     }
+
+
+@template_app.command("export")
+def template_export(
+    output: Annotated[Path, typer.Option("-o", "--output", help="Output bundle zip path.")],
+    class_id: Annotated[str | None, typer.Option("--class", help="Agent class id.")] = None,
+    workflow_id: Annotated[str | None, typer.Option("--workflow", help="Workflow id.")] = None,
+    project_root: Annotated[Path, typer.Option("--project-root", help="Project root.")] = Path("."),
+) -> None:
+    from acc.app.template_bundle import export_template_bundle
+
+    try:
+        manifest = export_template_bundle(
+            project_root=project_root.resolve(),
+            output_path=output,
+            class_id=class_id,
+            workflow_id=workflow_id,
+        )
+    except AccError as exc:
+        log_stderr(str(exc))
+        raise typer.Exit(1) from exc
+    typer.echo(dump_json({"status": "exported", "manifest": manifest}))
+
+
+@template_app.command("import")
+def template_import(
+    bundle: Path,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Validate without writing.")] = False,
+    fork_id: Annotated[str | None, typer.Option("--fork-id", help="Fork target id.")] = None,
+    replace: Annotated[bool, typer.Option("--replace", help="Replace existing templates.")] = False,
+    human_approved: Annotated[
+        bool,
+        typer.Option("--human-approved", help="Required with --replace."),
+    ] = False,
+    project_root: Annotated[Path, typer.Option("--project-root", help="Project root.")] = Path("."),
+) -> None:
+    from acc.app.template_bundle import import_template_bundle
+
+    try:
+        result = import_template_bundle(
+            project_root=project_root.resolve(),
+            bundle_path=bundle,
+            dry_run=dry_run,
+            fork_id=fork_id,
+            replace=replace,
+            human_approved=human_approved,
+        )
+    except AccError as exc:
+        log_stderr(str(exc))
+        raise typer.Exit(1) from exc
+    typer.echo(dump_json(result))
 
 
 if __name__ == "__main__":

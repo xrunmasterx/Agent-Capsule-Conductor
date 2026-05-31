@@ -37,6 +37,9 @@ class NodeRunSummary(BaseModel):
     event_log: str | None = None
     stdout_log: str | None = None
     stderr_log: str | None = None
+    log_ref: str | None = None
+    log_excerpt: str | None = None
+    transcript_ref: str | None = None
     workspace_dir: str | None = None
     errors: list[SummaryError] = Field(default_factory=list)
 
@@ -189,6 +192,10 @@ def build_node_summary(
             )
         )
 
+    stdout_log = existing_path(run_dir / "stdout.log")
+    stderr_log = existing_path(run_dir / "stderr.log")
+    log_ref = stdout_log or stderr_log
+    log_excerpt = read_log_excerpt(log_ref)
     return NodeRunSummary(
         node_id=str(manifest.get("parent_node_id") or run_dir.name),
         capsule_id=str(manifest.get("capsule_id") or "unknown"),
@@ -202,11 +209,29 @@ def build_node_summary(
         output_path=conductor_output.get("output_path") or manifest.get("output_path"),
         artifact_dir=conductor_output.get("artifact_dir") or manifest.get("artifact_dir"),
         event_log=conductor_output.get("event_log") or manifest.get("event_log_path"),
-        stdout_log=existing_path(run_dir / "stdout.log"),
-        stderr_log=existing_path(run_dir / "stderr.log"),
+        stdout_log=stdout_log,
+        stderr_log=stderr_log,
+        log_ref=log_ref,
+        log_excerpt=log_excerpt,
+        transcript_ref=stdout_log,
         workspace_dir=manifest.get("workspace_dir"),
         errors=errors,
     )
+
+
+def read_log_excerpt(log_ref: str | None, *, limit: int = 2048) -> str | None:
+    if not log_ref:
+        return None
+    path = Path(log_ref)
+    if not path.exists() or not path.is_file():
+        return None
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "\n... [truncated]"
 
 
 def build_run_summary(run_dir: Path, nodes: list[NodeRunSummary]) -> RunSummary:

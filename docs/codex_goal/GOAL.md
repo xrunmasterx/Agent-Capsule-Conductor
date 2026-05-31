@@ -1,5 +1,12 @@
 # Goal: Agent Capsule Conductor V2 MVP
 
+Status: historical MVP goal package.
+
+Current reading rule: this document explains the original CLI/capsule/session milestone. Its
+phase-specific non-goals, including "do not build a visual UI", do not override the current
+Workbench and callable architecture. For current rules, read `AGENTS.md`, `docs/README.md`, and
+`docs/CURRENT_ARCHITECTURE.md`.
+
 ## Objective
 
 Implement **Agent Capsule Conductor V2**.

@@ -17,6 +17,8 @@ import type {
   WorkflowRunResult,
   WorkflowRunSubmitResult,
   WorkflowSummary,
+  InteractionList,
+  InteractionRequest,
 } from './types';
 
 async function getJson<T>(path: string): Promise<T> {
@@ -51,8 +53,12 @@ async function responseErrorMessage(response: Response, path: string): Promise<s
     if (typeof detail === 'string') {
       return `${fallback} - ${detail}`;
     }
-    if (detail?.message) {
-      return `${fallback} - ${detail.message}`;
+    if (isRecord(detail) && detail.message) {
+      const validationDetails = validationErrorDetails(detail);
+      if (validationDetails) {
+        return `${fallback} - ${String(detail.message)}: ${validationDetails}`;
+      }
+      return `${fallback} - ${String(detail.message)}`;
     }
     if (detail) {
       return `${fallback} - ${JSON.stringify(detail)}`;
@@ -61,6 +67,39 @@ async function responseErrorMessage(response: Response, path: string): Promise<s
     return fallback;
   }
   return fallback;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function validationErrorDetails(detail: Record<string, unknown>): string {
+  const validation = detail.validation;
+  if (!isRecord(validation) || !Array.isArray(validation.errors)) {
+    return '';
+  }
+
+  const rendered = validation.errors
+    .slice(0, 3)
+    .map((issue) => {
+      if (!isRecord(issue)) {
+        return '';
+      }
+      const code = typeof issue.code === 'string' ? issue.code : '';
+      const message = typeof issue.message === 'string' ? issue.message : '';
+      const nodeId = typeof issue.node_id === 'string' ? issue.node_id : '';
+      const port = typeof issue.port === 'string' ? issue.port : '';
+      const location = [nodeId, port].filter(Boolean).join('.');
+      return [code, location, message].filter(Boolean).join(' - ');
+    })
+    .filter(Boolean);
+
+  if (rendered.length === 0) {
+    return '';
+  }
+
+  const remaining = validation.errors.length - rendered.length;
+  return remaining > 0 ? `${rendered.join('; ')}; +${remaining} more` : rendered.join('; ');
 }
 
 function encodePath(path: string): string {
@@ -204,6 +243,14 @@ export const api = {
   runEvents: (runId: string, limit = 200) =>
     getJson<{ run_id: string; event_log: string; events: RunEvent[] }>(
       `/api/runs/${encodeURIComponent(runId)}/events?limit=${encodeURIComponent(String(limit))}`,
+    ),
+  runInteractions: (runId: string) =>
+    getJson<InteractionList>(`/api/runs/${encodeURIComponent(runId)}/interactions`),
+  answerInteraction: (runId: string, interactionId: string, answer: Record<string, unknown>) =>
+    sendJson<InteractionRequest>(
+      'POST',
+      `/api/runs/${encodeURIComponent(runId)}/interactions/${encodeURIComponent(interactionId)}/answer`,
+      { answer },
     ),
   nodeEvents: (runId: string, nodeId: string, limit = 200) =>
     getJson<{ run_id: string; node_id: string; event_log: string; events: RunEvent[] }>(

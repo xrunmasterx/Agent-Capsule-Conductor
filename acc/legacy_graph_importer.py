@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,10 @@ NODE_REF_PATTERN = re.compile(r"nodes\.([a-zA-Z0-9_-]+)\.")
 DEFAULT_LEGACY_POLICY = {"failure_mode": "fail_fast", "max_concurrency": 1}
 
 
+def _callable_dispatch_enabled() -> bool:
+    return os.getenv("ACC_USE_CALLABLE_DISPATCH", "").strip().lower() in {"1", "true", "yes"}
+
+
 def load_legacy_graph_template(path: Path) -> tuple[WorkflowTemplate, dict[str, Any]]:
     payload = load_json(path)
     if not isinstance(payload, dict):
@@ -29,8 +34,39 @@ def load_legacy_graph_template(path: Path) -> tuple[WorkflowTemplate, dict[str, 
 
 
 def legacy_graph_to_accflow_payload(path: Path) -> dict[str, Any]:
-    template, _raw = load_legacy_graph_template(path)
-    return workflow_template_to_accflow_payload(template)
+    template, raw = load_legacy_graph_template(path)
+    return legacy_graph_dict_to_accflow_payload(raw, source_path=path, template=template)
+
+
+def legacy_graph_dict_to_accflow_payload(
+    graph: dict[str, Any],
+    *,
+    source_path: Path | None = None,
+    template: WorkflowTemplate | None = None,
+) -> dict[str, Any]:
+    resolved_template = template or import_legacy_graph_template(
+        graph,
+        source_path=source_path,
+    )
+    payload = workflow_template_to_accflow_payload(resolved_template)
+    for key in ("name", "description", "workspace_policy"):
+        if key in graph:
+            payload[key] = graph[key]
+    graph_metadata = graph.get("metadata")
+    if isinstance(graph_metadata, dict):
+        payload_metadata = dict(payload.get("metadata") or {})
+        payload_metadata.update(graph_metadata)
+        payload_metadata["canonical_format"] = "accflow"
+        payload["metadata"] = payload_metadata
+    return payload
+
+
+def accflow_path_from_legacy_graph_path(path: Path) -> Path:
+    if path.name.endswith(".graph.json"):
+        return path.with_name(path.name.replace(".graph.json", ".accflow.json"))
+    if path.name.endswith(".accflow.json"):
+        return path
+    return path.with_suffix(".accflow.json")
 
 
 def workflow_template_to_accflow_payload(template: WorkflowTemplate) -> dict[str, Any]:
@@ -76,6 +112,16 @@ def workflow_template_to_accflow_payload(template: WorkflowTemplate) -> dict[str
 
 
 def node_to_payload(node: NodeSpec) -> dict[str, Any]:
+    raw = dict(node.raw)
+    for key in (
+        "id",
+        "kind",
+        "runtime",
+        "tool",
+        "workflow_ref",
+        "permission_profile",
+    ):
+        raw.pop(key, None)
     payload = {
         "id": node.id,
         "kind": node.kind,
@@ -93,7 +139,7 @@ def node_to_payload(node: NodeSpec) -> dict[str, Any]:
         }
         if node.permission_profile is not None
         else None,
-        **node.raw,
+        **raw,
     }
     return {key: value for key, value in payload.items() if value is not None}
 
@@ -230,9 +276,7 @@ def parse_workflow_port_edges(
 def parse_control_context(edge: dict[str, Any], index: int) -> str:
     context = str(edge.get("context") or "upstream_output")
     if context not in {"upstream_output", "none"}:
-        raise AccError(
-            f"control edge {index} context must be 'upstream_output' or 'none'"
-        )
+        raise AccError(f"control edge {index} context must be 'upstream_output' or 'none'")
     return context
 
 
@@ -266,9 +310,7 @@ def legacy_data_edge_payloads(
     payload: dict[str, Any],
     control_edges: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    data_edges = [
-        dict(edge) for edge in payload.get("data_edges", []) if isinstance(edge, dict)
-    ]
+    data_edges = [dict(edge) for edge in payload.get("data_edges", []) if isinstance(edge, dict)]
     for edge in control_edges:
         for input_name, expression in dict(edge.get("mapping") or {}).items():
             source_node = first_node_reference(expression)
@@ -332,6 +374,11 @@ def import_legacy_nodes(graph: dict[str, Any]) -> list[NodeSpec]:
             continue
         capsule_id = require_string(node, "capsule_id", f"node {node_id}")
         raw["legacy_capsule_id"] = capsule_id
+        if _callable_dispatch_enabled():
+            # Make callable_ref.id resolve to the real capsule id (bypass the
+            # runtime="capsule" sentinel). Gated by the flag so flag-off runs stay
+            # byte-for-byte identical (callable_ref.id is persisted in manifests).
+            raw["callable_id"] = capsule_id
         result.append(
             NodeSpec(
                 id=node_id,

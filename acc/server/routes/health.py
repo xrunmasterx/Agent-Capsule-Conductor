@@ -15,4 +15,3 @@ def health() -> dict[str, str]:
 @router.get("/version")
 def version() -> dict[str, str]:
     return {"version": __version__}
-

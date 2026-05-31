@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from acc.domain import NodeSpec, WorkflowTemplate
+from acc.domain import NodeInvocationSpec, NodeSpec, WorkflowTemplate
 from acc.engine import normalize_node_invocation_spec
 from acc.store import load_json
 from acc.utils import AccError
@@ -14,8 +14,14 @@ def build_nested_workflow_input_payload(
     node: NodeSpec,
     node_dir: Path,
     child_template: WorkflowTemplate,
+    *,
+    node_invocation: NodeInvocationSpec | None = None,
 ) -> dict[str, Any]:
-    explicit_payload = build_explicit_nested_workflow_input_payload(node, node_dir)
+    explicit_payload = build_explicit_nested_workflow_input_payload(
+        node,
+        node_dir,
+        node_invocation=node_invocation,
+    )
     if explicit_payload:
         return explicit_payload
     if not child_template.exposed_inputs:
@@ -45,23 +51,23 @@ def build_nested_workflow_input_payload(
 def build_explicit_nested_workflow_input_payload(
     node: NodeSpec,
     node_dir: Path,
+    *,
+    node_invocation: NodeInvocationSpec | None = None,
 ) -> dict[str, Any]:
-    node_invocation = normalize_node_invocation_spec(node)
-    if not node_invocation.workflow_call_input_bindings:
+    invocation = node_invocation or normalize_node_invocation_spec(node)
+    if not invocation.workflow_call_input_bindings:
         return {}
     parent_input = load_json(node_dir / "input.json") if (node_dir / "input.json").exists() else {}
     if not isinstance(parent_input, dict):
         parent_input = {}
     payload: dict[str, Any] = {}
-    for binding in node_invocation.workflow_call_input_bindings:
+    for binding in invocation.workflow_call_input_bindings:
         if binding.static_value is not None:
             payload[binding.workflow_input] = binding.static_value
             continue
         if binding.source is None:
             if binding.required:
-                raise AccError(
-                    f"workflow call input {binding.workflow_input!r} has no source"
-                )
+                raise AccError(f"workflow call input {binding.workflow_input!r} has no source")
             continue
         value = bound_parent_input_value(parent_input, binding.source.node, binding.source.port)
         if value is None:
@@ -119,8 +125,9 @@ def workflow_call_manifest_payload(
     parent_invocation_id: str | None,
     parent_scope_frame_id: str | None,
     nested_result: dict[str, Any],
+    node_invocation: NodeInvocationSpec | None = None,
 ) -> dict[str, Any]:
-    node_invocation = normalize_node_invocation_spec(node)
+    invocation = node_invocation or normalize_node_invocation_spec(node)
     return {
         "node_id": node.id,
         "parent_invocation_id": parent_invocation_id,
@@ -136,7 +143,7 @@ def workflow_call_manifest_payload(
                 "source_port": binding.source.port if binding.source else None,
                 "required": binding.required,
             }
-            for binding in node_invocation.workflow_call_input_bindings
+            for binding in invocation.workflow_call_input_bindings
         ],
         "output_bindings": [
             {
@@ -144,7 +151,7 @@ def workflow_call_manifest_payload(
                 "parent_port": binding.parent_port,
                 "required": binding.required,
             }
-            for binding in node_invocation.workflow_call_output_bindings
+            for binding in invocation.workflow_call_output_bindings
         ],
         "status": str(nested_result.get("status")),
     }

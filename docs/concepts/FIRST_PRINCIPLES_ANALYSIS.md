@@ -1,76 +1,80 @@
-# First-Principles Analysis: Why V2 Needs Template/Session and GraphOps
+# First-Principles Analysis
 
-## 1. Core problem
+## 1. Core Problem
 
-The original design already solved the main problem:
+ACC coordinates work done by mature external agents and local tools. The hard part is not "calling an
+agent"; the hard part is keeping reusable behavior, runtime evidence, data flow, and human authority
+separate enough that the system stays debuggable.
 
-```text
-Conductor owns workflow topology.
-acc owns capsule execution boundary.
-External agents own their internal reasoning/tool loop.
-```
-
-But the new idea exposes two missing abstractions:
-
-1. **A node is not merely one run.**
-   It is a reusable behavior template that can create many independent runtime sessions.
-
-2. **The workflow can be edited by an LLM, but should not be governed by an LLM by default.**
-   Human remains the author/approver. LLM may propose changes through a controlled interface.
-
-## 2. What should change
-
-We should not redesign from scratch.
-
-We should extend the existing design:
+The current architecture answers that with a callable model:
 
 ```text
-V1:
-  Capsule
-  Run
+Reusable definitions:
+  AgentClassTemplate
+  ToolClassTemplate
+  WorkflowFunctionTemplate
 
-V2:
-  Capsule Template / Agent Class
-  Session / Agent Instance
-  GraphOps Control Plane
+Runtime executions:
+  FunctionInvocation
+  ScopeFrame
+  SessionInstance
+  ArtifactBundle
 ```
 
-## 3. Why this matters
+## 2. First Principles
 
-Without Template/Session separation:
+### Definition is not execution
 
-- one node's runtime state may pollute another run,
-- repeated executions are hard to reason about,
-- many independent conversations from the same agent template are not modeled cleanly,
-- debugging becomes unclear: is the bug in the template or in one session?
+A reusable agent/tool/workflow definition is like a class. A run is like an object instance plus its
+logs, files, events, and outputs. Mixing them causes state pollution, unclear debugging, and accidental
+reuse of old prompts or outputs.
 
-Without GraphOps:
+### Control flow is not data flow
 
-- Codex cannot safely assist workflow authoring,
-- LLM editing becomes ad-hoc file manipulation,
-- self-modification risks increase,
-- there is no validation/dry-run/review path.
+A control edge only says "B may run after A". It does not imply B can read every file A touched. Data
+must move through ports, inboxes, outboxes, artifact references, and workflow-call bindings.
 
-## 4. What should not change
+### Runtime evidence is not authoring state
 
-Do not turn the system into a dynamic autonomous scheduler.
+Run summaries, events, node manifests, and artifacts are evidence. They should not be written back
+into reusable workflow templates or class templates.
 
-The workflow remains deterministic by default:
+### LLM assistance is not authority
+
+An LLM may propose a graph or capsule edit. It must not silently become the owner of persistent
+workflow mutation. GraphOps keeps mutation typed, validated, dry-run, reviewable, and human-approved.
+
+## 3. Why This Matters
+
+Without these separations:
+
+- one task's run state can overwrite another task's state;
+- a completed Workbench task can appear grey or empty after switching views;
+- node input/output inspectors drift away from real artifacts;
+- nested workflows can accidentally read parent data that was never bound;
+- GraphOps becomes ad-hoc file editing instead of a controlled change path;
+- stdout JSON contracts can be polluted by logs.
+
+## 4. Correct Mental Model
 
 ```text
-Human-authored DAG
-  -> Conductor runs it
-  -> acc executes sessions
-  -> LLM can propose modifications
-  -> human approves changes
+AgentClassTemplate / ToolClassTemplate = reusable class
+WorkflowFunctionTemplate               = reusable function body
+NodeInvocationSpec                      = call site
+FunctionInvocation                      = one workflow call
+ScopeFrame                              = call stack frame and workspace boundary
+SessionInstance                         = one agent/tool execution
+ArtifactBundle                          = stable evidence output
+GraphOps Patch                          = reviewable workflow/capsule diff
+Human Gate                              = approval before persistent mutation
 ```
 
-## 5. Correct mental model
+## 5. What Must Not Change
 
-```text
-Capsule Template = class
-Session          = object instance
-Workflow         = deterministic call graph
-GraphOps Patch   = code review diff for workflow/capsule assets
-Human Gate       = commit approval
-```
+ACC must not become:
+
+- a custom LLM agent loop;
+- a Dify/LangGraph clone;
+- a database-first artifact platform;
+- a cloud or distributed worker system by default;
+- a self-modifying workflow system without validation and human approval.

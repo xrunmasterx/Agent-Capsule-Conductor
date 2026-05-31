@@ -1,8 +1,17 @@
 # Findings
 
-Status: Baseline audit updated before callable runtime code changes.
+Status: historical baseline audit. Do not treat every finding below as a current defect.
 
 Date: 2026-05-28
+
+Current reading rule:
+
+- This file records the baseline state before the callable semantics refactor.
+- Many findings below were later fixed by the callable implementation milestones.
+- For the current callable architecture and final evidence, read:
+  - `docs/codex_goal_callable_semantics/QUALITY_REPORT.md`
+  - `docs/CURRENT_ARCHITECTURE.md`
+  - `docs/concepts/FIRST_PRINCIPLES_ANALYSIS.md`
 
 Current worktree note:
 

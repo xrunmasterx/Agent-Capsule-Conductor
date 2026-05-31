@@ -29,6 +29,10 @@ class SessionManifest(BaseModel):
     parent_workflow_run_id: str | None = None
     parent_node_id: str | None = None
     error: str | None = None
+    capabilities_requested: list[str] | None = None
+    capabilities_effective: list[str] | None = None
+    external_session_id: str | None = None
+    capability_degraded: bool | None = None
 
 
 def new_session_id() -> str:

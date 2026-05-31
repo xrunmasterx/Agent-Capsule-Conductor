@@ -25,7 +25,7 @@ NodeExecutor = Callable[[NodeSpec, Path, Path, Path, EnvironmentFrame], Awaitabl
 AttemptPreparer = Callable[[Path], None]
 
 
-def build_allowed_env(
+def build_allowed_env(  # used by tests and future runtime env filtering
     profile: PermissionProfile,
     *,
     base_env: dict[str, str] | None = None,
@@ -118,9 +118,7 @@ async def execute_clean_node(
     if node.kind == "agent":
         return execute_agent_node(node, node_dir, frame)
     if node.kind == "workflow":
-        raise AccError(
-            f"Workflow node {node.id} must be executed by the application service"
-        )
+        raise AccError(f"Workflow node {node.id} must be executed by the application service")
     raise AccError(f"Unsupported node kind: {node.kind}")
 
 

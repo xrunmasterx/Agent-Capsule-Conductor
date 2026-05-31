@@ -65,7 +65,7 @@ def test_post_workflow_saves_graph(client, project_root) -> None:
 
     assert response.status_code == 200, response.text
     assert response.json()["status"] == "saved"
-    saved = load_json(project_root / "workflows" / "server_graph.graph.json")
+    saved = load_json(project_root / "workflows" / "server_graph.accflow.json")
     assert saved["control_edges"] == []
     assert saved["data_edges"] == []
 
@@ -97,9 +97,9 @@ def test_post_workflow_recovers_wrapped_capsule_node(client, project_root) -> No
     response = client.post("/api/workflows", json={"graph": graph, "force": True})
 
     assert response.status_code == 200, response.text
-    saved = load_json(project_root / "workflows" / "wrapped_capsule_graph.graph.json")
-    assert saved["nodes"][0]["kind"] == "agent_session"
-    assert saved["nodes"][0]["capsule_id"] == "echo-test.generic"
+    saved = load_json(project_root / "workflows" / "wrapped_capsule_graph.accflow.json")
+    assert saved["nodes"][0]["kind"] == "agent"
+    assert saved["nodes"][0]["legacy_capsule_id"] == "echo-test.generic"
     assert "ui" not in saved["nodes"][0]
 
 
@@ -140,7 +140,7 @@ def test_post_workflow_materializes_inline_workflow_container(client, project_ro
     response = client.post("/api/workflows", json={"graph": graph, "force": True})
 
     assert response.status_code == 200, response.text
-    saved = load_json(project_root / "workflows" / "inline_container_graph.graph.json")
+    saved = load_json(project_root / "workflows" / "inline_container_graph.accflow.json")
     child = load_json(
         project_root / "workflows" / "inline_container_graph__container.accflow.json"
     )
@@ -227,7 +227,7 @@ def test_post_workflow_top_level_capsule_input_respects_strict_schema(
     response = client.post("/api/workflows", json={"graph": graph, "force": True})
 
     assert response.status_code == 200, response.text
-    saved = load_json(project_root / "workflows" / "top_level_strict_schema_graph.graph.json")
+    saved = load_json(project_root / "workflows" / "top_level_strict_schema_graph.accflow.json")
     node = saved["nodes"][0]
     assert "topic" not in node["input"]
     assert "upstream_context" not in node["input"]
@@ -284,7 +284,7 @@ def test_post_workflow_materializes_inline_workflow_boundary_edges(client, proje
     response = client.post("/api/workflows", json={"graph": graph, "force": True})
 
     assert response.status_code == 200, response.text
-    saved = load_json(project_root / "workflows" / "inline_boundary_graph.graph.json")
+    saved = load_json(project_root / "workflows" / "inline_boundary_graph.accflow.json")
     saved_container = saved["nodes"][0]
     assert saved_container["workflow_call_output_bindings"] == [
         {
@@ -349,7 +349,7 @@ def test_inline_workflow_output_binding_uses_parent_output_port_id(
     response = client.post("/api/workflows", json={"graph": graph, "force": True})
 
     assert response.status_code == 200, response.text
-    saved = load_json(project_root / "workflows" / "inline_parent_output_port_graph.graph.json")
+    saved = load_json(project_root / "workflows" / "inline_parent_output_port_graph.accflow.json")
     saved_container = saved["nodes"][0]
     assert saved_container["workflow_call_output_bindings"] == [
         {
@@ -397,13 +397,13 @@ def test_run_graph_payload_does_not_persist_workflow_template(client, project_ro
 
     assert response.status_code == 200, response.text
     assert response.json()["status"] == "success"
-    assert not (project_root / "workflows" / "runtime_only_graph.graph.json").exists()
+    assert not (project_root / "workflows" / "runtime_only_graph.accflow.json").exists()
     assert (
         project_root
         / "runs"
         / "_workflow_graph_specs"
         / "runtime_only_graph_run"
-        / "runtime_only_graph.graph.json"
+        / "runtime_only_graph.accflow.json"
     ).exists()
 
 
@@ -571,7 +571,7 @@ def test_run_graph_endpoint_routes_through_workflow_app_service(
     assert response.status_code == 200, response.text
     assert response.json()["status"] == "success"
     assert calls == [
-        ("server_graph.graph.json", "server_graph_service_run", True, None, None, None)
+        ("server_graph.accflow.json", "server_graph_service_run", True, None, None, None)
     ]
 
 
@@ -654,7 +654,7 @@ def test_submit_run_graph_endpoint_creates_async_run_summary(
     summary_response = custom_client.get("/api/runs/async_graph_run")
     assert summary_response.status_code == 200, summary_response.text
     assert summary_response.json()["status"] in {"queued", "running", "success"}
-    assert calls == [("async_graph.graph.json", "async_graph_run", {"message": "async input"})]
+    assert calls == [("async_graph.accflow.json", "async_graph_run", {"message": "async input"})]
 
 
 def test_submit_run_graph_respects_run_limit_and_cancels_queued_run(
@@ -797,7 +797,7 @@ def test_run_graph_endpoint_accepts_binding_path(client, project_root, monkeypat
     )
 
     assert response.status_code == 200, response.text
-    assert calls[0][0:2] == ("server_graph.graph.json", "server_graph_bound_run")
+    assert calls[0][0:2] == ("server_graph.accflow.json", "server_graph_bound_run")
     assert Path(calls[0][2]["binding_path"]).name == "server_graph.binding.local.json"
 
 
@@ -852,7 +852,7 @@ def test_run_graph_endpoint_accepts_temporary_workspace(client, project_root, mo
 
 def test_relative_project_path_survives_atomic_replace_race(tmp_path, monkeypatch) -> None:
     project_root = tmp_path.resolve()
-    workflow_path = project_root / "workflows" / "ui_demo_graph.graph.json"
+    workflow_path = project_root / "workflows" / "ui_demo_graph.accflow.json"
     deleted_path = project_root.parent / "$Extend" / "$Deleted" / "stale"
     original_resolve = Path.resolve
 
@@ -864,7 +864,7 @@ def test_relative_project_path_survives_atomic_replace_race(tmp_path, monkeypatc
     monkeypatch.setattr(Path, "resolve", fake_resolve)
 
     assert relative_project_path(project_root, workflow_path) == (
-        "workflows/ui_demo_graph.graph.json"
+        "workflows/ui_demo_graph.accflow.json"
     )
 
 

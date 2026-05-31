@@ -7,13 +7,11 @@ from acc.domain import DataEdge, EnvironmentFrame, NodeSpec, RuntimeResult
 
 
 class ClockProtocol(Protocol):
-    def now_iso(self) -> str:
-        ...
+    def now_iso(self) -> str: ...
 
 
 class IdGeneratorProtocol(Protocol):
-    def new_id(self, prefix: str) -> str:
-        ...
+    def new_id(self, prefix: str) -> str: ...
 
 
 class EventSinkProtocol(Protocol):
@@ -25,8 +23,7 @@ class EventSinkProtocol(Protocol):
         node_id: str | None = None,
         level: int | None = None,
         payload: dict[str, Any] | None = None,
-    ) -> None:
-        ...
+    ) -> None: ...
 
     def write_node_event(
         self,
@@ -35,35 +32,29 @@ class EventSinkProtocol(Protocol):
         *,
         status: str,
         payload: dict[str, Any] | None = None,
-    ) -> None:
-        ...
+    ) -> None: ...
 
 
 class RunStoreProtocol(Protocol):
-    def create_environment(self) -> EnvironmentFrame:
-        ...
+    def create_environment(self) -> EnvironmentFrame: ...
 
-    def create_node_attempt(self, node_id: str) -> Path:
-        ...
+    def create_node_attempt(self, node_id: str) -> Path: ...
 
-    def cleanup_node_attempt(self, node_dir: Path) -> None:
-        ...
+    def cleanup_node_attempt(self, node_dir: Path) -> None: ...
 
     def materialize_data_edge(
         self,
         edge: DataEdge,
         node_dir: Path,
         source_outboxes: dict[str, dict[str, Path]],
-    ) -> dict[str, Any]:
-        ...
+    ) -> dict[str, Any]: ...
 
     def write_artifact_bundle(
         self,
         node: NodeSpec,
         node_dir: Path,
         output: dict[str, Any],
-    ) -> dict[str, Path]:
-        ...
+    ) -> dict[str, Path]: ...
 
 
 class NodeRunnerProtocol(Protocol):
@@ -72,10 +63,8 @@ class NodeRunnerProtocol(Protocol):
         node: NodeSpec,
         node_dir: Path,
         frame: EnvironmentFrame,
-    ) -> RuntimeResult:
-        ...
+    ) -> RuntimeResult: ...
 
 
 class PathResolverProtocol(Protocol):
-    def resolve_under_root(self, root: Path, relative_path: str) -> Path:
-        ...
+    def resolve_under_root(self, root: Path, relative_path: str) -> Path: ...

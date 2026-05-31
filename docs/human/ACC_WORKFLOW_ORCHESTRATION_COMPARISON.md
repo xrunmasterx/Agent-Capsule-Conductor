@@ -1,5 +1,8 @@
 # ACC 工作流编排深度研究报告
 
+状态：对比分析文档。架构事实以 `docs/CURRENT_ARCHITECTURE.md` 为准；本文用于解释 ACC
+和 Multica、Paperclip、LangGraph、Dify、Conductor 等方案的边界差异。
+
 ## 结论
 
 ACC 是为了解决一个很具体的问题而生：把 Codex CLI、Claude、Cursor、Gemini 这类成熟外部 agent，包装成可编排、可隔离、可复现、可审计的本地 workflow 节点。
@@ -318,7 +321,7 @@ Multica 更像 agent task board。
 ACC 更像 local agent workflow runtime。
 ```
 
-如果目标是“让 agent 像同事一样处理 issue”，Multica 更强。  
+如果目标是“让 agent 像同事一样处理 issue”，Multica 更强。
 如果目标是“把多个外部 agent 节点变成可复现 pipeline”，ACC 更强。
 
 ## 与 Paperclip 对比
@@ -378,7 +381,7 @@ Paperclip 管 agent 组织治理。
 ACC 管 workflow 节点执行边界。
 ```
 
-如果目标是“多个 agent 长期围绕目标运营”，Paperclip 更强。  
+如果目标是“多个 agent 长期围绕目标运营”，Paperclip 更强。
 如果目标是“把 agent 执行变成可审计 pipeline”，ACC 更强。
 
 ## 与 LangGraph 对比
@@ -481,8 +484,9 @@ Conductor 是通用 workflow orchestrator，强在企业级任务编排、状态
 ACC 与 Conductor 的关系不是替代，而是互补：
 
 ```text
-Conductor owns topology.
-ACC owns capsule execution boundary.
+ACC owns its local workflow/callable topology and execution evidence.
+Conductor can be an external production orchestration/export target.
+ACC owns capsule/callable execution boundaries.
 External agents own reasoning/tool loop.
 ```
 

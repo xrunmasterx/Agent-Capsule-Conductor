@@ -5,7 +5,9 @@ import json
 from collections.abc import AsyncIterable, Callable
 from typing import Any
 
-from acc.adapters.base import AgentRunRequest, AgentRunResult
+from acc.adapters.base import AgentRunRequest, AgentRunResult, ResumeRequest
+from acc.adapters.capabilities import default_adapter_capabilities
+from acc.domain import AccError, AgentCapabilities
 
 MessageStreamFactory = Callable[[AgentRunRequest], AsyncIterable[dict[str, Any]]]
 
@@ -13,6 +15,9 @@ MessageStreamFactory = Callable[[AgentRunRequest], AsyncIterable[dict[str, Any]]
 class ClaudeSdkAdapter:
     def __init__(self, message_stream_factory: MessageStreamFactory | None = None) -> None:
         self.message_stream_factory = message_stream_factory
+
+    def capabilities(self) -> AgentCapabilities:
+        return default_adapter_capabilities("claude_sdk")
 
     async def run(self, request: AgentRunRequest) -> AgentRunResult:
         if self.message_stream_factory is None:
@@ -71,8 +76,10 @@ class ClaudeSdkAdapter:
             exit_code=0,
         )
 
+    async def resume(self, request: ResumeRequest) -> AgentRunResult:
+        raise AccError("claude_sdk adapter does not support resume")
+
 
 def write_jsonl(path, payload: dict[str, Any]) -> None:
     with path.open("a", encoding="utf-8") as file:
         file.write(json.dumps(payload, sort_keys=True) + "\n")
-

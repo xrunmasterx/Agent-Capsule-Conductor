@@ -74,4 +74,3 @@ async def run_batch(
     }
     store.write_conductor_output(conductor_output)
     return conductor_output
-

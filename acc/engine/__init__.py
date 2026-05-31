@@ -231,9 +231,7 @@ def parse_control_edge(payload: Any, index: int) -> ControlEdge:
         raise AccError(f"control edge {index} condition must be string or null")
     context = str(payload.get("context") or "upstream_output")
     if context not in {"upstream_output", "none"}:
-        raise AccError(
-            f"control edge {index} context must be 'upstream_output' or 'none'"
-        )
+        raise AccError(f"control edge {index} context must be 'upstream_output' or 'none'")
     return ControlEdge(
         source=source,
         target=target,
@@ -472,9 +470,7 @@ def validate_workflow_call_input_boundary(
     for binding in node.workflow_call_input_bindings:
         if binding.source is None:
             if binding.required and binding.static_value is None:
-                raise AccError(
-                    f"Workflow call input {binding.workflow_input!r} requires a source"
-                )
+                raise AccError(f"Workflow call input {binding.workflow_input!r} requires a source")
             continue
         if binding.source.node not in template.node_invocations:
             raise AccError(
@@ -680,6 +676,7 @@ def normalize_node_invocation_spec(node: NodeSpec) -> NodeInvocationSpec:
             "legacy_runtime": node.runtime,
             "legacy_tool": node.tool,
             "legacy_workflow_ref": node.workflow_ref,
+            "legacy_capsule_id": node.raw.get("legacy_capsule_id") or node.raw.get("capsule_id"),
         },
     )
 
@@ -821,8 +818,7 @@ def validate_data_endpoint(
     ports = node.output_ports if direction == "output" else node.input_ports
     if ports and endpoint.port not in ports:
         raise AccError(
-            f"Data edge references missing {direction} port "
-            f"{endpoint.node}.{endpoint.port}"
+            f"Data edge references missing {direction} port {endpoint.node}.{endpoint.port}"
         )
 
 
@@ -840,8 +836,7 @@ def validate_workflow_boundary_contract(template: WorkflowTemplate) -> None:
     for binding in template.workflow_input_bindings:
         if binding.source_port not in template.exposed_inputs:
             raise AccError(
-                f"Workflow input binding references missing exposed input "
-                f"{binding.source_port!r}"
+                f"Workflow input binding references missing exposed input {binding.source_port!r}"
             )
         validate_data_endpoint(template, binding.target, direction="input")
         key = (binding.source_port, binding.target.node, binding.target.port)
@@ -856,8 +851,7 @@ def validate_workflow_boundary_contract(template: WorkflowTemplate) -> None:
     for binding in template.workflow_output_bindings:
         if binding.target_port not in template.exposed_outputs:
             raise AccError(
-                f"Workflow output binding references missing exposed output "
-                f"{binding.target_port!r}"
+                f"Workflow output binding references missing exposed output {binding.target_port!r}"
             )
         validate_data_endpoint(template, binding.source, direction="output")
         if binding.target_port in seen_output_ports:
@@ -1003,9 +997,7 @@ def reject_absolute_workspace_paths(payload: Any) -> None:
                 and isinstance(value, str)
                 and (re.match(r"^[A-Za-z]:[\\/]", value) or value.startswith(("/", "\\")))
             ):
-                raise AccError(
-                    "WorkflowTemplate must not contain local absolute workspace paths"
-                )
+                raise AccError("WorkflowTemplate must not contain local absolute workspace paths")
             reject_absolute_workspace_paths(value)
     elif isinstance(payload, list):
         for item in payload:

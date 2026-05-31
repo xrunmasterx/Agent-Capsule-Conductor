@@ -27,11 +27,7 @@ def render_prompt(template_path: Path, input_payload: dict[str, Any]) -> str:
         if "input_json" in template_text:
             return rendered
         return (
-            rendered.rstrip()
-            + "\n\n## ACC Runtime Input\n"
-            + "```json\n"
-            + input_json
-            + "\n```\n"
+            rendered.rstrip() + "\n\n## ACC Runtime Input\n" + "```json\n" + input_json + "\n```\n"
         )
     except TemplateError as exc:
         raise AccError(f"Failed to render prompt {template_path}: {exc}") from exc

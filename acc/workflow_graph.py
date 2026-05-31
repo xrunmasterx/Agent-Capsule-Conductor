@@ -522,9 +522,7 @@ def validate_mapping_expression(
         )
     for node_id in NODE_REF_PATTERN.findall(value):
         if node_id not in node_ids:
-            raise AccError(
-                f"Invalid mapping expression in {context}: missing node {node_id!r}"
-            )
+            raise AccError(f"Invalid mapping expression in {context}: missing node {node_id!r}")
         if allowed_node_bits & node_bits[node_id] == 0:
             raise AccError(
                 f"Invalid mapping expression in {context}: node {node_id!r} is not upstream"

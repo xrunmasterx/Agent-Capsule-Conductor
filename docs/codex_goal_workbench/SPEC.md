@@ -1,5 +1,12 @@
 # Workbench Next Phase Spec
 
+Status: historical Phase 2 Workbench package.
+
+Current reading rule: this document describes the older usability/server/read-only UI phase. The
+current Workbench is editable and run-scoped. For current Workbench rules, read
+`docs/CURRENT_ARCHITECTURE.md`, `web/README.md`, and
+`docs/codex_goal_visual_workbench_ux_refactor/QUALITY_REPORT.md`.
+
 ## Product definition
 
 Agent Capsule Workbench is the usability layer on top of Agent Capsule Conductor MVP.

@@ -97,4 +97,3 @@ def build_worktree_command(
             ref,
         ]
     raise AccError(f"Unsupported workspace mode: {mode}")
-

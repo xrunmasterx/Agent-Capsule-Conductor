@@ -2,42 +2,39 @@
 
 ## 1. Purpose
 
-GraphOps lets a higher-level LLM assist with workflow and capsule authoring.
+GraphOps is the controlled path for workflow, capsule, and resource-library mutation.
 
-It does not make the LLM the unrestricted owner of the system.
+It lets an LLM assist with authoring without making the LLM the unrestricted owner of persistent
+state.
 
 Correct boundary:
 
 ```text
-LLM proposes graph patch.
-acc validates patch.
-Human approves patch.
-acc applies patch.
+LLM proposes patch
+  -> acc validates schema and policy
+  -> acc dry-runs the mutation
+  -> human reviews evidence
+  -> acc applies only with explicit approval
 ```
 
-## 2. Why this is needed
+## 2. Why This Is Needed
 
-The user wants a recursive system:
+ACC can run Codex/Claude/Cursor-like agents as workflow nodes. Those agents may also help improve
+workflow definitions. That recursion is useful only if mutation remains explicit and reviewable.
 
-```text
-Workflow contains Codex nodes.
-Codex can also help improve the workflow.
-```
+Direct file editing creates risks:
 
-This is useful, but dangerous without a control plane.
-
-Directly letting Codex edit arbitrary YAML files creates risks:
-
-- deleting human gates,
-- enabling dangerous sandbox permissions,
-- breaking schema contracts,
-- silently changing prompts,
-- creating cycles,
+- deleting human gates;
+- enabling dangerous permissions;
+- breaking schema or port contracts;
+- silently changing class-level system prompts;
+- creating cycles;
+- writing runtime state into reusable templates;
 - corrupting workflow assets.
 
-GraphOps makes changes explicit, typed, reviewable, and testable.
+GraphOps makes changes typed, reviewable, testable, and auditable.
 
-## 3. Minimal patch format
+## 3. Minimal Patch Shape
 
 ```json
 {
@@ -61,7 +58,7 @@ GraphOps makes changes explicit, typed, reviewable, and testable.
 }
 ```
 
-## 4. CLI behavior
+## 4. CLI Behavior
 
 ```bash
 acc graphops validate-patch patch.json
@@ -81,7 +78,7 @@ acc graphops apply-patch patch.json --apply --human-approved
 
 Actually mutates files. This is not used by default tests.
 
-## 5. Forbidden operations by default
+## 5. Forbidden Operations By Default
 
 Reject by default:
 
@@ -94,7 +91,17 @@ change_git_remote
 remove_schema_validation
 ```
 
-## 6. Testing principle
+## 6. Current Architecture Boundary
+
+GraphOps is an authoring/control-plane feature. It must not:
+
+- run a custom LLM loop;
+- bypass workflow validation;
+- mutate run evidence as if it were a reusable template;
+- apply destructive changes without human approval;
+- make Workbench UI state the durable workflow truth.
+
+## 7. Testing Principle
 
 Default tests must prove:
 

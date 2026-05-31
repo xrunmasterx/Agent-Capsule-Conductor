@@ -1,9 +1,9 @@
 # 中文市场调研与分析示例
 
-这个目录保存一个隔离的两节点 demo，不会进入默认 `capsules/` 或 `workflows/`
-目录。它用于验证 capsule handoff、run inspection 和 Workbench artifact 展示。
+这个目录保存一个隔离的两节点 demo。它不会进入默认 `capsules/` 或 `workflows/`
+目录，主要用于验证 capsule handoff、run inspection 和 Workbench artifact 展示。
 
-运行调研节点：
+## 运行调研节点
 
 ```powershell
 uv run acc run market-news-research.generic `
@@ -13,7 +13,7 @@ uv run acc run market-news-research.generic `
   --emit-conductor-json
 ```
 
-运行分析节点：
+## 运行分析节点
 
 ```powershell
 uv run acc run market-investment-analysis.generic `
@@ -23,7 +23,10 @@ uv run acc run market-investment-analysis.generic `
   --emit-conductor-json
 ```
 
-如需让 Workbench 的 capsule/workflow 列表指向这个示例目录，可以启动前设置：
+## 让 Workbench 指向这个示例目录
+
+如果需要让 Workbench 的 capsule/workflow 列表指向这个示例目录，可以在启动 server
+前设置：
 
 ```powershell
 $env:ACC_CAPSULES_DIR = "examples/market_research_analysis/capsules"
@@ -31,4 +34,4 @@ $env:ACC_WORKFLOWS_DIR = "examples/market_research_analysis/workflows"
 uv run acc server --host 127.0.0.1 --port 8765
 ```
 
-这个示例是确定性数据，不抓取实时市场信息，也不构成金融建议。
+这个示例使用确定性数据，不抓取实时市场信息，也不构成金融建议。

@@ -17,6 +17,18 @@ export type NodeRunSummary = {
   event_log?: string | null;
   stdout_log?: string | null;
   stderr_log?: string | null;
+  log_ref?: string | null;
+  log_excerpt?: string | null;
+  transcript_ref?: string | null;
+  output_preview?: unknown;
+  steps?: Array<{
+    event_id?: string;
+    type?: string;
+    timestamp?: string;
+    status?: string;
+    summary?: string;
+    log_ref?: string;
+  }>;
   workspace_dir?: string | null;
   error?: string | null;
   artifacts_url?: string;
@@ -48,6 +60,27 @@ export type WorkflowRunSubmitResult = {
 export type RunIndex = {
   version: string;
   runs: RunSummary[];
+};
+
+export type InteractionKind = 'approval' | 'ask' | 'confirm' | 'suggest';
+
+export type InteractionRequest = {
+  interaction_id: string;
+  run_id: string;
+  node_id?: string | null;
+  kind: InteractionKind;
+  status: 'pending' | 'answered' | 'expired' | 'cancelled';
+  prompt: string;
+  options?: string[];
+  payload?: Record<string, unknown>;
+  created_at: string;
+  answered_at?: string | null;
+  answer?: Record<string, unknown> | null;
+};
+
+export type InteractionList = {
+  run_id: string;
+  interactions: InteractionRequest[];
 };
 
 export type RunEvent = {

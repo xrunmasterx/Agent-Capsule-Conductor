@@ -8,6 +8,7 @@ import yaml
 
 from acc.registry import CapsuleDefinition, CapsuleRegistry
 from acc.run_index import load_run_summary, load_run_summary_by_id
+from acc.store import is_clean_workflow_path
 from acc.utils import AccError, load_json, repo_root
 from acc.workflow_graph import validate_workflow_graph
 
@@ -99,7 +100,12 @@ def show_workflow_payload(
         **metadata,
     }
     if path.suffix == ".json":
-        result["validation"] = validate_workflow_graph(path, registry=registry)
+        if is_clean_workflow_path(path):
+            from acc.app import validate_clean_workflow_file
+
+            result["validation"] = validate_clean_workflow_file(path)
+        else:
+            result["validation"] = validate_workflow_graph(path, registry=registry)
         result["graph"] = payload
     return result
 
@@ -156,7 +162,14 @@ def discover_workflow_files(project_root: Path, workflows_dir: Path | None = Non
     for root in roots:
         if not root.exists():
             continue
-        files.extend(sorted(root.glob("*.graph.json")))
+        accflow_ids: set[str] = set()
+        for path in sorted(root.glob("*.accflow.json")):
+            files.append(path.resolve())
+            accflow_ids.add(workflow_file_id(path))
+        for path in sorted(root.glob("*.graph.json")):
+            if workflow_file_id(path) in accflow_ids:
+                continue
+            files.append(path.resolve())
         files.extend(sorted(root.glob("*.yaml")))
         files.extend(sorted(root.glob("*.yml")))
     return dedupe_paths(files)
@@ -180,7 +193,7 @@ def resolve_workflow_reference(
     workflows_dir: Path | None = None,
 ) -> Path:
     candidate = Path(workflow_ref)
-    if workflow_ref.endswith((".graph.json", ".json", ".yaml", ".yml")):
+    if workflow_ref.endswith((".accflow.json", ".graph.json", ".json", ".yaml", ".yml")):
         path = resolve_inside_project(project_root, candidate)
         if not path.exists():
             raise AccError(f"Workflow not found: {workflow_ref}")
@@ -203,18 +216,31 @@ def workflow_metadata(
     payload = read_workflow_payload(path)
     if path.suffix == ".json":
         workflow_id = str(payload.get("id") or workflow_file_id(path))
-        validation = validate_workflow_graph(path, registry=registry)
+        if is_clean_workflow_path(path):
+            from acc.app import validate_clean_workflow_file
+
+            validation = validate_clean_workflow_file(path, registry=registry)
+            workflow_type = "accflow"
+        else:
+            validation = validate_workflow_graph(path, registry=registry)
+            workflow_type = "graph"
+        node_count = validation.get("node_count", len(payload.get("nodes", [])))
+        control_edge_count = validation.get(
+            "control_edge_count", len(payload.get("control_edges", []))
+        )
+        data_edge_count = validation.get("data_edge_count", len(payload.get("data_edges", [])))
         return {
             "workflow_id": workflow_id,
             "file_id": workflow_file_id(path),
             "path": relative_project_path(project_root, path),
-            "type": "graph",
+            "type": workflow_type,
             "name": payload.get("name"),
             "description": payload.get("description"),
             "version": payload.get("version"),
-            "node_count": validation["node_count"],
-            "control_edge_count": validation["control_edge_count"],
-            "data_edge_count": validation["data_edge_count"],
+            "node_count": node_count,
+            "control_edge_count": control_edge_count,
+            "data_edge_count": data_edge_count,
+            "validation_status": validation.get("status"),
         }
     workflow_id = str(payload.get("name") or workflow_file_id(path))
     task_count = len(payload.get("tasks", [])) if isinstance(payload.get("tasks"), list) else 0
@@ -231,6 +257,8 @@ def workflow_metadata(
 
 
 def workflow_file_id(path: Path) -> str:
+    if path.name.endswith(".accflow.json"):
+        return path.name.removesuffix(".accflow.json")
     if path.name.endswith(".graph.json"):
         return path.name.removesuffix(".graph.json")
     return path.stem

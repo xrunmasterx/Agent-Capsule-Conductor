@@ -7,6 +7,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
+from acc.app.run_projection import build_node_run_projection
 from acc.run_index import NodeRunSummary, load_or_rebuild_run_index, load_run_summary_by_id
 from acc.server.context import (
     get_project_root,
@@ -44,7 +45,7 @@ async def cancel_run(run_id: str, request: Request) -> dict[str, Any]:
 @router.get("/{run_id}/nodes/{node_id}")
 def get_node(run_id: str, node_id: str, request: Request) -> dict[str, Any]:
     node = find_node_or_404(run_id, node_id, request)
-    payload = node.model_dump()
+    payload = build_node_run_projection(node, project_root=get_project_root(request))
     payload["artifacts_url"] = f"/api/runs/{run_id}/nodes/{node_id}/artifacts"
     return payload
 

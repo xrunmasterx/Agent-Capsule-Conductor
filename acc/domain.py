@@ -39,6 +39,13 @@ class PortContract:
 
 @dataclass(frozen=True)
 class NodeSpec:
+    """Legacy workflow node view used for scheduling, ports, and edges.
+
+    ``raw`` is a read-only compatibility snapshot from the source template.
+    Runtime execution should consume ``NodeInvocationSpec`` from load-time
+    normalization rather than re-parsing ``raw`` on the hot path.
+    """
+
     id: str
     kind: NodeKind
     runtime: str | None = None
@@ -365,3 +372,109 @@ class NodeEvent:
     node_id: str
     status: str
     payload: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class AgentCapabilities:
+    resumable_session: bool = False
+    status_updates: bool = False
+    log_streaming: bool = False
+    token_usage: bool = False
+
+    def as_dict(self) -> dict[str, bool]:
+        return {
+            "resumable_session": self.resumable_session,
+            "status_updates": self.status_updates,
+            "log_streaming": self.log_streaming,
+            "token_usage": self.token_usage,
+        }
+
+    def effective_keys(self) -> tuple[str, ...]:
+        return tuple(key for key, enabled in self.as_dict().items() if enabled)
+
+
+SupervisorDecisionKind = Literal["action", "no_action", "failed"]
+InteractionKind = Literal["approval", "ask", "confirm", "suggest"]
+InteractionStatus = Literal["pending", "answered", "expired", "cancelled"]
+SupervisorPlanStatus = Literal["proposed", "approved", "executing", "completed", "failed"]
+WakeupReason = Literal["supervisor", "dependency_met", "timer", "human", "retry"]
+SessionHealth = Literal["healthy", "stale", "failed", "unknown"]
+RecoveryLevel = Literal["none", "L1", "L2", "L3"]
+
+
+@dataclass(frozen=True)
+class RosterEntry:
+    callable_ref: CallableRef
+    title: str
+    capabilities: AgentCapabilities
+    input_ports: dict[str, PortContract]
+    output_ports: dict[str, PortContract]
+
+
+@dataclass(frozen=True)
+class SupervisorRoster:
+    entries: tuple[RosterEntry, ...]
+    generated_at: str
+
+
+@dataclass(frozen=True)
+class DynamicInvocationIntent:
+    target_callable_ref: CallableRef
+    input_payload: dict[str, Any]
+    rationale: str
+    correlation_id: str
+    node_id_suggestion: str | None = None
+
+
+@dataclass(frozen=True)
+class SupervisorPlan:
+    plan_id: str
+    supervisor_node_id: str
+    intents: tuple[DynamicInvocationIntent, ...]
+    created_at: str
+    status: SupervisorPlanStatus = "proposed"
+
+
+@dataclass(frozen=True)
+class DynamicInvocationProposal:
+    proposal_id: str
+    plan: SupervisorPlan
+    graph_patch: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
+class SupervisorDecision:
+    decision: SupervisorDecisionKind
+    correlation_id: str
+    rationale: str
+    supervisor_node_id: str
+    plan_id: str | None = None
+    target_callable_ref: CallableRef | None = None
+
+
+@dataclass(frozen=True)
+class WakeupRequest:
+    request_id: str
+    run_id: str
+    reason: WakeupReason
+    priority: int
+    created_at: str
+    target_node_id: str | None = None
+    target_callable_ref: CallableRef | None = None
+    coalesce_key: str | None = None
+    payload: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class InteractionRequest:
+    interaction_id: str
+    run_id: str
+    kind: InteractionKind
+    status: InteractionStatus
+    prompt: str
+    created_at: str
+    node_id: str | None = None
+    options: tuple[str, ...] = ()
+    payload: dict[str, Any] = field(default_factory=dict)
+    answered_at: str | None = None
+    answer: dict[str, Any] | None = None

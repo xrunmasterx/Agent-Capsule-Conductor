@@ -85,6 +85,10 @@ class CapsuleRegistry:
             return self._capsule_by_id[capsule_id]
         raise AccError(f"Capsule not found: {capsule_id}")
 
+    def has(self, capsule_id: str) -> bool:
+        self.discover()
+        return self._capsule_by_id is not None and capsule_id in self._capsule_by_id
+
     def load_path(self, yaml_path: Path) -> CapsuleDefinition:
         try:
             raw = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))

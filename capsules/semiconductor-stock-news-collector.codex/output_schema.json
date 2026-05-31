@@ -2,25 +2,49 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
-    "report": {
-      "description": "结构化报告正文",
-      "type": "string"
-    },
     "status": {
-      "enum": [
-        "success"
-      ],
+      "enum": ["success"],
       "type": "string"
     },
     "summary": {
-      "description": "一句话结论",
+      "description": "一句话概括本次收集结果。",
       "type": "string"
+    },
+    "news": {
+      "description": "至少 20 条半导体股市相关新闻。",
+      "minItems": 20,
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "title": { "type": "string" },
+          "source": { "type": "string" },
+          "published_at": { "type": "string" },
+          "ticker_or_company": { "type": "string" },
+          "companies": {
+            "items": { "type": "string" },
+            "type": "array"
+          },
+          "summary": { "type": "string" },
+          "market_relevance": { "type": "string" },
+          "url_or_reference": { "type": "string" },
+          "uncertainty": { "type": "string" }
+        },
+        "required": [
+          "title",
+          "source",
+          "published_at",
+          "ticker_or_company",
+          "companies",
+          "summary",
+          "market_relevance",
+          "url_or_reference",
+          "uncertainty"
+        ],
+        "type": "object"
+      },
+      "type": "array"
     }
   },
-  "required": [
-    "status",
-    "summary",
-    "report"
-  ],
+  "required": ["status", "summary", "news"],
   "type": "object"
 }

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import (
     BaseModel,
@@ -28,12 +28,22 @@ class RuntimeSpec(BaseModel):
     command: str | None = None
     args_base: list[str] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
+    capabilities: AgentCapabilitiesSpec | None = None
 
     @model_validator(mode="after")
     def generic_cli_requires_command(self) -> RuntimeSpec:
         if self.type == "generic_cli" and not self.command:
             raise ValueError("generic_cli runtime requires command")
         return self
+
+
+class AgentCapabilitiesSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    resumable_session: bool = False
+    status_updates: bool = False
+    log_streaming: bool = False
+    token_usage: bool = False
 
 
 class WorkspaceSpec(BaseModel):
@@ -134,6 +144,7 @@ class CapsuleSpec(BaseModel):
     behavior_pack: BehaviorPackSpec | None = None
     workflow: WorkflowSpec | None = None
     lifecycle: LifecycleSpec | None = None
+    metadata: dict[str, Any] | None = None
 
     @model_validator(mode="after")
     def validate_workflow_capsule_requirements(self) -> CapsuleSpec:

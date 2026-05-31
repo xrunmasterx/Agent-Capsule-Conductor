@@ -35,9 +35,7 @@ def main() -> None:
     artifact_dir = Path(os.environ["ACC_ARTIFACT_DIR"])
     output_path = Path(os.environ["ACC_OUTPUT_JSON"])
     workspace = Path(
-        os.environ.get("ACC_ENVIRONMENT_WORKSPACE")
-        or os.environ.get("ACC_WORKSPACE_DIR")
-        or "."
+        os.environ.get("ACC_ENVIRONMENT_WORKSPACE") or os.environ.get("ACC_WORKSPACE_DIR") or "."
     ).resolve()
     payload = json.loads(input_path.read_text(encoding="utf-8"))
     target = resolve_workspace_path(workspace, str(payload["path"]))

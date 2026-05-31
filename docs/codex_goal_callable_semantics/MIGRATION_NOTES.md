@@ -6,6 +6,19 @@ Status: Implemented as additive compatibility migration.
 
 This goal must not remove existing public commands. Existing `.accflow.json` and `CapsuleSpec` based workflows remain supported through normalization and compatibility views.
 
+## Dual workflow format (phase 3+)
+
+| Artifact | Role |
+|----------|------|
+| `workflows/<id>.accflow.json` | Canonical workflow function template (save/run default) |
+| `workflows/<id>.graph.json` | Legacy import-only; use `acc workflow import-graph` to convert |
+| `acc workflows list/show` | Discovers accflow first; legacy graph only if no accflow sibling |
+| Workbench `POST /api/workflows` | Persists accflow; may delete stale sibling `.graph.json` on save |
+
+**Callable dispatch flag**: `ACC_USE_CALLABLE_DISPATCH=1` enables `CallableInvocationService` on the
+clean workflow node path. Default is off so existing manifests and `callable_ref.id` / importer
+`callable_id` gates stay byte-stable until explicitly enabled.
+
 ## Concept mapping
 
 ```text

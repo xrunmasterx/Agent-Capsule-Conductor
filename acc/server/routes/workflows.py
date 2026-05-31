@@ -14,6 +14,11 @@ from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
 from pydantic import BaseModel, ConfigDict
 
 from acc.app import WorkflowAppService
+from acc.engine import is_clean_workflow_payload
+from acc.legacy_graph_importer import (
+    accflow_path_from_legacy_graph_path,
+    legacy_graph_dict_to_accflow_payload,
+)
 from acc.registry import CapsuleRegistry
 from acc.server.context import (
     configured_project_dir,
@@ -78,9 +83,30 @@ def list_workflows(request: Request) -> dict[str, Any]:
                 else 0,
             }
         )
+    for path in sorted(workflows_dir.glob("*.accflow.json")):
+        payload = load_json_or_500(path)
+        workflow_id = str(payload.get("id") or path.name.removesuffix(".accflow.json"))
+        workflows.append(
+            {
+                "workflow_id": workflow_id,
+                "file_id": path.name.removesuffix(".accflow.json"),
+                "name": payload.get("name"),
+                "description": payload.get("description"),
+                "version": payload.get("version"),
+                "path": relative_project_path(project_root, path),
+                "task_count": len(payload.get("nodes", []))
+                if isinstance(payload.get("nodes"), list)
+                else 0,
+                "type": "graph",
+                "format": "accflow",
+            }
+        )
     for path in sorted(workflows_dir.glob("*.graph.json")):
         payload = load_json_or_500(path)
         workflow_id = str(payload.get("id") or path.name.removesuffix(".graph.json"))
+        accflow_path = accflow_path_from_legacy_graph_path(path)
+        if accflow_path.exists():
+            continue
         workflows.append(
             {
                 "workflow_id": workflow_id,
@@ -93,6 +119,7 @@ def list_workflows(request: Request) -> dict[str, Any]:
                 if isinstance(payload.get("nodes"), list)
                 else 0,
                 "type": "graph",
+                "format": "legacy_graph",
             }
         )
     return {"workflows": workflows}
@@ -126,7 +153,7 @@ async def submit_run_graph_endpoint(
     run_dir = resolve_run_dir(project_root, payload.run_dir)
     graph_path = prepare_runtime_graph(payload.graph, run_dir, request)
     workspace, binding_path = resolve_run_environment(project_root, payload)
-    workflow_id = str(legacy_graph_payload_for_save(payload.graph).get("id") or graph_path.stem)
+    workflow_id = str(graph_payload_for_runtime(payload.graph).get("id") or graph_path.stem)
     registry = server_registry(request)
     manager = get_workbench_run_manager(request)
     try:
@@ -152,27 +179,26 @@ def prepare_runtime_graph(
     request: Request,
 ) -> Path:
     project_root = get_project_root(request)
-    graph = legacy_graph_payload_for_save(graph_payload)
+    graph = graph_payload_for_runtime(graph_payload)
     workflow_id = str(graph.get("id") or "")
     if not workflow_id:
         raise HTTPException(status_code=400, detail="Workflow graph id is required")
     graph_dir = project_root / "runs" / "_workflow_graph_specs" / run_dir.name
     graph_dir.mkdir(parents=True, exist_ok=True)
-    graph_path = graph_dir / f"{workflow_id}.graph.json"
-    normalize_capsule_node_inputs(graph, request)
-    materialize_inline_workflow_nodes(graph_path, graph, request)
-    temp_path = graph_path.with_suffix(f"{graph_path.suffix}.{uuid4().hex}.tmp")
+    accflow_path = graph_dir / f"{workflow_id}.accflow.json"
+    if is_workbench_legacy_graph(graph):
+        normalize_capsule_node_inputs(graph, request)
+    materialize_inline_workflow_nodes(accflow_path, graph, request)
+    strip_materialized_inline_ui(graph)
+    accflow_payload = graph_payload_for_accflow_save(graph, source_path=accflow_path)
+    temp_path = accflow_path.with_name(f"{accflow_path.stem}.{uuid4().hex}.accflow.json")
     temp_path.write_text(
-        json.dumps(graph, ensure_ascii=False, indent=2, sort_keys=True),
+        json.dumps(accflow_payload, ensure_ascii=False, indent=2, sort_keys=True),
         encoding="utf-8",
     )
-    try:
-        WorkflowAppService(registry=server_registry(request)).validate(temp_path)
-    except (AccError, JsonSchemaValidationError) as exc:
-        temp_path.unlink(missing_ok=True)
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    replace_workflow_file(temp_path, graph_path)
-    return graph_path
+    validate_workflow_save_path(request, temp_path, workflows_dir=accflow_path.parent)
+    replace_workflow_file(temp_path, accflow_path)
+    return accflow_path
 
 
 def enrich_inline_nested_node_runs(result: dict[str, Any]) -> dict[str, Any]:
@@ -241,6 +267,20 @@ def get_workflow(workflow_id: str, request: Request) -> dict[str, Any]:
                 "path": relative_project_path(project_root, path),
                 "workflow": payload,
             }
+    for path in sorted(workflows_dir.glob("*.accflow.json")):
+        payload = load_json_or_500(path)
+        file_id = path.name.removesuffix(".accflow.json")
+        candidate_ids = {file_id, str(payload.get("id") or "")}
+        if workflow_id in candidate_ids:
+            return {
+                "workflow_id": str(payload.get("id") or file_id),
+                "file_id": file_id,
+                "path": relative_project_path(project_root, path),
+                "workflow": payload,
+                "graph": payload,
+                "type": "graph",
+                "format": "accflow",
+            }
     for path in sorted(workflows_dir.glob("*.graph.json")):
         payload = load_json_or_500(path)
         file_id = path.name.removesuffix(".graph.json")
@@ -253,6 +293,7 @@ def get_workflow(workflow_id: str, request: Request) -> dict[str, Any]:
                 "workflow": payload,
                 "graph": payload,
                 "type": "graph",
+                "format": "legacy_graph",
             }
     raise HTTPException(status_code=404, detail=f"Workflow not found: {workflow_id}")
 
@@ -264,7 +305,7 @@ def create_workflow(payload: WorkflowSaveRequest, request: Request) -> dict[str,
     workflow_id = str(payload.graph.get("id") or "")
     if not workflow_id:
         raise HTTPException(status_code=400, detail="Workflow graph id is required")
-    path = workflow_graph_path(workflows_dir, payload.path or f"{workflow_id}.graph.json")
+    path = workflow_storage_path(workflows_dir, payload.path or f"{workflow_id}.accflow.json")
     if path.exists() and not payload.force:
         raise HTTPException(status_code=409, detail=f"Workflow already exists: {path.name}")
     return save_graph(path, payload.graph, request)
@@ -278,7 +319,7 @@ def update_workflow(
 ) -> dict[str, Any]:
     project_root = get_project_root(request)
     workflows_dir = configured_project_dir(project_root, "ACC_WORKFLOWS_DIR", "workflows")
-    path = workflow_graph_path(workflows_dir, payload.path or f"{workflow_id}.graph.json")
+    path = workflow_storage_path(workflows_dir, payload.path or f"{workflow_id}.accflow.json")
     return save_graph(path, payload.graph, request)
 
 
@@ -460,37 +501,139 @@ def load_json_or_500(path: Path) -> dict[str, Any]:
     return payload
 
 
-def workflow_graph_path(workflows_dir: Path, path_value: str) -> Path:
-    if not path_value.endswith(".graph.json"):
-        raise HTTPException(status_code=400, detail="Workflow path must end with .graph.json")
-    candidate = (workflows_dir / path_value).resolve()
-    if not candidate.is_relative_to(workflows_dir.resolve()):
-        raise HTTPException(status_code=400, detail="Workflow path is outside workflows directory")
-    return candidate
-
-
-def save_graph(path: Path, graph: dict[str, Any], request: Request) -> dict[str, Any]:
-    graph = legacy_graph_payload_for_save(graph)
-    normalize_capsule_node_inputs(graph, request)
-    materialize_inline_workflow_nodes(path, graph, request)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = path.with_suffix(f"{path.suffix}.{uuid4().hex}.tmp")
-    temp_path.write_text(
-        json.dumps(graph, ensure_ascii=False, indent=2, sort_keys=True),
-        encoding="utf-8",
-    )
+def validate_workflow_save_path(
+    request: Request,
+    temp_path: Path,
+    *,
+    workflows_dir: Path | None = None,
+) -> dict[str, Any]:
+    """REQ-B4-005: reject invalid accflow before replace."""
+    service = WorkflowAppService(registry=server_registry(request))
+    resolved_dir = workflows_dir or temp_path.parent
     try:
-        WorkflowAppService(registry=server_registry(request)).validate(temp_path)
+        try:
+            validation = service.validate(
+                temp_path,
+                workflows_dir=resolved_dir,
+            )
+        except TypeError:
+            validation = service.validate(temp_path)
     except (AccError, JsonSchemaValidationError) as exc:
         temp_path.unlink(missing_ok=True)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    replace_workflow_file(temp_path, path)
+    if validation.get("status") == "invalid":
+        temp_path.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=400,
+            detail={"message": "Workflow validation failed", "validation": validation},
+        )
+    return validation
+
+
+def workflow_storage_path(workflows_dir: Path, path_value: str) -> Path:
+    if not (path_value.endswith(".accflow.json") or path_value.endswith(".graph.json")):
+        raise HTTPException(
+            status_code=400,
+            detail="Workflow path must end with .accflow.json or .graph.json",
+        )
+    candidate = (workflows_dir / path_value).resolve()
+    if not candidate.is_relative_to(workflows_dir.resolve()):
+        raise HTTPException(status_code=400, detail="Workflow path is outside workflows directory")
+    if path_value.endswith(".graph.json"):
+        return accflow_path_from_legacy_graph_path(candidate)
+    return candidate
+
+
+def workflow_graph_path(workflows_dir: Path, path_value: str) -> Path:
+    return workflow_storage_path(workflows_dir, path_value)
+
+
+def save_graph(path: Path, graph: dict[str, Any], request: Request) -> dict[str, Any]:
+    graph = graph_payload_for_runtime(graph)
+    if is_workbench_legacy_graph(graph):
+        normalize_capsule_node_inputs(graph, request)
+    accflow_path = accflow_path_from_legacy_graph_path(path)
+    materialize_inline_workflow_nodes(accflow_path, graph, request)
+    strip_materialized_inline_ui(graph)
+    accflow_payload = graph_payload_for_accflow_save(graph, source_path=accflow_path)
+    accflow_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = accflow_path.with_name(f"{accflow_path.stem}.{uuid4().hex}.accflow.json")
+    temp_path.write_text(
+        json.dumps(accflow_payload, ensure_ascii=False, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    validate_workflow_save_path(request, temp_path, workflows_dir=accflow_path.parent)
+    replace_workflow_file(temp_path, accflow_path)
+    legacy_graph_path = accflow_path.with_name(
+        accflow_path.name.replace(".accflow.json", ".graph.json")
+    )
+    if legacy_graph_path.exists() and legacy_graph_path != accflow_path:
+        legacy_graph_path.unlink()
     return {
         "status": "saved",
-        "workflow_id": graph["id"],
-        "path": relative_project_path(get_project_root(request), path),
-        "validation": WorkflowAppService(registry=server_registry(request)).validate(path),
+        "workflow_id": accflow_payload["id"],
+        "path": relative_project_path(get_project_root(request), accflow_path),
+        "format": "accflow",
+        "validation": WorkflowAppService(registry=server_registry(request)).validate(accflow_path),
     }
+
+
+def graph_payload_for_runtime(graph: dict[str, Any]) -> dict[str, Any]:
+    payload = json.loads(json.dumps(graph))
+    if is_clean_workflow_payload(payload):
+        return payload
+    return legacy_graph_payload_for_save(payload)
+
+
+def graph_payload_for_accflow_save(
+    graph: dict[str, Any],
+    *,
+    source_path: Path,
+) -> dict[str, Any]:
+    if is_clean_workflow_payload(graph):
+        payload = json.loads(json.dumps(graph))
+        metadata = payload.setdefault("metadata", {})
+        if isinstance(metadata, dict):
+            metadata["canonical_format"] = "accflow"
+        return payload
+    return legacy_graph_dict_to_accflow_payload(graph, source_path=source_path)
+
+
+def is_workbench_legacy_graph(graph: dict[str, Any]) -> bool:
+    if is_clean_workflow_payload(graph):
+        return False
+    nodes = graph.get("nodes")
+    if not isinstance(nodes, list):
+        return True
+    return any(isinstance(node, dict) and is_workbench_legacy_node(node) for node in nodes)
+
+
+def is_workbench_legacy_node(node: dict[str, Any]) -> bool:
+    kind = str(node.get("kind") or "")
+    if kind in {"Agent", "Tool", "agent_session"}:
+        return True
+    kind_lower = kind.lower()
+    if kind_lower in {"agent", "tool", "workflow"} and (
+        node.get("runtime") or node.get("tool") or node.get("workflow_ref")
+    ):
+        if kind_lower == "workflow":
+            return not node.get("workflow_ref")
+        return False
+    return bool(node.get("capsule_id") or node.get("capsuleId") or node.get("runtime"))
+
+
+def strip_materialized_inline_ui(graph: dict[str, Any]) -> None:
+    nodes = graph.get("nodes")
+    if not isinstance(nodes, list):
+        return
+    for node in nodes:
+        if not isinstance(node, dict) or not node.get("workflow_ref"):
+            continue
+        ui = node.get("ui")
+        if not isinstance(ui, dict):
+            continue
+        ui.pop("internal_nodes", None)
+        ui.pop("internal_edges", None)
 
 
 def legacy_graph_payload_for_save(graph: dict[str, Any]) -> dict[str, Any]:
@@ -509,8 +652,7 @@ def normalize_capsule_node_inputs(graph: dict[str, Any], request: Request) -> No
     for node in nodes:
         if not isinstance(node, dict) or is_inline_workflow_container(node):
             continue
-        kind = str(node.get("kind") or "agent_session")
-        if kind == "workflow":
+        if not is_workbench_legacy_node(node):
             continue
         capsule_id = (
             node.get("legacy_capsule_id")
@@ -546,11 +688,11 @@ def materialize_inline_workflow_nodes(path: Path, graph: dict[str, Any], request
             json.dumps(child_payload, ensure_ascii=False, indent=2, sort_keys=True),
             encoding="utf-8",
         )
-        try:
-            WorkflowAppService(registry=server_registry(request)).validate(temp_path)
-        except (AccError, JsonSchemaValidationError) as exc:
-            temp_path.unlink(missing_ok=True)
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        validate_workflow_save_path(
+            request,
+            temp_path,
+            workflows_dir=child_path.parent,
+        )
         replace_workflow_file(temp_path, child_path)
         node["workflow_ref"] = child_path.name
         node["capsule_id"] = "fake-agent.generic"
@@ -665,12 +807,10 @@ def inline_workflow_payload(
     control_sources = {str(edge["from"]) for edge in control_edges}
     control_targets = {str(edge["to"]) for edge in control_edges}
     entry_ids = input_bound_targets or (
-        [node_id for node_id in internal_ids if node_id not in control_targets]
-        or internal_ids[:1]
+        [node_id for node_id in internal_ids if node_id not in control_targets] or internal_ids[:1]
     )
     terminal_ids = output_bound_sources or (
-        [node_id for node_id in internal_ids if node_id not in control_sources]
-        or internal_ids[-1:]
+        [node_id for node_id in internal_ids if node_id not in control_sources] or internal_ids[-1:]
     )
     output_ports = [
         {"id": "main" if index == 0 else f"main_{node_id}", "direction": "output"}
@@ -753,8 +893,8 @@ def inline_internal_node_payload(node: dict[str, Any], request: Request) -> dict
         or node.get("runtime")
         or "fake-agent.generic"
     )
-    input_payload, receive_upstream_context, upstream_context_fields = (
-        inline_capsule_input_payload(node, capsule_id, request)
+    input_payload, receive_upstream_context, upstream_context_fields = inline_capsule_input_payload(
+        node, capsule_id, request
     )
     timeout_seconds = inline_capsule_timeout_seconds(capsule_id, request)
     payload = {
@@ -786,6 +926,15 @@ def inline_capsule_input_payload(
     request: Request,
 ) -> tuple[dict[str, Any], bool, list[str]]:
     raw_input = node.get("input") if isinstance(node.get("input"), dict) else {}
+    if not is_workbench_legacy_node(node):
+        try:
+            schema = load_json(server_registry(request).get(capsule_id).input_schema_path)
+        except AccError:
+            return raw_input, True, []
+        properties = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
+        allows_extra = schema.get("additionalProperties", True) is not False
+        receive_upstream_context = allows_extra or "upstream_context" in properties
+        return raw_input, receive_upstream_context, []
     fallback_text = str(
         raw_input.get("topic")
         or raw_input.get("task")
@@ -833,8 +982,6 @@ def default_inline_schema_value(key: str, property_type: Any, fallback_text: str
         return 0
     if property_type == "boolean":
         return False
-    if key == "time_scope":
-        return "最近24小时"
     return fallback_text
 
 
@@ -902,7 +1049,7 @@ def recover_wrapped_capsule_nodes(graph: dict[str, Any]) -> None:
         if not isinstance(runtime, str) or runtime == "fake-agent.generic":
             continue
         node["capsule_id"] = runtime
-        node["kind"] = "tool" if internal_node.get("kind") == "Tool" else "agent_session"
+        node["kind"] = "tool" if internal_node.get("kind") == "Tool" else "agent"
         node.pop("ui", None)
 
 
@@ -963,6 +1110,11 @@ def find_graph_path(workflow_id: str, request: Request) -> Path:
     workflows_dir = configured_project_dir(project_root, "ACC_WORKFLOWS_DIR", "workflows")
     if not workflows_dir.exists():
         raise HTTPException(status_code=404, detail=f"Workflow not found: {workflow_id}")
+    for path in sorted(workflows_dir.glob("*.accflow.json")):
+        payload = load_json_or_500(path)
+        file_id = path.name.removesuffix(".accflow.json")
+        if workflow_id in {file_id, str(payload.get("id") or "")}:
+            return path
     for path in sorted(workflows_dir.glob("*.graph.json")):
         payload = load_json_or_500(path)
         file_id = path.name.removesuffix(".graph.json")

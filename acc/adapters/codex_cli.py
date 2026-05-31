@@ -5,10 +5,15 @@ import json
 import os
 import shutil
 
-from acc.adapters.base import AgentRunRequest, AgentRunResult
+from acc.adapters.base import AgentRunRequest, AgentRunResult, ResumeRequest
+from acc.adapters.capabilities import default_adapter_capabilities
+from acc.domain import AccError, AgentCapabilities
 
 
 class CodexCliAdapter:
+    def capabilities(self) -> AgentCapabilities:
+        return default_adapter_capabilities("codex_cli")
+
     async def run(self, request: AgentRunRequest) -> AgentRunResult:
         if request.sandbox == "danger-full-access" and not request.allow_dangerous:
             return failed(request, "danger-full-access requires allow_dangerous=true")
@@ -91,6 +96,11 @@ class CodexCliAdapter:
             event_log_path=request.events_log_path,
             artifacts_dir=request.artifacts_dir,
             exit_code=process.returncode,
+        )
+
+    async def resume(self, request: ResumeRequest) -> AgentRunResult:
+        raise AccError(
+            f"codex_cli resume is not implemented for session {request.external_session_id!r}"
         )
 
 

@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
+from acc.domain import AgentCapabilities
+
 
 @dataclass(frozen=True)
 class AgentRunRequest:
@@ -24,6 +26,8 @@ class AgentRunRequest:
     outbox_dir: Path | None = None
     environment_id: str | None = None
     node_id: str | None = None
+    resume_session_id: str | None = None
+    requested_capabilities: tuple[str, ...] = ()
 
     @property
     def stdout_log_path(self) -> Path:
@@ -55,8 +59,25 @@ class AgentRunResult:
     artifacts_dir: Path
     exit_code: int | None = None
     error: str | None = None
+    external_session_id: str | None = None
+    capabilities_effective: tuple[str, ...] = ()
+    requested_capabilities: tuple[str, ...] = ()
+    capability_degraded: bool = False
+
+
+@dataclass(frozen=True)
+class ResumeRequest:
+    capsule_id: str
+    run_dir: Path
+    workspace_dir: Path
+    external_session_id: str
+    timeout_seconds: int
+    env: dict[str, str] = field(default_factory=dict)
 
 
 class AgentAdapter(Protocol):
-    async def run(self, request: AgentRunRequest) -> AgentRunResult:
-        ...
+    def capabilities(self) -> AgentCapabilities: ...
+
+    async def run(self, request: AgentRunRequest) -> AgentRunResult: ...
+
+    async def resume(self, request: ResumeRequest) -> AgentRunResult: ...

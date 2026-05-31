@@ -13,6 +13,7 @@ import type {
   RunSummary,
 } from '../types';
 import { CodeBlock } from './CodeBlock';
+import { InteractionPanel } from './InteractionPanel';
 
 type Props = {
   runId: string;
@@ -122,6 +123,7 @@ export function RunInspectorCore({ runId }: Props) {
         {run ? <span className={`pill ${statusTone(run.status)}`}>{run.status}</span> : null}
       </header>
       {error ? <div className="notice">运行错误: {error}</div> : null}
+      {run ? <InteractionPanel runId={run.run_id} /> : null}
       {run ? (
         <div className="inspector-grid">
           <div className="dag-list" aria-label="运行节点列表">
