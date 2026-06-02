@@ -1,7 +1,7 @@
 [project]
-name = "agent-capsule-conductor"
+name = "agent-callable-conductor"
 version = "0.1.0"
-description = "Lightweight CLI wrapper for reusable agent capsules."
+description = "Lightweight CLI wrapper for reusable agent and tool callables."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -34,6 +34,30 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "e2e: end-to-end acceptance test",
+    "integration: integration-level tests covering orchestration paths",
+    "migration: migration and byte-equivalence tests",
+    "unit: unit-level tests",
+    "T_AC1: TEST_PLAN AC1 verification",
+    "T_AC2: TEST_PLAN AC2 verification (explicit binding behavior)",
+    "T_AC3: TEST_PLAN AC3 verification (provenance is runtime-only)",
+    "T_AC4: TEST_PLAN AC4 verification (explicit_only field set)",
+    "T_AC5: TEST_PLAN AC5 verification (deferred)",
+    "T_AC6: TEST_PLAN AC6 verification (deferred)",
+    "T_AC7: TEST_PLAN AC7 verification (deferred)",
+    "T_AC8: TEST_PLAN AC8 verification (workflow output binding + ResultStore)",
+    "T_AC9: TEST_PLAN AC9 verification",
+    "T_AC10: TEST_PLAN AC10 verification (deferred)",
+    "T_AC11: TEST_PLAN AC11 verification",
+    "T_AC12: TEST_PLAN AC12 verification",
+    "T_AC13: TEST_PLAN AC13 verification (deferred)",
+    "T_AC14: TEST_PLAN AC14 verification (deferred)",
+    "T_AC15: TEST_PLAN AC15 verification",
+    "T_AC16: TEST_PLAN AC16 verification (deferred)",
+    "T_AC17: TEST_PLAN AC17 verification (deferred)",
+    "T_AC18: TEST_PLAN AC18 verification",
+]
 
 [tool.ruff]
 line-length = 100

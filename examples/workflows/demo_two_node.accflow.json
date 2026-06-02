@@ -1,0 +1,64 @@
+{
+  "control_edges": [
+    {
+      "from": "echo",
+      "to": "fake"
+    }
+  ],
+  "data_edges": [],
+  "exposed_inputs": {},
+  "exposed_outputs": {},
+  "id": "demo_two_node",
+  "metadata": {
+    "canonical_format": "accflow",
+    "imported_from": "examples\\workflows\\demo_two_node.accflow.json"
+  },
+  "nodes": [
+    {
+      "callable_ref": {
+        "id": "generic_fake_agent",
+        "kind": "agent_class"
+      },
+      "id": "echo",
+      "input_bindings": [
+        {
+          "static_value": "hello from editable workbench",
+          "target_port": "message"
+        }
+      ],
+      "ports": {
+        "inputs": {
+          "message": {
+            "type": "json"
+          }
+        },
+        "outputs": {}
+      }
+    },
+    {
+      "callable_ref": {
+        "id": "generic_fake_agent",
+        "kind": "agent_class"
+      },
+      "id": "fake",
+      "input_bindings": [
+        {
+          "static_value": "generated from the previous echo node",
+          "target_port": "notes"
+        }
+      ],
+      "ports": {
+        "inputs": {
+          "notes": {
+            "type": "json"
+          }
+        },
+        "outputs": {}
+      }
+    }
+  ],
+  "schema_version": "acc.core.v2",
+  "version": "0.1.0",
+  "workflow_input_bindings": [],
+  "workflow_output_bindings": []
+}

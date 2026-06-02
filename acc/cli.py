@@ -2,23 +2,21 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 
 from acc.app import (
-    CapsuleAppService,
     WorkflowAppService,
     create_clean_environment_binding,
-    load_capsule_input,
+    load_cli_input,
 )
-from acc.capsule_authoring import clone_capsule, doctor_capsule
-from acc.conductor_export import export_conductor_yaml
+from acc.app.core_v2_loader import LEGACY_GRAPH_SUFFIX
 from acc.control_plane import (
-    list_capsules_payload,
+    list_callables_payload,
     list_workflows_payload,
     read_artifact_payload,
-    show_capsule_payload,
+    show_callable_payload,
     show_run_payload,
     show_workflow_payload,
 )
@@ -32,25 +30,24 @@ from acc.debugger import (
 )
 from acc.environment import create_workspace_binding, inspect_environment_run
 from acc.graphops import apply_patch_request, dry_run_patch, validate_patch_file
-from acc.legacy_graph_importer import (
+from acc.migration.graph_importer import (
     accflow_path_from_legacy_graph_path,
     legacy_graph_to_accflow_payload,
 )
 from acc.port_io import inspect_ports_run
-from acc.registry import CapsuleRegistry, validate_capsule_files
 from acc.run_index import load_or_rebuild_run_index, load_run_summary
-from acc.scaffold import scaffold_capsule
 from acc.store import is_clean_workflow_path, write_json
 from acc.utils import AccError, dump_json, load_json, log_stderr
 
-app = typer.Typer(help="Agent Capsule Conductor CLI.")
+app = typer.Typer(help="Agent Callable Conductor CLI.")
 session_app = typer.Typer(help="Session commands.")
 graphops_app = typer.Typer(help="GraphOps control plane commands.")
 runs_app = typer.Typer(help="Run discovery and inspection commands.")
-capsule_app = typer.Typer(help="Capsule authoring commands.")
-capsules_app = typer.Typer(help="Agent-callable capsule discovery commands.")
+callable_app = typer.Typer(help="Core v2 callable class commands.")
+callables_app = typer.Typer(help="Core v2 callable class discovery commands.")
 workflow_app = typer.Typer(help="Workflow graph commands.")
 workflows_app = typer.Typer(help="Agent-callable workflow discovery commands.")
+migrate_app = typer.Typer(help="Migration commands.")
 conductor_app = typer.Typer(help="Conductor export commands.")
 events_app = typer.Typer(help="Workflow event replay commands.")
 artifacts_app = typer.Typer(help="Artifact comparison commands.")
@@ -60,10 +57,11 @@ template_app = typer.Typer(help="Template bundle export/import commands.")
 app.add_typer(session_app, name="session")
 app.add_typer(graphops_app, name="graphops")
 app.add_typer(runs_app, name="runs")
-app.add_typer(capsule_app, name="capsule")
-app.add_typer(capsules_app, name="capsules")
+app.add_typer(callable_app, name="callable")
+app.add_typer(callables_app, name="callables")
 app.add_typer(workflow_app, name="workflow")
 app.add_typer(workflows_app, name="workflows")
+app.add_typer(migrate_app, name="migrate")
 app.add_typer(conductor_app, name="conductor")
 app.add_typer(events_app, name="events")
 app.add_typer(artifacts_app, name="artifacts")
@@ -74,115 +72,46 @@ app.add_typer(template_app, name="template")
 
 @app.callback()
 def callback() -> None:
-    """Wrap external agents as deterministic workflow capsules."""
+    """Wrap external agents and tools as deterministic callable workflows."""
 
 
-@app.command("list")
-def list_capsules(
+@callable_app.command("list")
+@callables_app.command("list")
+def callable_list(
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
-    capsules_dir: Annotated[
-        Path | None,
-        typer.Option("--capsules-dir", help="Capsule registry directory."),
-    ] = None,
 ) -> None:
-    registry = CapsuleRegistry(capsules_dir)
     try:
-        capsules = [capsule.to_metadata() for capsule in registry.discover()]
+        payload = list_callables_payload()
     except AccError as exc:
         log_stderr(str(exc))
         raise typer.Exit(1) from exc
-
     if json_output:
-        typer.echo(dump_json(capsules))
+        typer.echo(dump_json(payload))
         return
-
-    for capsule in capsules:
-        typer.echo(f"{capsule['id']}\t{capsule['runtime']}\t{capsule['name']}")
-
-
-@app.command()
-def show(
-    capsule_id: str,
-    capsules_dir: Annotated[
-        Path | None,
-        typer.Option("--capsules-dir", help="Capsule registry directory."),
-    ] = None,
-) -> None:
-    registry = CapsuleRegistry(capsules_dir)
-    try:
-        capsule = registry.get(capsule_id)
-    except AccError as exc:
-        log_stderr(str(exc))
-        raise typer.Exit(1) from exc
-    typer.echo(dump_json(capsule.to_metadata()))
+    for item in payload["callables"]:
+        typer.echo(f"{item['id']}\t{item['kind']}\t{item['version']}")
 
 
-@capsules_app.command("list")
-def capsules_list(
+@callable_app.command("show")
+@callables_app.command("show")
+def callable_show(
+    callable_id: str,
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
-    capsules_dir: Annotated[
-        Path | None,
-        typer.Option("--capsules-dir", help="Capsule registry directory."),
-    ] = None,
 ) -> None:
     try:
-        payload = list_capsules_payload(capsules_dir)
+        payload = show_callable_payload(callable_id)
     except AccError as exc:
         log_stderr(str(exc))
         raise typer.Exit(1) from exc
     typer.echo(dump_json(payload) if json_output else dump_json(payload))
-
-
-@capsules_app.command("show")
-def capsules_show(
-    capsule_id: str,
-    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
-    capsules_dir: Annotated[
-        Path | None,
-        typer.Option("--capsules-dir", help="Capsule registry directory."),
-    ] = None,
-) -> None:
-    try:
-        payload = show_capsule_payload(capsule_id, capsules_dir)
-    except AccError as exc:
-        log_stderr(str(exc))
-        raise typer.Exit(1) from exc
-    typer.echo(dump_json(payload) if json_output else dump_json(payload))
-
-
-@app.command()
-def validate(
-    capsule_id: str,
-    capsules_dir: Annotated[
-        Path | None,
-        typer.Option("--capsules-dir", help="Capsule registry directory."),
-    ] = None,
-) -> None:
-    registry = CapsuleRegistry(capsules_dir)
-    try:
-        capsule = registry.get(capsule_id)
-        errors = validate_capsule_files(capsule)
-    except AccError as exc:
-        log_stderr(str(exc))
-        raise typer.Exit(1) from exc
-
-    if errors:
-        for error in errors:
-            log_stderr(error)
-        raise typer.Exit(1)
-
-    typer.echo(
-        json.dumps(
-            {"status": "valid", "capsule_id": capsule.spec.id},
-            ensure_ascii=False,
-            sort_keys=True,
-        )
-    )
 
 
 @app.command("run")
 def run(
-    capsule_or_command: Annotated[str, typer.Argument(help="Capsule id or diff subcommand.")],
+    legacy_ref_or_command: Annotated[
+        str,
+        typer.Argument(help="Legacy runtime ref or diff subcommand."),
+    ],
     run_a: Annotated[str | None, typer.Argument(help="First run path for diff mode.")] = None,
     run_b: Annotated[str | None, typer.Argument(help="Second run path for diff mode.")] = None,
     input_path: Annotated[Path | None, typer.Option("--input", help="Input JSON path.")] = None,
@@ -196,12 +125,8 @@ def run(
         typer.Option("--emit-conductor-json", help="Print exactly one Conductor JSON object."),
     ] = False,
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
-    capsules_dir: Annotated[
-        Path | None,
-        typer.Option("--capsules-dir", help="Capsule registry directory."),
-    ] = None,
 ) -> None:
-    if capsule_or_command == "diff":
+    if legacy_ref_or_command == "diff":
         if not run_a or not run_b:
             log_stderr("run diff requires two run paths")
             raise typer.Exit(2)
@@ -214,19 +139,17 @@ def run(
         return
 
     try:
-        payload = load_capsule_input(input_path, input_json)
-        conductor_output = CapsuleAppService(
-            registry=CapsuleRegistry(capsules_dir)
-        ).run_capsule_sync(capsule_or_command, payload, run_dir)
+        _ = load_cli_input(input_path, input_json)
+        _ = run_dir, legacy_ref_or_command
+        raise AccError(
+            "`acc run <legacy-ref>` no longer executes legacy runtime assets. "
+            "Use `acc workflow run <workflow.accflow.json>`."
+        )
     except (AccError, json.JSONDecodeError) as exc:
         log_stderr(str(exc))
         raise typer.Exit(1) from exc
-
-    typer.echo(json.dumps(conductor_output, ensure_ascii=False, sort_keys=True))
-    if conductor_output["status"] != "success":
-        raise typer.Exit(1)
-    if not emit_conductor_json:
-        return
+    finally:
+        _ = emit_conductor_json
 
 
 @app.command()
@@ -372,23 +295,18 @@ def batch_run_command(
         bool,
         typer.Option("--emit-conductor-json", help="Print exactly one Conductor JSON object."),
     ] = False,
-    capsules_dir: Annotated[
-        Path | None,
-        typer.Option("--capsules-dir", help="Capsule registry directory."),
-    ] = None,
 ) -> None:
     try:
-        conductor_output = CapsuleAppService(registry=CapsuleRegistry(capsules_dir)).run_batch_sync(
-            spec, run_dir, max_concurrency
+        _ = spec, run_dir, max_concurrency
+        raise AccError(
+            "Legacy batch-run specs are no longer executable. "
+            "Use a canonical Core v2 workflow with explicit callable refs and bindings."
         )
     except AccError as exc:
         log_stderr(str(exc))
         raise typer.Exit(1) from exc
-    typer.echo(json.dumps(conductor_output, ensure_ascii=False, sort_keys=True))
-    if conductor_output["status"] != "success":
-        raise typer.Exit(1)
-    if not emit_conductor_json:
-        return
+    finally:
+        _ = emit_conductor_json
 
 
 @app.command("server")
@@ -447,101 +365,6 @@ def runs_show(
     typer.echo(dump_json(payload))
 
 
-@capsule_app.command("test")
-def capsule_test(
-    capsule_id: str,
-    input_path: Annotated[Path, typer.Option("--input", help="Input JSON path.")],
-    run_dir: Annotated[Path, typer.Option("--run-dir", help="Run directory.")],
-    emit_conductor_json: Annotated[
-        bool,
-        typer.Option("--emit-conductor-json", help="Print exactly one Conductor JSON object."),
-    ] = False,
-    capsules_dir: Annotated[
-        Path | None,
-        typer.Option("--capsules-dir", help="Capsule registry directory."),
-    ] = None,
-) -> None:
-    try:
-        payload = load_json(input_path)
-        if not isinstance(payload, dict):
-            raise AccError(f"Input JSON must be an object: {input_path}")
-        conductor_output = CapsuleAppService(
-            registry=CapsuleRegistry(capsules_dir)
-        ).run_capsule_sync(capsule_id, payload, run_dir)
-    except AccError as exc:
-        log_stderr(str(exc))
-        raise typer.Exit(1) from exc
-    typer.echo(json.dumps(conductor_output, ensure_ascii=False, sort_keys=True))
-    if conductor_output["status"] != "success":
-        raise typer.Exit(1)
-    if not emit_conductor_json:
-        return
-
-
-@capsule_app.command("clone")
-def capsule_clone(
-    source_id: str,
-    new_id: str,
-    capsules_dir: Annotated[
-        Path | None,
-        typer.Option("--capsules-dir", help="Capsule registry directory."),
-    ] = None,
-) -> None:
-    try:
-        result = clone_capsule(source_id, new_id, registry=CapsuleRegistry(capsules_dir))
-    except AccError as exc:
-        log_stderr(str(exc))
-        raise typer.Exit(1) from exc
-    typer.echo(dump_json(result))
-
-
-@capsule_app.command("doctor")
-def capsule_doctor(
-    capsule_id: str,
-    capsules_dir: Annotated[
-        Path | None,
-        typer.Option("--capsules-dir", help="Capsule registry directory."),
-    ] = None,
-) -> None:
-    result = doctor_capsule(capsule_id, registry=CapsuleRegistry(capsules_dir))
-    typer.echo(dump_json(result))
-    if result["status"] != "valid":
-        raise typer.Exit(1)
-
-
-@capsule_app.command("scaffold")
-def capsule_scaffold(
-    blueprint: Annotated[
-        Path | None,
-        typer.Option("--blueprint", help="Capsule blueprint JSON path."),
-    ] = None,
-    capsule_id: Annotated[
-        str | None,
-        typer.Option("--id", help="Capsule id for template scaffolding."),
-    ] = None,
-    runtime: Annotated[str, typer.Option("--runtime", help="Runtime type.")] = "generic_cli",
-    template: Annotated[str, typer.Option("--template", help="Scaffold template.")] = "simple",
-    force: Annotated[bool, typer.Option("--force", help="Overwrite an existing capsule.")] = False,
-    capsules_dir: Annotated[
-        Path,
-        typer.Option("--capsules-dir", help="Capsule registry directory."),
-    ] = Path("capsules"),
-) -> None:
-    try:
-        result = scaffold_capsule(
-            blueprint_path=blueprint,
-            capsule_id=capsule_id,
-            runtime=runtime,
-            template=template,
-            capsules_dir=capsules_dir,
-            force=force,
-        )
-    except AccError as exc:
-        log_stderr(str(exc))
-        raise typer.Exit(1) from exc
-    typer.echo(dump_json(result))
-
-
 @workflow_app.command("validate")
 def workflow_validate(
     graph_path: Path,
@@ -550,13 +373,9 @@ def workflow_validate(
         bool,
         typer.Option("--dry-run", help="Preview execution plan without creating a run."),
     ] = False,
-    capsules_dir: Annotated[
-        Path | None,
-        typer.Option("--capsules-dir", help="Capsule registry directory."),
-    ] = None,
 ) -> None:
     try:
-        result = WorkflowAppService(registry=CapsuleRegistry(capsules_dir)).validate(
+        result = WorkflowAppService().validate(
             graph_path,
             dry_run=dry_run,
             workflows_dir=graph_path.parent,
@@ -571,7 +390,7 @@ def workflow_validate(
         result = {
             **result,
             "import_hint": (
-                f"Legacy .graph.json is import-only; convert with "
+                f"Legacy {LEGACY_GRAPH_SUFFIX} is import-only; convert with "
                 f"`acc workflow import-graph {graph_path}`"
             ),
         }
@@ -586,33 +405,71 @@ def workflow_import_graph(
         typer.Option("-o", "--out", help="Output .accflow.json path."),
     ] = None,
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
-    capsules_dir: Annotated[
+    legacy_assets_dir: Annotated[
         Path | None,
-        typer.Option("--capsules-dir", help="Capsule registry directory."),
+        typer.Option(
+            "--legacy-assets-dir",
+            help="Directory containing migration-only legacy assets.",
+        ),
     ] = None,
 ) -> None:
-    if not graph_path.name.endswith(".graph.json"):
-        log_stderr("Input path must end with .graph.json")
-        raise typer.Exit(1)
-    output_path = out or accflow_path_from_legacy_graph_path(graph_path)
     try:
-        payload = legacy_graph_to_accflow_payload(graph_path)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        write_json(output_path, payload)
-        validation = WorkflowAppService(registry=CapsuleRegistry(capsules_dir)).validate(
-            output_path
-        )
+        result = import_legacy_graph_payload(graph_path, out, legacy_assets_dir)
     except AccError as exc:
         log_stderr(str(exc))
         raise typer.Exit(1) from exc
-    result = {
+    typer.echo(dump_json(result))
+
+
+@migrate_app.command("graph")
+def migrate_graph(
+    graph_path: Path,
+    out: Annotated[
+        Path | None,
+        typer.Option("-o", "--out", help="Output .accflow.json path."),
+    ] = None,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
+    legacy_assets_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--legacy-assets-dir",
+            help="Directory containing migration-only legacy assets.",
+        ),
+    ] = None,
+) -> None:
+    try:
+        result = import_legacy_graph_payload(graph_path, out, legacy_assets_dir)
+    except AccError as exc:
+        log_stderr(str(exc))
+        raise typer.Exit(1) from exc
+    typer.echo(dump_json(result))
+
+
+def import_legacy_graph_payload(
+    graph_path: Path,
+    out: Path | None,
+    legacy_assets_dir: Path | None,
+) -> dict[str, Any]:
+    if not graph_path.name.endswith(LEGACY_GRAPH_SUFFIX):
+        raise AccError(f"Input path must end with {LEGACY_GRAPH_SUFFIX}")
+    output_path = out or accflow_path_from_legacy_graph_path(graph_path)
+    if not output_path.name.endswith(".accflow.json"):
+        raise AccError("Migration output path must end with .accflow.json")
+    source_dir = graph_path.resolve().parent
+    if not output_path.resolve().is_relative_to(source_dir):
+        raise AccError("Migration output path must stay inside the source graph directory")
+    payload = legacy_graph_to_accflow_payload(graph_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    write_json(output_path, payload)
+    _ = legacy_assets_dir
+    validation = WorkflowAppService().validate(output_path)
+    return {
         "status": "imported",
         "source_path": str(graph_path.resolve()),
         "output_path": str(output_path.resolve()),
         "workflow_id": payload.get("id"),
         "validation": validation,
     }
-    typer.echo(dump_json(result))
 
 
 @workflow_app.command("bind")
@@ -641,10 +498,6 @@ def workflow_run(
         bool,
         typer.Option("--emit-json", help="Print exactly one workflow JSON object."),
     ] = False,
-    capsules_dir: Annotated[
-        Path | None,
-        typer.Option("--capsules-dir", help="Capsule registry directory."),
-    ] = None,
     workspace: Annotated[
         Path | None,
         typer.Option("--workspace", help="Workspace directory for a stateful environment."),
@@ -655,7 +508,7 @@ def workflow_run(
     ] = None,
 ) -> None:
     try:
-        result = WorkflowAppService(registry=CapsuleRegistry(capsules_dir)).run_sync(
+        result = WorkflowAppService().run_sync(
             graph_path,
             run_dir,
             workspace=workspace,
@@ -696,13 +549,9 @@ def workflows_list(
         Path | None,
         typer.Option("--workflows-dir", help="Workflow directory."),
     ] = None,
-    capsules_dir: Annotated[
-        Path | None,
-        typer.Option("--capsules-dir", help="Capsule registry directory."),
-    ] = None,
 ) -> None:
     try:
-        payload = list_workflows_payload(workflows_dir=workflows_dir, capsules_dir=capsules_dir)
+        payload = list_workflows_payload(workflows_dir=workflows_dir)
     except AccError as exc:
         log_stderr(str(exc))
         raise typer.Exit(1) from exc
@@ -717,16 +566,11 @@ def workflows_show(
         Path | None,
         typer.Option("--workflows-dir", help="Workflow directory."),
     ] = None,
-    capsules_dir: Annotated[
-        Path | None,
-        typer.Option("--capsules-dir", help="Capsule registry directory."),
-    ] = None,
 ) -> None:
     try:
         payload = show_workflow_payload(
             workflow_ref,
             workflows_dir=workflows_dir,
-            capsules_dir=capsules_dir,
         )
     except AccError as exc:
         log_stderr(str(exc))
@@ -757,17 +601,12 @@ def workflow_rerun_node(
     run_dir: Path,
     node_id: str,
     out: Annotated[Path, typer.Option("--out", help="New run directory for the rerun.")],
-    capsules_dir: Annotated[
-        Path | None,
-        typer.Option("--capsules-dir", help="Capsule registry directory."),
-    ] = None,
 ) -> None:
     try:
         payload = rerun_single_node(
             run_dir,
             node_id,
             out,
-            registry=CapsuleRegistry(capsules_dir),
         )
     except AccError as exc:
         log_stderr(str(exc))
@@ -782,17 +621,12 @@ def workflow_rerun_from(
     run_dir: Path,
     node_id: str,
     out: Annotated[Path, typer.Option("--out", help="New run directory for the rerun.")],
-    capsules_dir: Annotated[
-        Path | None,
-        typer.Option("--capsules-dir", help="Capsule registry directory."),
-    ] = None,
 ) -> None:
     try:
         payload = rerun_from_node(
             run_dir,
             node_id,
             out,
-            registry=CapsuleRegistry(capsules_dir),
         )
     except AccError as exc:
         log_stderr(str(exc))
@@ -808,10 +642,6 @@ def workflow_fork(
     from_node: Annotated[str, typer.Option("--from-node", help="Node to fork from.")],
     input_path: Annotated[Path, typer.Option("--input", help="Fork override JSON path.")],
     out: Annotated[Path, typer.Option("--out", help="New run directory for the fork.")],
-    capsules_dir: Annotated[
-        Path | None,
-        typer.Option("--capsules-dir", help="Capsule registry directory."),
-    ] = None,
 ) -> None:
     try:
         payload = fork_run(
@@ -819,7 +649,6 @@ def workflow_fork(
             from_node,
             input_path,
             out,
-            registry=CapsuleRegistry(capsules_dir),
         )
     except AccError as exc:
         log_stderr(str(exc))
@@ -870,17 +699,13 @@ def artifacts_get(
 def conductor_export(
     graph_path: Path,
     out: Annotated[Path, typer.Option("--out", help="Output Conductor YAML path.")],
-    capsules_dir: Annotated[
-        Path | None,
-        typer.Option("--capsules-dir", help="Capsule registry directory."),
-    ] = None,
 ) -> None:
-    try:
-        result = export_conductor_yaml(graph_path, out, registry=CapsuleRegistry(capsules_dir))
-    except AccError as exc:
-        log_stderr(str(exc))
-        raise typer.Exit(1) from exc
-    typer.echo(dump_json(result))
+    _ = graph_path, out
+    log_stderr(
+        "Legacy Conductor export from pre-Core-v2 workflow graphs has been removed. "
+        "Export support must be rebuilt from Core v2 WorkflowFunctionTemplate."
+    )
+    raise typer.Exit(1)
 
 
 def main() -> None:

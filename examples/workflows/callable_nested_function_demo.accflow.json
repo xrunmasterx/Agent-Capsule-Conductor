@@ -1,74 +1,4 @@
 {
-  "id": "callable_nested_function_demo",
-  "version": "0.1.0",
-  "name": "Callable Nested Function Demo",
-  "nodes": [
-    {
-      "id": "producer",
-      "kind": "tool",
-      "tool": "fake_producer",
-      "ports": {
-        "outputs": {
-          "main": {
-            "type": "artifact"
-          }
-        }
-      }
-    },
-    {
-      "id": "subflow",
-      "kind": "workflow",
-      "workflow_ref": "callable_child_function.accflow.json",
-      "ports": {
-        "inputs": {
-          "brief": {
-            "type": "artifact"
-          }
-        },
-        "outputs": {
-          "summary": {
-            "type": "artifact"
-          }
-        }
-      },
-      "workflow_call_input_bindings": [
-        {
-          "source": {
-            "node": "producer",
-            "port": "main"
-          },
-          "workflow_input": "brief",
-          "materialization": "copy",
-          "required": true
-        }
-      ],
-      "workflow_call_output_bindings": [
-        {
-          "workflow_output": "report",
-          "parent_port": "summary",
-          "materialization": "copy",
-          "required": true
-        }
-      ]
-    },
-    {
-      "id": "final_merge",
-      "kind": "tool",
-      "tool": "merge",
-      "ports": {
-        "inputs": {
-          "summary": {
-            "type": "artifact"
-          }
-        },
-        "outputs": {
-          "bundle": {
-            "type": "artifact"
-          }
-        }
-      }
-    }
-  ],
   "control_edges": [
     {
       "from": "producer",
@@ -81,33 +11,88 @@
   ],
   "data_edges": [
     {
-      "from": {
+      "materialization": "copy",
+      "source": {
         "node": "producer",
         "port": "main"
       },
-      "to": {
+      "target": {
         "node": "subflow",
         "port": "brief"
-      },
-      "materialization": "copy"
+      }
     },
     {
-      "from": {
+      "materialization": "copy",
+      "source": {
         "node": "subflow",
         "port": "summary"
       },
-      "to": {
+      "target": {
         "node": "final_merge",
         "port": "summary"
-      },
-      "materialization": "copy"
+      }
     }
   ],
-  "policies": {
-    "max_concurrency": 2,
-    "failure_mode": "fail_fast"
-  },
+  "exposed_inputs": {},
+  "exposed_outputs": {},
+  "id": "callable_nested_function_demo",
   "metadata": {
-    "layout": "left-to-right"
-  }
+    "canonical_format": "accflow",
+    "imported_from": "examples\\workflows\\callable_nested_function_demo.accflow.json"
+  },
+  "nodes": [
+    {
+      "callable_ref": {
+        "id": "fake_producer",
+        "kind": "tool_class"
+      },
+      "id": "producer",
+      "ports": {
+        "inputs": {},
+        "outputs": {
+          "main": {
+            "type": "json"
+          }
+        }
+      }
+    },
+    {
+      "callable_ref": {
+        "id": "callable_child_function.accflow.json",
+        "kind": "workflow_function"
+      },
+      "id": "subflow",
+      "ports": {
+        "inputs": {
+          "brief": {
+            "type": "json"
+          }
+        },
+        "outputs": {
+          "summary": {
+            "type": "json"
+          }
+        }
+      }
+    },
+    {
+      "callable_ref": {
+        "id": "merge",
+        "kind": "tool_class"
+      },
+      "id": "final_merge",
+      "ports": {
+        "inputs": {
+          "summary": {
+            "type": "json"
+          }
+        },
+        "outputs": {}
+      }
+    }
+  ],
+  "schema_version": "acc.core.v2",
+  "version": "0.1.0",
+  "workflow_input_bindings": [],
+  "workflow_output_bindings": []
 }

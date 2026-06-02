@@ -66,15 +66,6 @@ def augment_known_callable_refs(
         if not _callable_ref_is_known(node, node.callable_ref, known_callable_refs):
             continue
         augmented.add((node.callable_ref.kind, node.callable_ref.id))
-        legacy_id = node.metadata.get("legacy_capsule_id")
-        if isinstance(legacy_id, str) and legacy_id:
-            augmented.update(
-                {
-                    ("legacy_capsule", legacy_id),
-                    ("agent_class", legacy_id),
-                    ("tool_class", legacy_id),
-                }
-            )
     return augmented
 
 
@@ -160,19 +151,8 @@ def _callable_ref_is_known(
     ref: CallableRef,
     known_callable_refs: set[tuple[str, str]],
 ) -> bool:
-    if (ref.kind, ref.id) in known_callable_refs:
-        return True
-    legacy_id = node.metadata.get("legacy_capsule_id")
-    if not isinstance(legacy_id, str) or not legacy_id:
-        legacy_runtime = node.metadata.get("legacy_runtime")
-        if isinstance(legacy_runtime, str) and legacy_runtime not in {"", "capsule"}:
-            return (ref.kind, legacy_runtime) in known_callable_refs
-        return False
-    return (
-        ("legacy_capsule", legacy_id) in known_callable_refs
-        or ("agent_class", legacy_id) in known_callable_refs
-        or ("tool_class", legacy_id) in known_callable_refs
-    )
+    _ = node
+    return (ref.kind, ref.id) in known_callable_refs
 
 
 def _collect_unknown_callable_refs(

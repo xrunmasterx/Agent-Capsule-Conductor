@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "market",
+    "as_of_date",
+    "cleaned_evidence",
+    "source_credibility",
+    "consolidated_signals",
+    "analysis_question"
+  ],
+  "properties": {
+    "market": {
+      "type": "string"
+    },
+    "as_of_date": {
+      "type": "string"
+    },
+    "cleaned_evidence": {
+      "type": "string"
+    },
+    "source_credibility": {
+      "type": "string"
+    },
+    "consolidated_signals": {
+      "type": "string"
+    },
+    "analysis_question": {
+      "type": "string"
+    },
+    "output_language": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}

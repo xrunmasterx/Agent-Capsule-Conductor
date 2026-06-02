@@ -2,7 +2,7 @@
 
 ## 1. Purpose
 
-GraphOps is the controlled path for workflow, capsule, and resource-library mutation.
+GraphOps is the controlled path for workflow and callable resource-library mutation.
 
 It lets an LLM assist with authoring without making the LLM the unrestricted owner of persistent
 state.
@@ -47,7 +47,10 @@ GraphOps makes changes typed, reviewable, testable, and auditable.
     {
       "op": "add_node",
       "node_id": "critical_review",
-      "capsule_id": "critical-review.claude"
+      "callable_ref": {
+        "kind": "agent_class",
+        "id": "critical-review.claude"
+      }
     },
     {
       "op": "connect_nodes",

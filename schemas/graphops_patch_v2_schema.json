@@ -6,7 +6,7 @@
   "properties": {
     "patch_id": { "type": "string" },
     "author": { "type": "string" },
-    "target_type": { "type": "string", "enum": ["workflow", "capsule"] },
+    "target_type": { "type": "string", "enum": ["workflow", "callable"] },
     "target_path": { "type": "string" },
     "rationale": { "type": "string" },
     "operations": {

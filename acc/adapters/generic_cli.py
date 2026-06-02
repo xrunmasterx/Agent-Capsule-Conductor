@@ -40,6 +40,8 @@ class GenericCliAdapter:
             env["ACC_ENVIRONMENT_ID"] = request.environment_id
         if request.node_id is not None:
             env["ACC_NODE_ID"] = request.node_id
+        if request.run_id is not None:
+            env["ACC_RUN_ID"] = request.run_id
 
         prompt_bytes = request.prompt_path.read_bytes()
         try:

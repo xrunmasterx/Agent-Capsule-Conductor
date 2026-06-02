@@ -1,0 +1,46 @@
+{
+  "inbox": {
+    "records": [
+      {
+        "direction": "input",
+        "materialization": "copy",
+        "node_id": "final_merge",
+        "port_id": "summary",
+        "source_node_id": "subflow",
+        "source_outbox": "<<RUN_DIR>>\\nodes\\subflow\\outbox\\summary",
+        "source_port_id": "summary",
+        "source_refs": [
+          "subflow_summary"
+        ],
+        "source_session_id": "",
+        "target_inbox": "<<RUN_DIR>>\\nodes\\final_merge\\inbox\\summary\\subflow_summary",
+        "target_node_id": "final_merge",
+        "target_port_id": "summary"
+      }
+    ]
+  },
+  "input": {},
+  "node": {
+    "id": "final_merge",
+    "kind": "tool"
+  },
+  "upstream_context": [
+    {
+      "node_id": "subflow",
+      "output_bytes": 288,
+      "output_inline": {
+        "child_errors": [],
+        "child_workflow_id": "stateless_template_demo",
+        "child_workflow_run_dir": "<<RUN_DIR>>\\nodes\\subflow\\nested_workflow",
+        "status": "success",
+        "summary": "Nested workflow stateless_template_demo success"
+      },
+      "output_path": "<<RUN_DIR>>\\nodes\\subflow\\output.json",
+      "output_summary": "Nested workflow stateless_template_demo success",
+      "status": "success"
+    }
+  ],
+  "workflow": {
+    "input": {}
+  }
+}

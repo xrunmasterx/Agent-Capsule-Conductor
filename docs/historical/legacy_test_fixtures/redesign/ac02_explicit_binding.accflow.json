@@ -1,0 +1,37 @@
+{
+  "id": "ac02_explicit_binding",
+  "version": "0.1.0",
+  "name": "AC2 Explicit Binding Decides Input",
+  "metadata": {
+    "binding_mode": "explicit_only",
+    "canonical_format": "accflow",
+    "e2e_ac": "AC02"
+  },
+  "nodes": [
+    {
+      "id": "producer",
+      "kind": "tool",
+      "tool": "fake_producer",
+      "output_ports": [
+        {"id": "main", "direction": "output", "required": false}
+      ]
+    },
+    {
+      "id": "consumer",
+      "kind": "agent",
+      "runtime": "generic_fake_agent",
+      "prompt": "Read news via explicit binding from producer.default.",
+      "input_ports": [
+        {"id": "main", "direction": "input", "required": false}
+      ],
+      "output_ports": [
+        {"id": "main", "direction": "output", "required": false}
+      ]
+    }
+  ],
+  "control_edges": [
+    {"from": "producer", "to": "consumer", "condition": null, "context": "none"}
+  ],
+  "data_edges": [],
+  "policies": {"failure_mode": "fail_fast", "max_concurrency": 1}
+}

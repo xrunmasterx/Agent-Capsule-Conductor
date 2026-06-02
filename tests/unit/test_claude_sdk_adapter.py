@@ -12,7 +12,7 @@ def make_request(tmp_path: Path) -> AgentRunRequest:
     store.prepare()
     store.write_prompt("prompt")
     return AgentRunRequest(
-        capsule_id="critical-review.claude",
+        callable_id="critical-review.claude",
         run_dir=store.run_dir,
         workspace_dir=tmp_path,
         prompt_path=store.prompt_path,
@@ -44,4 +44,3 @@ def test_fake_sdk_message_stream_is_captured(tmp_path: Path) -> None:
     assert result.status == "success"
     assert "message" in request.events_log_path.read_text(encoding="utf-8")
     assert load_json(request.output_json_path)["summary"] == "ok"
-

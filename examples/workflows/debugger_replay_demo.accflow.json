@@ -1,0 +1,64 @@
+{
+  "control_edges": [
+    {
+      "from": "demo_node_a",
+      "to": "demo_node_b"
+    }
+  ],
+  "data_edges": [],
+  "exposed_inputs": {},
+  "exposed_outputs": {},
+  "id": "debugger_replay_demo",
+  "metadata": {
+    "canonical_format": "accflow",
+    "imported_from": "examples\\workflows\\debugger_replay_demo.accflow.json"
+  },
+  "nodes": [
+    {
+      "callable_ref": {
+        "id": "generic_fake_agent",
+        "kind": "agent_class"
+      },
+      "id": "demo_node_a",
+      "input_bindings": [
+        {
+          "static_value": "debugger demo input",
+          "target_port": "message"
+        }
+      ],
+      "ports": {
+        "inputs": {
+          "message": {
+            "type": "json"
+          }
+        },
+        "outputs": {}
+      }
+    },
+    {
+      "callable_ref": {
+        "id": "generic_fake_agent",
+        "kind": "agent_class"
+      },
+      "id": "demo_node_b",
+      "input_bindings": [
+        {
+          "static_value": "replay downstream node",
+          "target_port": "notes"
+        }
+      ],
+      "ports": {
+        "inputs": {
+          "notes": {
+            "type": "json"
+          }
+        },
+        "outputs": {}
+      }
+    }
+  ],
+  "schema_version": "acc.core.v2",
+  "version": "0.1.0",
+  "workflow_input_bindings": [],
+  "workflow_output_bindings": []
+}

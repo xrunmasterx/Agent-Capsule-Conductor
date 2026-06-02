@@ -6,11 +6,11 @@ from typing import Any
 
 import yaml
 
-from acc.registry import CapsuleDefinition, CapsuleRegistry
+from acc.app.core_v2_loader import LEGACY_GRAPH_SUFFIX, reject_legacy_graph_path
+from acc.callable_registry import CallableAsset, CallableRegistry, template_kind
 from acc.run_index import load_run_summary, load_run_summary_by_id
 from acc.store import is_clean_workflow_path
 from acc.utils import AccError, load_json, repo_root
-from acc.workflow_graph import validate_workflow_graph
 
 SECRET_EXACT_NAMES = {
     ".env",
@@ -36,49 +36,25 @@ SECRET_SUBSTRINGS = {
 MAX_ARTIFACT_READ_BYTES = 1_000_000
 
 
-def list_capsules_payload(capsules_dir: Path | None = None) -> dict[str, Any]:
-    project_root = repo_root().resolve()
-    registry = CapsuleRegistry(capsules_dir)
-    capsules = [capsule_summary(capsule, project_root) for capsule in registry.discover()]
-    return {"capsules": capsules}
+def list_callables_payload(project_root: Path | None = None) -> dict[str, Any]:
+    root = (project_root or repo_root()).resolve()
+    registry = CallableRegistry.from_project_root(root)
+    return {"callables": [callable_summary(asset, root) for asset in registry.iter_assets()]}
 
 
-def show_capsule_payload(capsule_id: str, capsules_dir: Path | None = None) -> dict[str, Any]:
-    project_root = repo_root().resolve()
-    registry = CapsuleRegistry(capsules_dir)
-    capsule = registry.get(capsule_id)
-    payload = capsule_summary(capsule, project_root)
-    payload.update(
-        {
-            "description": capsule.spec.description,
-            "permissions": capsule.spec.permissions.model_dump(),
-            "schemas": capsule.spec.schemas.model_dump(),
-            "artifacts": capsule.spec.artifacts.model_dump(),
-            "workspace_config": capsule.spec.workspace.model_dump(),
-            "runtime_config": capsule.spec.runtime.model_dump(),
-            "behavior_pack": None
-            if capsule.spec.behavior_pack is None
-            else capsule.spec.behavior_pack.model_dump(),
-            "workflow": None
-            if capsule.spec.workflow is None
-            else capsule.spec.workflow.model_dump(),
-            "prompt": None if capsule.spec.prompt is None else capsule.spec.prompt.model_dump(),
-            "lifecycle": None
-            if capsule.spec.lifecycle is None
-            else capsule.spec.lifecycle.model_dump(),
-        }
-    )
-    return {"capsule": payload}
+def show_callable_payload(callable_id: str, project_root: Path | None = None) -> dict[str, Any]:
+    root = (project_root or repo_root()).resolve()
+    registry = CallableRegistry.from_project_root(root)
+    asset = registry.resolve_class_id(callable_id)
+    return {"callable": callable_detail(asset, root)}
 
 
 def list_workflows_payload(
     workflows_dir: Path | None = None,
-    capsules_dir: Path | None = None,
 ) -> dict[str, Any]:
     project_root = repo_root().resolve()
-    registry = CapsuleRegistry(capsules_dir)
     workflows = [
-        workflow_metadata(path, project_root, registry)
+        workflow_metadata(path, project_root)
         for path in discover_workflow_files(project_root, workflows_dir)
     ]
     workflows.sort(key=lambda item: item["path"])
@@ -88,12 +64,10 @@ def list_workflows_payload(
 def show_workflow_payload(
     workflow_ref: str,
     workflows_dir: Path | None = None,
-    capsules_dir: Path | None = None,
 ) -> dict[str, Any]:
     project_root = repo_root().resolve()
-    registry = CapsuleRegistry(capsules_dir)
     path = resolve_workflow_reference(project_root, workflow_ref, workflows_dir)
-    metadata = workflow_metadata(path, project_root, registry)
+    metadata = workflow_metadata(path, project_root)
     payload = read_workflow_payload(path)
     result = {
         "workflow": payload,
@@ -105,7 +79,7 @@ def show_workflow_payload(
 
             result["validation"] = validate_clean_workflow_file(path)
         else:
-            result["validation"] = validate_workflow_graph(path, registry=registry)
+            reject_legacy_graph_path(path)
         result["graph"] = payload
     return result
 
@@ -143,10 +117,48 @@ def read_artifact_payload(artifact_ref: str) -> dict[str, Any]:
     }
 
 
-def capsule_summary(capsule: CapsuleDefinition, project_root: Path) -> dict[str, Any]:
-    payload = capsule.to_metadata()
-    payload["capsule_dir"] = relative_project_path(project_root, capsule.capsule_dir)
-    payload["yaml_path"] = relative_project_path(project_root, capsule.yaml_path)
+def callable_summary(asset: CallableAsset, project_root: Path) -> dict[str, Any]:
+    template = asset.template
+    payload: dict[str, Any] = {
+        "id": template.id,
+        "version": template.version,
+        "kind": template_kind(template),
+        "backend": asset.backend,
+        "source_id": asset.source_id,
+        "source_path": None,
+    }
+    name = template.metadata.get("name")
+    description = template.metadata.get("description")
+    if isinstance(name, str) and name:
+        payload["name"] = name
+    if isinstance(description, str) and description:
+        payload["description"] = description
+    if asset.source_path is not None:
+        payload["source_path"] = relative_project_path(project_root, asset.source_path)
+    return payload
+
+
+def callable_detail(asset: CallableAsset, project_root: Path) -> dict[str, Any]:
+    template = asset.template
+    payload = callable_summary(asset, project_root)
+    payload.update(
+        {
+            "metadata": template.metadata,
+            "input_ports": {
+                key: value.__dict__ for key, value in template.input_ports.items()
+            },
+            "output_ports": {
+                key: value.__dict__ for key, value in template.output_ports.items()
+            },
+            "artifact_contract": template.artifact_contract,
+        }
+    )
+    if hasattr(template, "runtime"):
+        payload["runtime"] = template.runtime
+    if hasattr(template, "default_prompt"):
+        payload["default_prompt"] = template.default_prompt
+    if hasattr(template, "runner"):
+        payload["runner"] = template.runner
     return payload
 
 
@@ -162,13 +174,7 @@ def discover_workflow_files(project_root: Path, workflows_dir: Path | None = Non
     for root in roots:
         if not root.exists():
             continue
-        accflow_ids: set[str] = set()
         for path in sorted(root.glob("*.accflow.json")):
-            files.append(path.resolve())
-            accflow_ids.add(workflow_file_id(path))
-        for path in sorted(root.glob("*.graph.json")):
-            if workflow_file_id(path) in accflow_ids:
-                continue
             files.append(path.resolve())
         files.extend(sorted(root.glob("*.yaml")))
         files.extend(sorted(root.glob("*.yml")))
@@ -193,10 +199,11 @@ def resolve_workflow_reference(
     workflows_dir: Path | None = None,
 ) -> Path:
     candidate = Path(workflow_ref)
-    if workflow_ref.endswith((".accflow.json", ".graph.json", ".json", ".yaml", ".yml")):
+    if workflow_ref.endswith((".accflow.json", LEGACY_GRAPH_SUFFIX, ".json", ".yaml", ".yml")):
         path = resolve_inside_project(project_root, candidate)
         if not path.exists():
             raise AccError(f"Workflow not found: {workflow_ref}")
+        reject_legacy_graph_path(path)
         return path
 
     for path in discover_workflow_files(project_root, workflows_dir):
@@ -211,7 +218,6 @@ def resolve_workflow_reference(
 def workflow_metadata(
     path: Path,
     project_root: Path,
-    registry: CapsuleRegistry,
 ) -> dict[str, Any]:
     payload = read_workflow_payload(path)
     if path.suffix == ".json":
@@ -219,10 +225,10 @@ def workflow_metadata(
         if is_clean_workflow_path(path):
             from acc.app import validate_clean_workflow_file
 
-            validation = validate_clean_workflow_file(path, registry=registry)
+            validation = validate_clean_workflow_file(path)
             workflow_type = "accflow"
         else:
-            validation = validate_workflow_graph(path, registry=registry)
+            reject_legacy_graph_path(path)
             workflow_type = "graph"
         node_count = validation.get("node_count", len(payload.get("nodes", [])))
         control_edge_count = validation.get(
@@ -259,8 +265,8 @@ def workflow_metadata(
 def workflow_file_id(path: Path) -> str:
     if path.name.endswith(".accflow.json"):
         return path.name.removesuffix(".accflow.json")
-    if path.name.endswith(".graph.json"):
-        return path.name.removesuffix(".graph.json")
+    if path.name.endswith(LEGACY_GRAPH_SUFFIX):
+        return path.name.removesuffix(LEGACY_GRAPH_SUFFIX)
     return path.stem
 
 
@@ -278,24 +284,26 @@ def read_workflow_payload(path: Path) -> dict[str, Any]:
 
 
 def resolve_artifact_reference(project_root: Path, artifact_ref: str) -> Path:
-    candidate = Path(artifact_ref)
-    if candidate.drive or candidate.exists() or "/" in artifact_ref or "\\" in artifact_ref:
-        return resolve_inside_project(project_root, candidate)
-
     parts = artifact_ref.split(":", 2)
     if len(parts) == 3:
         run_id, node_id, relative_path = parts
         if not run_id or not node_id or not relative_path:
             raise AccError(f"Invalid artifact ref: {artifact_ref}")
-        artifact_path = resolve_inside_project(
+        v2_artifact_path = resolve_inside_project(
             project_root,
-            Path("runs") / run_id / "node_runs" / node_id / "artifacts" / relative_path,
+            Path("runs") / run_id / "nodes" / node_id / "artifacts" / relative_path,
         )
-        if artifact_path.exists():
-            return artifact_path
+        if v2_artifact_path.exists():
+            return v2_artifact_path
+        v2_node_path = resolve_inside_project(
+            project_root,
+            Path("runs") / run_id / "nodes" / node_id / relative_path,
+        )
+        if v2_node_path.exists():
+            return v2_node_path
         return resolve_inside_project(
             project_root,
-            Path("runs") / run_id / "node_runs" / node_id / relative_path,
+            Path("runs") / run_id / "nodes" / node_id / relative_path,
         )
     if len(parts) == 2:
         run_id, relative_path = parts
@@ -308,6 +316,9 @@ def resolve_artifact_reference(project_root: Path, artifact_ref: str) -> Path:
         if artifact_path.exists():
             return artifact_path
         return resolve_inside_project(project_root, Path("runs") / run_id / relative_path)
+    candidate = Path(artifact_ref)
+    if candidate.drive or candidate.exists() or "/" in artifact_ref or "\\" in artifact_ref:
+        return resolve_inside_project(project_root, candidate)
     return resolve_inside_project(project_root, candidate)
 
 

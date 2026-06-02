@@ -1,0 +1,35 @@
+{
+  "inbox": {
+    "records": [
+      {
+        "direction": "input",
+        "materialization": "copy",
+        "node_id": "child_agent",
+        "port_id": "main",
+        "source_node_id": "callable_child_function__workflow_inputs",
+        "source_outbox": "<<RUN_DIR>>\\workflow_inputs\\brief",
+        "source_port_id": "brief",
+        "source_refs": [
+          "callable_child_function__workflow_inputs_brief"
+        ],
+        "source_session_id": null,
+        "target_inbox": "<<RUN_DIR>>\\nodes\\child_agent\\inbox\\main\\callable_child_function__workflow_inputs_brief",
+        "target_node_id": "child_agent",
+        "target_port_id": "main"
+      }
+    ]
+  },
+  "input": {},
+  "node": {
+    "id": "child_agent",
+    "kind": "agent"
+  },
+  "upstream_context": [],
+  "workflow": {
+    "input": {
+      "brief": {
+        "task": "Phase 1 baseline input for callable_child_function.accflow.json:brief"
+      }
+    }
+  }
+}

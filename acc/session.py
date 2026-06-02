@@ -10,8 +10,8 @@ class SessionManifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     session_id: str
-    capsule_id: str
-    capsule_version: str
+    callable_id: str
+    callable_version: str
     status: str
     created_at: str
     updated_at: str
@@ -25,7 +25,7 @@ class SessionManifest(BaseModel):
     conductor_output_path: str
     template_snapshot_dir: str | None = None
     lifecycle_log_dir: str | None = None
-    capsule_kind: str | None = None
+    callable_kind: str | None = None
     parent_workflow_run_id: str | None = None
     parent_node_id: str | None = None
     error: str | None = None

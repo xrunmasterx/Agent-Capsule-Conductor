@@ -4,7 +4,7 @@ export type NodeRunSummary = {
   node_id: string;
   ui_node_id?: string;
   parent_node_id?: string;
-  capsule_id: string;
+  callable_id: string;
   session_id?: string | null;
   status: string;
   summary?: string;
@@ -21,6 +21,11 @@ export type NodeRunSummary = {
   log_excerpt?: string | null;
   transcript_ref?: string | null;
   output_preview?: unknown;
+  execution_mode?: string | null;
+  adapter?: string | null;
+  runtime?: Record<string, unknown> | null;
+  binding_manifest?: Record<string, unknown> | null;
+  binding_resolved?: Array<Record<string, unknown>>;
   steps?: Array<{
     event_id?: string;
     type?: string;
@@ -33,6 +38,24 @@ export type NodeRunSummary = {
   error?: string | null;
   artifacts_url?: string;
   errors?: Array<{ error_class: string; message: string; paths: Record<string, string> }>;
+};
+
+export type NodeLogDelta = {
+  type: 'node_log_delta';
+  run_id: string;
+  node_id: string;
+  stream: 'stdout' | 'stderr';
+  offset: number;
+  next_offset: number;
+  text: string;
+  timestamp?: string;
+  eof?: boolean;
+};
+
+export type RuntimeConfig = {
+  run_mode: 'hermetic' | 'production' | string;
+  external_agent_execution_enabled: boolean;
+  real_external_agents_enabled: boolean;
 };
 
 export type RunSummary = {
@@ -97,23 +120,38 @@ export type RunEvent = {
   [key: string]: unknown;
 };
 
-export type CapsuleSummary = {
+export type CallableSummary = {
   id: string;
   version: string;
-  name: string;
-  description: string;
-  runtime: string;
-  workspace: string;
-  capsule_dir?: string;
+  kind: string;
+  backend: string;
+  source_id: string;
+  source_path?: string | null;
+  name?: string;
+  description?: string;
 };
 
-export type CapsuleDetail = CapsuleSummary & {
-  yaml_path: string;
-  prompt_template: string | null;
-  input_schema: string;
-  output_schema: string;
-  artifact_manifest: string;
-  permissions: Record<string, unknown>;
+export type CallableDetail = CallableSummary & {
+  metadata: Record<string, unknown>;
+  input_ports: Record<string, unknown>;
+  output_ports: Record<string, unknown>;
+  artifact_contract: Record<string, unknown> | unknown[];
+  runtime?: string;
+  runner?: string;
+  default_prompt?: string;
+};
+
+export type AgentClassDraft = {
+  id: string;
+  version?: string;
+  runtime?: string;
+  name?: string;
+  description?: string;
+  default_prompt?: string;
+  input_ports?: Record<string, unknown>;
+  output_ports?: Record<string, unknown>;
+  artifact_contract?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
 };
 
 export type ArtifactLink = {
@@ -168,7 +206,11 @@ export type WorkflowDetail = {
 
 export type WorkflowGraphNode = {
   id: string;
-  capsule_id: string;
+  callable_ref: {
+    kind: 'agent_class' | 'tool_class' | 'workflow_function' | string;
+    id: string;
+    version?: string;
+  };
   kind?: 'workflow' | 'agent_session' | 'tool' | string;
   workflow_ref?: string;
   label?: string;
@@ -180,10 +222,11 @@ export type WorkflowGraphNode = {
   output_ports?: WorkflowPort[];
   notes?: string;
   position?: { x: number; y: number };
+  metadata?: Record<string, unknown>;
   ui?: {
     collapsed?: boolean;
     color?: string;
-    semantic_kind?: 'workflow_container' | 'wrapped_capsule';
+    semantic_kind?: 'workflow_container' | 'wrapped_callable';
     binding_ref?: string;
     internal_nodes?: unknown[];
     internal_edges?: Array<WorkflowDataEdge | WorkflowGraphEdge>;
@@ -244,6 +287,15 @@ export type WorkflowGraph = {
   metadata?: Record<string, unknown>;
 };
 
+export type CoreV2WorkflowPayload = Record<string, unknown> & {
+  schema_version: 'acc.core.v2';
+  id: string;
+  version: string;
+  nodes: Array<Record<string, unknown>>;
+  control_edges: Array<Record<string, unknown>>;
+  data_edges: Array<Record<string, unknown>>;
+};
+
 export type WorkflowRunResult = {
   workflow_id: string;
   status: string;
@@ -292,7 +344,7 @@ export type DecisionInboxItem = {
   };
   node?: {
     node_id: string;
-    capsule_id: string;
+    callable_id: string;
     status: string;
     summary?: string;
   };

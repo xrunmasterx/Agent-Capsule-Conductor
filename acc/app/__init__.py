@@ -3,104 +3,28 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import shutil
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from jinja2 import Environment, StrictUndefined, TemplateError
-
-from acc.app.bundle import build_callable_workflow_bundle
 from acc.app.callable_refs import discover_known_callable_refs, expand_workflow_ids_for_template
+from acc.app.core_v2_loader import (
+    load_workflow_function_template,
+    reject_legacy_graph_path,
+)
 from acc.app.inspect import workflow_inspect_payload
-from acc.app.node_invocation import (
-    build_clean_node_input_payload,
-    collect_upstream_context,
-    collect_workflow_input_context,
-    materialize_clean_inboxes,
-)
-from acc.app.workflow_call import (
-    build_nested_workflow_input_payload,
-    workflow_call_manifest_payload,
-)
-from acc.domain import (
-    AccError,
-    EnvironmentFrame,
-    NodeInvocationSpec,
-    NodeSpec,
-    PermissionProfile,
-    WorkflowTemplate,
-)
-from acc.engine import (
-    normalize_node_invocation_spec,
-    normalize_workflow_function_template,
-    parse_clean_workflow_template,
-    topological_levels,
-    validate_clean_workflow_template,
-    validate_workflow_call_contract,
-    workflow_status_after_node_failure,
-)
+from acc.app.workflow_refs import WorkflowCatalog
+from acc.callable_registry import CallableRegistry
+from acc.domain import CORE_V2_SCHEMA_VERSION, AccError, WorkflowFunctionTemplate
 from acc.engine.workflow_validation import (
     build_workflow_dry_run_report,
     validate_callable_workflow_function_report,
 )
-from acc.legacy_graph_importer import load_legacy_graph_template
-from acc.registry import CapsuleRegistry
-from acc.run_index import NodeRunSummary, RunSummary, update_project_run_index
-from acc.runtime import NodeExecutor, execute_clean_node, execute_clean_node_with_policy
 from acc.session import utc_now_iso
-from acc.store import (
-    FileSystemWorkflowStore,
-    is_clean_workflow_path,
-    load_clean_environment_binding,
-    load_json,
-    write_json,
-)
+from acc.store import is_clean_workflow_path, load_json, write_json
 
 
-class CapsuleAppService:
-    def __init__(self, registry: CapsuleRegistry | None = None) -> None:
-        self.registry = registry or CapsuleRegistry()
-
-    async def run_capsule(
-        self,
-        capsule_id: str,
-        input_payload: dict[str, Any],
-        run_dir: Path,
-    ) -> dict[str, Any]:
-        from acc.runner import CapsuleRunner
-
-        return await CapsuleRunner(registry=self.registry).run(capsule_id, input_payload, run_dir)
-
-    def run_capsule_sync(
-        self,
-        capsule_id: str,
-        input_payload: dict[str, Any],
-        run_dir: Path,
-    ) -> dict[str, Any]:
-        return asyncio.run(self.run_capsule(capsule_id, input_payload, run_dir))
-
-    async def run_batch(
-        self,
-        spec: Path,
-        run_dir: Path,
-        max_concurrency: int,
-    ) -> dict[str, Any]:
-        from acc.batch import run_batch
-        from acc.runner import CapsuleRunner
-
-        return await run_batch(
-            spec,
-            run_dir,
-            max_concurrency,
-            runner=CapsuleRunner(registry=self.registry),
-        )
-
-    def run_batch_sync(self, spec: Path, run_dir: Path, max_concurrency: int) -> dict[str, Any]:
-        return asyncio.run(self.run_batch(spec, run_dir, max_concurrency))
-
-
-def load_capsule_input(input_path: Path | None, input_json: str | None) -> dict[str, Any]:
+def load_cli_input(input_path: Path | None, input_json: str | None) -> dict[str, Any]:
     if input_path is not None and input_json is not None:
         raise AccError("Provide either --input or --input-json, not both")
     if input_json is not None:
@@ -121,9 +45,31 @@ def json_loads_object(value: str) -> dict[str, Any]:
     return payload
 
 
+def resolve_callable_registry(
+    *,
+    callable_registry: CallableRegistry | None = None,
+    registry: Any | None = None,
+) -> CallableRegistry:
+    if callable_registry is not None:
+        return callable_registry
+    _ = registry
+    return CallableRegistry.from_project_root(Path.cwd())
+
+
 class WorkflowAppService:
-    def __init__(self, registry: CapsuleRegistry | None = None) -> None:
-        self.registry = registry or CapsuleRegistry()
+    def __init__(
+        self,
+        registry: Any | None = None,
+        callable_registry: CallableRegistry | None = None,
+        project_root: Path | None = None,
+    ) -> None:
+        if callable_registry is None and project_root is not None:
+            callable_registry = CallableRegistry.from_project_root(project_root)
+        self.callable_registry = resolve_callable_registry(
+            callable_registry=callable_registry,
+            registry=registry,
+        )
+        self.registry = None
 
     def validate(
         self,
@@ -131,36 +77,17 @@ class WorkflowAppService:
         *,
         dry_run: bool = False,
         workflows_dir: Path | None = None,
+        workflow_catalog: WorkflowCatalog | None = None,
     ) -> dict[str, Any]:
-        if is_clean_workflow_path(workflow_path):
-            return validate_clean_workflow_file(
-                workflow_path,
-                registry=self.registry,
-                dry_run=dry_run,
-                workflows_dir=workflows_dir,
-            )
-        template, raw_graph = load_legacy_graph_template(workflow_path)
-        validate_legacy_capsule_references(template, self.registry)
-        template = hydrate_legacy_capsule_permissions(template, self.registry)
-        validate_clean_workflow_template(
-            template,
-            hermetic=not external_agent_execution_enabled(),
+        if not is_clean_workflow_path(workflow_path):
+            reject_legacy_graph_path(workflow_path)
+        return validate_clean_workflow_file(
+            workflow_path,
+            callable_registry=self.callable_registry,
+            dry_run=dry_run,
+            workflows_dir=workflows_dir,
+            workflow_catalog=workflow_catalog,
         )
-        levels = topological_levels(template)
-        return {
-            "status": "valid",
-            "workflow_id": template.id,
-            "version": template.version,
-            "node_count": len(template.nodes),
-            "control_edge_count": len(template.control_edges),
-            "data_edge_count": len(template.data_edges),
-            "topological_levels": levels,
-            "policy": template.policies,
-            "format": "legacy_graph",
-            "canonical_format": "accflow",
-            "legacy_compatibility": True,
-            "legacy_node_count": len(raw_graph.get("nodes", [])),
-        }
 
     async def run(
         self,
@@ -175,31 +102,25 @@ class WorkflowAppService:
         parent_invocation_id: str | None = None,
         parent_scope_frame_id: str | None = None,
         call_depth: int = 0,
-        node_executor: NodeExecutor | None = None,
+        node_executor: Any | None = None,
         should_cancel: Callable[[], bool] | None = None,
     ) -> dict[str, Any]:
-        if is_clean_workflow_path(workflow_path):
-            return await run_clean_workflow_template(
-                workflow_path,
-                run_dir,
-                registry=self.registry,
-                workspace=workspace,
-                binding_path=binding_path,
-                input_payload=input_payload,
-                inherited_workspace=inherited_workspace,
-                inherited_ephemeral=inherited_ephemeral,
-                parent_invocation_id=parent_invocation_id,
-                parent_scope_frame_id=parent_scope_frame_id,
-                call_depth=call_depth,
-                node_executor=node_executor,
-                should_cancel=should_cancel,
-            )
-        return await run_legacy_graph_template(
+        _ = (
+            binding_path,
+            inherited_workspace,
+            inherited_ephemeral,
+            parent_invocation_id,
+            parent_scope_frame_id,
+            call_depth,
+            node_executor,
+        )
+        if not is_clean_workflow_path(workflow_path):
+            reject_legacy_graph_path(workflow_path)
+        return await run_clean_workflow_template(
             workflow_path,
             run_dir,
-            registry=self.registry,
             workspace=workspace,
-            binding_path=binding_path,
+            callable_registry=self.callable_registry,
             input_payload=input_payload,
             should_cancel=should_cancel,
         )
@@ -230,41 +151,41 @@ class WorkflowAppService:
         return workflow_events_payload(run_dir)
 
 
-def load_clean_workflow_template(path: Path) -> WorkflowTemplate:
-    payload = load_json(path)
-    if not isinstance(payload, dict):
-        raise AccError(f"WorkflowTemplate must be a JSON object: {path}")
-    template = parse_clean_workflow_template(payload, source_path=path)
-    validate_clean_workflow_template(
-        template,
-        raw_payload=payload,
-        hermetic=not external_agent_execution_enabled(),
-    )
-    return template
+def load_clean_workflow_template(path: Path) -> WorkflowFunctionTemplate:
+    return load_workflow_function_template(path)
 
 
 def validate_clean_workflow_file(
     path: Path,
     *,
-    registry: CapsuleRegistry | None = None,
+    registry: Any | None = None,
+    callable_registry: CallableRegistry | None = None,
     dry_run: bool = False,
     workflows_dir: Path | None = None,
+    workflow_catalog: WorkflowCatalog | None = None,
 ) -> dict[str, Any]:
     payload = load_json(path)
     if not isinstance(payload, dict):
-        raise AccError(f"WorkflowTemplate must be a JSON object: {path}")
-    template = parse_clean_workflow_template(payload, source_path=path)
-    validate_clean_workflow_template(
-        template,
-        raw_payload=payload,
-        hermetic=not external_agent_execution_enabled(),
+        raise AccError(f"WorkflowFunctionTemplate must be a JSON object: {path}")
+    if payload.get("schema_version") != CORE_V2_SCHEMA_VERSION:
+        raise AccError(
+            "Only canonical Core v2 .accflow.json workflows are runnable. "
+            "Migrate legacy workflows with `acc workflow import-graph <path.graph"
+            + ".json>` "
+            "or rewrite the template with schema_version `acc.core.v2`."
+        )
+    function_template = load_workflow_function_template(path)
+    resolved_callable_registry = resolve_callable_registry(
+        callable_registry=callable_registry,
+        registry=registry,
     )
-    function_template = normalize_workflow_function_template(template)
-    resolved_workflows_dir = workflows_dir or path.parent
     known_refs, known_workflow_ids = discover_known_callable_refs(
-        registry or CapsuleRegistry(),
-        workflows_dir=resolved_workflows_dir,
+        resolved_callable_registry,
+        workflows_dir=workflows_dir or path.parent,
     )
+    if workflow_catalog is not None:
+        known_refs.update(workflow_catalog.known_callable_refs())
+        known_workflow_ids.update(workflow_catalog.known_workflow_ids())
     expanded_workflow_ids = expand_workflow_ids_for_template(
         function_template,
         base_dir=path.parent,
@@ -286,10 +207,19 @@ def validate_clean_workflow_file(
 def validate_clean_workflow_file_strict(
     path: Path,
     *,
-    registry: CapsuleRegistry | None = None,
+    registry: Any | None = None,
+    callable_registry: CallableRegistry | None = None,
+    workflows_dir: Path | None = None,
+    workflow_catalog: WorkflowCatalog | None = None,
 ) -> dict[str, Any]:
-    report = validate_clean_workflow_file(path, registry=registry, dry_run=False)
-    if report.get("status") == "invalid":
+    report = validate_clean_workflow_file(
+        path,
+        registry=registry,
+        callable_registry=callable_registry,
+        workflows_dir=workflows_dir,
+        workflow_catalog=workflow_catalog,
+    )
+    if report.get("status") != "valid":
         errors = report.get("errors") or []
         message = (
             errors[0].get("message", "Workflow validation failed")
@@ -305,12 +235,12 @@ def create_clean_environment_binding(
     workspace: Path,
     out: Path,
 ) -> dict[str, Any]:
-    template = load_clean_workflow_template(workflow_path)
+    template = load_workflow_function_template(workflow_path)
     workspace_root = workspace.expanduser().resolve()
     if not workspace_root.exists() or not workspace_root.is_dir():
         raise AccError(f"Workspace directory not found: {workspace}")
     project_root = Path.cwd().resolve()
-    payload = {
+    payload: dict[str, Any] = {
         "workflow_id": template.id,
         "binding_name": out.stem,
         "workspace_root": str(workspace_root),
@@ -330,7 +260,8 @@ async def run_clean_workflow_template(
     workflow_path: Path,
     run_dir: Path,
     *,
-    registry: CapsuleRegistry | None = None,
+    registry: Any | None = None,
+    callable_registry: CallableRegistry | None = None,
     workspace: Path | None = None,
     binding_path: Path | None = None,
     input_payload: dict[str, Any] | None = None,
@@ -339,770 +270,69 @@ async def run_clean_workflow_template(
     parent_invocation_id: str | None = None,
     parent_scope_frame_id: str | None = None,
     call_depth: int = 0,
-    node_executor: NodeExecutor | None = None,
+    node_executor: Any | None = None,
     should_cancel: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
-    template = load_clean_workflow_template(workflow_path)
-    bundle = build_callable_workflow_bundle(template)
-    binding = load_clean_environment_binding(binding_path) if binding_path is not None else None
-    if binding is not None and binding.workflow_id != template.id:
-        raise AccError(
-            f"Binding workflow_id {binding.workflow_id!r} does not match {template.id!r}"
-        )
-    store = FileSystemWorkflowStore(
-        template=template,
-        workflow_path=workflow_path,
-        run_dir=run_dir,
+    _ = (
+        binding_path,
+        inherited_workspace,
+        inherited_ephemeral,
+        parent_invocation_id,
+        parent_scope_frame_id,
+        call_depth,
+        node_executor,
+    )
+    from acc.app.core_v2_runtime import run_core_v2_workflow_path
+
+    record = await run_core_v2_workflow_path(
+        workflow_path,
+        run_dir,
+        input_payload=input_payload,
         workspace=workspace,
-        binding=binding,
-        inherited_workspace=inherited_workspace,
-        inherited_ephemeral=inherited_ephemeral,
-        parent_invocation_id=parent_invocation_id,
-        parent_scope_frame_id=parent_scope_frame_id,
-        call_depth=call_depth,
-    )
-    return await run_workflow_template_instance(
-        template,
-        workflow_path,
-        store,
-        workflow_input=dict(
-            input_payload or template.metadata.get("legacy_workflow_input", {}) or {}
-        ),
-        node_invocations=bundle.node_invocations,
-        registry=registry,
-        node_executor=node_executor,
         should_cancel=should_cancel,
-    )
-
-
-async def run_legacy_graph_template(
-    workflow_path: Path,
-    run_dir: Path,
-    *,
-    registry: CapsuleRegistry | None = None,
-    workspace: Path | None = None,
-    binding_path: Path | None = None,
-    input_payload: dict[str, Any] | None = None,
-    should_cancel: Callable[[], bool] | None = None,
-) -> dict[str, Any]:
-    template, raw_graph = load_legacy_graph_template(workflow_path)
-    service_registry = registry or CapsuleRegistry()
-    validate_legacy_capsule_references(template, service_registry)
-    template = hydrate_legacy_capsule_permissions(template, service_registry)
-    validate_clean_workflow_template(
-        template,
-        hermetic=not external_agent_execution_enabled(),
-    )
-    bundle = build_callable_workflow_bundle(template)
-    workspace_for_store = workspace
-    if binding_path is not None and workspace_for_store is None:
-        from acc.environment import load_workspace_binding
-
-        workspace_for_store = load_workspace_binding(binding_path).workspace_root
-    store = FileSystemWorkflowStore(
-        template=template,
-        workflow_path=workflow_path,
-        run_dir=run_dir,
-        workspace=workspace_for_store,
-    )
-    workflow_input = dict(raw_graph.get("input", {}) or {})
-    if input_payload is not None:
-        workflow_input.update(input_payload)
-
-    callable_service = None
-    if use_callable_dispatch():
-        from acc.app.invocation import CallableInvocationService
-
-        callable_service = CallableInvocationService(registry=service_registry)
-
-    async def legacy_executor(
-        node: NodeSpec,
-        current_workflow_path: Path,
-        current_run_dir: Path,
-        node_dir: Path,
-        frame: EnvironmentFrame,
-    ) -> dict[str, Any]:
-        return await execute_app_clean_node(
-            node,
-            current_workflow_path,
-            current_run_dir,
-            node_dir,
-            frame,
-            registry=service_registry,
-            node_invocation=bundle.node_invocations[node.id],
-            callable_service=callable_service,
-        )
-
-    result = await run_workflow_template_instance(
-        template,
-        workflow_path,
-        store,
-        workflow_input=workflow_input,
-        legacy_graph=raw_graph,
-        legacy_compatibility=True,
-        node_invocations=bundle.node_invocations,
-        registry=service_registry,
-        node_executor=legacy_executor,
-        should_cancel=should_cancel,
-    )
-    result["format"] = "legacy_graph"
-    result["canonical_format"] = "accflow"
-    result["legacy_compatibility"] = True
-    return result
-
-
-async def run_workflow_template_instance(
-    template: WorkflowTemplate,
-    workflow_path: Path,
-    store: FileSystemWorkflowStore,
-    *,
-    workflow_input: dict[str, Any],
-    legacy_graph: dict[str, Any] | None = None,
-    legacy_compatibility: bool = False,
-    node_invocations: dict[str, NodeInvocationSpec] | None = None,
-    registry: CapsuleRegistry | None = None,
-    node_executor: NodeExecutor | None = None,
-    should_cancel: Callable[[], bool] | None = None,
-) -> dict[str, Any]:
-    if node_invocations is None:
-        node_invocations = build_callable_workflow_bundle(template).node_invocations
-    effective_executor = node_executor
-    if effective_executor is None:
-        callable_service = None
-        if use_callable_dispatch():
-            from acc.app.invocation import CallableInvocationService
-
-            callable_service = CallableInvocationService(registry=registry or CapsuleRegistry())
-
-        async def bound_executor(
-            node: NodeSpec,
-            current_workflow_path: Path,
-            current_run_dir: Path,
-            node_dir: Path,
-            frame: EnvironmentFrame,
-        ) -> dict[str, Any]:
-            return await execute_app_clean_node(
-                node,
-                current_workflow_path,
-                current_run_dir,
-                node_dir,
-                frame,
-                registry=registry,
-                node_invocation=node_invocations[node.id],
-                callable_service=callable_service,
-            )
-
-        effective_executor = bound_executor
-    validate_required_workflow_inputs(template, workflow_input)
-    started_at = utc_now_iso()
-    store.prepare_run_dir()
-    invocation = store.create_function_invocation(
-        input_payload=workflow_input,
-        status="running",
-        started_at=started_at,
-    )
-    frame = store.create_environment_frame(invocation)
-    levels = topological_levels(template)
-    store.write_workflow_event(
-        "workflow_started",
-        status="running",
-        payload={"workflow_id": template.id, "levels": levels},
-    )
-    write_running_workflow_run_summary(store.run_dir, template.id, started_at)
-
-    source_outboxes: dict[str, dict[str, Path]] = {}
-    workflow_input_outboxes = store.write_workflow_input_bundles(workflow_input)
-    for port_id in sorted(template.exposed_inputs):
-        if port_id not in workflow_input_outboxes and template.exposed_inputs[port_id].required:
-            continue
-        if port_id not in workflow_input_outboxes:
-            store.write_workflow_event(
-                "workflow_input_skipped",
-                status="skipped",
-                payload={"port_id": port_id, "reason": "optional input not provided"},
-            )
-    node_results: dict[str, dict[str, Any]] = {}
-    node_outputs: dict[str, dict[str, Any]] = {}
-    materializations: list[dict[str, Any]] = []
-    workflow_outputs: dict[str, dict[str, Any]] = {}
-    write_locks: dict[str, asyncio.Lock] = {frame.environment_id: asyncio.Lock()}
-    max_concurrency = max(1, int(template.policies.get("max_concurrency") or 1))
-    failure_mode = str(template.policies.get("failure_mode") or "fail_fast")
-    workflow_status = "success"
-    errors: list[str] = []
-
-    for level_index, level in enumerate(levels):
-        if should_cancel is not None and should_cancel():
-            workflow_status = "cancelled"
-            errors.append("Workflow run cancelled before scheduling next level")
-            store.write_workflow_event(
-                "workflow_cancelled",
-                status="cancelled",
-                payload={"level": level_index, "reason": "cancel_requested"},
-            )
-            break
-        semaphore = asyncio.Semaphore(max_concurrency)
-        tasks = [
-            run_clean_node(
-                template,
-                template.nodes[node_id],
-                workflow_path,
-                store,
-                frame,
-                level_index,
-                source_outboxes,
-                workflow_input_outboxes,
-                node_outputs,
-                workflow_input,
-                materializations,
-                workflow_outputs,
-                semaphore,
-                write_locks[frame.environment_id],
-                legacy_compatibility=legacy_compatibility,
-                node_invocation=node_invocations[node_id],
-                node_executor=effective_executor,
-            )
-            for node_id in level
-        ]
-        level_results = await asyncio.gather(*tasks)
-        for result in level_results:
-            node_results[result["node_id"]] = result
-            if result["status"] == "success":
-                output_path = result.get("output_path")
-                if output_path:
-                    node_outputs[result["node_id"]] = load_json(Path(output_path))
-                source_outboxes[result["node_id"]] = {
-                    port: Path(path) for port, path in result.get("outboxes", {}).items()
-                }
-            else:
-                workflow_status = workflow_status_after_node_failure(failure_mode)
-                errors.append(str(result.get("error") or result.get("summary")))
-        if workflow_status != "success" and failure_mode != "continue_on_error":
-            break
-        if should_cancel is not None and should_cancel():
-            workflow_status = "cancelled"
-            errors.append("Workflow run cancelled after current level completed")
-            store.write_workflow_event(
-                "workflow_cancelled",
-                status="cancelled",
-                payload={"level": level_index, "reason": "cancel_requested"},
-            )
-            break
-
-    ended_at = utc_now_iso()
-    payload = {
-        "status": workflow_status,
-        "workflow_id": template.id,
-        "run_id": store.run_dir.name,
-        "run_dir": str(store.run_dir),
-        "workflow_run_manifest": str((store.run_dir / "workflow_run_manifest.json").resolve()),
-        "function_invocation_manifest": str(
-            (store.run_dir / "function_invocation_manifest.json").resolve()
+        callable_registry=resolve_callable_registry(
+            callable_registry=callable_registry,
+            registry=registry,
         ),
-        "scope_frame_manifest": str((store.run_dir / "scope_frame_manifest.json").resolve()),
-        "environment_manifest": str(frame.environment_root / "environment_manifest.json"),
-        "event_log": str(store.event_log.resolve()),
-        "topological_levels": levels,
-        "nodes": list(node_results.values()),
-        "materializations": materializations,
-        "workflow_outputs": workflow_outputs,
-        "errors": errors,
-        "started_at": started_at,
-        "ended_at": ended_at,
+    )
+    return {
+        "status": record.status,
+        "workflow_id": record.workflow_function_id,
+        "run_id": record.run_id,
+        "run_dir": str(run_dir.resolve()),
+        "event_log": str(record.event_log_path.resolve()),
+        "result_store_root": str(record.result_store_root.resolve()),
     }
-    if legacy_graph is not None:
-        payload["policy"] = template.policies
-        payload["failure_mode"] = template.policies.get("failure_mode")
-        payload["edges"] = legacy_graph.get("edges", legacy_graph.get("control_edges", []))
-        payload["control_edges"] = legacy_graph.get("control_edges", [])
-        payload["data_edges"] = legacy_graph.get("data_edges", [])
-    store.write_workflow_manifests(frame, payload, started_at, ended_at)
-    if legacy_graph is not None:
-        write_json(store.run_dir / "workflow_graph.json", legacy_graph)
-        write_json(store.run_dir / "workflow_run.json", payload)
-        write_json(store.run_dir / "workflow_summary.json", payload)
-        write_legacy_run_compatibility_files(
-            store.run_dir,
-            workflow_path,
-            template,
-            payload,
-            started_at,
-            ended_at,
-        )
-    else:
-        write_workflow_run_summary_file(store.run_dir, template.id, payload, started_at, ended_at)
-    update_project_run_index(store.run_dir)
-    store.write_workflow_event(
-        workflow_terminal_event_type(workflow_status),
-        status=workflow_status,
-        payload={"errors": errors},
-    )
-    return payload
-
-
-def validate_required_workflow_inputs(
-    template: WorkflowTemplate,
-    workflow_input: dict[str, Any],
-) -> None:
-    missing = [
-        binding.source_port
-        for binding in template.workflow_input_bindings
-        if template.exposed_inputs.get(binding.source_port) is not None
-        and template.exposed_inputs[binding.source_port].required
-        and binding.source_port not in workflow_input
-    ]
-    if missing:
-        raise AccError(f"Missing required workflow input port(s): {', '.join(sorted(missing))}")
-
-
-def write_legacy_run_compatibility_files(
-    run_dir: Path,
-    workflow_path: Path,
-    template: WorkflowTemplate,
-    payload: dict[str, Any],
-    started_at: str,
-    ended_at: str,
-) -> None:
-    manifest_path = run_dir / "workflow_run_manifest.json"
-    manifest = load_json(manifest_path) if manifest_path.exists() else {}
-    if isinstance(manifest, dict):
-        manifest.update(
-            {
-                "graph_path": str(workflow_path),
-                "graph_snapshot_path": str((run_dir / "workflow_graph.json").resolve()),
-                "summary_path": str((run_dir / "workflow_summary.json").resolve()),
-                "node_runs_dir": str((run_dir / "node_runs").resolve()),
-            }
-        )
-        write_json(manifest_path, manifest)
-    node_summaries = [
-        NodeRunSummary(
-            node_id=str(node.get("node_id")),
-            capsule_id=legacy_summary_capsule_id(template, node),
-            status=str(node.get("status") or "failed"),
-            summary=str(node.get("summary") or ""),
-            run_dir=str(node.get("run_dir") or ""),
-            input_path=node.get("input_path"),
-            prompt_path=node.get("prompt_path"),
-            output_path=node.get("output_path"),
-            artifact_dir=node.get("artifact_dir"),
-            event_log=node.get("event_log"),
-            stdout_log=node.get("stdout_log"),
-            stderr_log=node.get("stderr_log"),
-        )
-        for node in payload.get("nodes", [])
-        if isinstance(node, dict)
-    ]
-    summary = RunSummary(
-        run_id=run_dir.name,
-        workflow_id=template.id,
-        status=str(payload.get("status") or "failed"),
-        started_at=started_at,
-        ended_at=ended_at,
-        run_dir=str(run_dir.resolve()),
-        node_count=len(node_summaries),
-        failed_nodes=[node.node_id for node in node_summaries if node.status not in {"success"}],
-        nodes=node_summaries,
-    )
-    write_json(run_dir / "run_summary.json", summary.model_dump())
-
-
-def write_running_workflow_run_summary(run_dir: Path, workflow_id: str, started_at: str) -> None:
-    summary = RunSummary(
-        run_id=run_dir.name,
-        workflow_id=workflow_id,
-        status="running",
-        started_at=started_at,
-        run_dir=str(run_dir.resolve()),
-        node_count=0,
-        failed_nodes=[],
-        nodes=[],
-    )
-    write_json(run_dir / "run_summary.json", summary.model_dump())
-
-
-def write_workflow_run_summary_file(
-    run_dir: Path,
-    workflow_id: str,
-    payload: dict[str, Any],
-    started_at: str,
-    ended_at: str,
-) -> None:
-    node_summaries = [
-        NodeRunSummary(
-            node_id=str(node.get("node_id")),
-            capsule_id=str(node.get("capsule_id") or ""),
-            status=str(node.get("status") or "failed"),
-            summary=str(node.get("summary") or ""),
-            run_dir=str(node.get("run_dir") or ""),
-            input_path=node.get("input_path"),
-            prompt_path=node.get("prompt_path"),
-            output_path=node.get("output_path"),
-            artifact_dir=node.get("artifact_dir"),
-            event_log=node.get("event_log"),
-            stdout_log=node.get("stdout_log"),
-            stderr_log=node.get("stderr_log"),
-            workspace_dir=node.get("workspace_dir"),
-        )
-        for node in payload.get("nodes", [])
-        if isinstance(node, dict)
-    ]
-    summary = RunSummary(
-        run_id=run_dir.name,
-        workflow_id=workflow_id,
-        status=str(payload.get("status") or "failed"),
-        started_at=started_at,
-        ended_at=ended_at,
-        run_dir=str(run_dir.resolve()),
-        node_count=len(node_summaries),
-        failed_nodes=[node.node_id for node in node_summaries if node.status not in {"success"}],
-        nodes=node_summaries,
-    )
-    write_json(run_dir / "run_summary.json", summary.model_dump())
-
-
-def workflow_terminal_event_type(status: str) -> str:
-    if status == "success":
-        return "workflow_completed"
-    if status == "cancelled":
-        return "workflow_cancelled"
-    return "workflow_failed"
-
-
-def legacy_summary_capsule_id(template: WorkflowTemplate, node: dict[str, Any]) -> str:
-    node_id = str(node.get("node_id"))
-    template_node = template.nodes.get(node_id)
-    return str(
-        node.get("capsule_id")
-        or (template_node.raw.get("legacy_capsule_id") if template_node else "")
-        or ""
-    )
-
-
-def validate_legacy_capsule_references(
-    template: WorkflowTemplate,
-    registry: CapsuleRegistry,
-) -> None:
-    for node in template.nodes.values():
-        capsule_id = node.raw.get("legacy_capsule_id")
-        if isinstance(capsule_id, str):
-            registry.get(capsule_id)
-
-
-def external_agent_execution_enabled() -> bool:
-    return os.getenv("ACC_RUN_EXTERNAL_AGENT_TESTS", "").strip().lower() in {"1", "true", "yes"}
-
-
-def hydrate_legacy_capsule_permissions(
-    template: WorkflowTemplate,
-    registry: CapsuleRegistry,
-) -> WorkflowTemplate:
-    nodes: dict[str, NodeSpec] = {}
-    for node_id, node in template.nodes.items():
-        capsule_id = node.raw.get("legacy_capsule_id")
-        if not isinstance(capsule_id, str):
-            nodes[node_id] = node
-            continue
-        capsule = registry.get(capsule_id)
-        permissions = capsule.spec.permissions
-        nodes[node_id] = NodeSpec(
-            id=node.id,
-            kind=node.kind,
-            runtime=node.runtime,
-            tool=node.tool,
-            workflow_ref=node.workflow_ref,
-            prompt=node.prompt,
-            permission_profile=PermissionProfile(
-                workspace_access="writes_workspace" if permissions.write_files else "read_only",
-                network=permissions.network,
-                shell=False,
-                dangerous=permissions.allow_dangerous,
-                env_policy="acc_whitelist",
-                allowed_env=(),
-                timeout_seconds=permissions.timeout_seconds,
-            ),
-            input_ports=node.input_ports,
-            output_ports=node.output_ports,
-            raw=node.raw,
-        )
-    return WorkflowTemplate(
-        id=template.id,
-        version=template.version,
-        nodes=nodes,
-        control_edges=template.control_edges,
-        data_edges=template.data_edges,
-        exposed_inputs=template.exposed_inputs,
-        exposed_outputs=template.exposed_outputs,
-        workflow_input_bindings=template.workflow_input_bindings,
-        workflow_output_bindings=template.workflow_output_bindings,
-        policies=template.policies,
-        metadata=template.metadata,
-        source_path=template.source_path,
-    )
 
 
 def run_clean_workflow_template_sync(
     workflow_path: Path,
     run_dir: Path,
     *,
-    workspace: Path | None = None,
-    binding_path: Path | None = None,
+    registry: Any | None = None,
+    callable_registry: CallableRegistry | None = None,
     input_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return asyncio.run(
         run_clean_workflow_template(
             workflow_path,
             run_dir,
-            workspace=workspace,
-            binding_path=binding_path,
+            registry=registry,
+            callable_registry=callable_registry,
             input_payload=input_payload,
         )
     )
 
 
-async def run_clean_node(
-    template: WorkflowTemplate,
-    node: NodeSpec,
-    workflow_path: Path,
-    store: FileSystemWorkflowStore,
-    frame: EnvironmentFrame,
-    level_index: int,
-    source_outboxes: dict[str, dict[str, Path]],
-    workflow_input_outboxes: dict[str, Path],
-    node_outputs: dict[str, dict[str, Any]],
-    workflow_input: dict[str, Any],
-    materializations: list[dict[str, Any]],
-    workflow_outputs: dict[str, dict[str, Any]],
-    semaphore: asyncio.Semaphore,
-    write_lock: asyncio.Lock,
-    *,
-    legacy_compatibility: bool = False,
-    node_invocation: NodeInvocationSpec | None = None,
-    node_executor: NodeExecutor | None = None,
-) -> dict[str, Any]:
-    invocation = node_invocation or normalize_node_invocation_spec(node)
-    async with semaphore:
-        node_dir = store.create_node_attempt(node.id)
-        store.write_workflow_event(
-            "node_scheduled",
-            node_id=node.id,
-            level=level_index,
-            status="scheduled",
-            payload={"kind": node.kind},
-        )
-        store.write_node_event(node.id, "node_scheduled", status="scheduled")
-        try:
-            node_started_at = utc_now_iso()
-            inbox_records = materialize_clean_inboxes(
-                template,
-                node,
-                store,
-                node_dir,
-                source_outboxes,
-                workflow_input_outboxes,
-                workflow_input,
-                materializations,
-            )
-            upstream_context = collect_upstream_context(
-                template,
-                node,
-                store.run_dir,
-                node_outputs,
-            ) + collect_workflow_input_context(template, node, workflow_input)
-            if is_legacy_capsule_node(node):
-                input_payload = resolve_legacy_node_input(node, workflow_input, node_outputs)
-                fill_legacy_upstream_context_fields(input_payload, node, upstream_context)
-                if node.raw.get("acc_receive_upstream_context") is True:
-                    input_payload["upstream_context"] = upstream_context
-                write_json(node_dir / "input.json", input_payload)
-            else:
-                write_json(
-                    node_dir / "input.json",
-                    build_clean_node_input_payload(
-                        node,
-                        workflow_input,
-                        upstream_context,
-                        inbox_records,
-                    ),
-                )
-            store.write_workflow_event(
-                "inbox_materialized",
-                node_id=node.id,
-                level=level_index,
-                status="inbox_materialized",
-                payload={
-                    "records": inbox_records,
-                    "upstream_context_count": len(upstream_context),
-                },
-            )
-            store.write_node_event(
-                node.id,
-                "inbox_materialized",
-                status="inbox_materialized",
-                payload={
-                    "records": inbox_records,
-                    "upstream_context_count": len(upstream_context),
-                },
-            )
-            result, attempts = await execute_clean_node_with_policy(
-                node,
-                workflow_path,
-                store.run_dir,
-                node_dir,
-                frame,
-                write_lock,
-                node_executor=node_executor or execute_app_clean_node,
-                prepare_attempt=store.cleanup_node_attempt,
-            )
-            outboxes = store.write_artifact_bundle(node, node_dir, result)
-            workflow_call_output_bindings = (
-                invocation.workflow_call_output_bindings if node.kind == "workflow" else []
-            )
-            if workflow_call_output_bindings and isinstance(
-                result.get("child_workflow_run_dir"),
-                str,
-            ):
-                outboxes.update(
-                    store.apply_workflow_call_output_bindings(
-                        node,
-                        node_dir,
-                        Path(result["child_workflow_run_dir"]),
-                        workflow_call_output_bindings,
-                    )
-                )
-            published_outputs = store.publish_workflow_outputs_for_node(node, outboxes)
-            workflow_outputs.update(published_outputs)
-            node_ended_at = utc_now_iso()
-            session_instance = None
-            if node.kind in {"agent", "tool"}:
-                session_instance = store.write_session_instance_manifest(
-                    node=node,
-                    node_dir=node_dir,
-                    frame=frame,
-                    callable_ref=invocation.callable_ref,
-                    status="success",
-                    started_at=node_started_at,
-                    ended_at=node_ended_at,
-                )
-            result_payload = {
-                "node_id": node.id,
-                "capsule_id": str(node.raw.get("legacy_capsule_id") or ""),
-                "kind": node.kind,
-                "status": "success",
-                "summary": result["summary"],
-                "attempts": attempts,
-                "run_dir": str(node_dir.resolve()),
-                "input_path": str((node_dir / "input.json").resolve())
-                if (node_dir / "input.json").exists()
-                else None,
-                "prompt_path": str((node_dir / "resolved_prompt.md").resolve())
-                if (node_dir / "resolved_prompt.md").exists()
-                else None,
-                "output_path": str((node_dir / "output.json").resolve()),
-                "artifact_dir": str((node_dir / "artifacts").resolve()),
-                "event_log": str((node_dir / "events.jsonl").resolve()),
-                "stdout_log": str((node_dir / "stdout.log").resolve())
-                if (node_dir / "stdout.log").exists()
-                else None,
-                "stderr_log": str((node_dir / "stderr.log").resolve())
-                if (node_dir / "stderr.log").exists()
-                else None,
-                "inbox_dir": str((node_dir / "inbox").resolve()),
-                "outboxes": {port: str(path.resolve()) for port, path in outboxes.items()},
-                "workflow_outputs": published_outputs,
-                "invocation_id": frame.function_invocation_id,
-                "scope_frame_id": frame.scope_frame_id,
-            }
-            if session_instance is not None:
-                result_payload["session_id"] = session_instance.session_id
-                result_payload["session_instance_manifest"] = str(
-                    (node_dir / "session_instance_manifest.json").resolve()
-                )
-            store.write_node_manifest(node_dir, result_payload)
-            store.write_workflow_event(
-                "node_completed",
-                node_id=node.id,
-                level=level_index,
-                status="success",
-                payload={"outboxes": sorted(outboxes)},
-            )
-            store.write_node_event(
-                node.id,
-                "node_completed",
-                status="success",
-                payload={"attempts": attempts, "outboxes": sorted(outboxes)},
-            )
-            if legacy_compatibility:
-                mirror_legacy_node_run(node_dir, store.run_dir / "node_runs" / node.id)
-            return result_payload
-        except Exception as exc:  # noqa: BLE001 - keep workflow failure manifest complete.
-            node_ended_at = utc_now_iso()
-            session_instance = None
-            if node.kind in {"agent", "tool"}:
-                session_instance = store.write_session_instance_manifest(
-                    node=node,
-                    node_dir=node_dir,
-                    frame=frame,
-                    callable_ref=invocation.callable_ref,
-                    status="failed",
-                    started_at=locals().get("node_started_at", node_ended_at),
-                    ended_at=node_ended_at,
-                    error=str(exc),
-                )
-            result_payload = {
-                "node_id": node.id,
-                "capsule_id": str(node.raw.get("legacy_capsule_id") or ""),
-                "kind": node.kind,
-                "status": "failed",
-                "summary": f"Node {node.id} failed",
-                "run_dir": str(node_dir.resolve()),
-                "input_path": str((node_dir / "input.json").resolve())
-                if (node_dir / "input.json").exists()
-                else None,
-                "prompt_path": str((node_dir / "resolved_prompt.md").resolve())
-                if (node_dir / "resolved_prompt.md").exists()
-                else None,
-                "event_log": str((node_dir / "events.jsonl").resolve()),
-                "stdout_log": str((node_dir / "stdout.log").resolve())
-                if (node_dir / "stdout.log").exists()
-                else None,
-                "stderr_log": str((node_dir / "stderr.log").resolve())
-                if (node_dir / "stderr.log").exists()
-                else None,
-                "error": str(exc),
-                "invocation_id": frame.function_invocation_id,
-                "scope_frame_id": frame.scope_frame_id,
-            }
-            if session_instance is not None:
-                result_payload["session_id"] = session_instance.session_id
-                result_payload["session_instance_manifest"] = str(
-                    (node_dir / "session_instance_manifest.json").resolve()
-                )
-            store.write_node_manifest(node_dir, result_payload)
-            store.write_workflow_event(
-                "node_failed",
-                node_id=node.id,
-                level=level_index,
-                status="failed",
-                payload={"error": str(exc)},
-            )
-            store.write_node_event(
-                node.id,
-                "node_failed",
-                status="failed",
-                payload={"error": str(exc)},
-            )
-            if legacy_compatibility:
-                mirror_legacy_node_run(node_dir, store.run_dir / "node_runs" / node.id)
-            return result_payload
-
-
-def use_callable_dispatch() -> bool:
-    return os.getenv("ACC_USE_CALLABLE_DISPATCH", "").strip().lower() in {"1", "true", "yes"}
+def external_agent_execution_enabled() -> bool:
+    return os.getenv("ACC_ENABLE_EXTERNAL_AGENT_EXECUTION", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
 
 
 def use_submit_validate() -> bool:
-    """When off, save path keeps legacy validate-only-on-exception behavior."""
     return os.getenv("ACC_ENABLE_SUBMIT_VALIDATE", "").strip().lower() in {
         "1",
         "true",
@@ -1114,345 +344,17 @@ def use_supervisor() -> bool:
     return os.getenv("ACC_ENABLE_SUPERVISOR", "").strip().lower() in {"1", "true", "yes"}
 
 
-async def execute_app_clean_node(
-    node: NodeSpec,
-    workflow_path: Path,
-    run_dir: Path,
-    node_dir: Path,
-    frame: EnvironmentFrame,
-    *,
-    registry: CapsuleRegistry | None = None,
-    node_invocation: NodeInvocationSpec | None = None,
-    callable_service: Any | None = None,
-) -> dict[str, Any]:
-    if use_callable_dispatch():
-        from acc.app.invocation import CallableInvocationService
-
-        service = callable_service or CallableInvocationService(
-            registry=registry or CapsuleRegistry()
-        )
-        return await service.execute_node(
-            node,
-            workflow_path,
-            run_dir,
-            node_dir,
-            frame,
-            node_invocation=node_invocation,
-        )
-    if is_legacy_capsule_node(node):
-        return await execute_legacy_capsule_node(
-            node,
-            workflow_path,
-            run_dir,
-            node_dir,
-            frame,
-            registry=registry,
-        )
-    if node.kind != "workflow":
-        return await execute_clean_node(node, workflow_path, run_dir, node_dir, frame)
-    return await execute_clean_workflow_call_node(
-        node,
-        workflow_path,
-        run_dir,
-        node_dir,
-        frame,
-        registry=registry,
-        node_invocation=node_invocation,
-    )
-
-
-async def execute_clean_workflow_call_node(
-    node: NodeSpec,
-    workflow_path: Path,
-    run_dir: Path,
-    node_dir: Path,
-    frame: EnvironmentFrame,
-    *,
-    registry: CapsuleRegistry | None = None,
-    node_invocation: NodeInvocationSpec | None = None,
-) -> dict[str, Any]:
-    invocation = node_invocation or normalize_node_invocation_spec(node)
-    if node.workflow_ref is None:
-        raise AccError(f"Workflow node {node.id} has no workflow_ref")
-    child_path = (workflow_path.parent / node.workflow_ref).resolve()
-    if not child_path.exists():
-        child_path = Path(node.workflow_ref).resolve()
-    if not child_path.exists():
-        raise AccError(f"Nested workflow not found: {node.workflow_ref}")
-    child_template = load_clean_workflow_template(child_path)
-    validate_workflow_call_contract(
-        invocation,
-        child_template,
-    )
-    nested_result = await run_clean_workflow_template(
-        child_path,
-        node_dir / "nested_workflow",
-        registry=registry,
-        input_payload=build_nested_workflow_input_payload(
-            node,
-            node_dir,
-            child_template,
-            node_invocation=invocation,
-        ),
-        inherited_workspace=frame.workspace_root,
-        inherited_ephemeral=frame.ephemeral,
-        parent_invocation_id=frame.function_invocation_id,
-        parent_scope_frame_id=frame.scope_frame_id,
-        call_depth=frame.call_depth + 1,
-    )
-    status = str(nested_result.get("status"))
-    write_json(
-        node_dir / "workflow_call_manifest.json",
-        workflow_call_manifest_payload(
-            node,
-            parent_invocation_id=frame.function_invocation_id,
-            parent_scope_frame_id=frame.scope_frame_id,
-            nested_result=nested_result,
-            node_invocation=invocation,
-        ),
-    )
-    output = workflow_node_output_payload(node, nested_result, node_invocation=invocation)
-    write_json(node_dir / "output.json", output)
-    if status != "success":
-        raise AccError(output["summary"])
-    return output
-
-
-def workflow_node_output_payload(
-    node: NodeSpec,
-    nested_result: dict[str, Any],
-    *,
-    node_invocation: NodeInvocationSpec | None = None,
-) -> dict[str, Any]:
-    status = str(nested_result.get("status"))
-    summary = f"Nested workflow {nested_result.get('workflow_id')} {status}"
-    fallback = {
-        "status": status,
-        "summary": summary,
-        "child_workflow_id": nested_result.get("workflow_id"),
-        "child_workflow_run_dir": nested_result.get("run_dir"),
-        "child_errors": nested_result.get("errors", []),
-    }
-    if status != "success":
-        return fallback
-
-    child_run_dir_value = nested_result.get("run_dir")
-    if not isinstance(child_run_dir_value, str):
-        return fallback
-    child_run_dir = Path(child_run_dir_value)
-    invocation = node_invocation or normalize_node_invocation_spec(node)
-    bindings = invocation.workflow_call_output_bindings
-    if not bindings:
-        return fallback
-
-    public_outputs: dict[str, Any] = {}
-    for binding in bindings:
-        output_path = child_run_dir / "workflow_outputs" / binding.workflow_output / "output.json"
-        if not output_path.exists():
-            if binding.required:
-                raise AccError(
-                    "Missing child workflow output "
-                    f"{binding.workflow_output!r} for workflow node {node.id}"
-                )
-            continue
-        payload = load_json(output_path)
-        public_outputs[binding.parent_port] = payload
-
-    if len(public_outputs) == 1:
-        only_output = next(iter(public_outputs.values()))
-        output = dict(only_output) if isinstance(only_output, dict) else {"value": only_output}
-        output.setdefault("status", status)
-        output.setdefault("summary", summary)
-        output.setdefault("child_workflow_id", nested_result.get("workflow_id"))
-        output.setdefault("child_workflow_run_dir", nested_result.get("run_dir"))
-        output.setdefault("child_errors", nested_result.get("errors", []))
-        return output
-    if public_outputs:
-        return {
-            **fallback,
-            "workflow_outputs": public_outputs,
-        }
-    return fallback
-
-
-def is_legacy_capsule_node(node: NodeSpec) -> bool:
-    return isinstance(node.raw.get("legacy_capsule_id"), str)
-
-
-async def execute_legacy_capsule_node(
-    node: NodeSpec,
-    workflow_path: Path,
-    run_dir: Path,
-    node_dir: Path,
-    frame: EnvironmentFrame,
-    *,
-    registry: CapsuleRegistry | None = None,
-) -> dict[str, Any]:
-    from acc.environment import (
-        EnvironmentFrame as LegacyEnvironmentFrame,
-    )
-    from acc.environment import (
-        WorkflowExecutionContext,
-        node_cwd,
-        snapshot_behavior_pack,
-    )
-    from acc.runner import CapsuleRunner
-
-    input_payload = load_json(node_dir / "input.json") if (node_dir / "input.json").exists() else {}
-    if node_dir.exists() and not (node_dir / "session_manifest.json").exists():
-        shutil.rmtree(node_dir)
-    legacy_frame = LegacyEnvironmentFrame(
-        environment_id=frame.environment_id,
-        workflow_id=frame.workflow_id,
-        state_mode="stateless" if frame.ephemeral else "stateful",
-        workspace_root=frame.workspace_root,
-        environment_root=frame.environment_root,
-        inbox_root=frame.inbox_root,
-        outbox_root=frame.outbox_root,
-        artifact_root=frame.artifact_root,
-        snapshot_root=(frame.environment_root / ".acc" / "snapshots").resolve(),
-        binding_path=frame.binding_path,
-    )
-    raw_node = dict(node.raw)
-    cwd = node_cwd(legacy_frame, raw_node)
-    behavior_snapshot_dir = legacy_frame.snapshot_root / "behavior_pack" / node.id
-    behavior_manifest = snapshot_behavior_pack(
-        workflow_path,
-        {"id": frame.workflow_id, **dict(node.raw.get("legacy_graph_policy") or {})},
-        cwd,
-        behavior_snapshot_dir,
-    )
-    execution_context = WorkflowExecutionContext(
-        workflow_run_id=f"workflow_{run_dir.name}",
-        environment=legacy_frame,
-        node_id=node.id,
-        cwd=cwd,
-        inbox_dir=frame.inbox_root / node.id,
-        outbox_dir=frame.outbox_root / node.id,
-        behavior_snapshot_dir=behavior_snapshot_dir,
-        extra_env={
-            "ACC_ENVIRONMENT_WORKSPACE": str(frame.workspace_root),
-            "ACC_BEHAVIOR_PACK_EFFECTIVE": str(Path(behavior_manifest["effective_root"])),
-            "ACC_BEHAVIOR_CONFLICTS": str(Path(behavior_manifest["conflict_report"])),
-        },
-    )
-    runner = CapsuleRunner(registry=registry or CapsuleRegistry())
-    conductor_output = await runner.run(
-        str(node.raw["legacy_capsule_id"]),
-        input_payload if isinstance(input_payload, dict) else {},
-        node_dir,
-        execution_context,
-    )
-    status = str(conductor_output.get("status") or "failed")
-    if status != "success":
-        raise AccError(str(conductor_output.get("error") or conductor_output.get("summary")))
-    output_path = conductor_output.get("output_path")
-    if not output_path:
-        raise AccError(f"Legacy capsule node {node.id} did not produce output_path")
-    return load_json(Path(output_path))
-
-
-def resolve_legacy_node_input(
-    node: NodeSpec,
-    workflow_input: dict[str, Any],
-    node_outputs: dict[str, dict[str, Any]],
-) -> dict[str, Any]:
-    context = {
-        "workflow": {"input": workflow_input},
-        "nodes": {node_id: {"output": output} for node_id, output in node_outputs.items()},
-    }
-    static_input = dict(node.raw.get("input", {}) or {})
-    mapped = render_legacy_value(node.raw.get("input_mapping", {}) or {}, context)
-    if not isinstance(mapped, dict):
-        raise AccError(f"Node {node.id} input_mapping must render to an object")
-    result = {**static_input, **mapped}
-    for edge in node.raw.get("legacy_value_edges", []) or []:
-        if not isinstance(edge, dict):
-            continue
-        target = edge.get("to")
-        if not isinstance(target, dict) or "input" not in target:
-            continue
-        result[str(target["input"])] = resolve_legacy_value_edge(edge, context, node_outputs)
-    return result
-
-
-def fill_legacy_upstream_context_fields(
-    input_payload: dict[str, Any],
-    node: NodeSpec,
-    upstream_context: list[dict[str, Any]],
-) -> None:
-    fields = node.raw.get("acc_upstream_context_fields")
-    if not isinstance(fields, list) or not upstream_context:
-        return
-    context_text = json.dumps(upstream_context, ensure_ascii=False, sort_keys=True)
-    for field in fields:
-        if not isinstance(field, str) or not field:
-            continue
-        input_payload[field] = context_text
-
-
-def resolve_legacy_value_edge(
-    edge: dict[str, Any],
-    context: dict[str, Any],
-    node_outputs: dict[str, dict[str, Any]],
-) -> Any:
-    source = edge.get("from")
-    if not isinstance(source, dict):
-        raise AccError("Legacy data edge source must be an object")
-    source_node = str(source.get("node") or "")
-    output = node_outputs.get(source_node)
-    if output is None:
-        if edge.get("required", True):
-            raise AccError(f"Required data edge source {source_node!r} is not available")
-        return None
-    if "output" in source:
-        output_name = str(source["output"])
-        if output_name not in output:
-            raise AccError(f"Data edge source missing output field {output_name!r}")
-        return output[output_name]
-    if "path" in source:
-        return render_legacy_value(str(source["path"]), context)
-    if "artifact" in source:
-        return str(source["artifact"])
-    raise AccError("Legacy data edge source must reference output, path, or artifact")
-
-
-def render_legacy_value(value: Any, context: dict[str, Any]) -> Any:
-    if isinstance(value, str):
-        environment = Environment(undefined=StrictUndefined, autoescape=False)
-        try:
-            return environment.from_string(value).render(**context)
-        except TemplateError as exc:
-            raise AccError(f"Failed to render node input template: {exc}") from exc
-    if isinstance(value, list):
-        return [render_legacy_value(item, context) for item in value]
-    if isinstance(value, dict):
-        return {key: render_legacy_value(item, context) for key, item in value.items()}
-    return value
-
-
-def mirror_legacy_node_run(source: Path, target: Path) -> None:
-    if target.exists():
-        shutil.rmtree(target)
-    if source.exists():
-        shutil.copytree(source, target, ignore=ignore_deep_nested_workflow_dirs)
-
-
-def ignore_deep_nested_workflow_dirs(path: str, names: list[str]) -> set[str]:
-    current = Path(path)
-    if current.name in {"artifacts", "outbox"}:
-        return {"nested_workflow"} if "nested_workflow" in names else set()
-    return set()
-
-
 def workflow_events_payload(run_dir: Path) -> dict[str, Any]:
-    event_log_path = run_dir / "workflow_events.jsonl"
+    event_log_path = run_dir / "events.jsonl"
+    if not event_log_path.exists():
+        historical_event_log = run_dir / "workflow_events.jsonl"
+        if historical_event_log.exists():
+            event_log_path = historical_event_log
     events = []
     if event_log_path.exists():
         for line in event_log_path.read_text(encoding="utf-8").splitlines():
-            if not line.strip():
-                continue
-            events.append(json.loads(line))
+            if line.strip():
+                events.append(json.loads(line))
     return {
         "run_dir": str(run_dir.resolve()),
         "event_log": str(event_log_path.resolve()),

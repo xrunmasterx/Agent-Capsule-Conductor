@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "confidence": {
+      "description": "可信度说明",
+      "type": "string"
+    },
+    "report": {
+      "description": "清理结果",
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "success"
+      ],
+      "type": "string"
+    },
+    "summary": {
+      "description": "摘要",
+      "type": "string"
+    }
+  },
+  "required": [
+    "status",
+    "summary",
+    "report",
+    "confidence"
+  ],
+  "type": "object"
+}

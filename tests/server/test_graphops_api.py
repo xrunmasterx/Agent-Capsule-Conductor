@@ -5,20 +5,24 @@ from pathlib import Path
 
 
 def test_graphops_example_validate_and_dry_run(client, project_root: Path) -> None:
-    graph_path = project_root / "workflows" / "control_plane_demo.graph.json"
+    graph_path = project_root / "workflows" / "control_plane_demo.accflow.json"
     graph_path.write_text(
         json.dumps(
             {
+                "schema_version": "acc.core.v2",
                 "id": "control_plane_demo",
                 "version": "0.1.0",
                 "nodes": [
                     {
                         "id": "start",
-                        "capsule_id": "echo-test.generic",
-                        "input": {"message": "hello graphops"},
+                        "callable_ref": {"kind": "agent_class", "id": "generic_fake_agent"},
+                        "input_bindings": [
+                            {"target_port": "message", "static_value": "hello graphops"}
+                        ],
                     }
                 ],
-                "edges": [],
+                "control_edges": [],
+                "data_edges": [],
             },
             indent=2,
         ),
@@ -33,21 +37,25 @@ def test_graphops_example_validate_and_dry_run(client, project_root: Path) -> No
                 "patch_id": "patch_add_review_node",
                 "author": "browser_e2e",
                 "target_type": "workflow",
-                "target_path": "workflows/control_plane_demo.graph.json",
+                "target_path": "workflows/control_plane_demo.accflow.json",
                 "rationale": "Add a review node after start.",
                 "operations": [
                     {
                         "op": "add_node",
                         "node": {
                             "id": "review",
-                            "capsule_id": "echo-test.generic",
-                            "input": {"message": "review"},
+                            "callable_ref": {
+                                "kind": "agent_class",
+                                "id": "generic_fake_agent",
+                            },
+                            "input_bindings": [
+                                {"target_port": "message", "static_value": "review"}
+                            ],
                         },
                     },
                     {
-                        "op": "connect_nodes",
-                        "from": "start",
-                        "to": "review",
+                        "op": "add_control_edge",
+                        "edge": {"from": "start", "to": "review"},
                     },
                 ],
             },

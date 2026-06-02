@@ -1,5 +1,11 @@
 # 给人看的说明：这次为什么要升级 ACC Workflow Kernel
 
+状态：历史设计说明。本文中的 `Capsule` / `Workflow Capsule` 代表早期“可复用执行资产”的说法；
+当前产品运行时不再以 capsule YAML 或 `CapsuleRunner` 作为主路径。当前等价心智模型是
+`AgentClassTemplate` / `ToolClassTemplate` / `WorkflowFunctionTemplate` 被
+`NodeInvocationSpec` 调用，并在运行时产生 `FunctionInvocation`、`ScopeFrame` 和
+`SessionInstance` 证据。
+
 ## 一句话结论
 
 这次升级的目标是：**让 ACC 不只是“能跑一个 Capsule”，而是能可靠地调度很多 Capsule，并且每个 Capsule 可以是一个已经搭好的 Agent Workflow。**

@@ -120,7 +120,7 @@ export function liveWorkflowRunFromEvents(
 ): WorkflowRunResult {
   const rootNodeIds = new Set(graph.nodes.map((node) => node.id));
   const statusByNode = new Map(graph.nodes.map((node) => [node.id, 'not_run']));
-  const nestedNodeMeta = new Map<string, { nodeId: string; parentNodeId: string; capsuleId: string }>();
+  const nestedNodeMeta = new Map<string, { nodeId: string; parentNodeId: string; callableId: string }>();
   let workflowStatus = events.length ? 'running' : 'not_run';
   for (const event of events) {
     const type = String(event.type || event.event || '');
@@ -136,7 +136,7 @@ export function liveWorkflowRunFromEvents(
         nestedNodeMeta.set(uiNodeId, {
           nodeId: rawNodeId || uiNodeId,
           parentNodeId,
-          capsuleId: typeof event.capsule_id === 'string' ? event.capsule_id : '',
+          callableId: typeof event.callable_id === 'string' ? event.callable_id : '',
         });
       }
       if (type === 'node_scheduled') {
@@ -167,10 +167,10 @@ export function liveWorkflowRunFromEvents(
     nodes: [
       ...graph.nodes.map((node) => ({
         node_id: node.id,
-        capsule_id: node.capsule_id,
+        callable_id: node.callable_ref?.id || '',
         status: statusByNode.get(node.id) || 'not_run',
         run_dir: `${runDir}/nodes/${node.id}`,
-        input_path: `${runDir}/nodes/${node.id}/input.json`,
+        input_path: `${runDir}/nodes/${node.id}/agent_payload.json`,
         prompt_path: `${runDir}/nodes/${node.id}/resolved_prompt.md`,
         output_path: `${runDir}/nodes/${node.id}/output.json`,
         artifact_dir: `${runDir}/nodes/${node.id}/artifacts`,
@@ -183,10 +183,10 @@ export function liveWorkflowRunFromEvents(
         node_id: meta.nodeId,
         ui_node_id: uiNodeId,
         parent_node_id: meta.parentNodeId,
-        capsule_id: meta.capsuleId,
+        callable_id: meta.callableId,
         status: statusByNode.get(uiNodeId) || 'not_run',
         run_dir: `${runDir}/nodes/${meta.parentNodeId}/nested_workflow/nodes/${meta.nodeId}`,
-        input_path: `${runDir}/nodes/${meta.parentNodeId}/nested_workflow/nodes/${meta.nodeId}/input.json`,
+        input_path: `${runDir}/nodes/${meta.parentNodeId}/nested_workflow/nodes/${meta.nodeId}/agent_payload.json`,
         prompt_path: `${runDir}/nodes/${meta.parentNodeId}/nested_workflow/nodes/${meta.nodeId}/resolved_prompt.md`,
         output_path: `${runDir}/nodes/${meta.parentNodeId}/nested_workflow/nodes/${meta.nodeId}/output.json`,
         artifact_dir: `${runDir}/nodes/${meta.parentNodeId}/nested_workflow/nodes/${meta.nodeId}/artifacts`,

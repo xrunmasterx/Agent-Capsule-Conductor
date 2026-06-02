@@ -1,5 +1,10 @@
 # ACC 下一阶段大白话说明
 
+状态：历史路线说明。本文保留当时对 Debugger、Workflow Adapter、Control Plane 和 Browser E2E 的
+阶段拆解，但其中 `Capsule`、`Workflow Capsule`、`list_capsules` 等说法不是当前 Core v2
+callable-only 运行时术语。当前可复用资产应优先理解为 Agent/Tool class template 和
+WorkflowFunctionTemplate。
+
 ## 一句话结论
 
 现在 ACC 已经能跑、能编排、能画图，下一步要把它变成真正“用得舒服”的系统：**能调试、能复用已有 Agent 工作流、能被更上层 Agent 调用，并且能通过浏览器真实操作验证体验。**

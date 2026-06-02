@@ -1,6 +1,6 @@
 {
   "app.workflow": "工作流",
-  "app.capsuleLibrary": "节点库",
+  "app.callableLibrary": "节点库",
   "app.canvas": "画布",
   "app.inspector": "属性面板",
   "action.save": "保存",
@@ -16,3 +16,4 @@
   "status.success": "成功",
   "status.failed": "失败"
 }
+

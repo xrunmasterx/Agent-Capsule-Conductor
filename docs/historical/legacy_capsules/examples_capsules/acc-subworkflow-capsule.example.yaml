@@ -1,0 +1,30 @@
+id: acc-subworkflow-capsule.example
+version: "0.1.0"
+name: ACC Subworkflow Capsule Example
+description: Example acc_workflow capsule that runs a nested ACC graph.
+kind: acc_workflow
+runtime:
+  type: acc_workflow
+workflow:
+  type: acc_graph
+  path: workflow.accflow.json
+workspace:
+  mode: existing_dir
+permissions:
+  sandbox: read-only
+  network: false
+  write_files: true
+  timeout_seconds: 30
+  allow_dangerous: false
+lifecycle:
+  setup:
+    - python scripts/fake_nested_lifecycle.py setup
+  collect:
+    - python scripts/fake_nested_lifecycle.py collect
+  cleanup:
+    - python scripts/fake_nested_lifecycle.py cleanup
+schema:
+  input: input_schema.json
+  output: output_schema.json
+artifacts:
+  manifest: artifact_manifest.yaml

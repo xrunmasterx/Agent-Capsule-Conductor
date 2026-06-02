@@ -19,7 +19,7 @@ def test_graphops_validate_patch_exits_zero() -> None:
 
 
 def test_graphops_dry_run_does_not_mutate_target() -> None:
-    target_path = Path("examples/workflows/demo_level_parallel.graph.json")
+    target_path = Path("examples/workflows/control_plane_demo.accflow.json")
     before = target_path.read_text(encoding="utf-8")
 
     result = CliRunner().invoke(
@@ -31,7 +31,7 @@ def test_graphops_dry_run_does_not_mutate_target() -> None:
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
     assert payload["status"] == "dry_run"
-    assert payload["target_path"] == "examples/workflows/demo_level_parallel.graph.json"
+    assert payload["target_path"] == "examples/workflows/control_plane_demo.accflow.json"
     assert payload["operations"]
     assert before == after
 

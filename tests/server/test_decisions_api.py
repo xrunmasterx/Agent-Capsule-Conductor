@@ -11,7 +11,7 @@ def test_decision_inbox_aggregates_failed_run_and_node(client, project_root: Pat
     failed_run_dir.mkdir(parents=True)
     node = NodeRunSummary(
         node_id="broken_node",
-        capsule_id="echo-test.generic",
+        callable_id="echo-test.generic",
         status="failed",
         summary="boom",
         run_dir=str(failed_run_dir.resolve()),

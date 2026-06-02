@@ -1,0 +1,14 @@
+{
+  "inbox": {
+    "records": []
+  },
+  "input": {},
+  "node": {
+    "id": "subflow",
+    "kind": "workflow"
+  },
+  "upstream_context": [],
+  "workflow": {
+    "input": {}
+  }
+}

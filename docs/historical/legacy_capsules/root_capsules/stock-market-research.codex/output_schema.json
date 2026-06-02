@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "status",
+    "summary",
+    "dossier",
+    "sources",
+    "signal_table",
+    "evidence_gaps",
+    "confidence"
+  ],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["success"]
+    },
+    "summary": {
+      "type": "string"
+    },
+    "dossier": {
+      "type": "string"
+    },
+    "sources": {
+      "type": "string"
+    },
+    "signal_table": {
+      "type": "string"
+    },
+    "evidence_gaps": {
+      "type": "string"
+    },
+    "confidence": {
+      "type": "string",
+      "enum": ["low", "medium", "high"]
+    }
+  },
+  "additionalProperties": false
+}

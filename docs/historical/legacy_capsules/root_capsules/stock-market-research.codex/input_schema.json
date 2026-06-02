@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "market",
+    "as_of_date",
+    "research_mode",
+    "research_question"
+  ],
+  "properties": {
+    "market": {
+      "type": "string"
+    },
+    "as_of_date": {
+      "type": "string"
+    },
+    "research_mode": {
+      "type": "string",
+      "enum": ["news_surface", "sentiment_surface"]
+    },
+    "research_question": {
+      "type": "string"
+    },
+    "freshness_requirements": {
+      "type": "string"
+    },
+    "source_targets": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "output_language": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,5 +1,10 @@
 # ACC 环境化 Workflow 设计：大白话说明
 
+状态：历史设计说明。本文用于解释“workflow 运行需要独立环境边界”的设计动机；当前实现术语以
+Core v2 callable-only 为准：`WorkflowFunctionTemplate` 表达可复用函数体，`ScopeFrame` 表达运行
+scope，`NodeInvocationSpec` 表达节点调用点，`SessionInstance` 表达一次 agent/tool 执行。文中的
+`WorkflowTemplate`、`EnvironmentFrame`、`AgentSessionNode`、`ToolNode` 不应直接视为当前运行时 API。
+
 ## 1. 这次要解决什么问题
 
 你现在发现一个关键点：

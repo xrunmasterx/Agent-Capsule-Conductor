@@ -28,4 +28,5 @@ optional:
     type: patch
     display: optional
     viewer: patch
-    description: Optional code changes produced by the capsule.
+    description: Optional code changes produced by the callable.
+

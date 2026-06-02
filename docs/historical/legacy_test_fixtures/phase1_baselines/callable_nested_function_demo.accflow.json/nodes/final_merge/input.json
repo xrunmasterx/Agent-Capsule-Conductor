@@ -1,0 +1,52 @@
+{
+  "inbox": {
+    "records": [
+      {
+        "direction": "input",
+        "materialization": "copy",
+        "node_id": "final_merge",
+        "port_id": "summary",
+        "source_node_id": "subflow",
+        "source_outbox": "<<RUN_DIR>>\\nodes\\subflow\\outbox\\summary",
+        "source_port_id": "summary",
+        "source_refs": [
+          "subflow_summary"
+        ],
+        "source_session_id": null,
+        "target_inbox": "<<RUN_DIR>>\\nodes\\final_merge\\inbox\\summary\\subflow_summary",
+        "target_node_id": "final_merge",
+        "target_port_id": "summary"
+      }
+    ]
+  },
+  "input": {},
+  "node": {
+    "id": "final_merge",
+    "kind": "tool"
+  },
+  "upstream_context": [
+    {
+      "node_id": "subflow",
+      "output_bytes": 674,
+      "output_inline": {
+        "child_errors": [],
+        "child_workflow_id": "callable_child_function",
+        "child_workflow_run_dir": "<<RUN_DIR>>\\nodes\\subflow\\nested_workflow",
+        "cwd": "<<RUN_DIR>>\\environments\\root_env\\workspace",
+        "inbox_file_count": 3,
+        "prompt": "Read explicit child workflow input from inbox.",
+        "read_from_inbox": true,
+        "read_from_upstream_context": false,
+        "status": "success",
+        "summary": "Fake agent child_agent ran in <<RUN_DIR>>\\environments\\root_env\\workspace",
+        "upstream_context_count": 0
+      },
+      "output_path": "<<RUN_DIR>>\\nodes\\subflow\\output.json",
+      "output_summary": "Fake agent child_agent ran in <<RUN_DIR>>\\environments\\root_env\\workspace",
+      "status": "success"
+    }
+  ],
+  "workflow": {
+    "input": {}
+  }
+}

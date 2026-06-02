@@ -3,13 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import yaml
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
 
-from acc.registry import CapsuleRegistry
+from acc.domain import CORE_V2_SCHEMA_VERSION
+from acc.engine import parse_workflow_function_template, validate_workflow_function_template
 from acc.utils import AccError, load_json
-from acc.workflow_graph import normalize_workflow_graph, validate_graph_semantics
 
 FORBIDDEN_OPERATIONS = {
     "enable_danger_full_access",
@@ -18,6 +17,7 @@ FORBIDDEN_OPERATIONS = {
     "write_secret_files",
     "change_git_remote",
     "remove_schema_validation",
+    "add_artifact_requirement",
 }
 
 
@@ -46,6 +46,8 @@ def validate_patch(patch: dict[str, Any]) -> None:
         raise AccError("GraphOps schema mutations are disabled by default")
     if Path(target_path).name == "output_schema.json":
         raise AccError("GraphOps output schema mutations are disabled by default")
+    if patch["target_type"] == "workflow" and not target_path.endswith(".accflow.json"):
+        raise AccError("GraphOps workflow target must be a canonical .accflow.json file")
 
     for index, operation in enumerate(patch["operations"], start=1):
         op = operation["op"]
@@ -56,6 +58,14 @@ def validate_patch(patch: dict[str, Any]) -> None:
 
 
 def validate_operation_policy(operation: dict[str, Any], index: int) -> None:
+    if contains_legacy_workflow_field(operation):
+        raise AccError(
+            f"GraphOps workflow operation contains legacy field at operations[{index}]"
+        )
+    if operation.get("op") == "connect_nodes":
+        raise AccError("GraphOps connect_nodes is legacy shorthand; use add_control_edge")
+    if operation.get("op") == "update_node_input":
+        raise AccError("GraphOps update_node_input is legacy shorthand; use input_bindings")
     if operation.get("op") == "replace_schema":
         raise AccError("GraphOps schema mutations are disabled by default")
     if contains_value(operation, "danger-full-access"):
@@ -102,6 +112,48 @@ def contains_policy_value(value: Any, key: str, expected: Any) -> bool:
         return any(contains_policy_value(child, key, expected) for child in value.values())
     if isinstance(value, list):
         return any(contains_policy_value(child, key, expected) for child in value)
+    return False
+
+
+def contains_legacy_workflow_field(value: Any) -> bool:
+    allowed_node_fields = {
+        "id",
+        "callable_ref",
+        "ports",
+        "input_bindings",
+        "output_bindings",
+        "workflow_call_input_bindings",
+        "workflow_call_output_bindings",
+        "environment_policy",
+        "invocation_policy",
+        "runtime_policy",
+        "prompt_policy",
+        "artifact_contract",
+        "metadata",
+    }
+    legacy_fields = {
+        "input" + "_mapping",
+        "legacy" + "_value_edges",
+        "binding" + "_mode",
+        "upstream" + "_context",
+        "runtime",
+        "kind",
+        "tool",
+        "workflow_ref",
+    }
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if key == "node" and isinstance(child, dict):
+                return any(node_key not in allowed_node_fields for node_key in child)
+            if key in legacy_fields:
+                return True
+            if key == "callable_ref":
+                continue
+            if contains_legacy_workflow_field(child):
+                return True
+        return False
+    if isinstance(value, list):
+        return any(contains_legacy_workflow_field(child) for child in value)
     return False
 
 
@@ -157,15 +209,15 @@ def preview_operation(operation: dict[str, Any]) -> dict[str, Any]:
     if op == "add_node":
         node = operation.get("node") or {}
         node_id = operation.get("node_id") or node.get("id")
-        capsule_id = operation.get("capsule_id") or node.get("capsule_id")
+        callable_ref = node.get("callable_ref") if isinstance(node, dict) else None
+        callable_label = (
+            f"{callable_ref.get('kind')}:{callable_ref.get('id')}"
+            if isinstance(callable_ref, dict)
+            else "<missing callable_ref>"
+        )
         return {
             "op": op,
-            "description": (f"Would add node {node_id} using capsule {capsule_id}"),
-        }
-    if op == "connect_nodes":
-        return {
-            "op": op,
-            "description": f"Would connect {operation.get('from')} to {operation.get('to')}",
+            "description": f"Would add node {node_id} using {callable_label}",
         }
     if op == "add_control_edge":
         edge = operation.get("edge") or {}
@@ -175,17 +227,14 @@ def preview_operation(operation: dict[str, Any]) -> dict[str, Any]:
         }
     if op == "add_data_edge":
         edge = operation.get("edge") or {}
+        source = edge.get("source") or edge.get("from") or {}
+        target = edge.get("target") or edge.get("to") or {}
         return {
             "op": op,
             "description": (
-                f"Would add data edge {edge.get('from', {}).get('node')} "
-                f"to {edge.get('to', {}).get('node')}"
+                f"Would add data edge {source.get('node')} "
+                f"to {target.get('node')}"
             ),
-        }
-    if op == "update_capsule_prompt":
-        return {
-            "op": op,
-            "description": f"Would update prompt for {operation.get('capsule_id')}",
         }
     return {
         "op": op,
@@ -207,7 +256,7 @@ def semantic_diff_for_patch(patch: dict[str, Any]) -> dict[str, Any]:
     try:
         result = materialize_patch(patch)
         if patch["target_type"] == "workflow":
-            validate_graph_semantics(result, CapsuleRegistry())
+            validate_workflow_function_template(parse_workflow_function_template(result))
     except AccError as exc:
         diff["status"] = "invalid"
         diff["semantic_errors"].append(str(exc))
@@ -218,11 +267,11 @@ def semantic_diff_for_patch(patch: dict[str, Any]) -> dict[str, Any]:
             diff["added_nodes"].append(node_id)
         elif op == "remove_node":
             diff["removed_nodes"].append(operation.get("node_id"))
-        elif op in {"connect_nodes", "add_control_edge", "add_data_edge"}:
+        elif op in {"add_control_edge", "add_data_edge"}:
             edge = operation.get("edge") or operation
             diff["added_edges"].append(edge.get("id") or f"{edge.get('from')}->{edge.get('to')}")
         elif op.startswith("update_"):
-            diff["changed_nodes"].append(operation.get("node_id") or operation.get("capsule_id"))
+            diff["changed_nodes"].append(operation.get("node_id"))
     return diff
 
 
@@ -233,25 +282,26 @@ def materialize_patch(patch: dict[str, Any]) -> dict[str, Any]:
     if target_path.suffix == ".json":
         target = load_json(target_path)
     else:
-        target = yaml.safe_load(target_path.read_text(encoding="utf-8"))
+        raise AccError("GraphOps workflow targets must be JSON Core v2 templates")
     if not isinstance(target, dict):
         raise AccError(f"GraphOps target must be an object: {target_path}")
     if patch["target_type"] != "workflow":
         return target
-    graph = normalize_workflow_graph(target)
+    graph = json_clone(target)
+    if graph.get("schema_version") != CORE_V2_SCHEMA_VERSION:
+        raise AccError("GraphOps workflow target must use schema_version acc.core.v2")
     for operation in patch["operations"]:
         apply_operation_to_graph(graph, operation)
+    validate_workflow_function_template(parse_workflow_function_template(graph))
     return graph
 
 
 def apply_operation_to_graph(graph: dict[str, Any], operation: dict[str, Any]) -> None:
     op = operation["op"]
     if op == "add_node":
-        node = operation.get("node") or {
-            "id": operation.get("node_id"),
-            "capsule_id": operation.get("capsule_id"),
-            "input": operation.get("input", {}),
-        }
+        node = operation.get("node")
+        if not isinstance(node, dict) or not isinstance(node.get("callable_ref"), dict):
+            raise AccError("GraphOps add_node requires a Core v2 node with callable_ref")
         graph.setdefault("nodes", []).append(node)
         return
     if op == "remove_node":
@@ -269,16 +319,6 @@ def apply_operation_to_graph(graph: dict[str, Any], operation: dict[str, Any]) -
             and edge.get("to", {}).get("node") != node_id
         ]
         return
-    if op == "connect_nodes":
-        edge_id = operation.get("edge_id") or f"edge_{operation.get('from')}_{operation.get('to')}"
-        graph.setdefault("control_edges", []).append(
-            {
-                "id": edge_id,
-                "from": operation.get("from"),
-                "to": operation.get("to"),
-            }
-        )
-        return
     if op == "add_control_edge":
         graph.setdefault("control_edges", []).append(operation["edge"])
         return
@@ -286,7 +326,10 @@ def apply_operation_to_graph(graph: dict[str, Any], operation: dict[str, Any]) -
         graph.setdefault("data_edges", []).append(operation["edge"])
         return
     if op == "update_node_input":
-        for node in graph.get("nodes", []):
-            if node.get("id") == operation.get("node_id"):
-                node["input"] = operation.get("input", {})
-                return
+        raise AccError("GraphOps update_node_input is legacy shorthand; use input_bindings")
+
+
+def json_clone(value: dict[str, Any]) -> dict[str, Any]:
+    import json
+
+    return json.loads(json.dumps(value))

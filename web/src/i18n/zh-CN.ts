@@ -1,9 +1,9 @@
 export const zhCN = {
-  appTitle: 'Agent Capsule 工作台',
+  appTitle: 'Agent Callable 工作台',
   appSubtitle: '本地编排与检查',
   apiConnected: 'API 已连接',
   workflow: '工作流',
-  capsuleLibrary: '节点库',
+  callableLibrary: '节点库',
   runs: '运行记录',
   artifacts: '产物',
   controlPlane: '控制平面',
@@ -63,3 +63,4 @@ export const zhCN = {
 };
 
 export type ZhKey = keyof typeof zhCN;
+

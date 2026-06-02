@@ -1,0 +1,25 @@
+id: stock-market-info-cleaner.codex
+version: "0.1.0"
+name: Stock Market Information Cleaner
+description: Codex-backed capsule for deduplicating, verifying, and filtering stock market research evidence.
+kind: agent_session
+runtime:
+  type: codex_cli
+  command: codex
+  args_base:
+    - exec
+workspace:
+  mode: existing_dir
+permissions:
+  sandbox: read-only
+  network: true
+  write_files: false
+  timeout_seconds: 600
+  allow_dangerous: false
+prompt:
+  template: prompt_template.md
+schema:
+  input: input_schema.json
+  output: output_schema.json
+artifacts:
+  manifest: artifact_manifest.yaml

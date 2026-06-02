@@ -9,7 +9,7 @@ from acc.domain import AgentCapabilities
 
 @dataclass(frozen=True)
 class AgentRunRequest:
-    capsule_id: str
+    callable_id: str
     run_dir: Path
     workspace_dir: Path
     prompt_path: Path
@@ -21,6 +21,8 @@ class AgentRunRequest:
     env: dict[str, str] = field(default_factory=dict)
     sandbox: str = "read-only"
     allow_dangerous: bool = False
+    bypass_approvals_and_sandbox: bool = False
+    enable_search: bool = False
     session_id: str = "session_test"
     inbox_dir: Path | None = None
     outbox_dir: Path | None = None
@@ -28,6 +30,8 @@ class AgentRunRequest:
     node_id: str | None = None
     resume_session_id: str | None = None
     requested_capabilities: tuple[str, ...] = ()
+    run_id: str | None = None
+    cancel_path: Path | None = None
 
     @property
     def stdout_log_path(self) -> Path:
@@ -67,7 +71,7 @@ class AgentRunResult:
 
 @dataclass(frozen=True)
 class ResumeRequest:
-    capsule_id: str
+    callable_id: str
     run_dir: Path
     workspace_dir: Path
     external_session_id: str

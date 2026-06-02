@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from collections import deque
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 
 from acc.app.run_projection import build_node_run_projection
+from acc.result_store.filesystem import FilesystemResultStore
+from acc.result_store.types import NodeId, RunId
 from acc.run_index import NodeRunSummary, load_or_rebuild_run_index, load_run_summary_by_id
 from acc.server.context import (
     get_project_root,
@@ -16,6 +20,8 @@ from acc.server.context import (
     reject_secret_like_path,
     relative_project_path,
 )
+from acc.server.run_projection import RunProjection
+from acc.session import utc_now_iso
 from acc.utils import AccError
 
 router = APIRouter(prefix="/runs", tags=["runs"])
@@ -94,13 +100,13 @@ def get_run_events(
         if not run_id.startswith("ui_workflow_"):
             raise
         validate_path_component(run_id, "run_id")
-        event_log = project_root / "runs" / run_id / "workflow_events.jsonl"
+        event_log = project_root / "runs" / run_id / "events.jsonl"
         return {
             "run_id": run_id,
             "event_log": relative_project_path(project_root, event_log),
             "events": [],
         }
-    event_log = run_dir / "workflow_events.jsonl"
+    event_log = run_dir / "events.jsonl"
     return {
         "run_id": run_id,
         "event_log": relative_project_path(project_root, event_log),
@@ -118,17 +124,176 @@ def get_node_events(
     project_root = get_project_root(request)
     run_dir = resolve_run_dir_or_404(run_id, request)
     validate_path_component(node_id, "node_id")
-    event_log = run_dir / "node_runs" / node_id / "events.jsonl"
-    if not event_log.exists():
-        legacy_event_log = run_dir / "nodes" / node_id / "events.jsonl"
-        if legacy_event_log.exists():
-            event_log = legacy_event_log
+    event_log = run_dir / "nodes" / node_id / "events.jsonl"
     return {
         "run_id": run_id,
         "node_id": node_id,
         "event_log": relative_project_path(project_root, event_log),
         "events": read_jsonl_tolerant(event_log, limit=limit),
     }
+
+
+@router.get("/{run_id}/nodes/{node_id}/logs/{stream}")
+def get_node_log_delta(
+    run_id: str,
+    node_id: str,
+    stream: str,
+    request: Request,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(65536, ge=1, le=262144),
+) -> dict[str, Any]:
+    run_dir = resolve_run_dir_or_404(run_id, request)
+    validate_path_component(node_id, "node_id")
+    if stream not in {"stdout", "stderr"}:
+        raise HTTPException(status_code=400, detail=f"Invalid log stream: {stream}")
+    return read_node_log_delta(run_dir, run_id, node_id, stream, offset=offset, limit=limit)
+
+
+@router.get("/{run_id}/stream")
+async def stream_run(run_id: str, request: Request) -> StreamingResponse:
+    run_dir = resolve_run_dir_or_404(run_id, request)
+
+    async def event_source():
+        offsets: dict[tuple[str, str], int] = {}
+        while not await request.is_disconnected():
+            for node_dir in iter_node_dirs(run_dir):
+                node_id = node_dir.name
+                for stream_name in ("stdout", "stderr"):
+                    key = (node_id, stream_name)
+                    delta = read_node_log_delta(
+                        run_dir,
+                        run_id,
+                        node_id,
+                        stream_name,
+                        offset=offsets.get(key, 0),
+                        limit=65536,
+                    )
+                    offsets[key] = int(delta["next_offset"])
+                    if delta["text"]:
+                        payload = {
+                            "type": "node_log_delta",
+                            "run_id": run_id,
+                            "node_id": node_id,
+                            "stream": stream_name,
+                            "offset": delta["offset"],
+                            "next_offset": delta["next_offset"],
+                            "text": delta["text"],
+                            "timestamp": utc_now_iso(),
+                        }
+                        data = json.dumps(payload, ensure_ascii=False)
+                        yield f"event: node_log_delta\ndata: {data}\n\n"
+
+            summary_path = run_dir / "run_summary.json"
+            if summary_path.exists():
+                try:
+                    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+                except json.JSONDecodeError:
+                    summary = None
+                if isinstance(summary, dict) and summary.get("status") in {
+                    "success",
+                    "failed",
+                    "cancelled",
+                    "crashed",
+                }:
+                    payload = {"type": "summary", "run_id": run_id, "summary": summary}
+                    yield f"event: summary\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                    break
+            await asyncio.sleep(0.5)
+
+    return StreamingResponse(event_source(), media_type="text/event-stream")
+
+
+@router.get("/{run_id}/projection/nodes")
+def list_projection_nodes(run_id: str, request: Request) -> dict[str, Any]:
+    run_dir = resolve_run_dir_or_404(run_id, request)
+    projection = _build_run_projection(run_dir)
+    views = projection.list_nodes(RunId(run_id))
+    return {
+        "run_id": run_id,
+        "nodes": [view.to_jsonable() for view in views],
+    }
+
+
+@router.get("/{run_id}/projection/nodes/{node_id}")
+def get_projection_node(run_id: str, node_id: str, request: Request) -> dict[str, Any]:
+    run_dir = resolve_run_dir_or_404(run_id, request)
+    validate_path_component(node_id, "node_id")
+    projection = _build_run_projection(run_dir)
+    view = projection.get_node(RunId(run_id), NodeId(node_id))
+    if view is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No ResultStore record for node: {node_id}",
+        )
+    return view.to_jsonable()
+
+
+@router.get("/{run_id}/projection/outputs/{target_field}")
+def get_projection_workflow_output(
+    run_id: str, target_field: str, request: Request
+) -> dict[str, Any]:
+    run_dir = resolve_run_dir_or_404(run_id, request)
+    validate_path_component(target_field, "target_field")
+    projection = _build_run_projection(run_dir)
+    view = projection.get_workflow_output(RunId(run_id), target_field)
+    if view is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No workflow output for target_field: {target_field}",
+        )
+    return view.to_jsonable()
+
+
+def read_node_log_delta(
+    run_dir: Path,
+    run_id: str,
+    node_id: str,
+    stream: str,
+    *,
+    offset: int,
+    limit: int,
+) -> dict[str, Any]:
+    log_path = run_dir / "nodes" / node_id / f"{stream}.log"
+    if not log_path.exists():
+        return {
+            "type": "node_log_delta",
+            "run_id": run_id,
+            "node_id": node_id,
+            "stream": stream,
+            "offset": offset,
+            "next_offset": offset,
+            "text": "",
+            "eof": True,
+        }
+    size = log_path.stat().st_size
+    safe_offset = min(offset, size)
+    with log_path.open("rb") as file:
+        file.seek(safe_offset)
+        chunk = file.read(min(limit, max(0, size - safe_offset)))
+    return {
+        "type": "node_log_delta",
+        "run_id": run_id,
+        "node_id": node_id,
+        "stream": stream,
+        "offset": safe_offset,
+        "next_offset": safe_offset + len(chunk),
+        "text": chunk.decode("utf-8", errors="replace"),
+        "eof": safe_offset + len(chunk) >= size,
+    }
+
+
+def iter_node_dirs(run_dir: Path) -> list[Path]:
+    nodes_dir = run_dir / "nodes"
+    if not nodes_dir.exists() or not nodes_dir.is_dir():
+        return []
+    return sorted(item for item in nodes_dir.iterdir() if item.is_dir())
+
+
+def _build_run_projection(run_dir: Path) -> RunProjection:
+    return RunProjection(
+        result_store=FilesystemResultStore(run_dir.parent),
+        run_dir=run_dir,
+    )
 
 
 def load_run_or_404(run_id: str, request: Request):
@@ -177,14 +342,14 @@ def read_jsonl_tolerant(path: Path, limit: int = 200) -> list[dict[str, Any]]:
 def read_run_events_with_nested(run_dir: Path, limit: int = 200) -> list[dict[str, Any]]:
     ordered_events: list[tuple[str, int, dict[str, Any]]] = []
     sequence = 0
-    for event in read_jsonl_tolerant(run_dir / "workflow_events.jsonl", limit=limit):
+    for event in read_jsonl_tolerant(run_dir / "events.jsonl", limit=limit):
         ordered_events.append((event_sort_key(event), sequence, event))
         sequence += 1
 
     nodes_dir = run_dir / "nodes"
     if nodes_dir.exists() and nodes_dir.is_dir():
         for node_dir in sorted(item for item in nodes_dir.iterdir() if item.is_dir()):
-            nested_event_log = node_dir / "nested_workflow" / "workflow_events.jsonl"
+            nested_event_log = node_dir / "nested_workflow" / "events.jsonl"
             for event in read_jsonl_tolerant(nested_event_log, limit=limit):
                 nested_event = annotate_nested_event(event, node_dir.name)
                 ordered_events.append((event_sort_key(nested_event), sequence, nested_event))

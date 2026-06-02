@@ -7,6 +7,23 @@
   text-rendering: optimizeLegibility;
 }
 
+.failure-summary-card {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid #f3a6a6;
+  border-radius: 6px;
+  background: #fff4f4;
+  color: #4b1111;
+}
+
+.failure-summary-card p,
+.failure-summary-card small {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -254,6 +271,16 @@ small {
 
 .server-state.ready::before {
   background: #1f8a52;
+}
+
+.server-state.degraded {
+  color: #7a4a04;
+  border-color: #e6c16a;
+  background: #fff7dd;
+}
+
+.server-state.degraded::before {
+  background: #c47a00;
 }
 
 .server-state.error {
@@ -671,6 +698,102 @@ small {
   background: #f7f9fa;
 }
 
+.compact-notice {
+  padding: 10px;
+  font-size: 12px;
+}
+
+.callable-editor-form label,
+.invocation-input-editor label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.callable-editor-form input,
+.callable-editor-form select,
+.callable-editor-form textarea,
+.invocation-input-editor textarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-strong);
+  color: var(--text);
+  padding: 8px 10px;
+  font: inherit;
+}
+
+.callable-editor-form textarea,
+.invocation-input-editor textarea {
+  min-height: 96px;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+}
+
+.invocation-input-editor {
+  display: grid;
+  gap: 10px;
+}
+
+.inline-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.compact-action {
+  min-height: 30px;
+  padding: 5px 9px;
+  font-size: 12px;
+}
+
+.invocation-identity-card {
+  display: grid;
+  grid-template-columns: minmax(88px, auto) minmax(0, 1fr);
+  gap: 6px 10px;
+  margin: 0;
+  padding: 10px;
+  border: 1px solid #c6d0d7;
+  border-radius: 7px;
+  background: #f7fafb;
+  font-size: 12px;
+}
+
+.invocation-identity-card dt {
+  color: #60707d;
+  font-weight: 800;
+}
+
+.invocation-identity-card dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.invocation-identity-card input {
+  width: 100%;
+  border: 1px solid #c6d0d7;
+  border-radius: 5px;
+  padding: 4px 6px;
+  background: #ffffff;
+  color: #24313a;
+  font: inherit;
+}
+
+.danger-action {
+  border-color: rgba(220, 38, 38, 0.6);
+  color: #fecaca;
+}
+
+.run-monitor-stack {
+  display: grid;
+  min-height: 0;
+  gap: 10px;
+}
+
 .editor-panel {
   display: grid;
   gap: 10px;
@@ -822,6 +945,7 @@ small {
 }
 
 .search-box select,
+.search-box input,
 .graph-inspector input,
 .graph-inspector textarea {
   width: 100%;
@@ -833,6 +957,21 @@ small {
 .workflow-list {
   display: grid;
   gap: 8px;
+}
+
+.workflow-resource-entry {
+  display: grid;
+  gap: 6px;
+}
+
+.scope-target-banner {
+  padding: 8px 10px;
+  border: 1px solid #bcd3ec;
+  border-radius: 7px;
+  background: #eef6ff;
+  color: #174d80;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .workflow-list h4 {
@@ -852,7 +991,7 @@ small {
   pointer-events: none;
 }
 
-.capsule-flow-node {
+.callable-flow-node {
   display: grid;
   gap: 6px;
   width: 230px;
@@ -863,25 +1002,25 @@ small {
   box-shadow: 0 8px 22px rgb(24 32 38 / 8%);
 }
 
-.capsule-flow-node.selected {
+.callable-flow-node.selected {
   border-color: #0f766e;
   box-shadow: 0 0 0 2px rgb(15 118 110 / 18%);
 }
 
-.capsule-flow-node header {
+.callable-flow-node header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
 }
 
-.capsule-flow-node strong,
-.capsule-flow-node p,
-.capsule-flow-node small {
+.callable-flow-node strong,
+.callable-flow-node p,
+.callable-flow-node small {
   overflow-wrap: anywhere;
 }
 
-.capsule-flow-node p {
+.callable-flow-node p {
   margin: 0;
   color: #45545f;
   font-size: 13px;
@@ -894,7 +1033,7 @@ small {
   background: #ffffff;
 }
 
-.capsule-flow-node small {
+.callable-flow-node small {
   color: #61707d;
 }
 
@@ -1005,7 +1144,7 @@ small {
   overflow-wrap: anywhere;
 }
 
-.capsule-create-form {
+.callable-create-form {
   max-height: 520px;
   overflow: auto;
   padding: 12px;
@@ -1014,7 +1153,7 @@ small {
   background: #ffffff;
 }
 
-.capsule-create-form label {
+.callable-create-form label {
   display: grid;
   gap: 5px;
   color: #61707d;
@@ -1022,18 +1161,18 @@ small {
   font-weight: 700;
 }
 
-.capsule-create-form input,
-.capsule-create-form select,
-.capsule-create-form textarea {
+.callable-create-form input,
+.callable-create-form select,
+.callable-create-form textarea {
   width: 100%;
 }
 
-.capsule-create-form textarea {
+.callable-create-form textarea {
   min-height: 120px;
   resize: vertical;
 }
 
-.capsule-create-form .compact-textarea {
+.callable-create-form .compact-textarea {
   min-height: 74px;
   font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
   font-size: 12px;
@@ -1639,7 +1778,7 @@ small {
   font-weight: 800;
 }
 
-.capsule-palette-item,
+.callable-palette-item,
 .palette-drag-item {
   display: grid;
   grid-template-columns: 20px minmax(0, 1fr) auto;
@@ -1659,8 +1798,8 @@ small {
   cursor: grab;
 }
 
-.capsule-palette-item strong,
-.capsule-palette-item small {
+.callable-palette-item strong,
+.callable-palette-item small {
   display: block;
   overflow-wrap: anywhere;
 }
@@ -1815,8 +1954,9 @@ small {
 .workflow-container {
   position: relative;
   display: grid;
-  gap: 12px;
-  padding: 34px 14px 14px;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+  padding: 16px;
   border: 1px solid #c5d0d8;
   border-radius: 8px;
   background: #fbfcfd;
@@ -1825,7 +1965,7 @@ small {
 
 .react-flow__node.draggable.dragging .workflow-container,
 .react-flow__node.draggable.dragging .agent-tool-node,
-.react-flow__node.draggable.dragging .workflow-directory-pill {
+.react-flow__node.draggable.dragging .workflow-directory-line {
   box-shadow: none;
 }
 
@@ -1852,7 +1992,23 @@ small {
 
 .workflow-container > .workflow-control-handle.input,
 .workflow-container > .workflow-control-handle.output {
-  top: 72px;
+  top: 78px;
+}
+
+.agent-tool-node > .agent-control-handle {
+  width: 14px;
+  height: 14px;
+  border-color: #ffffff;
+  background: #586675;
+  box-shadow: 0 0 0 3px rgb(79 95 109 / 14%);
+}
+
+.agent-tool-node > .agent-control-handle.input {
+  left: -8px;
+}
+
+.agent-tool-node > .agent-control-handle.output {
+  right: -8px;
 }
 
 .workflow-container.selected {
@@ -1890,75 +2046,98 @@ small {
   box-shadow: 0 0 0 2px rgb(189 52 52 / 18%), 0 10px 24px rgb(25 38 48 / 8%);
 }
 
-.workflow-directory-pill {
-  position: absolute;
-  top: -17px;
-  left: 50%;
-  max-width: calc(100% - 32px);
-  transform: translateX(-50%);
-  display: inline-grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 10px;
-  border: 1px solid #cbd4dc;
-  border-radius: 999px;
-  background: #ffffff;
-  color: #41505c;
-  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
-  font-size: 11px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  box-shadow: 0 6px 14px rgb(25 38 48 / 10%);
-}
-
-.workflow-directory-pill span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.workflow-directory-pill button {
-  display: inline-grid;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: 1px solid #d8dee4;
-  border-radius: 999px;
-  background: #f8fafb;
-  color: #50606d;
-}
-
-.workflow-directory-pill.unbound {
-  color: #766044;
-  border-color: #e5cfaa;
-  background: #fff9ee;
-}
-
 .workflow-container-header {
+  position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: 8px;
-  align-items: center;
-  padding-bottom: 10px;
-  border-bottom: 1px solid #e3e8ec;
+  justify-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 2px 34px 8px;
+  text-align: center;
 }
 
-.workflow-container-header h3,
-.workflow-container-header p {
+.workflow-container-header h3 {
   margin: 0;
 }
 
 .workflow-container-header h3 {
-  font-size: 16px;
+  max-width: 100%;
+  color: #1f2b34;
+  font-size: 15px;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.workflow-container-header p {
+.workflow-directory-line {
+  display: inline-grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
   color: #60707d;
-  font-size: 12px;
-  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.workflow-directory-line span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflow-directory-line button {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #60707d;
+}
+
+.workflow-directory-line button:hover,
+.workflow-directory-line button:focus-visible {
+  background: rgb(96 112 125 / 12%);
+  color: #1f2b34;
+}
+
+.workflow-directory-line.unbound {
+  color: #9b7a39;
+}
+
+.workflow-status-marker {
+  position: absolute;
+  top: 7px;
+  right: 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #9aa6b2;
+  box-shadow: 0 0 0 3px rgb(154 166 178 / 14%);
+}
+
+.workflow-status-marker.success {
+  background: #1f8a52;
+  box-shadow: 0 0 0 3px rgb(31 138 82 / 15%);
+}
+
+.workflow-status-marker.failed,
+.workflow-status-marker.schema_error,
+.workflow-status-marker.artifact_error {
+  background: #bd3434;
+  box-shadow: 0 0 0 3px rgb(189 52 52 / 15%);
+}
+
+.workflow-status-marker.running,
+.workflow-status-marker.scheduled {
+  background: #1d78d6;
+  box-shadow: 0 0 0 3px rgb(29 120 214 / 15%);
 }
 
 .status-dot {
@@ -1991,7 +2170,7 @@ small {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 12px;
-  min-height: 220px;
+  min-height: 0;
   pointer-events: none;
 }
 
@@ -2042,17 +2221,19 @@ small {
 }
 
 .workflow-port-handle {
-  width: 13px;
-  height: 13px;
-  border: 2px solid #ffffff;
+  width: 14px;
+  height: 14px;
+  border: 2px solid #ffffff !important;
+  box-shadow: 0 0 0 2px rgb(29 120 214 / 22%);
+  z-index: 8;
 }
 
 .workflow-port-handle.input {
-  background: #1d78d6;
+  background: #0b84ff !important;
 }
 
 .workflow-port-handle.output {
-  background: #1d78d6;
+  background: #0b84ff !important;
 }
 
 .workflow-port-handle.hidden {
@@ -2060,14 +2241,50 @@ small {
   pointer-events: none;
 }
 
+.agent-tool-node > .workflow-port-handle.input {
+  left: -7px;
+}
+
+.agent-tool-node > .workflow-port-handle.output {
+  right: -7px;
+}
+
+.workflow-port-click-target {
+  position: absolute;
+  z-index: 7;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  cursor: pointer;
+  transform: translateY(-50%);
+}
+
+.workflow-port-click-target.input {
+  left: -23px;
+}
+
+.workflow-port-click-target.output {
+  right: -23px;
+}
+
+.workflow-port-click-target:hover,
+.workflow-port-click-target:focus-visible {
+  outline: 2px solid rgb(29 120 214 / 34%);
+  outline-offset: -5px;
+  background: rgb(29 120 214 / 8%);
+}
+
 .internal-node-grid {
   position: relative;
   min-width: 0;
-  min-height: 202px;
-  padding: 9px;
-  border: 1px solid #e0e6eb;
-  border-radius: 8px;
-  background: #f6f8fa;
+  min-height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   overflow: visible;
 }
 
@@ -2078,7 +2295,7 @@ small {
   gap: 8px;
   align-items: center;
   width: 260px;
-  min-height: 72px;
+  min-height: 128px;
   padding: 10px;
   border: 1px solid #d6dee5;
   border-radius: 7px;
@@ -2087,6 +2304,27 @@ small {
   cursor: grab;
   text-align: left;
   box-shadow: 0 8px 20px rgb(25 38 48 / 8%);
+}
+
+.agent-tool-node.data-ports-visible::before,
+.agent-tool-node.data-ports-visible::after {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  z-index: 0;
+  height: 1px;
+  content: "";
+  pointer-events: none;
+}
+
+.agent-tool-node.data-ports-visible::before {
+  top: 43px;
+  background: linear-gradient(90deg, rgb(88 102 117 / 22%), transparent 28%, transparent 72%, rgb(88 102 117 / 22%));
+}
+
+.agent-tool-node.data-ports-visible::after {
+  top: 88px;
+  background: linear-gradient(90deg, rgb(29 120 214 / 28%), transparent 28%, transparent 72%, rgb(29 120 214 / 28%));
 }
 
 .agent-tool-node.tool {
@@ -2117,6 +2355,14 @@ small {
 .agent-tool-node small {
   color: #60707d;
   font-size: 11px;
+}
+
+.node-scope-badge {
+  display: block;
+  margin-top: 3px;
+  color: #1f6fab;
+  font-size: 10px;
+  font-weight: 800;
 }
 
 .internal-node-card {
@@ -2174,23 +2420,16 @@ small {
   background: #fff6dc;
 }
 
-.empty-internal-node {
-  display: grid;
-  place-items: center;
-  min-height: 120px;
-  color: #60707d;
-  border: 1px dashed #cfd8df;
-  border-radius: 7px;
-}
-
 .workflow-edge-data .react-flow__edge-path {
-  stroke: #aab4bd;
-  stroke-dasharray: 6 6;
+  stroke: #f8fafc;
+  stroke-dasharray: 8 6;
+  stroke-linecap: round;
 }
 
 .workflow-edge-control .react-flow__edge-path {
-  stroke: #303943;
+  stroke: #f8fafc;
   stroke-dasharray: none;
+  stroke-linecap: round;
 }
 
 .react-flow__edge-textbg {
@@ -2271,6 +2510,63 @@ small {
 .edge-summary-row {
   color: #60707d;
   overflow-wrap: anywhere;
+}
+
+.data-connections-panel button {
+  width: fit-content;
+}
+
+.connection-identity-card,
+.data-connect-draft,
+.connection-target-card {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid #cfd8df;
+  border-radius: 7px;
+  background: #f8fafb;
+}
+
+.connection-identity-card small,
+.connection-target-card small {
+  color: #60707d;
+  overflow-wrap: anywhere;
+}
+
+.data-connect-draft {
+  border-color: #9cc8f2;
+  background: #eef7ff;
+}
+
+.data-connect-draft label,
+.inline-port-form {
+  display: grid;
+  gap: 5px;
+}
+
+.data-connect-draft select,
+.inline-port-form input {
+  min-height: 32px;
+  border: 1px solid #cfd8df;
+  border-radius: 6px;
+  padding: 5px 8px;
+  font: inherit;
+}
+
+.connection-target-port {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+  padding-top: 6px;
+}
+
+.connection-target-port button + button {
+  grid-column: 2;
+}
+
+.secondary-action-button {
+  justify-self: start;
 }
 
 .evidence-dock {
@@ -2524,6 +2820,498 @@ small {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(13 23 33 / 0.32);
+}
+
+.modal-panel {
+  width: min(520px, 100%);
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid #cfd8df;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 18px 48px rgb(18 31 44 / 0.2);
+}
+
+.modal-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.modal-title-row h3 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.form-field {
+  display: grid;
+  gap: 6px;
+  color: #2b3b47;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.form-field input {
+  min-width: 0;
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid #cfd8df;
+  border-radius: 6px;
+  font: inherit;
+  font-weight: 500;
+}
+
+.form-error {
+  margin: 0;
+  color: #a33a32;
+  font-size: 13px;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.graph-workbench-v2 {
+  --wb-bg: #050607;
+  --wb-panel: #0c0f12;
+  --wb-panel-strong: #12161a;
+  --wb-node: #111417;
+  --wb-node-muted: #171b20;
+  --wb-border: #242a31;
+  --wb-border-strong: #333b45;
+  --wb-text: #eef4f8;
+  --wb-text-muted: #8f9aa6;
+  --wb-blue: #3f7dff;
+  --wb-cyan: #12b8c9;
+  --wb-green: #00d56f;
+  --wb-purple: #a855f7;
+  --wb-orange: #f59e0b;
+  --wb-red-muted: #7a3030;
+  color: var(--wb-text);
+  background: var(--wb-bg);
+}
+
+.graph-workbench-v2 .workbench-topbar {
+  border-bottom-color: #1d2229;
+  background: #080a0d;
+  color: var(--wb-text);
+}
+
+.graph-workbench-v2 .topbar-kicker,
+.graph-workbench-v2 .topbar-title p,
+.graph-workbench-v2 .navigator-section header span,
+.graph-workbench-v2 .workflow-list h4,
+.graph-workbench-v2 .agent-tool-node p,
+.graph-workbench-v2 .agent-tool-node small,
+.graph-workbench-v2 .internal-node-card p,
+.graph-workbench-v2 .workflow-directory-line,
+.graph-workbench-v2 .workflow-port-node small,
+.graph-workbench-v2 .invocation-identity-card dt {
+  color: var(--wb-text-muted);
+}
+
+.graph-workbench-v2 .toolbar-actions button,
+.graph-workbench-v2 .canvas-toolbar button,
+.graph-workbench-v2 .drawer-title-row button,
+.graph-workbench-v2 .palette-add-action,
+.graph-workbench-v2 .segmented-control button,
+.graph-workbench-v2 .execution-dock button {
+  border-color: var(--wb-border-strong);
+  background: #0c0f12;
+  color: var(--wb-text);
+}
+
+.graph-workbench-v2 .toolbar-actions button:hover,
+.graph-workbench-v2 .canvas-toolbar button:hover,
+.graph-workbench-v2 .drawer-title-row button:hover,
+.graph-workbench-v2 .palette-add-action:hover,
+.graph-workbench-v2 .execution-dock button:hover {
+  border-color: #4c5561;
+  background: #151a20;
+}
+
+.graph-workbench-v2 .toolbar-actions .primary-action,
+.graph-workbench-v2 .execution-dock .run-task-action {
+  border-color: var(--wb-blue);
+  background: var(--wb-blue);
+  color: #ffffff;
+}
+
+.graph-workbench-v2 .toolbar-actions .topbar-run-action {
+  display: none;
+}
+
+.graph-workbench-v2 .workspace-canvas-surface,
+.graph-workbench-v2 .graph-canvas {
+  background:
+    radial-gradient(circle at 18% 14%, rgb(63 125 255 / 5%), transparent 30%),
+    radial-gradient(circle at 75% 20%, rgb(0 213 111 / 4%), transparent 26%),
+    var(--wb-bg);
+}
+
+.graph-workbench-v2 .react-flow {
+  background: transparent;
+}
+
+.graph-workbench-v2 .react-flow__background {
+  opacity: 0.95;
+}
+
+.graph-workbench-v2 .react-flow__background circle {
+  fill: #58606b;
+}
+
+.graph-workbench-v2 .canvas-toolbar {
+  border-color: #242b33;
+  background: rgb(8 10 13 / 88%);
+  color: var(--wb-text);
+  box-shadow: 0 16px 34px rgb(0 0 0 / 32%);
+  backdrop-filter: blur(8px);
+}
+
+.graph-workbench-v2 .mode-pill.data,
+.graph-workbench-v2 .mode-pill.control,
+.graph-workbench-v2 .canvas-toolbar .segmented-control.compact {
+  border-color: #2d3540;
+  background: #101419;
+  color: var(--wb-text-muted);
+}
+
+.graph-workbench-v2 .canvas-toolbar .segmented-control.compact button.active,
+.graph-workbench-v2 .toggle-action.active,
+.graph-workbench-v2 .segmented-control button.active {
+  border-color: #365f98;
+  background: #14243a;
+  color: #dceaff;
+  box-shadow: none;
+}
+
+.graph-workbench-v2 .canvas-drawer {
+  border-color: #232a32;
+  background: #090c0f;
+  box-shadow: 0 28px 64px rgb(0 0 0 / 48%);
+}
+
+.graph-workbench-v2 .canvas-drawer-right {
+  top: 64px;
+  z-index: 40;
+}
+
+.graph-workbench-v2 .drawer-title-row {
+  border-bottom-color: #1f252d;
+  background: #0d1115;
+  color: var(--wb-text);
+}
+
+.graph-workbench-v2 .left-navigator,
+.graph-workbench-v2 .right-inspector {
+  background: #090c0f;
+  color: var(--wb-text);
+}
+
+.graph-workbench-v2 .task-rail {
+  border-color: #242b33;
+  background: rgb(9 12 15 / 90%);
+  color: var(--wb-text);
+  box-shadow: 0 18px 40px rgb(0 0 0 / 38%);
+}
+
+.graph-workbench-v2 .task-rail-new,
+.graph-workbench-v2 .task-rail-item {
+  border-color: #242b33;
+  background: #11151a;
+  color: var(--wb-text);
+}
+
+.graph-workbench-v2 .task-rail-item.active {
+  border-color: #335f8f;
+  background: #101d2c;
+}
+
+.graph-workbench-v2 .task-rail-item.status-running {
+  border-left-color: var(--wb-blue);
+  background: #101d2c;
+}
+
+.graph-workbench-v2 .task-rail-item.status-success {
+  border-left-color: var(--wb-green);
+}
+
+.graph-workbench-v2 .task-rail-item.status-failed {
+  border-left-color: #39414a;
+}
+
+.graph-workbench-v2 .search-box,
+.graph-workbench-v2 .invocation-identity-card,
+.graph-workbench-v2 .inspector-section,
+.graph-workbench-v2 .scope-target-banner,
+.graph-workbench-v2 .compact-notice {
+  border-color: #252c35;
+  background: #101419;
+  color: var(--wb-text);
+}
+
+.graph-workbench-v2 .inspector-section input,
+.graph-workbench-v2 .inspector-section textarea,
+.graph-workbench-v2 .invocation-identity-card input {
+  border-color: #2f3844;
+  background: #080b0e;
+  color: var(--wb-text);
+}
+
+.graph-workbench-v2 .workflow-container,
+.graph-workbench-v2 .agent-tool-node,
+.graph-workbench-v2 .internal-node-card,
+.graph-workbench-v2 .workflow-port-node {
+  border-color: var(--wb-border);
+  background: var(--wb-node);
+  color: var(--wb-text);
+  box-shadow: 0 18px 38px rgb(0 0 0 / 28%);
+}
+
+.graph-workbench-v2 .agent-tool-node.tool {
+  border-color: #28333a;
+  background: #10161a;
+}
+
+.graph-workbench-v2 .workflow-container-header h3 {
+  color: var(--wb-text);
+}
+
+.graph-workbench-v2 .workflow-directory-line button {
+  color: var(--wb-text-muted);
+}
+
+.graph-workbench-v2 .workflow-directory-line button:hover,
+.graph-workbench-v2 .workflow-directory-line button:focus-visible {
+  background: rgb(143 154 166 / 12%);
+  color: var(--wb-text);
+}
+
+.graph-workbench-v2 .workflow-directory-line.unbound {
+  color: #e8c777;
+}
+
+.graph-workbench-v2 .workflow-container.selected,
+.graph-workbench-v2 .agent-tool-node.selected,
+.graph-workbench-v2 .internal-node-card.selected {
+  border-color: var(--wb-blue);
+  box-shadow: 0 0 0 2px rgb(63 125 255 / 34%), 0 18px 38px rgb(0 0 0 / 32%);
+}
+
+.graph-workbench-v2 .workflow-container.status-running,
+.graph-workbench-v2 .workflow-container.status-scheduled,
+.graph-workbench-v2 .agent-tool-node.status-running,
+.graph-workbench-v2 .agent-tool-node.status-scheduled,
+.graph-workbench-v2 .internal-node-card.status-running,
+.graph-workbench-v2 .internal-node-card.status-scheduled {
+  border-color: #2f80ff;
+  box-shadow: 0 0 0 2px rgb(47 128 255 / 22%), 0 18px 38px rgb(0 0 0 / 30%);
+}
+
+.graph-workbench-v2 .workflow-container.status-success,
+.graph-workbench-v2 .agent-tool-node.status-success,
+.graph-workbench-v2 .internal-node-card.status-success {
+  border-color: var(--wb-green);
+  box-shadow:
+    0 0 0 2px rgb(0 213 111 / 38%),
+    0 0 24px rgb(0 213 111 / 24%),
+    0 18px 38px rgb(0 0 0 / 32%);
+}
+
+.graph-workbench-v2 .workflow-container.status-failed,
+.graph-workbench-v2 .workflow-container.status-schema_error,
+.graph-workbench-v2 .workflow-container.status-artifact_error,
+.graph-workbench-v2 .agent-tool-node.status-failed,
+.graph-workbench-v2 .agent-tool-node.status-schema_error,
+.graph-workbench-v2 .agent-tool-node.status-artifact_error,
+.graph-workbench-v2 .internal-node-card.status-failed,
+.graph-workbench-v2 .internal-node-card.status-schema_error,
+.graph-workbench-v2 .internal-node-card.status-artifact_error {
+  border-color: var(--wb-border);
+  box-shadow: 0 18px 38px rgb(0 0 0 / 28%);
+}
+
+.graph-workbench-v2 .status-dot.failed,
+.graph-workbench-v2 .status-dot.schema_error,
+.graph-workbench-v2 .status-dot.artifact_error {
+  background: var(--wb-red-muted);
+  box-shadow: 0 0 0 3px rgb(122 48 48 / 16%);
+}
+
+.graph-workbench-v2 .internal-node-grid,
+.graph-workbench-v2 .workflow-nested-canvas {
+  border-color: transparent;
+  background: transparent;
+}
+
+.graph-workbench-v2 .workflow-edge-control .react-flow__edge-path {
+  stroke: #f8fafc;
+  filter: drop-shadow(0 0 5px rgb(248 250 252 / 28%));
+  stroke-linecap: round;
+}
+
+.graph-workbench-v2 .workflow-edge-data .react-flow__edge-path {
+  stroke: #f8fafc;
+  filter: drop-shadow(0 0 5px rgb(248 250 252 / 28%));
+  stroke-dasharray: 8 6;
+  stroke-linecap: round;
+}
+
+.graph-workbench-v2 .react-flow__edge.selected .react-flow__edge-path {
+  stroke: #fbbf24;
+  filter: drop-shadow(0 0 8px rgb(251 191 36 / 48%));
+}
+
+.graph-workbench-v2 .react-flow__edge-textbg {
+  fill: rgb(8 10 13 / 88%);
+}
+
+.graph-workbench-v2 .react-flow__minimap {
+  right: 18px !important;
+  bottom: 18px !important;
+  border: 1px solid #2a313a;
+  border-radius: 8px;
+  background: rgb(12 15 18 / 90%);
+  box-shadow: 0 18px 40px rgb(0 0 0 / 38%);
+}
+
+.graph-workbench-v2 .react-flow__controls {
+  border: 1px solid #2a313a;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #0c0f12;
+  box-shadow: 0 18px 40px rgb(0 0 0 / 28%);
+}
+
+.graph-workbench-v2 .react-flow__controls-button {
+  border-bottom-color: #242b33;
+  background: #0c0f12;
+  color: var(--wb-text);
+}
+
+.graph-workbench-v2 .execution-dock {
+  top: 12px;
+  right: 16px;
+  bottom: auto;
+  z-index: 80;
+  border-color: #2a313a;
+  background: rgb(8 10 13 / 92%);
+  box-shadow: 0 18px 42px rgb(0 0 0 / 38%);
+  backdrop-filter: blur(10px);
+}
+
+.graph-workbench-v2 .runtime-mode-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid #2a313a;
+  border-radius: 999px;
+  background: #0c1116;
+  color: var(--wb-muted);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.graph-workbench-v2 .execution-dock .run-task-action {
+  background: var(--wb-blue);
+  border-color: var(--wb-blue);
+}
+
+.graph-workbench-v2 .callable-palette-item,
+.graph-workbench-v2 .palette-drag-item,
+.graph-workbench-v2 .workflow-resource-entry .list-item {
+  position: relative;
+  border-color: #252c35;
+  background: #12161a;
+  color: var(--wb-text);
+  overflow: hidden;
+}
+
+.graph-workbench-v2 .callable-palette-item::before,
+.graph-workbench-v2 .palette-drag-item::before,
+.graph-workbench-v2 .workflow-resource-entry .list-item::before {
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 0;
+  width: 4px;
+  border-radius: 0 999px 999px 0;
+  background: #4b5563;
+  content: "";
+}
+
+.graph-workbench-v2 .resource-kind-workflow .list-item::before,
+.graph-workbench-v2 .palette-drag-item::before {
+  background: linear-gradient(180deg, var(--wb-purple), var(--wb-blue));
+}
+
+.graph-workbench-v2 .resource-kind-agent::before {
+  background: linear-gradient(180deg, var(--wb-blue), var(--wb-cyan));
+}
+
+.graph-workbench-v2 .resource-kind-tool::before {
+  background: linear-gradient(180deg, var(--wb-orange), #facc15);
+}
+
+.graph-workbench-v2 .resource-kind-file-source::before {
+  background: linear-gradient(180deg, #14b8a6, #22c55e);
+}
+
+.graph-workbench-v2 .callable-palette-item > svg,
+.graph-workbench-v2 .palette-drag-item > svg {
+  width: 28px;
+  height: 28px;
+  padding: 6px;
+  border-radius: 7px;
+  color: #ffffff;
+}
+
+.graph-workbench-v2 .resource-kind-agent > svg {
+  background: var(--wb-blue);
+}
+
+.graph-workbench-v2 .resource-kind-tool > svg {
+  background: var(--wb-orange);
+}
+
+.graph-workbench-v2 .resource-kind-file-source > svg {
+  background: #14b8a6;
+}
+
+.graph-workbench-v2 .palette-drag-item > svg {
+  background: var(--wb-purple);
+}
+
+.graph-workbench-v2 .workflow-resource-entry .list-item.selected {
+  border-color: #3d6fb3;
+  background: #101d2c;
+}
+
+.graph-workbench-v2 .palette-add-action {
+  background: #0d1318;
+  color: #dceaff;
+}
+
+.graph-workbench-v2 .palette-add-action-secondary {
+  color: var(--wb-text-muted);
+  background: #0b0f13;
 }
 
 @media (max-width: 1180px) {

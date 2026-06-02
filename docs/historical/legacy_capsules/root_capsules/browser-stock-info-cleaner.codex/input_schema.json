@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "news_report": {
+      "description": "消息面原始调研",
+      "type": "string"
+    },
+    "sentiment_report": {
+      "description": "情绪面原始调研",
+      "type": "string"
+    },
+    "task": {
+      "description": "清理任务",
+      "type": "string"
+    }
+  },
+  "required": [
+    "task",
+    "news_report",
+    "sentiment_report"
+  ],
+  "type": "object"
+}

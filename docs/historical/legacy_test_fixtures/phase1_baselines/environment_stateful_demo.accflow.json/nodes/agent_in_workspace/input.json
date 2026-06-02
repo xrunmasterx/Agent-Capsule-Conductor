@@ -1,0 +1,14 @@
+{
+  "inbox": {
+    "records": []
+  },
+  "input": {},
+  "node": {
+    "id": "agent_in_workspace",
+    "kind": "agent"
+  },
+  "upstream_context": [],
+  "workflow": {
+    "input": {}
+  }
+}

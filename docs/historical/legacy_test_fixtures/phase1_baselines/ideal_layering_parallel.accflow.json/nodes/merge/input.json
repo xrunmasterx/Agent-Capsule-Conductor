@@ -1,0 +1,82 @@
+{
+  "inbox": {
+    "records": [
+      {
+        "direction": "input",
+        "materialization": "copy",
+        "node_id": "merge",
+        "port_id": "a",
+        "source_node_id": "branch_a",
+        "source_outbox": "<<RUN_DIR>>\\nodes\\branch_a\\outbox\\main",
+        "source_port_id": "main",
+        "source_refs": [
+          "branch_a_main"
+        ],
+        "source_session_id": "",
+        "target_inbox": "<<RUN_DIR>>\\nodes\\merge\\inbox\\a\\branch_a_main",
+        "target_node_id": "merge",
+        "target_port_id": "a"
+      },
+      {
+        "direction": "input",
+        "materialization": "copy",
+        "node_id": "merge",
+        "port_id": "b",
+        "source_node_id": "branch_b",
+        "source_outbox": "<<RUN_DIR>>\\nodes\\branch_b\\outbox\\main",
+        "source_port_id": "main",
+        "source_refs": [
+          "branch_b_main"
+        ],
+        "source_session_id": "",
+        "target_inbox": "<<RUN_DIR>>\\nodes\\merge\\inbox\\b\\branch_b_main",
+        "target_node_id": "merge",
+        "target_port_id": "b"
+      }
+    ]
+  },
+  "input": {},
+  "node": {
+    "id": "merge",
+    "kind": "tool"
+  },
+  "upstream_context": [
+    {
+      "node_id": "branch_a",
+      "output_bytes": 332,
+      "output_inline": {
+        "cwd": "<<RUN_DIR>>\\environments\\root_env\\workspace",
+        "inbox_file_count": 4,
+        "producer_node_id": "branch_a",
+        "read_from_inbox": true,
+        "read_from_upstream_context": true,
+        "status": "success",
+        "summary": "Produced artifact from branch_a",
+        "upstream_context_count": 1
+      },
+      "output_path": "<<RUN_DIR>>\\nodes\\branch_a\\output.json",
+      "output_summary": "Produced artifact from branch_a",
+      "status": "success"
+    },
+    {
+      "node_id": "branch_b",
+      "output_bytes": 332,
+      "output_inline": {
+        "cwd": "<<RUN_DIR>>\\environments\\root_env\\workspace",
+        "inbox_file_count": 4,
+        "producer_node_id": "branch_b",
+        "read_from_inbox": true,
+        "read_from_upstream_context": true,
+        "status": "success",
+        "summary": "Produced artifact from branch_b",
+        "upstream_context_count": 1
+      },
+      "output_path": "<<RUN_DIR>>\\nodes\\branch_b\\output.json",
+      "output_summary": "Produced artifact from branch_b",
+      "status": "success"
+    }
+  ],
+  "workflow": {
+    "input": {}
+  }
+}

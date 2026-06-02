@@ -1,5 +1,10 @@
 # ACC Clean Core Refactor：大白话说明
 
+状态：历史设计说明。本文保留当时的重构直觉和类比，但术语不是当前产品合同；当前运行时以
+`docs/CURRENT_ARCHITECTURE.md` 的 Core v2 callable-only 模型为准。文中的 `WorkflowTemplate`、
+`EnvironmentFrame`、`AgentSessionNode` 等可对应理解为后来的 `WorkflowFunctionTemplate`、
+`ScopeFrame`、`SessionInstance` / `NodeInvocationSpec`，不要把它们当成当前 API 名称。
+
 ## 一句话说明
 
 这次不是继续堆功能，而是把 ACC 的核心重构成一套更干净、更轻量、更结实的编排内核。

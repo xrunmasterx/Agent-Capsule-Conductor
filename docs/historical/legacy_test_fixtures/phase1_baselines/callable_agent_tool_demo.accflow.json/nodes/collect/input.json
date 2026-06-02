@@ -1,0 +1,14 @@
+{
+  "inbox": {
+    "records": []
+  },
+  "input": {},
+  "node": {
+    "id": "collect",
+    "kind": "tool"
+  },
+  "upstream_context": [],
+  "workflow": {
+    "input": {}
+  }
+}

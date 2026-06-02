@@ -2,29 +2,33 @@
   "patch_id": "add-review-node",
   "author": "example",
   "target_type": "workflow",
-  "target_path": "examples/workflows/demo_level_parallel.graph.json",
+  "target_path": "examples/workflows/control_plane_demo.accflow.json",
   "rationale": "Add a critical review node after merge.",
   "operations": [
     {
       "op": "add_node",
       "node": {
         "id": "critical_review",
-        "capsule_id": "fake-agent.generic",
-        "label": "批判性审查",
-        "input": { "topic": "review merged result" },
-        "position": { "x": 1080, "y": 200 }
+        "callable_ref": { "kind": "agent_class", "id": "generic_fake_agent" },
+        "input_bindings": [
+          { "target_port": "topic", "static_value": "review merged result" }
+        ],
+        "metadata": {
+          "label": "批判性审查",
+          "position": { "x": 1080, "y": 200 }
+        }
       }
     },
     {
       "op": "add_control_edge",
-      "edge": { "id": "c_merge_review", "from": "merge", "to": "critical_review" }
+      "edge": { "id": "c_control_echo_review", "from": "control_echo", "to": "critical_review" }
     },
     {
       "op": "add_data_edge",
       "edge": {
-        "id": "d_merge_review",
-        "from": { "node": "merge", "output": "summary" },
-        "to": { "node": "critical_review", "input": "topic" }
+        "id": "d_control_echo_review",
+        "source": { "node": "control_echo", "port": "main" },
+        "target": { "node": "critical_review", "port": "topic" }
       }
     }
   ]

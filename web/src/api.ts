@@ -1,8 +1,9 @@
 import type {
   ArtifactContent,
   ArtifactList,
-  CapsuleDetail,
-  CapsuleSummary,
+  AgentClassDraft,
+  CallableDetail,
+  CallableSummary,
   GraphOpsExample,
   DecisionInbox,
   NodeRunSummary,
@@ -19,6 +20,8 @@ import type {
   WorkflowSummary,
   InteractionList,
   InteractionRequest,
+  NodeLogDelta,
+  RuntimeConfig,
 } from './types';
 
 async function getJson<T>(path: string): Promise<T> {
@@ -108,6 +111,7 @@ function encodePath(path: string): string {
 
 export const api = {
   health: () => getJson<{ status: string }>('/api/health'),
+  runtimeConfig: () => getJson<RuntimeConfig>('/api/runtime/config'),
   runs: () => getJson<RunIndex>('/api/runs'),
   run: (runId: string) => getJson<RunSummary>(`/api/runs/${encodeURIComponent(runId)}`),
   cancelRun: (runId: string) =>
@@ -126,43 +130,32 @@ export const api = {
     ),
   artifact: (path: string) =>
     getJson<ArtifactContent>(`/api/artifacts/read?path=${encodeURIComponent(path)}`),
-  capsules: () => getJson<{ capsules: CapsuleSummary[] }>('/api/capsules'),
-  capsule: (capsuleId: string) =>
-    getJson<CapsuleDetail>(`/api/capsules/${encodeURIComponent(capsuleId)}`),
-  scaffoldCapsule: (body: unknown) =>
-    sendJson<{ status: string; capsule_id: string }>('POST', '/api/capsules/scaffold', body),
-  deleteCapsule: (capsuleId: string, force = false) =>
-    sendJson<{ status: string; capsule_id: string }>(
-      'DELETE',
-      `/api/capsules/${encodeURIComponent(capsuleId)}${force ? '?force=true' : ''}`,
-    ),
-  capsuleFile: (capsuleId: string, filePath: string) =>
-    getJson<{ capsule_id: string; file: string; path: string; content: string }>(
-      `/api/capsules/${encodeURIComponent(capsuleId)}/files/${encodePath(filePath)}`,
-    ),
-  saveCapsuleFile: (capsuleId: string, filePath: string, content: string) =>
-    sendJson<{ status: string }>(
+  callables: () => getJson<{ callables: CallableSummary[] }>('/api/callables'),
+  callable: (callableId: string) =>
+    getJson<{ callable: CallableDetail }>(`/api/callables/${encodeURIComponent(callableId)}`),
+  createAgentCallable: (draft: AgentClassDraft) =>
+    sendJson<{ status: string; callable: CallableDetail }>('POST', '/api/callables/agents', draft),
+  updateAgentCallable: (callableId: string, draft: AgentClassDraft) =>
+    sendJson<{ status: string; callable: CallableDetail }>(
       'PUT',
-      `/api/capsules/${encodeURIComponent(capsuleId)}/files/${encodePath(filePath)}`,
-      { content },
+      `/api/callables/agents/${encodeURIComponent(callableId)}`,
+      draft,
     ),
-  validateCapsule: (capsuleId: string) =>
-    sendJson<{ status: string; errors?: string[] }>(
-      'POST',
-      `/api/capsules/${encodeURIComponent(capsuleId)}/validate`,
+  deleteAgentCallable: (callableId: string) =>
+    sendJson<{ status: string; id: string }>(
+      'DELETE',
+      `/api/callables/agents/${encodeURIComponent(callableId)}`,
       {},
-    ),
-  testCapsule: (capsuleId: string, body: unknown) =>
-    sendJson<{ status: string; summary?: string }>(
-      'POST',
-      `/api/capsules/${encodeURIComponent(capsuleId)}/test`,
-      body,
     ),
   workflows: () => getJson<{ workflows: WorkflowSummary[] }>('/api/workflows'),
   workflow: (workflowId: string) =>
     getJson<WorkflowDetail>(`/api/workflows/${encodeURIComponent(workflowId)}`),
   saveWorkflow: (graph: WorkflowGraph, force = true) =>
-    sendJson<{ status: string; workflow_id: string }>('POST', '/api/workflows', { graph, force }),
+    sendJson<{ status: string; workflow_id: string; canonical_preview?: Record<string, unknown> }>(
+      'POST',
+      '/api/workflows',
+      { graph, force },
+    ),
   runGraph: (
     graph: WorkflowGraph,
     runDir: string,
@@ -256,6 +249,11 @@ export const api = {
     getJson<{ run_id: string; node_id: string; event_log: string; events: RunEvent[] }>(
       `/api/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/events?limit=${encodeURIComponent(String(limit))}`,
     ),
+  nodeLog: (runId: string, nodeId: string, stream: 'stdout' | 'stderr', offset = 0, limit = 65536) =>
+    getJson<NodeLogDelta>(
+      `/api/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/logs/${encodeURIComponent(stream)}?offset=${encodeURIComponent(String(offset))}&limit=${encodeURIComponent(String(limit))}`,
+    ),
+  runStreamUrl: (runId: string) => `/api/runs/${encodeURIComponent(runId)}/stream`,
   decisions: (limit = 100) =>
     getJson<DecisionInbox>(`/api/decisions?limit=${encodeURIComponent(String(limit))}`),
   replayRun: (runId: string, nodeId?: string) =>

@@ -13,7 +13,7 @@ def test_successful_node_summary_includes_standard_paths(tmp_path: Path) -> None
     summary = build_node_summary(
         run_dir,
         {
-            "capsule_id": "echo-test.generic",
+            "callable_id": "echo-test.generic",
             "session_id": "session_1",
             "input_path": str(run_dir / "input.json"),
             "prompt_path": str(run_dir / "resolved_prompt.md"),
@@ -37,7 +37,7 @@ def test_failed_node_summary_records_error_class(tmp_path: Path) -> None:
 
     summary = build_node_summary(
         run_dir,
-        {"capsule_id": "fake-agent.generic"},
+        {"callable_id": "fake-agent.generic"},
         {"status": "schema_error", "error": "JSON Schema validation failed"},
     )
 
@@ -51,7 +51,7 @@ def test_node_summary_omits_environment_values(tmp_path: Path) -> None:
 
     summary = build_node_summary(
         run_dir,
-        {"capsule_id": "fake-agent.generic"},
+        {"callable_id": "fake-agent.generic"},
         {"status": "adapter_error", "error": "process failed"},
     )
 

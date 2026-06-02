@@ -23,7 +23,6 @@ const consoleErrors = [];
 const networkErrors = [];
 const journeys = [];
 const childProcesses = [];
-const createdCapsuleIds = [];
 
 await fs.mkdir(screenshotsDir, { recursive: true });
 
@@ -133,7 +132,7 @@ function workflowToolbar(page) {
 }
 
 async function workflowNode(page, label) {
-  const locator = page.locator(".capsule-flow-node").filter({ hasText: label }).last();
+  const locator = page.locator(".agent-tool-node").filter({ hasText: label }).last();
   await locator.waitFor();
   return locator;
 }
@@ -254,33 +253,12 @@ try {
     await capture(page, journey, "overview");
   });
 
-  await runJourney("journey_b_create_capsule", "Create capsule", async (journey) => {
-    const capsuleId = `browser-e2e-${Date.now()}.generic`;
-    createdCapsuleIds.push(capsuleId);
+  await runJourney("journey_b_browse_callables", "Browse callables", async (journey) => {
     await navButton(page, "资源").click();
-    const createPanel = page.getByRole("region", { name: "创建 Capsule" });
-    await createPanel.waitFor();
-    await page.getByLabel("Capsule 类型").selectOption("generic_cli");
-    await createPanel.getByRole("button", { name: "基本信息" }).click();
-    await page.getByLabel("新 Capsule id").fill(capsuleId);
-    await page.getByLabel("新 Capsule 名称").fill("Browser E2E Capsule");
-    await createPanel.getByRole("button", { name: "创建并校验", exact: true }).click();
-    await page.getByText(new RegExp(`已创建并校验 ${capsuleId}:`)).first().waitFor({ timeout: 20000 });
-    await page.getByRole("button", { name: "高级设置 / 原始文件" }).click();
-    await page.getByText("Capsule 编辑器").waitFor();
-    await page.getByRole("button", { name: "校验", exact: true }).click();
-    await page.getByRole("button", { name: "测试", exact: true }).click();
-    await page
-      .locator(".notice")
-      .filter({ hasText: new RegExp(`测试 ${capsuleId}: success`) })
-      .first()
-      .waitFor({ timeout: 20000 });
-    appendStep(journey, "创建并测试 Capsule", "pass", capsuleId);
-    journey.fixes_applied.push({
-      summary: "测试按钮不再依赖当前编辑器正好选中 examples/input.json，会自动读取示例输入。",
-      retest_status: "pass",
-    });
-    await capture(page, journey, "capsule_created");
+    await page.getByRole("region", { name: "Callable 资源库" }).waitFor();
+    await page.getByText("AgentClassTemplate / ToolClassTemplate").waitFor();
+    appendStep(journey, "浏览 Callable 资源库", "pass", "只读查看 AgentClassTemplate / ToolClassTemplate");
+    await capture(page, journey, "callables_browsed");
   });
 
   await runJourney("journey_c_two_node_workflow", "Two node workflow", async (journey) => {
@@ -362,18 +340,6 @@ try {
 
   await browser.close();
 } finally {
-  for (const capsuleId of createdCapsuleIds) {
-    try {
-      const response = await fetch(`${apiBaseUrl}/api/capsules/${encodeURIComponent(capsuleId)}?force=true`, {
-        method: "DELETE",
-      });
-      if (!response.ok) {
-        throw new Error(`Failed to delete capsule ${capsuleId}: ${response.status}`);
-      }
-    } catch {
-      await fs.rm(path.join(repoRoot, "capsules", capsuleId), { recursive: true, force: true });
-    }
-  }
   await fs.writeFile(consoleLogPath, `${consoleErrors.join("\n")}\n`, "utf-8");
   await fs.writeFile(networkLogPath, `${networkErrors.join("\n")}\n`, "utf-8");
   const report = {

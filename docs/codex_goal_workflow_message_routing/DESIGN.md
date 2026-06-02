@@ -191,6 +191,7 @@
   - `upstream_lineage[]`：从根向下的因果链。
   - `materialization_mode_resolved`：实际选定的物化模式。
   - `producer_session_id / frame_id / parent_frame_id / call_depth`。
+  - `invoking_workflow_call_id`：Phase 1 新增；当节点由嵌套 workflow_call 触发时记录该 call 的唯一 id，便于追踪嵌套 lineage（参见 §15 Q-table 内部演进策略；交叉引用 AUDIT C-003 / O-006 / MN-008 / STRATEGY identity primitives）。
   - **完整性哈希**分两类，分别记录、不交叠：
     - `inline_value_sha256`：仅在 binding `materialization=copy` 且把字段值序列化进 `input.json` 时记录，对序列化后的字节流取 sha256；
     - `source_artifact_sha256`：在 binding 引用上游产物（`reference / symlink` 模式或 outbox 引用）时记录，**直接复用** `artifact_bundle.json.files[*].sha256`（`acc/store/__init__.py:864-877` 已有），不重新计算；多文件 outbox 端口引用时记录每个文件 sha256 数组，避免对整目录做不稳定的全量哈希。
@@ -203,7 +204,7 @@
 ### 7.3 三档可见性（详见 §10）
 
 - **默认 agent-visible**：`input.bindings_resolved` / `workflow.input` / `inbox.records` 中显式声明的字段。
-- **可显式 opt-in 的 agent-visible**：`upstream_context`（仅当 `acc_receive_upstream_context=true`）、`ProvenanceSummary`（仅当 `acc_expose_provenance=true`）、单值 metadata 列表 `acc_expose_workflow_metadata=[...]`（**字段级白名单替代旧版 bool 开关**，例如 `["run_id","upstream_node_ids"]`，未列字段一律不进）。
+- **可显式 opt-in 的 agent-visible**：`upstream_context`（仅当 `acc_receive_upstream_context=true`）、ProvenanceSummary（通过 Workbench inspector projection 暴露，无 agent-visible opt-in 路径）、单值 metadata 列表 `acc_expose_workflow_metadata=[...]`（**字段级白名单替代旧版 bool 开关**，例如 `["run_id","upstream_node_ids"]`，未列字段一律不进）。
 - **永远 runtime-only**：`bundle_id` / `producer_session_id` / `events.jsonl` 流 / `__acc_control_context` 透传标记 / RunIndex 全局聚合元数据。
 
 ### 7.4 Render_prompt 重构（Phase 2 核心改动）
@@ -317,10 +318,11 @@ opt-in 一律采用**字段级白名单**而非 bool 总开关，以贯彻最小
 |---|---|---|
 | `upstream_context` | `acc_receive_upstream_context=true` | 仅写入 input.json |
 | upstream_context 字段白名单 | `acc_upstream_context_fields=[...]` | 不再全量，限定字段集 |
-| `ProvenanceSummary` | `acc_expose_provenance=true` | 摘要含 source_node/source_port/materialization_mode |
 | `upstream_context` 进 prompt | `acc_expose_upstream_context=true` | 与 input.json 注入解耦，模板侧另一开关 |
 | 单值 metadata 列表（精细） | `acc_expose_workflow_metadata=[...]` | **替代旧版 bool 总开关**；列出要暴露的子字段，例如 `["run_id","node_id","upstream_node_ids"]`；未列字段一律不进 |
 | 上游节点的 `output_summary / output_inline` | binding 中 `source_port + field_path` 显式选取 | 不再默认整 dict 追加到 prompt 末尾 |
+
+> Provenance fields are runtime-only and have no agent-visible opt-in path; use ProvenanceSummary only via the Workbench inspector projection.
 
 > ENV 现状：`acc/adapters/codex_cli.py:23-31` 当前仅透出 `ACC_INBOX_DIR / ACC_OUTBOX_DIR / ACC_ENVIRONMENT_ID / ACC_NODE_ID`。`ACC_RUN_ID / ACC_RUN_DIR` 在本设计中尚未存在，将在 Phase 1 交付物里补齐（见 §13 Phase 1）。在 ENV 透出前，opt-in 表中的 `run_id` 仅经 `input.json` 注入。
 
@@ -348,6 +350,23 @@ opt-in 一律采用**字段级白名单**而非 bool 总开关，以贯彻最小
 - `WorkbenchRunManager` 已通过独立 `runs/<run_id>` 子目录树实现物理隔离（`acc/server/run_manager.py:36-52`）。
 - 设计补强：BindingResolver 在 Phase 1 加运行时断言——任何对兄弟 run 的 outbox/inbox 直接读取 fail-fast；`acc/store` + `acc/debugger` 中所有读路径在 Phase 1 审计阶段标记 `run_id` 边界。
 - `events.jsonl` 仅写本 run，禁止跨 run 合并。
+
+#### 11.1.1 并发上限与 over-limit 行为（决策）
+
+```
+max_concurrent_nodes_per_run = 16
+max_total_nodes_per_run     = 1000
+max_active_runs              = 8
+
+over-limit:
+  max_concurrent_nodes_per_run → asyncio.Semaphore queue (FIFO)
+  max_total_nodes_per_run      → fail-fast at graph compile (NodeCountExceeded)
+  max_active_runs              → submission rejected (HTTP 429-equivalent)
+
+constants live in acc/policy.py:DEFAULT_CONCURRENCY_LIMITS
+```
+
+`acc/policy.py:DEFAULT_CONCURRENCY_LIMITS` 是上述三个常量的 single source of truth；STRATEGY R-6、TEST_PLAN T-070、AUDIT P-005 等下游引用必须从此常量取值，不得再单独 inline 数字。
 
 ### 11.2 显式 checkpoint 与 pause/resume
 
@@ -419,7 +438,7 @@ opt-in 一律采用**字段级白名单**而非 bool 总开关，以贯彻最小
 **目标**：把现有底座中分散的 binding/provenance 证据统一为可被未来抽象消费的结构化对象，所有变更在 mixed mode 下与现行行为完全等价。
 
 **交付物**：
-- 新增 `acc/provenance.py`，定义 ProvenanceObject（`binding_applied` / `upstream_lineage` / `materialization_mode_resolved` / `producer_session_id` / `frame_id` / `call_depth` / `inline_value_sha256` / `source_artifact_sha256`）。
+- 新增 `acc/provenance.py`，定义 ProvenanceObject（`binding_applied` / `upstream_lineage` / `materialization_mode_resolved` / `producer_session_id` / `frame_id` / `parent_frame_id` / `call_depth` / `invoking_workflow_call_id` / `inline_value_sha256` / `source_artifact_sha256`）。其中 `invoking_workflow_call_id` 用于在嵌套 workflow_call 触发节点时记录该 call 的唯一 id，便于跨子-父 workflow 的 lineage 追踪（交叉引用 AUDIT C-003 / O-006 / MN-008 / STRATEGY identity primitives）。
 - ArtifactBundle.provenance 字段升级为 ProvenanceObject（保留 dict 形态作 fallback，兼容旧持久化，对应 `acc/domain.py:142-151`）。NodeResult / ProvenanceObject 内所有路径字段统一存**相对 `run_dir`** 的相对路径，绝对路径只在 ENV 透出时现算。
 - `acc/store` + `acc/port_io` 的 binding resolution 调用统一通过新增的 BindingResolver 入口（适配器层，不动现有路径）。
 - `run_manifest.json` 增加 `completed_nodes / binding_materializations` checkpoint 字段，写入侧补齐。
@@ -478,6 +497,8 @@ opt-in 一律采用**字段级白名单**而非 bool 总开关，以贯彻最小
 
 ## 14. 验收标准与测试建议
 
+> **AC index header**（由 STRATEGY / TEST_PLAN / AUDIT 共同 import）：本章为 AC1–AC18 的唯一 source of truth；STRATEGY 的 R-* 索引、TEST_PLAN 的 `T_AC<n>` marker、AUDIT 的 C-* cross-ref 必须以本章编号为准。新增 AC 时务必同步更新引用文档。
+
 以下条目均为可验证不变量，每条都能落到独立测试用例。
 
 ### AC1 — Control edge 仅 readiness
@@ -529,6 +550,10 @@ opt-in 一律采用**字段级白名单**而非 bool 总开关，以贯彻最小
 - **断言**：legacy 全量传递行为测试单独打 `@pytest.mark.legacy` 标签并隔离；新增 explicit-binding 测试矩阵覆盖"仅可见声明字段""未声明字段不可见""pause/resume 不串 run"等核心不变量。
 - **测试形态**：CI 配置审计——legacy lane 与主 lane 独立可运行；主 lane 包含至少 AC1/AC2/AC4/AC5/AC6/AC8/AC9 测试。
 
+### AC18 — Nested workflow boundary isolation
+- **断言**：`WorkflowCallInputBinding / WorkflowCallOutputBinding` 必须不传播 parent 的 `upstream_context / __acc_control_context / 任何未显式 binding 字段` 进入嵌套调用；`WorkflowCallOutputBinding` 同样限制可跨边界返回的字段——只有显式 binding 列出的 source_port / field_path 才能跨子-父 workflow 边界。
+- **测试形态**：构造 parent → child 嵌套 workflow，parent 节点声明 `acc_receive_upstream_context=true` 并产生非平凡 `upstream_context / __acc_control_context`；assert child workflow 内部首节点的 `agent_payload / input.json / resolved_prompt.md` 中不出现 parent 的 `upstream_context / __acc_control_context` 与任何未在 `WorkflowCallInputBinding` 中显式列出的字段；反向构造 child 出参，assert 仅 `WorkflowCallOutputBinding` 显式列出的 port/field 被父 workflow 可见。
+
 ### AC13 — ArtifactBundle 含结构化 Provenance
 - **断言**：ArtifactBundle 必须包含结构化 ProvenanceObject（带 schema 的 dataclass / Pydantic 模型），至少记录 `binding_applied / upstream_lineage / materialization_mode_resolved`，可被持久化但默认不进入 agent 输入。
 - **测试形态**：序列化/反序列化往返测试；assert 字段缺失时 schema 校验 fail。
@@ -553,12 +578,35 @@ opt-in 一律采用**字段级白名单**而非 bool 总开关，以贯彻最小
 
 ## 15. 仍需用户确认的问题
 
+### 15.0 决议状态总表 (per-Q resolution)
+
+| Q | Status | Phase | One-line rationale |
+|---|--------|-------|--------------------|
+| Q1 | decided | 3 | Phase 3 翻转后 upstream_context 保留为 legacy 兼容/调试通道，不再彻底退役。 |
+| Q2 | decided | 3 | ProvenanceObject 仅作 ACC 内部数据结构，无 agent-visible opt-in 路径（P-015）。 |
+| Q3 | deferred-with-rationale | 4 | 内置 `aggregation` capsule 类型推迟到 Phase 4 评估；先靠用户 capsule + `workflow_output_bindings` 表达。 |
+| Q4 | decided | 3 | `binding_mode` 粒度落在 workflow 级，避免节点级混合带来的迁移复杂度。 |
+| Q5 | decided | 3 | render_prompt 改造通过 capsule 级 `prompt_appendix_policy` 兜底，避免一次性破坏现网。 |
+| Q6 | decided | 3 | ProvenanceSummary 仅通过 Workbench inspector projection 暴露（P-015），无 Phase 2/3 fork。 |
+| Q7 | deferred-with-rationale | 4 | data_edge 多 source（fan-in concat/merge）合并语义与冲突处理留待 Phase 4 决议。 |
+| Q8 | partial-with-rationale | 3 | nested workflow 边界由 AC18 + `invoking_workflow_call_id` 收敛核心字段；ProvenanceSummary 继承策略部分决议。 |
+| Q9 | decided | 3 | pause/resume 以 `run_manifest` checkpoint 为唯一真理源，outbox 缺失但 status=completed 时重跑。 |
+| Q10 | decided | 3 | reference 物化在 Windows 普通用户态自动降级为 copy，并 emit `materialization_degraded` 事件。 |
+| Q11 | decided | 3 | 测试三层分层：`@legacy` lane 独立运行，不阻断主 lane。 |
+| Q12 | deferred-with-rationale | 4 | standalone 路径将用户输入 wrap 为 `task` 子键以追求结构同构，留待 Phase 4 评估。 |
+| Q13 | decided | 3 | selector 一次性统一为 `field:.path / outbox:port / artifact:path / each_of:<node>.<path>` 规范。 |
+| Q14 | decided | 3 | `each_of:<for_each_node_id>.<field_path>` fan-in selector 在 Phase 3 进入一等公民。 |
+| Q15 | partial-with-rationale | 3 | 多文件 outbox 引用记录每个文件 sha256 数组（复用 artifact_bundle.json）；目录级聚合策略仍可演进。 |
+| Q16 | partial-with-rationale | 3 | `materialization_degraded` 已写 `events.jsonl` + inspector 渲染；是否同时落 `binding_manifest.json` 待确认。 |
+
+下文逐条展开理由；状态权威来源：AUDIT §6.2。
+
 1. **upstream_context 的最终归宿**：Phase 3 翻转默认为 opt-in 后是否彻底退役，还是永久保留作为兼容/调试通道？需要用户对兼容窗口长度拍板。
-2. **ProvenanceObject 是否需要稳定的对外 schema**：是否被外部工具、CI 流水线消费？还是仅作为 ACC 内部数据结构、可自由演进？此决定直接影响字段命名与版本治理策略。
+2. **ProvenanceObject 是否需要稳定的对外 schema** *(decided per P-015: provenance is runtime-only; no agent-visible opt-in path; ProvenanceSummary surfaces only via Workbench inspector projection)*：是否被外部工具、CI 流水线消费？还是仅作为 ACC 内部数据结构、可自由演进？此决定直接影响字段命名与版本治理策略。
 3. **Final summary 由 aggregation 节点产生（AC7）**：是否需要 ACC 提供一个内置的 `aggregation` capsule 类型，还是完全留给用户自己写 capsule + `workflow_output_bindings`？
 4. **`binding_mode` 的粒度选择**：放在 workflow 级还是节点级？粒度选择会显著影响 mixed 阶段的复杂度与迁移工作量。
 5. **render_prompt 的破坏性改造**：是否需要给 capsule 作者一个迁移期 flag（`acc_legacy_prompt_appendix=true`），还是一次性切换？现有 prompt 模板对"自动追加 JSON 块"的依赖范围需要先做模板审计。
-6. **UI 透明度上线节奏**：Phase 2 就支持 ProvenanceSummary toggle，还是延后到 Phase 3 与 default 翻转一起上线？取决于发布节奏与设计资源。
+6. **UI 透明度上线节奏** *(decided per P-015: ProvenanceSummary toggle ships with Workbench inspector projection only; no agent-visible opt-in path is offered, so the design has no Phase 2-vs-Phase 3 fork on this dimension)*：Phase 2 就支持 ProvenanceSummary toggle，还是延后到 Phase 3 与 default 翻转一起上线？取决于发布节奏与设计资源。
 7. **同一 data_edge 是否允许多 source（fan-in concat / merge）**：现有 schema 未明确（`schemas/workflow_graph_v3_schema.json:58-105`）；如果允许，需要定义合并语义与冲突处理。
 8. **Nested workflow 的 ProvenanceSummary 继承**：子 workflow 内部节点是否要继承父 frame 的 ProvenanceSummary，还是必须由子 workflow 显式重新声明？
 9. **Pause/resume 异常恢复策略**：发现 outbox_manifest 缺失但 status=completed 时，应该报错回滚还是降级重跑？需要明确恢复策略。

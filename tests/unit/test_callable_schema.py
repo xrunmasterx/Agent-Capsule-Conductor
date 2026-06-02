@@ -116,14 +116,46 @@ def test_node_invocation_spec_schema_accepts_callable_ref_and_workflow_bindings(
     )
 
 
+def test_workflow_function_template_schema_accepts_engine_canonical_nodes() -> None:
+    validate(
+        "schemas/workflow_function_template_schema.json",
+        {
+            "schema_version": "acc.core.v2",
+            "id": "architecture_review",
+            "version": "0.1.0",
+            "nodes": [
+                {
+                    "id": "collect",
+                    "callable_ref": {"kind": "agent_class", "id": "source_analyzer.codex"},
+                    "ports": {
+                        "inputs": {"main": {"type": "artifact", "required": False}},
+                        "outputs": {"main": {"type": "artifact", "required": True}},
+                    },
+                    "overrides": {"static_input": {"topic": "today"}},
+                    "prompt_policy": {"user_prompt": "Collect facts."},
+                }
+            ],
+            "control_edges": [],
+            "data_edges": [],
+            "metadata": {"ui_layout": {"nodes": [{"id": "collect"}]}},
+        },
+    )
+
+
 def test_workflow_function_template_schema_rejects_workspace_path_state() -> None:
     with pytest.raises(ValidationError):
         validate(
             "schemas/workflow_function_template_schema.json",
             {
+                "schema_version": "acc.core.v2",
                 "id": "architecture_review",
                 "version": "0.1.0",
-                "node_invocations": [],
+                "nodes": [
+                    {
+                        "id": "review",
+                        "callable_ref": {"kind": "agent_class", "id": "source_analyzer.codex"},
+                    }
+                ],
                 "control_edges": [],
                 "data_edges": [],
                 "workspace_root": "F:/Agent-Capsule-Conductor",

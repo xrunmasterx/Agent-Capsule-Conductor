@@ -2,10 +2,10 @@
 
 ## Current Project Contract
 
-Agent Capsule Conductor (`acc`) is a local-first workflow runtime and Workbench for wrapping mature
+Agent Callable Conductor (`acc`) is a local-first workflow runtime and Workbench for wrapping mature
 external agents or local tools as reusable callable assets.
 
-Current architecture is callable-first:
+Current architecture is Core v2 callable-only:
 
 - `AgentClassTemplate` / `ToolClassTemplate`: reusable, stateless behavior definitions.
 - `WorkflowFunctionTemplate`: reusable, stateless workflow function body.
@@ -17,24 +17,26 @@ Current architecture is callable-first:
 - `ArtifactBundle`: stable files produced by a session, node, or workflow invocation.
 - `GraphOps Control Plane`: proposal, validation, dry-run, human approval, then apply.
 
-Legacy names still exist for compatibility:
+Legacy runtime architecture is not an active product architecture:
 
-- `Capsule Template` maps to `AgentClassTemplate`, `ToolClassTemplate`, or a legacy compatibility
-  wrapper.
-- `Session` maps to the legacy `acc run` session artifact and to clean workflow `SessionInstance`
-  evidence.
-- Existing `.accflow.json`, `.graph.json`, `CapsuleSpec`, and `NodeSpec` behavior must not be
-  removed without migration notes and tests.
+- `AgentClassTemplate`, `ToolClassTemplate`, `WorkflowFunctionTemplate`, `NodeInvocationSpec`, and
+  `SessionInstance` are the active concepts.
+- Legacy `CapsuleSpec`, `CapsuleRegistry`, `CapsuleRunner`, `WorkflowTemplate`, `NodeSpec`,
+  `.graph.json`, old workflow graph schemas, and capsule YAML executable assets must not be used by
+  product runtime paths.
+- Legacy inputs may appear only as raw migration input, explicit rejection tests, or historical
+  archived evidence. Do not reintroduce a compatibility registry, old runner, old graph runtime, or
+  hidden fallback execution path.
 
-## Dual workflow format (P0 convergence)
+## Workflow Format
 
 - **Canonical on-disk template**: `workflows/<id>.accflow.json` (Workbench/API save default).
 - **Legacy import-only**: `*.graph.json` — convert with `acc workflow import-graph <path.graph.json>`.
-- **CLI discovery**: `acc workflows list/show` discovers `.accflow.json` first; legacy `.graph.json`
-  is listed only when no matching accflow file exists for the same workflow id.
-- **Callable hot path (opt-in)**: set `ACC_USE_CALLABLE_DISPATCH=1` (or `true`/`yes`) to route clean
-  workflow nodes through `CallableInvocationService`; default remains off for byte-stable manifests.
-  See `docs/codex_goal_callable_semantics/MIGRATION_NOTES.md`.
+- **CLI discovery**: `acc workflows list/show` must not list `.graph.json` files as runnable
+  workflows.
+- **Runtime path**: canonical `.accflow.json` parses directly to `WorkflowFunctionTemplate`, compiles
+  to `ExecutionPlan`, and executes `CallableRef` as `SessionInstance` evidence. There is no
+  opt-in legacy or compatibility hot path.
 
 ## Stable Invariants
 
@@ -69,7 +71,7 @@ These rules outrank older phase docs when there is a conflict.
    - Use ports, inbox/outbox materialization, artifact references, and workflow-call bindings.
 
 7. Keep GraphOps human-governed.
-   - LLM-generated graph/capsule/workflow changes must default to proposal mode.
+   - LLM-generated callable/workflow changes must default to proposal mode.
    - Destructive or persistent apply requires validation, dry-run evidence, and explicit human
      approval.
 

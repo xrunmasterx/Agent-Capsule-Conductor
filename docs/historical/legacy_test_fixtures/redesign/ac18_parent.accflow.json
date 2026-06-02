@@ -1,0 +1,36 @@
+{
+  "id": "ac18_parent_nested",
+  "version": "0.1.0",
+  "name": "AC18 Parent-Nested Boundary Isolation",
+  "metadata": {
+    "binding_mode": "explicit_only",
+    "canonical_format": "accflow",
+    "e2e_ac": "AC18"
+  },
+  "nodes": [
+    {
+      "id": "producer",
+      "kind": "tool",
+      "tool": "fake_producer",
+      "output_ports": [
+        {"id": "main", "direction": "output", "required": false}
+      ]
+    },
+    {
+      "id": "child_call",
+      "kind": "workflow",
+      "workflow_ref": "ac18_child.accflow.json",
+      "input_ports": [
+        {"id": "main", "direction": "input", "required": false}
+      ],
+      "output_ports": [
+        {"id": "main", "direction": "output", "required": false}
+      ]
+    }
+  ],
+  "control_edges": [
+    {"from": "producer", "to": "child_call", "condition": null, "context": "upstream_output"}
+  ],
+  "data_edges": [],
+  "policies": {"failure_mode": "fail_fast", "max_concurrency": 1}
+}

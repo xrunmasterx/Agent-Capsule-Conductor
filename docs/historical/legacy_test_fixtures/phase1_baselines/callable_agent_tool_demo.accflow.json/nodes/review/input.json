@@ -1,0 +1,49 @@
+{
+  "inbox": {
+    "records": [
+      {
+        "direction": "input",
+        "materialization": "copy",
+        "node_id": "review",
+        "port_id": "raw",
+        "source_node_id": "collect",
+        "source_outbox": "<<RUN_DIR>>\\nodes\\collect\\outbox\\raw",
+        "source_port_id": "raw",
+        "source_refs": [
+          "collect_raw"
+        ],
+        "source_session_id": "",
+        "target_inbox": "<<RUN_DIR>>\\nodes\\review\\inbox\\raw\\collect_raw",
+        "target_node_id": "review",
+        "target_port_id": "raw"
+      }
+    ]
+  },
+  "input": {},
+  "node": {
+    "id": "review",
+    "kind": "agent"
+  },
+  "upstream_context": [
+    {
+      "node_id": "collect",
+      "output_bytes": 332,
+      "output_inline": {
+        "cwd": "<<RUN_DIR>>\\environments\\root_env\\workspace",
+        "inbox_file_count": 0,
+        "producer_node_id": "collect",
+        "read_from_inbox": false,
+        "read_from_upstream_context": false,
+        "status": "success",
+        "summary": "Produced artifact from collect",
+        "upstream_context_count": 0
+      },
+      "output_path": "<<RUN_DIR>>\\nodes\\collect\\output.json",
+      "output_summary": "Produced artifact from collect",
+      "status": "success"
+    }
+  ],
+  "workflow": {
+    "input": {}
+  }
+}

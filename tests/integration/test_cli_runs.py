@@ -12,7 +12,7 @@ def make_indexed_run(tmp_path: Path) -> None:
     run_dir.mkdir(parents=True)
     node = NodeRunSummary(
         node_id="workbench_fake",
-        capsule_id="fake-agent.generic",
+        callable_id="fake-agent.generic",
         status="success",
         run_dir=str(run_dir),
         output_path=str(run_dir / "output.json"),

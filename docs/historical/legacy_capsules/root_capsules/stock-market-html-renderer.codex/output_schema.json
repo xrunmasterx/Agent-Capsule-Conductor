@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "status",
+    "summary",
+    "html_title",
+    "html",
+    "source_report_path",
+    "warnings"
+  ],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["success", "partial"]
+    },
+    "summary": {
+      "type": "string"
+    },
+    "html_title": {
+      "type": "string"
+    },
+    "html": {
+      "type": "string"
+    },
+    "source_report_path": {
+      "type": "string"
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false
+}

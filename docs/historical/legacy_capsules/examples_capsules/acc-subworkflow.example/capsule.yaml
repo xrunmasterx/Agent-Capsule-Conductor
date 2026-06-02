@@ -1,0 +1,20 @@
+id: acc-subworkflow.example
+version: 0.1.0
+name: ACC Subworkflow Example
+description: Example capsule wrapping a nested ACC workflow graph.
+kind: acc_workflow
+runtime:
+  type: acc_workflow
+workflow:
+  type: acc_graph
+  path: workflow.accflow.json
+schema:
+  input: input_schema.json
+  output: output_schema.json
+artifacts:
+  manifest: artifact_manifest.yaml
+permissions:
+  sandbox: read-only
+  network: false
+  write_files: false
+  timeout_seconds: 600

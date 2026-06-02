@@ -1,0 +1,21 @@
+id: browser-stock-research-template.codex
+version: 0.1.0
+name: 浏览器股市调研模板
+description: 面向 2026-05-26 当日股市消息面与情绪面的可复用调研模板。
+runtime:
+  type: codex_cli
+workspace:
+  mode: existing_dir
+permissions:
+  sandbox: read-only
+  network: true
+  write_files: false
+  timeout_seconds: 600
+  allow_dangerous: false
+prompt:
+  template: prompt_template.md
+schema:
+  input: input_schema.json
+  output: output_schema.json
+artifacts:
+  manifest: artifact_manifest.yaml

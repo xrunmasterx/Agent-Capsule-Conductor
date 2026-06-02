@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "source_report_path",
+    "as_of_date",
+    "output_language"
+  ],
+  "properties": {
+    "source_report_path": {
+      "type": "string"
+    },
+    "source_report": {
+      "type": "object"
+    },
+    "as_of_date": {
+      "type": "string"
+    },
+    "output_language": {
+      "type": "string"
+    },
+    "html_title": {
+      "type": "string"
+    },
+    "rendering_notes": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}

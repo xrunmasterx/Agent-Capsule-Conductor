@@ -1,0 +1,37 @@
+{
+  "id": "ac04_standalone_equiv",
+  "version": "0.1.0",
+  "name": "AC4 Standalone-Equivalence Field Set",
+  "metadata": {
+    "binding_mode": "explicit_only",
+    "canonical_format": "accflow",
+    "e2e_ac": "AC04"
+  },
+  "nodes": [
+    {
+      "id": "producer",
+      "kind": "tool",
+      "tool": "fake_producer",
+      "output_ports": [
+        {"id": "main", "direction": "output", "required": false}
+      ]
+    },
+    {
+      "id": "consumer",
+      "kind": "agent",
+      "runtime": "generic_fake_agent",
+      "prompt": "Receive a single bound topic and nothing else.",
+      "input_ports": [
+        {"id": "main", "direction": "input", "required": false}
+      ],
+      "output_ports": [
+        {"id": "main", "direction": "output", "required": false}
+      ]
+    }
+  ],
+  "control_edges": [
+    {"from": "producer", "to": "consumer", "condition": null, "context": "none"}
+  ],
+  "data_edges": [],
+  "policies": {"failure_mode": "fail_fast", "max_concurrency": 1}
+}

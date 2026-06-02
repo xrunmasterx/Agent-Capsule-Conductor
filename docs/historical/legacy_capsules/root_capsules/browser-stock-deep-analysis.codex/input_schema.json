@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "cleaned_report": {
+      "description": "清理后的输入",
+      "type": "string"
+    },
+    "task": {
+      "description": "分析任务",
+      "type": "string"
+    }
+  },
+  "required": [
+    "task",
+    "cleaned_report"
+  ],
+  "type": "object"
+}

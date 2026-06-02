@@ -37,7 +37,7 @@
       "properties": {
         "kind": {
           "type": "string",
-          "enum": ["agent_class", "tool_class", "workflow_function", "legacy_capsule"]
+          "enum": ["agent_class", "tool_class", "workflow_function"]
         },
         "id": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+$"},
         "version": {"type": ["string", "null"]}

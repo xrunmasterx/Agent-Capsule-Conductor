@@ -1,9 +1,8 @@
-# Template and Session Model
+# Class Template and Session Model
 
 ## 1. Current Definition
 
-The old phrase "Capsule Template and Session" is still useful, but the current architecture is more
-precise:
+The current architecture uses Core v2 callable objects:
 
 ```text
 AgentClassTemplate / ToolClassTemplate = reusable class
@@ -77,8 +76,9 @@ events.jsonl
 workflow_summary.json
 ```
 
-Legacy `acc run` still emits `session_manifest.json` and `run_manifest.json`; these remain supported
-compatibility artifacts.
+Runtime evidence is a projection of Core v2 invocation/session objects. Legacy run manifests may
+exist only as historical evidence or migration/rejection fixtures; they are not a source of truth for
+new runs.
 
 ## 5. Workbench Boundary
 

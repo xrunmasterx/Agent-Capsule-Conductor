@@ -1,6 +1,6 @@
 {
   "node_id": "fake-agent.generic",
-  "capsule_id": "fake-agent.generic",
+  "callable_id": "fake-agent.generic",
   "session_id": null,
   "status": "success",
   "summary": "Fake agent completed successfully.",

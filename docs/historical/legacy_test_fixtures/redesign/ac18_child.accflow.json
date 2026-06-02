@@ -1,0 +1,38 @@
+{
+  "id": "ac18_child_explicit",
+  "version": "0.1.0",
+  "name": "AC18 Child Workflow Explicit",
+  "metadata": {
+    "binding_mode": "explicit_only",
+    "canonical_format": "accflow",
+    "e2e_ac": "AC18"
+  },
+  "nodes": [
+    {
+      "id": "child_only",
+      "kind": "agent",
+      "runtime": "generic_fake_agent",
+      "prompt": "Child node has explicit_only mode and must not see parent's __acc_control_context.",
+      "input_ports": [
+        {"id": "main", "direction": "input", "required": false}
+      ],
+      "output_ports": [
+        {"id": "main", "direction": "output", "required": false}
+      ]
+    }
+  ],
+  "control_edges": [],
+  "data_edges": [],
+  "exposed_inputs": [
+    {"id": "main", "direction": "input", "required": false}
+  ],
+  "workflow_input_bindings": [
+    {
+      "source_port": "main",
+      "target": {"node": "child_only", "port": "main"},
+      "required": false,
+      "materialization": "copy"
+    }
+  ],
+  "policies": {"failure_mode": "fail_fast", "max_concurrency": 1}
+}

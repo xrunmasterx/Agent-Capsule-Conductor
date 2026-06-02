@@ -2,22 +2,40 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "WorkflowFunctionTemplate",
   "type": "object",
-  "required": ["id", "version", "node_invocations", "control_edges", "data_edges"],
+  "required": ["schema_version", "id", "version", "nodes", "control_edges", "data_edges"],
   "properties": {
-    "id": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+$"},
-    "version": {"type": "string"},
-    "exposed_inputs": {"type": "object"},
-    "exposed_outputs": {"type": "object"},
-    "workflow_input_bindings": {"type": "array", "items": {"type": "object"}},
-    "workflow_output_bindings": {"type": "array", "items": {"type": "object"}},
-    "node_invocations": {
+    "schema_version": { "const": "acc.core.v2" },
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+$" },
+    "version": { "type": "string" },
+    "name": { "type": "string" },
+    "description": { "type": "string" },
+    "exposed_inputs": { "$ref": "#/$defs/ports" },
+    "exposed_outputs": { "$ref": "#/$defs/ports" },
+    "workflow_input_bindings": {
       "type": "array",
-      "items": {"$ref": "#/$defs/node_invocation"}
+      "items": { "type": "object" },
+      "default": []
     },
-    "control_edges": {"type": "array", "items": {"$ref": "#/$defs/control_edge"}},
-    "data_edges": {"type": "array", "items": {"$ref": "#/$defs/data_edge"}},
-    "policies": {"type": "object"},
-    "metadata": {"type": "object"}
+    "workflow_output_bindings": {
+      "type": "array",
+      "items": { "type": "object" },
+      "default": []
+    },
+    "nodes": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/node_invocation" }
+    },
+    "control_edges": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/control_edge" }
+    },
+    "data_edges": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/data_edge" }
+    },
+    "policies": { "type": "object" },
+    "metadata": { "type": "object" }
   },
   "additionalProperties": false,
   "$defs": {
@@ -25,22 +43,22 @@
       "type": "object",
       "required": ["from", "to"],
       "properties": {
-        "from": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+$"},
-        "to": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+$"},
-        "condition": {"type": ["string", "null"]},
-        "context": {"type": "string", "enum": ["upstream_output", "none"]}
+        "from": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+$" },
+        "to": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+$" },
+        "condition": { "type": ["string", "null"] },
+        "context": { "type": "string", "enum": ["none"], "default": "none" }
       },
       "additionalProperties": false
     },
     "data_edge": {
       "type": "object",
-      "required": ["from", "to"],
+      "required": ["source", "target"],
       "properties": {
-        "from": {"$ref": "#/$defs/data_endpoint"},
-        "to": {"$ref": "#/$defs/data_endpoint"},
+        "source": { "$ref": "#/$defs/data_endpoint" },
+        "target": { "$ref": "#/$defs/data_endpoint" },
         "materialization": {
           "type": "string",
-          "enum": ["copy", "reference", "symlink"],
+          "enum": ["copy", "reference"],
           "default": "copy"
         }
       },
@@ -50,8 +68,8 @@
       "type": "object",
       "required": ["node", "port"],
       "properties": {
-        "node": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+$"},
-        "port": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+$"}
+        "node": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+$" },
+        "port": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+$" }
       },
       "additionalProperties": false
     },
@@ -59,21 +77,46 @@
       "type": "object",
       "required": ["id", "callable_ref"],
       "properties": {
-        "id": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+$"},
-        "callable_ref": {"$ref": "#/$defs/callable_ref"},
-        "overrides": {"type": "object"},
-        "input_bindings": {"type": "array"},
-        "output_bindings": {"type": "array"},
-        "workflow_call_input_bindings": {"type": "array"},
-        "workflow_call_output_bindings": {"type": "array"},
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+$" },
+        "callable_ref": { "$ref": "#/$defs/callable_ref" },
+        "overrides": { "$ref": "#/$defs/callable_override" },
+        "ports": {
+          "type": "object",
+          "properties": {
+            "inputs": { "$ref": "#/$defs/ports" },
+            "outputs": { "$ref": "#/$defs/ports" }
+          },
+          "additionalProperties": false
+        },
+        "input_bindings": { "type": "array", "items": { "type": "object" }, "default": [] },
+        "output_bindings": { "type": "array", "items": { "type": "object" }, "default": [] },
+        "workflow_call_input_bindings": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/workflow_call_input_binding" },
+          "default": []
+        },
+        "workflow_call_output_bindings": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/workflow_call_output_binding" },
+          "default": []
+        },
         "environment_policy": {
           "type": "string",
           "enum": ["inherit_parent", "new_ephemeral", "binding_required", "forbidden"]
         },
-        "invocation_policy": {"type": "object"},
-        "input_ports": {"type": "object"},
-        "output_ports": {"type": "object"},
-        "metadata": {"type": "object"}
+        "invocation_policy": { "type": "object" },
+        "runtime_policy": { "type": "object" },
+        "prompt_policy": {
+          "type": "object",
+          "properties": {
+            "system_prompt": { "type": ["string", "null"] },
+            "user_prompt": { "type": ["string", "null"] },
+            "appendix_policy": { "type": "string", "default": "task_only" }
+          },
+          "additionalProperties": false
+        },
+        "artifact_contract": { "type": "object" },
+        "metadata": { "type": "object" }
       },
       "additionalProperties": false
     },
@@ -83,12 +126,67 @@
       "properties": {
         "kind": {
           "type": "string",
-          "enum": ["agent_class", "tool_class", "workflow_function", "legacy_capsule"]
+          "enum": ["agent_class", "tool_class", "workflow_function"]
         },
-        "id": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+$"},
-        "version": {"type": ["string", "null"]}
+        "id": { "type": "string" },
+        "version": { "type": ["string", "null"] }
       },
       "additionalProperties": false
+    },
+    "callable_override": {
+      "type": "object",
+      "properties": {
+        "prompt": { "type": ["string", "null"] },
+        "permission_profile": { "type": "object" },
+        "timeout_seconds": { "type": "integer", "minimum": 1 },
+        "retry": { "type": "object" },
+        "static_input": { "type": "object" },
+        "behavior_overlay": { "type": "object" }
+      },
+      "additionalProperties": false
+    },
+    "workflow_call_input_binding": {
+      "type": "object",
+      "required": ["workflow_input"],
+      "properties": {
+        "source": { "$ref": "#/$defs/data_endpoint" },
+        "workflow_input": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+$" },
+        "static_value": {},
+        "materialization": {
+          "type": "string",
+          "enum": ["copy", "reference"],
+          "default": "copy"
+        },
+        "required": { "type": "boolean", "default": true }
+      },
+      "additionalProperties": false
+    },
+    "workflow_call_output_binding": {
+      "type": "object",
+      "required": ["workflow_output", "parent_port"],
+      "properties": {
+        "workflow_output": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+$" },
+        "parent_port": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+$" },
+        "materialization": {
+          "type": "string",
+          "enum": ["copy", "reference"],
+          "default": "copy"
+        },
+        "required": { "type": "boolean", "default": true }
+      },
+      "additionalProperties": false
+    },
+    "ports": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "type": { "type": "string", "default": "artifact" },
+          "required": { "type": "boolean", "default": false },
+          "cardinality": { "type": "string", "enum": ["one", "many"], "default": "one" }
+        },
+        "additionalProperties": false
+      }
     }
   }
 }

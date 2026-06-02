@@ -1,0 +1,131 @@
+{
+  "description": "Child workflow compiled from Workbench container New_Workflow.",
+  "exposed_inputs": {
+    "in_main": {
+      "cardinality": "one",
+      "required": false,
+      "type": "artifact"
+    }
+  },
+  "exposed_outputs": {
+    "out_main": {
+      "cardinality": "one",
+      "required": false,
+      "type": "artifact"
+    }
+  },
+  "id": "stock_info_collection_browser_e2e__New_Workflow",
+  "metadata": {
+    "canonical_format": "accflow",
+    "compiled_child_path": "stock_info_collection_browser_e2e__New_Workflow.accflow.json",
+    "compiled_from_workbench_container": "New_Workflow",
+    "ui_layout": {
+      "layout": null,
+      "nodes": [
+        {
+          "id": "stock_market_research_codex",
+          "label": "消息面调研",
+          "position": {
+            "x": 120.0,
+            "y": 130.0
+          }
+        },
+        {
+          "id": "stock_market_research_codex_2",
+          "label": "情绪面调研",
+          "position": {
+            "x": 460.0,
+            "y": 130.0
+          }
+        }
+      ],
+      "root_workflow_id": null
+    },
+    "workbench_draft": true
+  },
+  "name": "New Workflow",
+  "nodes": [
+    {
+      "callable_ref": {
+        "id": "stock-market-research.codex",
+        "kind": "agent_class"
+      },
+      "id": "stock_market_research_codex",
+      "metadata": {
+        "label": "消息面调研",
+        "ui_label": "消息面调研",
+        "workbench_kind": "agent_session"
+      },
+      "overrides": {
+        "static_input": {
+          "date": "2026-06-02",
+          "focus": "market_news",
+          "market": "US"
+        }
+      },
+      "ports": {
+        "inputs": {
+          "main": {
+            "cardinality": "one",
+            "required": false,
+            "type": "artifact"
+          }
+        },
+        "outputs": {
+          "main": {
+            "cardinality": "one",
+            "required": false,
+            "type": "artifact"
+          }
+        }
+      },
+      "prompt_policy": {
+        "user_prompt": "Inside collection workflow: collect time-sensitive US stock market news facts with source and timestamp."
+      }
+    },
+    {
+      "callable_ref": {
+        "id": "stock-market-research.codex",
+        "kind": "agent_class"
+      },
+      "id": "stock_market_research_codex_2",
+      "metadata": {
+        "label": "情绪面调研",
+        "ui_label": "情绪面调研",
+        "workbench_kind": "agent_session"
+      },
+      "overrides": {
+        "static_input": {
+          "date": "2026-06-02",
+          "focus": "market_sentiment",
+          "market": "US"
+        }
+      },
+      "ports": {
+        "inputs": {
+          "main": {
+            "cardinality": "one",
+            "required": false,
+            "type": "artifact"
+          }
+        },
+        "outputs": {
+          "main": {
+            "cardinality": "one",
+            "required": false,
+            "type": "artifact"
+          }
+        }
+      },
+      "prompt_policy": {
+        "user_prompt": "Inside collection workflow: collect current US stock market sentiment evidence with source and timestamp."
+      }
+    }
+  ],
+  "policies": {
+    "failure_mode": "fail_fast",
+    "max_concurrency": 4
+  },
+  "schema_version": "acc.core.v2",
+  "version": "0.1.0"
+}

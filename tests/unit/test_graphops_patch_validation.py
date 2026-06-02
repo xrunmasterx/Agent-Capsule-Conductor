@@ -11,18 +11,25 @@ def valid_patch() -> dict:
         "patch_id": "patch_add_review_node",
         "author": "workflow-editor.codex",
         "target_type": "workflow",
-        "target_path": "workflows/engine-architecture-research.v2.yaml",
+        "target_path": "examples/workflows/control_plane_demo.accflow.json",
         "rationale": "Add a reviewer node before final synthesis.",
         "operations": [
             {
                 "op": "add_node",
-                "node_id": "critical_review",
-                "capsule_id": "critical-review.claude",
+                "node": {
+                    "id": "critical_review",
+                    "callable_ref": {
+                        "kind": "agent_class",
+                        "id": "generic_fake_agent",
+                    },
+                },
             },
             {
-                "op": "connect_nodes",
-                "from": "source_reality_check",
-                "to": "critical_review",
+                "op": "add_control_edge",
+                "edge": {
+                    "from": "control_echo",
+                    "to": "critical_review",
+                },
             },
         ],
     }
@@ -50,9 +57,12 @@ def test_danger_full_access_fails() -> None:
     patch = valid_patch()
     patch["operations"] = [
         {
-            "op": "update_capsule_permission",
-            "capsule_id": "source-reality-check.codex",
-            "permission": {"sandbox": "danger-full-access"},
+            "op": "add_node",
+            "node": {
+                "id": "dangerous",
+                "callable_ref": {"kind": "agent_class", "id": "generic_fake_agent"},
+                "runtime_policy": {"permission_profile": {"sandbox": "danger-full-access"}},
+            },
         }
     ]
 
@@ -73,15 +83,39 @@ def test_dry_run_reports_target_and_operations() -> None:
 
     assert preview["status"] == "dry_run"
     assert preview["mutated"] is False
-    assert preview["target_path"] == "workflows/engine-architecture-research.v2.yaml"
+    assert preview["target_path"] == "examples/workflows/control_plane_demo.accflow.json"
     assert len(preview["operations"]) == 2
 
 
 def test_output_schema_mutation_is_disabled_by_default() -> None:
     patch = valid_patch()
     patch["target_type"] = "schema"
-    patch["target_path"] = "capsules/echo-test.generic/output_schema.json"
+    patch["target_path"] = "callables/agents/echo-test.generic.output_schema.json"
     patch["operations"] = [{"op": "replace_schema", "schema": {"type": "object"}}]
 
     with pytest.raises(AccError, match="schema mutations are disabled by default"):
+        validate_patch(patch)
+
+
+def test_workflow_patch_rejects_legacy_graph_target() -> None:
+    patch = valid_patch()
+    patch["target_path"] = "tests/fixtures/legacy/demo_level_parallel.graph.json"
+
+    with pytest.raises(AccError, match="canonical .accflow.json"):
+        validate_patch(patch)
+
+
+def test_workflow_patch_rejects_legacy_node_fields() -> None:
+    patch = valid_patch()
+    patch["operations"] = [
+        {
+            "op": "add_node",
+            "node": {
+                "id": "legacy_review",
+                "capsule_id": "fake-agent.generic",
+            },
+        }
+    ]
+
+    with pytest.raises(AccError, match="legacy field"):
         validate_patch(patch)

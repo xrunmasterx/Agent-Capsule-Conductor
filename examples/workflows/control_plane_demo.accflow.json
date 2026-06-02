@@ -1,0 +1,38 @@
+{
+  "control_edges": [],
+  "data_edges": [],
+  "exposed_inputs": {},
+  "exposed_outputs": {},
+  "id": "control_plane_demo",
+  "metadata": {
+    "canonical_format": "accflow",
+    "imported_from": "examples\\workflows\\control_plane_demo.accflow.json"
+  },
+  "nodes": [
+    {
+      "callable_ref": {
+        "id": "generic_fake_agent",
+        "kind": "agent_class"
+      },
+      "id": "control_echo",
+      "input_bindings": [
+        {
+          "static_value": "control plane demo",
+          "target_port": "message"
+        }
+      ],
+      "ports": {
+        "inputs": {
+          "message": {
+            "type": "json"
+          }
+        },
+        "outputs": {}
+      }
+    }
+  ],
+  "schema_version": "acc.core.v2",
+  "version": "0.1.0",
+  "workflow_input_bindings": [],
+  "workflow_output_bindings": []
+}

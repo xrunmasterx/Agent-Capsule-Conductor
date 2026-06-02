@@ -1,0 +1,22 @@
+{
+  "id": "ac09_no_auto_appendix",
+  "version": "0.1.0",
+  "name": "AC9 No Auto Appendix When No Var Ref",
+  "metadata": {
+    "binding_mode": "explicit_only",
+    "prompt_appendix_policy": "task_only",
+    "canonical_format": "accflow",
+    "e2e_ac": "AC09"
+  },
+  "nodes": [
+    {
+      "id": "agent_no_var",
+      "kind": "agent",
+      "runtime": "generic_fake_agent",
+      "prompt": "Plain prompt with no input_json reference."
+    }
+  ],
+  "control_edges": [],
+  "data_edges": [],
+  "policies": {"failure_mode": "fail_fast", "max_concurrency": 1}
+}

@@ -78,7 +78,7 @@ def run_decision_items(project_root: Path, *, limit: int) -> list[dict[str, Any]
             )
             item["node"] = {
                 "node_id": node.node_id,
-                "capsule_id": node.capsule_id,
+                "callable_id": node.callable_id,
                 "status": node.status,
                 "summary": node.summary,
             }
@@ -121,7 +121,7 @@ def graphops_decision_items(project_root: Path, *, limit: int) -> list[dict[str,
                 "status": "open",
                 "severity": "medium",
                 "title": f"GraphOps 提案: {patch_id}",
-                "summary": str(patch.get("rationale") or "待验证的 workflow/capsule patch。"),
+                "summary": str(patch.get("rationale") or "待验证的 workflow/callable patch。"),
                 "graphops": {
                     "patch_id": patch_id,
                     "patch_path": rel_path,
@@ -250,3 +250,4 @@ def utc_now_iso() -> str:
     from acc.session import utc_now_iso as session_utc_now_iso
 
     return session_utc_now_iso()
+

@@ -1,11 +1,64 @@
 {
-  "id": "ideal_layering_serial",
-  "version": "0.1.0",
-  "nodes": [
-    {"id": "a", "type": "tool", "runner": "fake", "ports": {"out": ["main"]}, "permission_profile": {"workspace_access": "writes_run_only", "network": false, "shell": false, "dangerous": false, "env_policy": "acc_whitelist", "allowed_env": [], "timeout_seconds": 30}},
-    {"id": "b", "type": "tool", "runner": "fake", "ports": {"in": ["input"], "out": ["main"]}, "permission_profile": {"workspace_access": "writes_run_only", "network": false, "shell": false, "dangerous": false, "env_policy": "acc_whitelist", "allowed_env": [], "timeout_seconds": 30}}
+  "control_edges": [
+    {
+      "from": "a",
+      "to": "b"
+    }
   ],
-  "control_edges": [{"from": "a", "to": "b"}],
-  "data_edges": [{"from": {"node": "a", "port": "main"}, "to": {"node": "b", "port": "input"}}],
-  "policy": {"failure_mode": "fail_fast", "max_concurrency": 2}
+  "data_edges": [
+    {
+      "materialization": "copy",
+      "source": {
+        "node": "a",
+        "port": "main"
+      },
+      "target": {
+        "node": "b",
+        "port": "input"
+      }
+    }
+  ],
+  "exposed_inputs": {},
+  "exposed_outputs": {},
+  "id": "ideal_layering_serial",
+  "metadata": {
+    "canonical_format": "accflow",
+    "imported_from": "examples\\workflows\\ideal_layering_serial.accflow.json"
+  },
+  "nodes": [
+    {
+      "callable_ref": {
+        "id": "generic_fake_agent",
+        "kind": "agent_class"
+      },
+      "id": "a",
+      "ports": {
+        "inputs": {},
+        "outputs": {
+          "main": {
+            "type": "json"
+          }
+        }
+      }
+    },
+    {
+      "callable_ref": {
+        "id": "generic_fake_agent",
+        "kind": "agent_class"
+      },
+      "id": "b",
+      "ports": {
+        "inputs": {
+          "input": {
+            "type": "json"
+          }
+        },
+        "outputs": {}
+      }
+    }
+  ],
+  "schema_version": "acc.core.v2",
+  "version": "0.1.0",
+  "workflow_input_bindings": [],
+  "workflow_output_bindings": []
 }

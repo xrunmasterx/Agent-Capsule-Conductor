@@ -7,7 +7,7 @@
     "author": { "type": "string", "minLength": 1 },
     "target_type": {
       "type": "string",
-      "enum": ["workflow", "capsule_template", "prompt_template", "artifact_manifest", "schema"]
+      "enum": ["workflow", "prompt_template", "artifact_manifest", "schema"]
     },
     "target_path": { "type": "string", "minLength": 1 },
     "rationale": { "type": "string", "minLength": 1 },
@@ -27,8 +27,6 @@
               "add_control_edge",
               "add_data_edge",
               "update_node_input",
-              "update_capsule_prompt",
-              "update_capsule_permission",
               "add_artifact_requirement",
               "replace_schema",
               "enable_danger_full_access",

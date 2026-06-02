@@ -1,0 +1,28 @@
+id: stock-market-research.codex
+version: 0.1.0
+runtime: codex_cli
+default_permissions:
+  network: true
+  dangerous: false
+default_prompt: 'Role: stock market research agent. Methodology: collect only time-sensitive
+  market information; separate news facts from interpretation; record source, timestamp,
+  affected market/index/sector, confidence, and uncertainty; never invent data; output
+  structured evidence with key items, source credibility, and missing-data notes.'
+input_ports:
+  main:
+    id: main
+    direction: input
+    type: artifact
+    required: false
+    cardinality: one
+output_ports:
+  main:
+    id: main
+    direction: output
+    type: artifact
+    required: true
+    cardinality: one
+artifact_contract: {}
+metadata:
+  name: stock market research agent
+  description: codex cli stock market research methodology template

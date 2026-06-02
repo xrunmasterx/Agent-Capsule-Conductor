@@ -25,7 +25,7 @@
     "callable_ref": {"$ref": "#/$defs/callable_ref"},
     "callable_kind": {
       "type": "string",
-      "enum": ["agent_class", "tool_class", "workflow_function", "legacy_capsule"]
+      "enum": ["agent_class", "tool_class", "workflow_function"]
     },
     "status": {"type": "string"},
     "cwd": {"type": "string"},
@@ -46,7 +46,7 @@
       "properties": {
         "kind": {
           "type": "string",
-          "enum": ["agent_class", "tool_class", "workflow_function", "legacy_capsule"]
+          "enum": ["agent_class", "tool_class", "workflow_function"]
         },
         "id": {"type": "string"},
         "version": {"type": ["string", "null"]}

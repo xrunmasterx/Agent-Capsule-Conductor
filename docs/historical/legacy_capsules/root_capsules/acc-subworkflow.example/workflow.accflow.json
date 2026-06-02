@@ -1,0 +1,89 @@
+{
+  "control_edges": [
+    {
+      "from": "review_a",
+      "to": "merge"
+    },
+    {
+      "from": "review_b",
+      "to": "merge"
+    }
+  ],
+  "data_edges": [],
+  "exposed_inputs": {},
+  "exposed_outputs": {},
+  "id": "nested_arch_review",
+  "metadata": {
+    "canonical_format": "accflow",
+    "imported_from": "capsules\\acc-subworkflow.example\\workflow.accflow.json"
+  },
+  "nodes": [
+    {
+      "callable_ref": {
+        "id": "generic_fake_agent",
+        "kind": "agent_class"
+      },
+      "id": "review_a",
+      "input_bindings": [
+        {
+          "static_value": "nested review A",
+          "target_port": "topic"
+        }
+      ],
+      "ports": {
+        "inputs": {
+          "topic": {
+            "type": "json"
+          }
+        },
+        "outputs": {}
+      }
+    },
+    {
+      "callable_ref": {
+        "id": "generic_fake_agent",
+        "kind": "agent_class"
+      },
+      "id": "review_b",
+      "input_bindings": [
+        {
+          "static_value": "nested review B",
+          "target_port": "topic"
+        }
+      ],
+      "ports": {
+        "inputs": {
+          "topic": {
+            "type": "json"
+          }
+        },
+        "outputs": {}
+      }
+    },
+    {
+      "callable_ref": {
+        "id": "generic_fake_agent",
+        "kind": "agent_class"
+      },
+      "id": "merge",
+      "input_bindings": [
+        {
+          "static_value": "merge nested review",
+          "target_port": "topic"
+        }
+      ],
+      "ports": {
+        "inputs": {
+          "topic": {
+            "type": "json"
+          }
+        },
+        "outputs": {}
+      }
+    }
+  ],
+  "schema_version": "acc.core.v2",
+  "version": "0.3.0",
+  "workflow_input_bindings": [],
+  "workflow_output_bindings": []
+}

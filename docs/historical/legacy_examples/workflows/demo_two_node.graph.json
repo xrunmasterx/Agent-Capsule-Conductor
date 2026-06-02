@@ -1,0 +1,30 @@
+{
+  "id": "demo_two_node",
+  "version": "0.1.0",
+  "name": "Demo Two Node Workflow",
+  "description": "A minimal two-node workflow for editable workbench acceptance.",
+  "nodes": [
+    {
+      "id": "echo",
+      "capsule_id": "echo-test.generic",
+      "input": {
+        "message": "hello from editable workbench"
+      },
+      "position": {"x": 0, "y": 0}
+    },
+    {
+      "id": "fake",
+      "capsule_id": "fake-agent.generic",
+      "input": {
+        "notes": "generated from the previous echo node"
+      },
+      "input_mapping": {
+        "topic": "{{ nodes.echo.output.summary }}"
+      },
+      "position": {"x": 360, "y": 0}
+    }
+  ],
+  "edges": [
+    {"id": "edge_echo_fake", "from": "echo", "to": "fake"}
+  ]
+}

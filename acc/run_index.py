@@ -4,7 +4,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from acc.utils import AccError, load_json
 
@@ -24,7 +24,7 @@ class NodeRunSummary(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     node_id: str
-    capsule_id: str
+    callable_id: str = "unknown"
     session_id: str | None = None
     status: str
     summary: str = ""
@@ -103,7 +103,7 @@ def load_or_rebuild_run_index(runs_root: Path = Path("runs")) -> RunIndex:
             index = normalize_run_index(RunIndex.model_validate(load_json(index_path)))
             write_json(index_path, index.model_dump())
             return index
-        except AccError:
+        except (AccError, ValidationError):
             return rebuild_run_index(runs_root)
     return rebuild_run_index(runs_root)
 
@@ -147,16 +147,34 @@ def load_run_summary(run_dir: Path) -> RunSummary | None:
     if summary_path.exists():
         try:
             return RunSummary.model_validate(load_json(summary_path))
-        except AccError:
+        except (AccError, ValidationError):
             return invalid_run_summary(run_dir, "Invalid run_summary.json")
 
     node_path = run_dir / "node_summary.json"
     if node_path.exists():
         try:
             node = NodeRunSummary.model_validate(load_json(node_path))
-        except AccError:
+        except (AccError, ValidationError):
             return invalid_run_summary(run_dir, "Invalid node_summary.json")
         return build_run_summary(run_dir, [node])
+
+    run_record_path = run_dir / "run_record.json"
+    if run_record_path.exists():
+        try:
+            record = load_json(run_record_path)
+        except AccError:
+            return invalid_run_summary(run_dir, "Invalid run_record.json")
+        if isinstance(record, dict):
+            return RunSummary(
+                run_id=str(record.get("run_id") or run_dir.name),
+                workflow_id=record.get("workflow_function_id"),
+                status=str(record.get("status") or "unknown"),
+                started_at=record.get("started_at"),
+                ended_at=record.get("ended_at"),
+                run_dir=str(run_dir.resolve()),
+                node_count=0,
+                failed_nodes=[],
+            )
 
     conductor_path = run_dir / "conductor_output.json"
     manifest_path = run_dir / "session_manifest.json"
@@ -198,7 +216,7 @@ def build_node_summary(
     log_excerpt = read_log_excerpt(log_ref)
     return NodeRunSummary(
         node_id=str(manifest.get("parent_node_id") or run_dir.name),
-        capsule_id=str(manifest.get("capsule_id") or "unknown"),
+        callable_id=str(manifest.get("callable_id") or "unknown"),
         session_id=manifest.get("session_id") or conductor_output.get("session_id"),
         status=status,
         summary=str(conductor_output.get("summary") or ""),
@@ -261,7 +279,7 @@ def build_run_summary(run_dir: Path, nodes: list[NodeRunSummary]) -> RunSummary:
 def invalid_run_summary(run_dir: Path, message: str) -> RunSummary:
     node = NodeRunSummary(
         node_id=run_dir.name,
-        capsule_id="unknown",
+        callable_id="unknown",
         status="invalid",
         summary=message,
         run_dir=str(run_dir.resolve()),

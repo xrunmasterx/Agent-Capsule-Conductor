@@ -38,6 +38,7 @@ import {
 } from 'lucide-react';
 import dagre from 'dagre';
 import {
+  Fragment,
   memo,
   useCallback,
   useEffect,
@@ -56,9 +57,11 @@ import { api } from '../api';
 import { shortPath, statusTone } from '../format';
 import type {
   ArtifactContent,
-  CapsuleSummary,
+  CallableSummary,
+  NodeLogDelta,
   NodeRunSummary,
   RunEvent,
+  RuntimeConfig,
   RunSummary,
   WorkflowDataEdge,
   WorkflowBindingView,
@@ -91,7 +94,11 @@ import {
 
 type Props = {
   workflows: WorkflowSummary[];
-  capsules: CapsuleSummary[];
+  callables: CallableSummary[];
+  resourceErrors?: {
+    callables?: string;
+    workflows?: string;
+  };
   selectedWorkflowId: string;
   onSelect: (workflowId: string) => void;
   onChanged?: () => void;
@@ -112,10 +119,11 @@ type WorkflowPortView = {
 type InternalNodeView = {
   id: string;
   name: string;
+  invocationLabel?: string;
   task: string;
   kind: 'Agent' | 'Tool';
   status: WorkflowStatus;
-  capsuleId?: string;
+  callableId?: string;
   runtime?: string;
   input?: Record<string, unknown>;
   inputPorts?: WorkflowPortView[];
@@ -126,9 +134,10 @@ type InternalNodeView = {
 type WorkflowContainerModel = {
   id: string;
   title: string;
+  invocationLabel?: string;
   boundaryKind?: 'workflow_input' | 'workflow_output';
   sourceKind?: WorkflowGraphNode['kind'];
-  capsuleId?: string;
+  callableId?: string;
   sourceInput?: Record<string, unknown>;
   sourceInputMapping?: Record<string, unknown>;
   workflowRef?: string;
@@ -151,7 +160,7 @@ type WorkflowCanvasEdge =
       kind: 'data';
       source: { workflowId: string; portId: string };
       target: { workflowId: string; portId: string };
-      materialization: 'copy' | 'reference' | 'symlink';
+      materialization: 'copy' | 'reference';
     }
   | {
       id: string;
@@ -173,9 +182,9 @@ type WorkspaceCanvasModel = {
 
 type PaletteItem =
   | { kind: 'workflow'; workflowRef?: string; label: string }
-  | { kind: 'agent'; capsuleId: string; label: string }
-  | { kind: 'tool'; capsuleId: string; label: string }
-  | { kind: 'file_source'; capsuleId: 'file-source.local'; label: string };
+  | { kind: 'agent'; callableId: string; label: string }
+  | { kind: 'tool'; callableId: string; label: string }
+  | { kind: 'file_source'; callableId: 'file-source.local'; label: string };
 
 type PaletteAddOptions = {
   forceRoot?: boolean;
@@ -207,10 +216,55 @@ type CanvasSelection =
   | { type: 'edge'; id: string }
   | { type: 'internal'; workflowId: string; nodeId: string };
 
+type DataConnectionDraft = {
+  scopeWorkflowId: string | null;
+  sourceNodeId: string;
+  sourceNodeLabel: string;
+  sourcePortId: string;
+  materialization: 'copy' | 'reference';
+} | null;
+
+type DataEdgeCommandRequest = {
+  scopeWorkflowId: string | null;
+  sourceNodeId: string;
+  sourcePortId: string;
+  targetNodeId: string;
+  targetPortId: string;
+  materialization: 'copy' | 'reference';
+  replaceExisting?: boolean;
+};
+
+type DataEdgeCommandResult = {
+  canvas: WorkspaceCanvasModel;
+  edge: WorkflowCanvasEdge;
+  autoAddedControlEdge: boolean;
+};
+
+type DataConnectNodeOption = {
+  nodeId: string;
+  label: string;
+  inputPorts: WorkflowPortView[];
+  outputPorts: WorkflowPortView[];
+  subtitle?: string;
+};
+
 type EvidenceDockState = {
   open: boolean;
   title: string;
   content: ArtifactContent | null;
+  owner?: {
+    kind: 'validation' | 'run' | 'node' | 'artifact';
+    taskId?: string;
+    runId?: string;
+    nodeId?: string;
+    createdAt?: string;
+  };
+};
+
+type SaveWorkflowDialogState = {
+  name: string;
+  saving: boolean;
+  error: string | null;
 };
 
 type WorkbenchTask = {
@@ -234,8 +288,8 @@ type WorkbenchTaskStorePayload = {
 
 type ResourceTemplate =
   | { kind: 'workflow_class'; workflowId: string; path: string; name: string }
-  | { kind: 'agent_class'; capsuleId: string; name: string }
-  | { kind: 'tool_class'; capsuleId: string; name: string };
+  | { kind: 'agent_class'; callableId: string; name: string }
+  | { kind: 'tool_class'; callableId: string; name: string };
 
 type WorkbenchChromeState = {
   leftPanel: 'none' | 'tasks' | 'resources';
@@ -256,6 +310,13 @@ type RunProjection = {
   events: RunEvent[];
   overlay: RunOverlayState | null;
   pollState: 'idle' | 'polling' | 'error';
+};
+
+type NodeLiveLogs = {
+  stdout: string;
+  stderr: string;
+  stdoutOffset: number;
+  stderrOffset: number;
 };
 
 type EdgeViewMode = 'all' | 'control' | 'data';
@@ -280,9 +341,11 @@ type WorkflowNodeData = {
 type AgentToolNodeData = {
   id: string;
   title: string;
+  subtitle?: string;
+  scopeLabel?: string;
   kind: 'Agent' | 'Tool';
   status: WorkflowStatus;
-  capsuleId?: string;
+  callableId?: string;
   workflowId?: string;
   internalNodeId?: string;
   inputPorts: WorkflowPortView[];
@@ -290,6 +353,7 @@ type AgentToolNodeData = {
   selected: boolean;
   showDataPorts: boolean;
   onSelect: () => void;
+  onSelectPort: (workflowId: string, port: WorkflowPortView) => void;
 };
 
 type WorkflowFlowNode = Node<WorkflowNodeData, 'workflowContainer'>;
@@ -299,7 +363,10 @@ type CanvasFlowNode = WorkflowFlowNode | AgentToolFlowNode;
 const nodeTypes = { workflowContainer: memo(WorkflowContainer), agentToolNode: memo(AgentToolNode) };
 const DEFAULT_CONTAINER_SIZE = { width: 430, height: 328 };
 const BOUNDARY_NODE_SIZE = { width: 270, height: 240 };
-const AGENT_TOOL_NODE_SIZE = { width: 260, height: 72 };
+const AGENT_TOOL_NODE_SIZE = { width: 260, height: 128 };
+const AGENT_CONTROL_HANDLE_TOP = 26;
+const AGENT_DATA_PORT_TOP = 88;
+const AGENT_DATA_PORT_GAP = 28;
 const WORKFLOW_CHILD_PADDING = 24;
 const WORKFLOW_CHILD_START_PADDING = 8;
 const INSPECTOR_DEFAULT_WIDTH = 390;
@@ -310,9 +377,22 @@ const MAX_LOG_PREVIEW_LINES = 180;
 const TASK_STORE_KEY = 'acc.workbench.tasks.v1';
 const DEFAULT_TASK_ID = 'task_canvas_default';
 
+function agentDataPortTop(index: number): number {
+  return AGENT_DATA_PORT_TOP + index * AGENT_DATA_PORT_GAP;
+}
+
+function trimLiveLog(value: string): string {
+  const lines = value.split(/\r?\n/);
+  if (lines.length <= MAX_LOG_PREVIEW_LINES) {
+    return value;
+  }
+  return lines.slice(-MAX_LOG_PREVIEW_LINES).join('\n');
+}
+
 export function WorkflowViewer({
   workflows,
-  capsules,
+  callables,
+  resourceErrors,
   selectedWorkflowId,
   onSelect,
   onChanged,
@@ -341,8 +421,11 @@ export function WorkflowViewer({
   const [connectionMode, setConnectionMode] = useState<ConnectionMode>('control');
   const [message, setMessage] = useState('已加载持久任务');
   const [runsById, setRunsById] = useState<Record<string, RunProjection>>({});
+  const [runLogsById, setRunLogsById] = useState<Record<string, Record<string, NodeLiveLogs>>>({});
+  const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfig | null>(null);
   const [openedExternalWorkflow, setOpenedExternalWorkflow] = useState(false);
   const [focusedWorkflowId, setFocusedWorkflowId] = useState<string | null>(null);
+  const [dataConnectionDraft, setDataConnectionDraft] = useState<DataConnectionDraft>(null);
   const [chrome, setChrome] = useState<WorkbenchChromeState>({
     leftPanel: 'none',
     rightPanel: 'none',
@@ -357,6 +440,9 @@ export function WorkflowViewer({
     title: '运行证据',
     content: null,
   });
+  const [saveWorkflowDialog, setSaveWorkflowDialog] = useState<SaveWorkflowDialogState | null>(
+    null,
+  );
   const graphRef = useRef(sourceGraph);
   const selectedRunId = currentTask?.activeRunId || currentTask?.latestRunId || null;
   const selectedRunProjection = selectedRunId ? runsById[selectedRunId] : undefined;
@@ -386,6 +472,92 @@ export function WorkflowViewer({
       return { ...current, [runId]: update(projection) };
     });
   }, []);
+
+  const appendNodeLogDelta = useCallback((delta: NodeLogDelta) => {
+    setRunLogsById((current) => {
+      const runLogs = current[delta.run_id] || {};
+      const previous = runLogs[delta.node_id] || {
+        stdout: '',
+        stderr: '',
+        stdoutOffset: 0,
+        stderrOffset: 0,
+      };
+      const nextNodeLogs: NodeLiveLogs =
+        delta.stream === 'stdout'
+          ? {
+              ...previous,
+              stdout: trimLiveLog(previous.stdout + delta.text),
+              stdoutOffset: delta.next_offset,
+            }
+          : {
+              ...previous,
+              stderr: trimLiveLog(previous.stderr + delta.text),
+              stderrOffset: delta.next_offset,
+            };
+      return {
+        ...current,
+        [delta.run_id]: { ...runLogs, [delta.node_id]: nextNodeLogs },
+      };
+    });
+  }, []);
+
+  useEffect(() => {
+    let ignore = false;
+    api
+      .runtimeConfig()
+      .then((config) => {
+        if (!ignore) {
+          setRuntimeConfig(config);
+        }
+      })
+      .catch(() => {
+        if (!ignore) {
+          setRuntimeConfig(null);
+        }
+      });
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!selectedRunId || typeof EventSource === 'undefined') {
+      return undefined;
+    }
+    const source = new EventSource(api.runStreamUrl(selectedRunId));
+    const onLogDelta = (event: MessageEvent<string>) => {
+      try {
+        const payload = JSON.parse(event.data) as NodeLogDelta;
+        if (payload.type === 'node_log_delta') {
+          appendNodeLogDelta(payload);
+        }
+      } catch {
+        // Ignore malformed stream chunks; polling still owns durable run state.
+      }
+    };
+    const onSummary = (event: MessageEvent<string>) => {
+      try {
+        const payload = JSON.parse(event.data) as { type?: string; summary?: RunSummary };
+        if (payload.type === 'summary' && payload.summary) {
+          updateRunProjection(selectedRunId, (current) => ({
+            ...current,
+            summary: payload.summary,
+            status: payload.summary?.status as WorkflowStatus,
+          }));
+        }
+      } catch {
+        // Keep the stream best-effort; existing run polling remains the fallback.
+      }
+    };
+    source.addEventListener('node_log_delta', onLogDelta as EventListener);
+    source.addEventListener('summary', onSummary as EventListener);
+    source.onerror = () => {
+      source.close();
+    };
+    return () => {
+      source.close();
+    };
+  }, [appendNodeLogDelta, selectedRunId, updateRunProjection]);
 
   useEffect(() => {
     saveTaskStore({ version: 1, activeTaskId, tasks });
@@ -600,11 +772,14 @@ export function WorkflowViewer({
     selection.type === 'internal'
       ? selectedWorkflow?.internalNodes.find((node) => node.id === selection.nodeId)
       : undefined;
+  const normalizedSelection = useMemo(
+    () => normalizeWorkbenchSelection(displayCanvas, selection, focusedWorkflowId),
+    [displayCanvas, focusedWorkflowId, selection],
+  );
   const paletteTargetWorkflow =
     focusedWorkflowId
       ? canvas.workflows.find((workflow) => workflow.id === focusedWorkflowId)
-      : selection.type === 'workflow' &&
-          selectedWorkflow &&
+      : selectedWorkflow &&
           !isExecutableNodeWorkflow(selectedWorkflow)
         ? selectedWorkflow
         : null;
@@ -612,6 +787,38 @@ export function WorkflowViewer({
   const canRunSelectedNode = Boolean(
     selectedInternalNode || (selection.type === 'workflow' && selectedWorkflow && isExecutableNodeWorkflow(selectedWorkflow)),
   );
+
+  useEffect(() => {
+    if (selectionKey(normalizedSelection) !== selectionKey(selection)) {
+      setSelection(normalizedSelection);
+      if (normalizedSelection.type === 'task_canvas') {
+        setChrome((current) => ({ ...current, rightPanel: 'none' }));
+      }
+    }
+  }, [normalizedSelection, selection]);
+
+  useEffect(() => {
+    if (connectionMode !== 'data') {
+      setDataConnectionDraft(null);
+    }
+  }, [connectionMode]);
+
+  useEffect(() => {
+    if (!dataConnectionDraft) {
+      return;
+    }
+    const sourceNode = findDataConnectNode(
+      displayCanvas,
+      dataConnectionDraft.scopeWorkflowId,
+      dataConnectionDraft.sourceNodeId,
+    );
+    const hasSourcePort = sourceNode?.outputPorts.some(
+      (portValue) => portValue.id === dataConnectionDraft.sourcePortId,
+    );
+    if (!sourceNode || !hasSourcePort) {
+      setDataConnectionDraft(null);
+    }
+  }, [dataConnectionDraft, displayCanvas]);
 
   function createDemo() {
     const nextCanvas = workspaceDemoCanvas();
@@ -637,6 +844,9 @@ export function WorkflowViewer({
     setSourceGraph(nextGraph);
     setCanvas(task.canvas);
     setSelection({ type: 'task_canvas', taskId: task.canvas.id });
+    setFocusedWorkflowId(null);
+    setChrome((current) => ({ ...current, rightPanel: 'none' }));
+    closeEvidenceDock();
   }
 
   function newTask() {
@@ -650,6 +860,9 @@ export function WorkflowViewer({
     setSourceGraph(nextGraph);
     setCanvas(nextCanvas);
     setSelection({ type: 'task_canvas', taskId: nextCanvas.id });
+    setFocusedWorkflowId(null);
+    setChrome((current) => ({ ...current, rightPanel: 'none' }));
+    closeEvidenceDock();
   }
 
   function deleteTask(taskId: string) {
@@ -740,11 +953,61 @@ export function WorkflowViewer({
     }
   }, []);
 
-  async function saveGraph(options: { selectSavedWorkflow?: boolean; refreshIndex?: boolean } = {}) {
-    const { selectSavedWorkflow = true, refreshIndex = true } = options;
-    const graph = reusableWorkflowClassGraph(
+  function requestSaveWorkflow() {
+    if (isJsdomRuntime()) {
+      void saveGraph();
+      return;
+    }
+    const baseGraph = reusableWorkflowClassGraph(
       graphForCurrentView(stripRuntimeStateFromCanvas(canvas), focusedWorkflowId),
     );
+    setSaveWorkflowDialog({
+      name: baseGraph.name || canvas.name || 'workflow',
+      saving: false,
+      error: null,
+    });
+  }
+
+  async function confirmSaveWorkflow() {
+    const requestedName = saveWorkflowDialog?.name.trim() || '';
+    if (!requestedName) {
+      setSaveWorkflowDialog((current) =>
+        current ? { ...current, error: 'Workflow 名称不能为空' } : current,
+      );
+      return;
+    }
+    setSaveWorkflowDialog((current) =>
+      current ? { ...current, saving: true, error: null } : current,
+    );
+    try {
+      await saveGraph({ requestedName });
+      setSaveWorkflowDialog(null);
+    } catch (error) {
+      const text = error instanceof Error ? error.message : String(error);
+      setSaveWorkflowDialog((current) =>
+        current ? { ...current, saving: false, error: text } : current,
+      );
+    }
+  }
+
+  async function saveGraph(
+    options: {
+      selectSavedWorkflow?: boolean;
+      refreshIndex?: boolean;
+      requestedName?: string | null;
+    } = {},
+  ) {
+    const { selectSavedWorkflow = true, refreshIndex = true, requestedName = null } = options;
+    const baseGraph = reusableWorkflowClassGraph(
+      graphForCurrentView(stripRuntimeStateFromCanvas(canvas), focusedWorkflowId),
+    );
+    const graph = requestedName
+      ? {
+          ...baseGraph,
+          id: slugId(requestedName) === 'node' ? `workflow_${Date.now()}` : slugId(requestedName),
+          name: requestedName,
+        }
+      : baseGraph;
     graphRef.current = graph;
     setSourceGraph(graph);
     const result = await api.saveWorkflow(graph, true);
@@ -770,6 +1033,11 @@ export function WorkflowViewer({
         open: true,
         title: '校验错误',
         content: textArtifact('validation-error.log', text, 'log'),
+        owner: {
+          kind: 'validation',
+          taskId: activeTaskId,
+          createdAt: new Date().toISOString(),
+        },
       });
     }
   }
@@ -899,6 +1167,12 @@ export function WorkflowViewer({
         ),
       );
       setMessage(`运行 ${graph.id}: 已提交，等待节点事件...`);
+      setEvidenceDock((current) => ({
+        open: current.open,
+        title: '杩愯璇佹嵁',
+        content: null,
+        owner: { kind: 'run', taskId, runId, createdAt: new Date().toISOString() },
+      }));
       const submitted = await api.submitGraphRun(
         runnableGraph,
         runDir,
@@ -926,6 +1200,7 @@ export function WorkflowViewer({
         open: true,
         title: '运行错误',
         content: textArtifact('run-error.log', text, 'log'),
+        owner: { kind: 'run', taskId, runId, createdAt: new Date().toISOString() },
       });
       updateRunProjection(runId, (current) => ({ ...current, status: 'failed', pollState: 'error' }));
       setTasks((current) =>
@@ -943,7 +1218,17 @@ export function WorkflowViewer({
       return;
     }
     const content = await api.artifact(path);
-    setEvidenceDock({ open: true, title, content: truncateLargeLog(content) });
+    setEvidenceDock({
+      open: true,
+      title,
+      content: truncateLargeLog(content),
+      owner: {
+        kind: 'artifact',
+        taskId: activeTaskId,
+        runId: selectedRunId || undefined,
+        createdAt: new Date().toISOString(),
+      },
+    });
   }
 
   async function saveBinding(workflowId: string, workspaceRoot: string) {
@@ -972,6 +1257,176 @@ export function WorkflowViewer({
     setMessage(`已打开 ${workflowId} 的 bindings 目录`);
   }
 
+  function updateWorkflowInvocationInput(workflowId: string, input: Record<string, unknown>) {
+    updateCanvasAndGraph((current) => ({
+      ...current,
+      workflows: current.workflows.map((workflow) =>
+        workflow.id === workflowId ? { ...workflow, sourceInput: input } : workflow,
+      ),
+    }));
+  }
+
+  function updateInternalInvocationInput(
+    workflowId: string,
+    nodeId: string,
+    input: Record<string, unknown>,
+  ) {
+    updateCanvasAndGraph((current) => ({
+      ...current,
+      workflows: current.workflows.map((workflow) =>
+        workflow.id === workflowId
+          ? {
+              ...workflow,
+              internalNodes: workflow.internalNodes.map((node) =>
+                node.id === nodeId ? { ...node, input } : node,
+              ),
+            }
+          : workflow,
+      ),
+    }));
+  }
+
+  function updateWorkflowInvocationLabel(workflowId: string, label: string) {
+    const nextLabel = label.trim();
+    updateCanvas((current) => ({
+      ...current,
+      workflows: current.workflows.map((workflow) =>
+        workflow.id === workflowId
+          ? {
+              ...workflow,
+              invocationLabel: nextLabel || workflow.id,
+              title: nextLabel || workflow.id,
+            }
+          : workflow,
+      ),
+    }));
+  }
+
+  function updateInternalInvocationLabel(workflowId: string, nodeId: string, label: string) {
+    const nextLabel = label.trim();
+    updateCanvas((current) => ({
+      ...current,
+      workflows: current.workflows.map((workflow) =>
+        workflow.id === workflowId
+          ? {
+              ...workflow,
+              internalNodes: workflow.internalNodes.map((node) =>
+                node.id === nodeId
+                  ? {
+                      ...node,
+                      invocationLabel: nextLabel || node.id,
+                      name: nextLabel || node.id,
+                    }
+                  : node,
+              ),
+            }
+          : workflow,
+      ),
+    }));
+  }
+
+  function beginDataConnection(draft: Exclude<DataConnectionDraft, null>) {
+    setConnectionMode('data');
+    setDataConnectionDraft(draft);
+    setChrome((current) => ({ ...current, rightPanel: 'inspector' }));
+    setMessage(`正在连接: ${draft.sourceNodeLabel}.${draft.sourcePortId} -> 请选择目标输入`);
+  }
+
+  function cancelDataConnection() {
+    setDataConnectionDraft(null);
+    setMessage('已取消 Data Edge 连接');
+  }
+
+  function updateDataConnectionMaterialization(materialization: 'copy' | 'reference') {
+    setDataConnectionDraft((current) => (current ? { ...current, materialization } : current));
+  }
+
+  function completeDataConnection(
+    targetNodeId: string,
+    targetPortId: string,
+    options: { replaceExisting?: boolean } = {},
+  ) {
+    if (!dataConnectionDraft) {
+      setMessage('请先选择一个 output port 作为 Data Edge 来源');
+      return;
+    }
+    try {
+      const result = createDataEdgeCommand(canvas, {
+        ...dataConnectionDraft,
+        targetNodeId,
+        targetPortId,
+        replaceExisting: options.replaceExisting,
+      });
+      updateCanvasAndGraph(result.canvas);
+      setDataConnectionDraft(null);
+      setSelection({ type: 'edge', id: result.edge.id });
+      setChrome((current) => ({ ...current, rightPanel: 'inspector' }));
+      setMessage(
+        `已创建 Data Edge: ${dataConnectionDraft.sourceNodeLabel}.${dataConnectionDraft.sourcePortId} -> ${targetNodeId}.${targetPortId}` +
+          (result.autoAddedControlEdge ? '；已自动补控制依赖' : ''),
+      );
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '创建 Data Edge 失败');
+    }
+  }
+
+  function completeDataConnectionWithNewInputPort(targetNodeId: string, requestedPortId: string) {
+    if (!dataConnectionDraft) {
+      setMessage('请先选择一个 output port 作为 Data Edge 来源');
+      return;
+    }
+    try {
+      const portId = uniqueInputPortIdForNode(
+        canvas,
+        dataConnectionDraft.scopeWorkflowId,
+        targetNodeId,
+        requestedPortId,
+      );
+      const currentWithPort = addInputPortToDataConnectNode(
+        canvas,
+        dataConnectionDraft.scopeWorkflowId,
+        targetNodeId,
+        portId,
+      );
+      const result = createDataEdgeCommand(currentWithPort, {
+        ...dataConnectionDraft,
+        targetNodeId,
+        targetPortId: portId,
+      });
+      updateCanvasAndGraph(result.canvas);
+      setDataConnectionDraft(null);
+      setSelection({ type: 'edge', id: result.edge.id });
+      setChrome((current) => ({ ...current, rightPanel: 'inspector' }));
+      setMessage(
+        `已创建输入端口 ${targetNodeId}.${portId} 并连接 Data Edge` +
+          (result.autoAddedControlEdge ? '；已自动补控制依赖' : ''),
+      );
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '创建 Data Edge 失败');
+    }
+  }
+
+  function addDataConnectPort(
+    scopeWorkflowId: string | null,
+    nodeId: string,
+    direction: PortDirection,
+    requestedPortId: string,
+  ) {
+    const normalizedPortId = slugId(requestedPortId || `${direction}_${Date.now()}`);
+    if (!normalizedPortId) {
+      setMessage('端口 id 不能为空');
+      return;
+    }
+    try {
+      updateCanvasAndGraph((current) =>
+        addPortToDataConnectNode(current, scopeWorkflowId, nodeId, direction, normalizedPortId),
+      );
+      setMessage(`已添加 ${direction} port: ${nodeId}.${normalizedPortId}`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '添加端口失败');
+    }
+  }
+
   return (
     <WorkbenchShell>
       <TopBar
@@ -980,7 +1435,7 @@ export function WorkflowViewer({
         isRunning={isRunning}
         onNew={newTask}
         onLoadDemo={createDemo}
-        onSave={saveGraph}
+        onSave={requestSaveWorkflow}
         onValidate={validateGraph}
         onRun={runGraph}
         onAutoLayout={autoLayout}
@@ -1030,7 +1485,8 @@ export function WorkflowViewer({
             </div>
             <LeftNavigator
               workflows={workflows}
-              capsules={capsules}
+              callables={callables}
+              resourceErrors={resourceErrors}
               selectedWorkflowId={selectedWorkflowId}
               onOpenWorkflow={(workflowId) => openWorkflow(workflowId)}
               onSelectResource={(resource) => {
@@ -1041,7 +1497,6 @@ export function WorkflowViewer({
               addTargetLabel={paletteTargetWorkflow?.title}
               onAddPaletteItem={(item, options) => {
                 const selectedContainerId =
-                  selection.type === 'workflow' &&
                   selectedWorkflow &&
                   !isExecutableNodeWorkflow(selectedWorkflow)
                     ? selectedWorkflow.id
@@ -1055,20 +1510,18 @@ export function WorkflowViewer({
                     new Set(canvas.workflows.map((workflow) => workflow.id)),
                   );
                   updateCanvas((current) =>
-                    addWorkflowFromPalette(current, item, {
-                      x: 160 + current.workflows.length * 80,
-                      y: 180 + current.workflows.length * 40,
-                    }),
+                    addWorkflowFromPalette(current, item, nextRootPalettePosition(current)),
                   );
                   setSelection({ type: 'workflow', id: nextWorkflowId });
                   setChrome((current) => ({ ...current, rightPanel: 'inspector' }));
-                  setMessage(`已加入 ${item.label}`);
+                  setMessage(`已加入 Root canvas: ${item.label}`);
                   return;
                 }
+                const nextSelection = nextPaletteSelection(canvas, item, requestedTargetWorkflowId);
                 updateCanvas((current) => {
                   const targetWorkflowId = requestedTargetWorkflowId;
                   if (!targetWorkflowId) {
-                    return addCapsuleNodeFromPalette(current, item, nextRootPalettePosition(current));
+                    return addCallableNodeFromPalette(current, item, nextRootPalettePosition(current));
                   }
                   const workflow = current.workflows.find((candidate) => candidate.id === targetWorkflowId);
                   const nodeCount = workflow?.internalNodes.length || 0;
@@ -1077,10 +1530,12 @@ export function WorkflowViewer({
                     y: 130 + Math.floor(nodeCount / 4) * 170,
                   });
                 });
+                setSelection(nextSelection);
+                setChrome((current) => ({ ...current, rightPanel: 'inspector' }));
                 if (!requestedTargetWorkflowId) {
-                  setMessage(`已加入 ${item.label}`);
+                  setMessage(`已加入 Root canvas: ${item.label}`);
                 } else {
-                  setMessage(`已加入 ${item.label} 到 ${requestedTargetWorkflowId}`);
+                  setMessage(`已加入 Workflow: ${requestedTargetWorkflowId} / ${item.label}`);
                 }
               }}
             />
@@ -1092,7 +1547,7 @@ export function WorkflowViewer({
           connectionMode={connectionMode}
           workflowRun={workflowRun}
           focusedWorkflowId={focusedWorkflowId}
-          capsules={capsules}
+          callables={callables}
           workflows={workflows}
           bindings={workflowBindings}
           onFocusedWorkflow={setFocusedWorkflowId}
@@ -1101,6 +1556,7 @@ export function WorkflowViewer({
           edgeViewMode={edgeViewMode}
           onEdgeViewMode={setEdgeViewMode}
           onBlankCanvas={() => setChrome((current) => ({ ...current, rightPanel: 'none' }))}
+          onNotice={setMessage}
           onConfigureWorkflow={(workflowId) => {
             setSelection({ type: 'workflow', id: workflowId });
             setChrome((current) => ({ ...current, rightPanel: 'inspector' }));
@@ -1109,6 +1565,7 @@ export function WorkflowViewer({
         />
         <ExecutionDock
           isRunning={isRunning}
+          runtimeConfig={runtimeConfig}
           canRunWorkflow={canRunSelectedWorkflow}
           canRunNode={canRunSelectedNode}
           onRunTask={runGraph}
@@ -1147,12 +1604,26 @@ export function WorkflowViewer({
                 selectedEdge={selectedEdge}
                 selectedInternalNode={selectedInternalNode}
                 connectionMode={connectionMode}
+                dataConnectionDraft={dataConnectionDraft}
+                runtimeConfig={runtimeConfig}
+                liveLogs={selectedRunId ? runLogsById[selectedRunId] || {} : {}}
                 workflowRun={workflowRun}
                 workflowEvents={workflowEvents}
+                workflows={workflows}
                 binding={selectedWorkflow ? workflowBindings[selectedWorkflow.id] : undefined}
                 onConnectionMode={setConnectionMode}
+                onBeginDataConnection={beginDataConnection}
+                onCancelDataConnection={cancelDataConnection}
+                onUpdateDataConnectionMaterialization={updateDataConnectionMaterialization}
+                onCompleteDataConnection={completeDataConnection}
+                onCompleteDataConnectionWithNewInputPort={completeDataConnectionWithNewInputPort}
+                onAddDataConnectPort={addDataConnectPort}
                 onReadEvidence={readEvidence}
                 onConfigureBinding={(workflowId) => setBindingEditorWorkflowId(workflowId)}
+                onUpdateWorkflowInput={updateWorkflowInvocationInput}
+                onUpdateInternalInput={updateInternalInvocationInput}
+                onUpdateWorkflowLabel={updateWorkflowInvocationLabel}
+                onUpdateInternalLabel={updateInternalInvocationLabel}
               />
             )}
           </div>
@@ -1168,11 +1639,23 @@ export function WorkflowViewer({
           onOpenFolder={openBindingsFolder}
         />
       ) : null}
+      {saveWorkflowDialog ? (
+        <SaveWorkflowDialog
+          state={saveWorkflowDialog}
+          onName={(name) =>
+            setSaveWorkflowDialog((current) => (current ? { ...current, name } : current))
+          }
+          onCancel={() => setSaveWorkflowDialog(null)}
+          onConfirm={confirmSaveWorkflow}
+        />
+      ) : null}
       <WorkflowEvidenceDock
         state={evidenceDock}
         message={message}
         workflowRun={workflowRun}
         workflowEvents={workflowEvents}
+        currentTaskId={currentTask?.taskId}
+        selectedRunId={selectedRunId}
         onToggle={() => setEvidenceDock((current) => ({ ...current, open: !current.open }))}
       />
     </WorkbenchShell>
@@ -1187,8 +1670,59 @@ function WorkbenchShell({ children }: { children: ReactNode }) {
   );
 }
 
+function SaveWorkflowDialog({
+  state,
+  onName,
+  onCancel,
+  onConfirm,
+}: {
+  state: SaveWorkflowDialogState;
+  onName: (name: string) => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <form
+        className="modal-panel save-workflow-dialog"
+        aria-label="保存 Workflow"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onConfirm();
+        }}
+      >
+        <div className="modal-title-row">
+          <h3>保存任务为 Workflow</h3>
+          <button type="button" onClick={onCancel} disabled={state.saving}>
+            关闭
+          </button>
+        </div>
+        <label className="form-field">
+          <span>Workflow 名称</span>
+          <input
+            value={state.name}
+            onChange={(event) => onName(event.target.value)}
+            disabled={state.saving}
+            autoFocus
+          />
+        </label>
+        {state.error ? <p className="form-error">{state.error}</p> : null}
+        <div className="modal-actions">
+          <button type="button" onClick={onCancel} disabled={state.saving}>
+            取消
+          </button>
+          <button type="submit" className="primary-action" disabled={state.saving}>
+            {state.saving ? '保存中' : '保存'}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function ExecutionDock({
   isRunning,
+  runtimeConfig,
   canRunWorkflow,
   canRunNode,
   onRunTask,
@@ -1196,14 +1730,21 @@ function ExecutionDock({
   onRunNode,
 }: {
   isRunning: boolean;
+  runtimeConfig: RuntimeConfig | null;
   canRunWorkflow: boolean;
   canRunNode: boolean;
   onRunTask: () => void;
   onRunWorkflow: () => void;
   onRunNode: () => void;
 }) {
+  const modeLabel = runtimeConfig?.real_external_agents_enabled
+    ? 'Production: real external agents'
+    : runtimeConfig?.run_mode === 'production'
+      ? 'Production gate disabled'
+      : 'Hermetic: no external agents';
   return (
     <div className="execution-dock" aria-label="执行控制">
+      <span className="runtime-mode-pill">{modeLabel}</span>
       <button type="button" className="primary-action run-task-action" onClick={onRunTask} disabled={isRunning}>
         <Play aria-hidden="true" size={18} />
         {isRunning ? '运行中' : '运行当前任务'}
@@ -1326,9 +1867,9 @@ function TopBar({
           <Database aria-hidden="true" size={16} />
           属性
         </button>
-        <button type="button" onClick={onNew}>
+        <button type="button" aria-label="新建任务（工具栏）" onClick={onNew}>
           <GitBranch aria-hidden="true" size={16} />
-          新建
+          新建任务
         </button>
         <button type="button" onClick={onLoadDemo}>
           <LayoutDashboard aria-hidden="true" size={16} />
@@ -1357,7 +1898,8 @@ function TopBar({
 
 function LeftNavigator({
   workflows,
-  capsules,
+  callables,
+  resourceErrors,
   selectedWorkflowId,
   onOpenWorkflow,
   onSelectResource,
@@ -1366,7 +1908,11 @@ function LeftNavigator({
   onAddPaletteItem,
 }: {
   workflows: WorkflowSummary[];
-  capsules: CapsuleSummary[];
+  callables: CallableSummary[];
+  resourceErrors?: {
+    callables?: string;
+    workflows?: string;
+  };
   selectedWorkflowId: string;
   onOpenWorkflow: (workflowId: string) => void;
   onSelectResource: (resource: ResourceTemplate) => void;
@@ -1374,11 +1920,21 @@ function LeftNavigator({
   addTargetLabel?: string;
   onAddPaletteItem: (item: PaletteItem, options?: PaletteAddOptions) => void;
 }) {
-  const paletteCapsules = capsules.filter((capsule) => capsule.id !== 'file-source.local').slice(0, 40);
-  const workflowCapsuleCount = capsules.filter((capsule) =>
-    /workflow|subworkflow|agent-workflow/u.test(capsule.id),
+  const [workflowSearch, setWorkflowSearch] = useState('');
+  const paletteCallables = callables.filter((callable) => callable.id !== 'file-source.local').slice(0, 40);
+  const workflowCallableCount = callables.filter((callable) =>
+    /workflow|subworkflow|agent-workflow/u.test(callable.id),
   );
-  const addButtonLabel = addTargetLabel ? '加入到选中 Workflow' : '加入';
+  const normalizedWorkflowSearch = workflowSearch.trim().toLowerCase();
+  const visibleWorkflows = workflows.filter((workflow) => {
+    if (!normalizedWorkflowSearch) {
+      return true;
+    }
+    return workflowSearchHaystack(workflow).includes(normalizedWorkflowSearch);
+  });
+  const rootWorkflows = visibleWorkflows.filter((workflow) => !isChildWorkflowSummary(workflow));
+  const childWorkflows = visibleWorkflows.filter(isChildWorkflowSummary);
+  const addButtonLabel = addTargetLabel ? `加入到选中 Workflow: ${addTargetLabel}` : '加入';
   const addHint = addTargetLabel
     ? `将加入 ${addTargetLabel} 的内部节点`
     : focusedWorkflowId
@@ -1393,8 +1949,17 @@ function LeftNavigator({
         </header>
         <div className="search-box">
           <Search aria-hidden="true" size={15} />
-          <span>Workflow Template</span>
+          <input
+            type="search"
+            value={workflowSearch}
+            onChange={(event) => setWorkflowSearch(event.target.value)}
+            placeholder="搜索 workflow id / path"
+            aria-label="搜索 Workflow Template"
+          />
         </div>
+        {resourceErrors?.workflows ? (
+          <div className="notice compact-notice">Workflow 模板加载失败：{resourceErrors.workflows}</div>
+        ) : null}
         <button
           type="button"
           className="palette-drag-item"
@@ -1408,52 +1973,54 @@ function LeftNavigator({
           <span>拖入 Workflow</span>
         </button>
         <div className="workflow-list">
-          {workflows.map((workflow) => (
-            <button
-              key={workflow.workflow_id}
-              type="button"
-              className={
-                selectedWorkflowId === workflow.workflow_id ? 'list-item selected' : 'list-item'
-              }
-              onClick={() =>
-                onSelectResource({
-                  kind: 'workflow_class',
-                  workflowId: workflow.workflow_id,
-                  path: workflow.path,
-                  name: workflow.name || workflow.workflow_id,
-                })
-              }
-              onDoubleClick={() => onOpenWorkflow(workflow.workflow_id)}
-            >
-              <strong>{workflow.name || workflow.workflow_id}</strong>
-              <span>{workflow.path}</span>
-              <small>{workflow.task_count} nodes</small>
-            </button>
-          ))}
+          <WorkflowResourceGroup
+            title="Root workflows"
+            workflows={rootWorkflows}
+            selectedWorkflowId={selectedWorkflowId}
+            onSelectResource={onSelectResource}
+            onAddPaletteItem={onAddPaletteItem}
+          />
+          {childWorkflows.length ? (
+            <WorkflowResourceGroup
+              title="依赖 workflows"
+              workflows={childWorkflows}
+              selectedWorkflowId={selectedWorkflowId}
+              onSelectResource={onSelectResource}
+              onAddPaletteItem={onAddPaletteItem}
+              dependency
+            />
+          ) : null}
+          {visibleWorkflows.length === 0 ? <p className="empty-state">未找到匹配的 workflow。</p> : null}
         </div>
       </section>
       <section className="navigator-section">
         <header>
-          <h3>Agent / Tool Capsule</h3>
-          <span>{paletteCapsules.length}</span>
+          <h3>Agent / Tool Callable</h3>
+          <span>{paletteCallables.length}</span>
         </header>
-        {paletteCapsules.map((capsule) => {
+        {addTargetLabel ? (
+          <div className="scope-target-banner">当前添加目标：{addTargetLabel}</div>
+        ) : null}
+        {resourceErrors?.callables ? (
+          <div className="notice compact-notice">Callable 模板加载失败：{resourceErrors.callables}</div>
+        ) : null}
+        {paletteCallables.map((callable) => {
           const item: Exclude<PaletteItem, { kind: 'workflow' }> = {
-            kind: capsule.runtime === 'generic_cli' ? 'tool' : 'agent',
-            capsuleId: capsule.id,
-            label: capsule.name || capsule.id,
+            kind: callable.kind === 'tool_class' ? 'tool' : 'agent',
+            callableId: callable.id,
+            label: callable.name || callable.id,
           };
           return (
           <article
-            key={capsule.id}
-            className="capsule-palette-item"
+            key={callable.id}
+            className={`callable-palette-item resource-kind-${item.kind}`}
             draggable
             title={addHint}
             onClick={() =>
               onSelectResource({
                 kind: item.kind === 'tool' ? 'tool_class' : 'agent_class',
-                capsuleId: capsule.id,
-                name: capsule.name || capsule.id,
+                callableId: callable.id,
+                name: callable.name || callable.id,
               })
             }
             onDoubleClick={() => onAddPaletteItem(item)}
@@ -1461,8 +2028,8 @@ function LeftNavigator({
           >
             <Boxes aria-hidden="true" size={16} />
             <div>
-              <strong>{capsule.name || capsule.id}</strong>
-              <small>{capsule.id}</small>
+              <strong>{callable.name || callable.id}</strong>
+              <small>{callable.id}</small>
             </div>
             <div className="palette-add-actions">
               <button
@@ -1495,33 +2062,33 @@ function LeftNavigator({
           </article>
           );
         })}
-        {workflowCapsuleCount.length > 0 ? (
+        {workflowCallableCount.length > 0 ? (
           <small className="navigator-hint">
-            Workflow capsules: {workflowCapsuleCount.length}
+            Workflow callables: {workflowCallableCount.length}
           </small>
         ) : null}
         <article
-          className="capsule-palette-item"
+          className="callable-palette-item resource-kind-file-source"
           draggable
           title={addHint}
           onClick={() =>
             onSelectResource({
               kind: 'tool_class',
-              capsuleId: 'file-source.local',
+              callableId: 'file-source.local',
               name: 'File Source',
             })
           }
           onDoubleClick={() =>
             onAddPaletteItem({
               kind: 'file_source',
-              capsuleId: 'file-source.local',
+              callableId: 'file-source.local',
               label: 'File Source',
             })
           }
           onDragStart={(event) =>
             setPaletteDragData(event, {
               kind: 'file_source',
-              capsuleId: 'file-source.local',
+              callableId: 'file-source.local',
               label: 'File Source',
             })
           }
@@ -1541,7 +2108,7 @@ function LeftNavigator({
                 event.stopPropagation();
                 onAddPaletteItem({
                   kind: 'file_source',
-                  capsuleId: 'file-source.local',
+                  callableId: 'file-source.local',
                   label: 'File Source',
                 });
               }}
@@ -1559,7 +2126,7 @@ function LeftNavigator({
                   onAddPaletteItem(
                     {
                       kind: 'file_source',
-                      capsuleId: 'file-source.local',
+                      callableId: 'file-source.local',
                       label: 'File Source',
                     },
                     { forceRoot: true },
@@ -1576,6 +2143,74 @@ function LeftNavigator({
   );
 }
 
+function WorkflowResourceGroup({
+  title,
+  workflows,
+  selectedWorkflowId,
+  onSelectResource,
+  onAddPaletteItem,
+  dependency = false,
+}: {
+  title: string;
+  workflows: WorkflowSummary[];
+  selectedWorkflowId: string;
+  onSelectResource: (resource: ResourceTemplate) => void;
+  onAddPaletteItem: (item: PaletteItem, options?: PaletteAddOptions) => void;
+  dependency?: boolean;
+}) {
+  if (workflows.length === 0) {
+    return null;
+  }
+  return (
+    <>
+      <h4>{title}</h4>
+      {workflows.map((workflow) => {
+        const item: Extract<PaletteItem, { kind: 'workflow' }> = {
+          kind: 'workflow',
+          workflowRef: workflow.path,
+          label: workflow.name || workflow.workflow_id,
+        };
+        const stableKey = workflow.path || workflow.file_id || workflow.workflow_id;
+        return (
+          <article key={stableKey} className="workflow-resource-entry resource-kind-workflow">
+            <button
+              type="button"
+              className={selectedWorkflowId === workflow.workflow_id ? 'list-item selected' : 'list-item'}
+              onClick={() =>
+                onSelectResource({
+                  kind: 'workflow_class',
+                  workflowId: workflow.workflow_id,
+                  path: workflow.path,
+                  name: workflow.name || workflow.workflow_id,
+                })
+              }
+              onDoubleClick={() => onAddPaletteItem(item)}
+              draggable
+              onDragStart={(event) => setPaletteDragData(event, item)}
+            >
+              <strong>{workflow.name || workflow.workflow_id}</strong>
+              <span>{workflow.workflow_id}</span>
+              <span>{workflow.path}</span>
+              <small>
+                {workflow.task_count} nodes {dependency ? 'dependency' : 'root'}
+              </small>
+            </button>
+            <div className="palette-add-actions">
+              <button
+                type="button"
+                className="palette-add-action"
+                onClick={() => onAddPaletteItem(item, { forceRoot: true })}
+              >
+                加入到画布
+              </button>
+            </div>
+          </article>
+        );
+      })}
+    </>
+  );
+}
+
 function WorkspaceCanvas({
   canvas,
   selection,
@@ -1583,7 +2218,7 @@ function WorkspaceCanvas({
   edgeViewMode,
   workflowRun,
   focusedWorkflowId,
-  capsules,
+  callables,
   workflows,
   bindings,
   onFocusedWorkflow,
@@ -1591,6 +2226,7 @@ function WorkspaceCanvas({
   onSelect,
   onEdgeViewMode,
   onBlankCanvas,
+  onNotice,
   onConfigureWorkflow,
 }: {
   canvas: WorkspaceCanvasModel;
@@ -1599,7 +2235,7 @@ function WorkspaceCanvas({
   edgeViewMode: EdgeViewMode;
   workflowRun: WorkflowRunResult | null;
   focusedWorkflowId: string | null;
-  capsules: CapsuleSummary[];
+  callables: CallableSummary[];
   workflows: WorkflowSummary[];
   bindings: Record<string, WorkflowBindingView>;
   onFocusedWorkflow: (workflowId: string | null) => void;
@@ -1607,23 +2243,33 @@ function WorkspaceCanvas({
   onSelect: (selection: CanvasSelection) => void;
   onEdgeViewMode: (mode: EdgeViewMode) => void;
   onBlankCanvas: () => void;
+  onNotice?: (message: string) => void;
   onConfigureWorkflow: (workflowId: string) => void;
 }) {
   const [flowInstance, setFlowInstance] = useState<{
     screenToFlowPosition: (position: { x: number; y: number }) => { x: number; y: number };
+    fitView?: (options?: { padding?: number; duration?: number }) => void;
   } | null>(null);
   const [nodeCreateMenu, setNodeCreateMenu] = useState<NodeCreateMenuState>(null);
   const [connectStart, setConnectStart] = useState<PendingCanvasConnection | null>(null);
   const [isDraggingNode, setIsDraggingNode] = useState(false);
   const [flowNodes, setFlowNodes] = useState<CanvasFlowNode[]>([]);
   const flowNodesRef = useRef<CanvasFlowNode[]>([]);
+  const connectionModeRef = useRef(connectionMode);
   const connectStartRef = useRef<PendingCanvasConnection | null>(null);
+  const connectCompletedRef = useRef(false);
+  const internalClickConnectRef = useRef<{
+    workflowId: string;
+    nodeId: string;
+    mode: ConnectionMode;
+  } | null>(null);
   const nodeDragStartPositionRef = useRef<Map<string, { x: number; y: number }>>(new Map());
   const nodeDragEligibleRef = useRef<Map<string, boolean>>(new Map());
   const draggingRef = useRef(false);
   const lastDragCommitRef = useRef<string | null>(null);
   const forceCommittedProjectionRef = useRef(false);
   const projectionKeysRef = useRef({ identity: '', layout: '' });
+  const lastFitViewNodeCountRef = useRef(0);
   const visibleCanvas = useMemo(
     () => focusCanvas(canvas, focusedWorkflowId),
     [canvas, focusedWorkflowId],
@@ -1631,23 +2277,169 @@ function WorkspaceCanvas({
   useEffect(() => {
     setNodeCreateMenu(null);
     connectStartRef.current = null;
+    internalClickConnectRef.current = null;
     setConnectStart(null);
   }, [canvas.id]);
+  useEffect(() => {
+    connectionModeRef.current = connectionMode;
+    internalClickConnectRef.current = null;
+  }, [connectionMode]);
+  useEffect(() => {
+    const visibleNodeCount = flowNodes.length;
+    if (!flowInstance?.fitView || visibleNodeCount === 0 || visibleNodeCount === lastFitViewNodeCountRef.current) {
+      return;
+    }
+    lastFitViewNodeCountRef.current = visibleNodeCount;
+    window.setTimeout(() => flowInstance.fitView?.({ padding: 0.18, duration: 180 }), 0);
+  }, [flowInstance, flowNodes.length]);
   const handleSelectPort = useCallback(
-    (workflowId: string, portValue: WorkflowPortView) =>
-      onSelect({
+    (workflowId: string, portValue: WorkflowPortView) => {
+      const nextSelection: CanvasSelection = {
         type: 'port',
         workflowId,
         portId: portValue.id,
         direction: portValue.direction,
-      }),
-    [onSelect],
+      };
+      if (connectionMode === 'data' && selection.type === 'port') {
+        const endpoints = [selection, nextSelection];
+        const source = endpoints.find((item) => item.direction === 'output');
+        const target = endpoints.find((item) => item.direction === 'input');
+        if (!source || !target) {
+          onSelect(nextSelection);
+          onNotice?.('Data Edge 必须从 output port 连接到 input port');
+          return;
+        }
+        const scopedEdge = scopedDataEdge(
+          visibleCanvas,
+          flowEndpoint(source.workflowId),
+          flowEndpoint(target.workflowId),
+          source.portId,
+          target.portId,
+        );
+        if (!scopedEdge) {
+          onSelect(nextSelection);
+          onNotice?.('Data Edge 必须从同一层级的 output port 连接到 input port');
+          return;
+        }
+        const { edge, scopeWorkflowId } = scopedEdge;
+        if (edge.kind !== 'data') {
+          onSelect(nextSelection);
+          return;
+        }
+        onCanvasChange((current) =>
+          applyDataEdgeCommandOrKeep(current, {
+            scopeWorkflowId,
+            sourceNodeId: edge.source.workflowId,
+            sourcePortId: edge.source.portId,
+            targetNodeId: edge.target.workflowId,
+            targetPortId: edge.target.portId,
+            materialization: edge.materialization,
+          }, onNotice),
+        );
+        onSelect({ type: 'edge', id: edge.id });
+        return;
+      }
+      onSelect(nextSelection);
+    },
+    [connectionMode, onCanvasChange, onNotice, onSelect, selection, visibleCanvas],
   );
   const handleSelectInternal = useCallback((workflowId: string, nodeId: string) => {
     if (isWorkflowBoundaryId(workflowId)) {
       onSelect({ type: 'workflow', id: workflowId });
       return;
     }
+    const currentConnectionMode = connectionModeRef.current;
+    const pendingInternalClick = internalClickConnectRef.current;
+    if (
+      pendingInternalClick &&
+      pendingInternalClick.mode === currentConnectionMode &&
+      pendingInternalClick.workflowId === workflowId &&
+      pendingInternalClick.nodeId !== nodeId
+    ) {
+      const edge =
+        currentConnectionMode === 'control'
+          ? controlEdge(pendingInternalClick.nodeId, nodeId)
+          : dataEdge(pendingInternalClick.nodeId, 'main', nodeId, 'main');
+      internalClickConnectRef.current = null;
+      onCanvasChange((current) =>
+        edge.kind === 'data'
+          ? applyDataEdgeCommandOrKeep(current, {
+              scopeWorkflowId: workflowId,
+              sourceNodeId: edge.source.workflowId,
+              sourcePortId: edge.source.portId,
+              targetNodeId: edge.target.workflowId,
+              targetPortId: edge.target.portId,
+              materialization: edge.materialization,
+            }, onNotice)
+          : {
+              ...current,
+              workflows: current.workflows.map((workflow) => {
+                if (workflow.id !== workflowId) {
+                  return workflow;
+                }
+                const scopedCanvas = {
+                  ...current,
+                  edges: workflow.internalEdges.filter((item) => item.id !== edge.id),
+                };
+                return {
+                  ...workflow,
+                  internalEdges: addEdgeWithControlDependency(
+                    scopedCanvas,
+                    edge,
+                    workflowId,
+                  ).edges,
+                };
+              }),
+            },
+      );
+      onSelect({ type: 'edge', id: edge.id });
+      return;
+    }
+    if (
+      selection.type === 'internal' &&
+      selection.workflowId === workflowId &&
+      selection.nodeId !== nodeId
+    ) {
+      const edge =
+        currentConnectionMode === 'control'
+          ? controlEdge(selection.nodeId, nodeId)
+          : dataEdge(selection.nodeId, 'main', nodeId, 'main');
+      onCanvasChange((current) =>
+        edge.kind === 'data'
+          ? applyDataEdgeCommandOrKeep(current, {
+              scopeWorkflowId: workflowId,
+              sourceNodeId: edge.source.workflowId,
+              sourcePortId: edge.source.portId,
+              targetNodeId: edge.target.workflowId,
+              targetPortId: edge.target.portId,
+              materialization: edge.materialization,
+            }, onNotice)
+          : {
+              ...current,
+              workflows: current.workflows.map((workflow) => {
+                if (workflow.id !== workflowId) {
+                  return workflow;
+                }
+                const scopedCanvas = {
+                  ...current,
+                  edges: workflow.internalEdges.filter((item) => item.id !== edge.id),
+                };
+                return {
+                  ...workflow,
+                  internalEdges: addEdgeWithControlDependency(
+                    scopedCanvas,
+                    edge,
+                    workflowId,
+                  ).edges,
+                };
+              }),
+            },
+      );
+      internalClickConnectRef.current = null;
+      onSelect({ type: 'edge', id: edge.id });
+      return;
+    }
+    internalClickConnectRef.current = { workflowId, nodeId, mode: currentConnectionMode };
     if (
       focusedWorkflowId &&
       selection.type === 'internal' &&
@@ -1657,17 +2449,32 @@ function WorkspaceCanvas({
         connectionMode === 'control'
           ? controlEdge(selection.workflowId, workflowId)
           : dataEdge(selection.workflowId, 'main', workflowId, 'main');
-      onCanvasChange((current) => ({
-        ...current,
-        workflows: current.workflows.map((workflow) =>
-          workflow.id === focusedWorkflowId
-            ? {
-                ...workflow,
-                internalEdges: [...workflow.internalEdges.filter((item) => item.id !== edge.id), edge],
-              }
-            : workflow,
-        ),
-      }));
+      onCanvasChange((current) =>
+        edge.kind === 'data'
+          ? applyDataEdgeCommandOrKeep(current, {
+              scopeWorkflowId: focusedWorkflowId,
+              sourceNodeId: edge.source.workflowId,
+              sourcePortId: edge.source.portId,
+              targetNodeId: edge.target.workflowId,
+              targetPortId: edge.target.portId,
+              materialization: edge.materialization,
+            }, onNotice)
+          : {
+              ...current,
+              workflows: current.workflows.map((workflow) =>
+                workflow.id === focusedWorkflowId
+                  ? {
+                      ...workflow,
+                      internalEdges: addEdgeWithControlDependency(
+                        { ...current, edges: workflow.internalEdges },
+                        edge,
+                        focusedWorkflowId,
+                      ).edges,
+                    }
+                  : workflow,
+              ),
+            },
+      );
       onSelect({ type: 'edge', id: edge.id });
       return;
     }
@@ -1689,6 +2496,7 @@ function WorkspaceCanvas({
         visibleCanvas,
         selection,
         bindings,
+        (workflowId) => onSelect({ type: 'workflow', id: workflowId }),
         handleSelectPort,
         handleSelectInternal,
         onFocusedWorkflow,
@@ -1701,6 +2509,7 @@ function WorkspaceCanvas({
       visibleCanvas,
       selection,
       bindings,
+      onSelect,
       handleSelectPort,
       handleSelectInternal,
       onFocusedWorkflow,
@@ -1824,9 +2633,28 @@ function WorkspaceCanvas({
   const handleConnect: OnConnect = useCallback((connection) => {
     const scopedEdge = scopedEdgeFromConnection(visibleCanvas, connection, connectionMode);
     if (!scopedEdge) {
+      connectCompletedRef.current = false;
+      if (connectionMode === 'data') {
+        onNotice?.('Data Edge 必须从 output port 连接到 input port');
+      }
       return;
     }
+    connectCompletedRef.current = true;
     const { edge, scopeWorkflowId } = scopedEdge;
+    if (edge.kind === 'data') {
+      onCanvasChange((current) =>
+        applyDataEdgeCommandOrKeep(current, {
+          scopeWorkflowId,
+          sourceNodeId: edge.source.workflowId,
+          sourcePortId: edge.source.portId,
+          targetNodeId: edge.target.workflowId,
+          targetPortId: edge.target.portId,
+          materialization: edge.materialization,
+        }, onNotice),
+      );
+      onSelect({ type: 'edge', id: edge.id });
+      return;
+    }
     if (scopeWorkflowId) {
       onCanvasChange((current) => ({
         ...current,
@@ -1844,10 +2672,10 @@ function WorkspaceCanvas({
     }
     onCanvasChange((current) => ({
       ...current,
-      edges: [...current.edges.filter((item) => item.id !== edge.id), edge],
+      edges: addEdgeWithControlDependency(current, edge, null).edges,
     }));
     onSelect({ type: 'edge', id: edge.id });
-  }, [connectionMode, onCanvasChange, onSelect, visibleCanvas]);
+  }, [connectionMode, onCanvasChange, onNotice, onSelect, visibleCanvas]);
 
   const handleNodeDragStart = useCallback((event?: unknown, node?: CanvasFlowNode) => {
     draggingRef.current = true;
@@ -1920,7 +2748,7 @@ function WorkspaceCanvas({
         : position;
       return positionedWorkflow
         ? addInternalNodeFromPalette(current, positionedWorkflow.id, item, internalPosition)
-        : addCapsuleNodeFromPalette(current, item, position);
+        : addCallableNodeFromPalette(current, item, position);
     });
   }, [flowInstance, focusedWorkflowId, onCanvasChange]);
 
@@ -1937,7 +2765,8 @@ function WorkspaceCanvas({
   const handleConnectEnd = useCallback((event: MouseEvent | TouchEvent) => {
     const target = event.target instanceof Element ? event.target : null;
     const pendingConnection = connectStartRef.current || connectStart;
-    if (!pendingConnection || target?.closest('.react-flow__handle, .react-flow__node')) {
+    if (connectCompletedRef.current || !pendingConnection || target?.closest('.react-flow__handle, .react-flow__node')) {
+      connectCompletedRef.current = false;
       connectStartRef.current = null;
       setConnectStart(null);
       return;
@@ -1950,6 +2779,7 @@ function WorkspaceCanvas({
       pendingConnection,
     });
     connectStartRef.current = null;
+    connectCompletedRef.current = false;
     setConnectStart(null);
   }, [connectStart, flowInstance]);
 
@@ -1977,7 +2807,7 @@ function WorkspaceCanvas({
     if (item.kind === 'workflow') {
       onCanvasChange((current) => addWorkflowFromPalette(current, item, menu.position));
     } else {
-      onCanvasChange((current) => addCapsuleNodeFromPalette(current, item, menu.position));
+      onCanvasChange((current) => addCallableNodeFromPalette(current, item, menu.position));
     }
     setNodeCreateMenu(null);
   }, [focusedWorkflowId, nodeCreateMenu, onCanvasChange]);
@@ -1989,6 +2819,7 @@ function WorkspaceCanvas({
         handleId: params.handleId || null,
         mode: connectionMode,
       };
+      connectCompletedRef.current = false;
       connectStartRef.current = pending;
       setConnectStart(pending);
     },
@@ -1996,7 +2827,10 @@ function WorkspaceCanvas({
   );
 
   const handleInit = useCallback(
-    (instance: { screenToFlowPosition: (position: { x: number; y: number }) => { x: number; y: number } }) =>
+    (instance: {
+      screenToFlowPosition: (position: { x: number; y: number }) => { x: number; y: number };
+      fitView?: (options?: { padding?: number; duration?: number }) => void;
+    }) =>
       setFlowInstance(instance),
     [],
   );
@@ -2072,7 +2906,7 @@ function WorkspaceCanvas({
       >
         <MiniMap />
         <Controls />
-        <Background variant={BackgroundVariant.Dots} gap={24} size={1} />
+        <Background variant={BackgroundVariant.Dots} gap={24} size={1.5} />
       </ReactFlow>
       {nodeCreateMenu ? (
         <NodeCreateMenu
@@ -2080,7 +2914,7 @@ function WorkspaceCanvas({
           y={nodeCreateMenu.y}
           focused={Boolean(focusedWorkflowId)}
           workflows={workflows}
-          capsules={capsules}
+          callables={callables}
           onPick={createMenuItem}
           onClose={() => setNodeCreateMenu(null)}
         />
@@ -2139,7 +2973,7 @@ function NodeCreateMenu({
   y,
   focused,
   workflows,
-  capsules,
+  callables,
   onPick,
   onClose,
 }: {
@@ -2147,11 +2981,11 @@ function NodeCreateMenu({
   y: number;
   focused: boolean;
   workflows: WorkflowSummary[];
-  capsules: CapsuleSummary[];
+  callables: CallableSummary[];
   onPick: (item: PaletteItem) => void;
   onClose: () => void;
 }) {
-  const agentItems = capsules.filter((capsule) => capsule.id !== 'file-source.local').slice(0, 8);
+  const agentItems = callables.filter((callable) => callable.id !== 'file-source.local').slice(0, 8);
   const workflowItems = workflows.slice(0, 8);
   return (
     <div
@@ -2172,24 +3006,24 @@ function NodeCreateMenu({
       </header>
       {focused ? (
         <>
-          {agentItems.map((capsule) => (
+          {agentItems.map((callable) => (
             <button
-              key={capsule.id}
+              key={callable.id}
               type="button"
               role="menuitem"
               onClick={() =>
-                onPick({ kind: 'agent', capsuleId: capsule.id, label: capsule.name || capsule.id })
+                onPick({ kind: 'agent', callableId: callable.id, label: callable.name || callable.id })
               }
             >
               <CircleDot size={14} aria-hidden="true" />
-              <span>{capsule.name || capsule.id}</span>
-              <small>{capsule.id}</small>
+              <span>{callable.name || callable.id}</span>
+              <small>{callable.id}</small>
             </button>
           ))}
           <button
             type="button"
             role="menuitem"
-            onClick={() => onPick({ kind: 'tool', capsuleId: 'fake-agent.generic', label: 'Generic Tool' })}
+            onClick={() => onPick({ kind: 'tool', callableId: 'fake-agent.generic', label: 'Generic Tool' })}
           >
             <TestTube size={14} aria-hidden="true" />
             <span>Generic Tool</span>
@@ -2198,7 +3032,7 @@ function NodeCreateMenu({
           <button
             type="button"
             role="menuitem"
-            onClick={() => onPick({ kind: 'file_source', capsuleId: 'file-source.local', label: 'File Source' })}
+            onClick={() => onPick({ kind: 'file_source', callableId: 'file-source.local', label: 'File Source' })}
           >
             <FileText size={14} aria-hidden="true" />
             <span>File Source</span>
@@ -2277,12 +3111,12 @@ function WorkflowContainer({
         position={Position.Right}
         className="workflow-control-handle output"
       />
-      <WorkflowDirectoryPill
+      <WorkflowHeader
+        workflow={workflow}
         directory={bindingDirectory(workflow, data.binding)}
         status={data.binding?.status || 'unbound'}
         onConfigure={() => data.onConfigureWorkflow(workflow.id)}
       />
-      <WorkflowHeader workflow={workflow} />
       {!data.showDataPorts ? <HiddenWorkflowPortHandles workflow={workflow} /> : null}
       <div className={data.showDataPorts ? 'workflow-nested-canvas advanced-data' : 'workflow-nested-canvas'}>
         {data.showDataPorts ? (
@@ -2293,11 +3127,7 @@ function WorkflowContainer({
             onSelectPort={data.onSelectPort}
           />
         ) : null}
-        <div className="internal-node-grid" aria-label={`${workflow.title} internal nodes`}>
-          {workflow.internalNodes.length === 0 ? (
-            <div className="empty-internal-node">内部节点未展开</div>
-          ) : null}
-        </div>
+        <div className="internal-node-grid" aria-label={`${workflow.title} internal nodes`} />
         {data.showDataPorts ? (
           <WorkflowPortColumn
             workflowId={workflow.id}
@@ -2336,14 +3166,70 @@ function HiddenWorkflowPortHandles({ workflow }: { workflow: WorkflowContainerMo
   );
 }
 
+function HiddenAgentPortHandles({
+  nodeId,
+  inputPorts,
+  outputPorts,
+}: {
+  nodeId: string;
+  inputPorts: WorkflowPortView[];
+  outputPorts: WorkflowPortView[];
+}) {
+  return (
+    <div className="workflow-hidden-port-handles" aria-hidden="true">
+      {inputPorts.map((portValue, index) => (
+        <Handle
+          key={`input-${portValue.id}`}
+          id={portHandleId(nodeId, 'input', portValue.id)}
+          type="target"
+          position={Position.Left}
+          className="workflow-port-handle hidden input"
+          style={{ top: agentDataPortTop(index) }}
+        />
+      ))}
+      {outputPorts.map((portValue, index) => (
+        <Handle
+          key={`output-${portValue.id}`}
+          id={portHandleId(nodeId, 'output', portValue.id)}
+          type="source"
+          position={Position.Right}
+          className="workflow-port-handle hidden output"
+          style={{ top: agentDataPortTop(index) }}
+        />
+      ))}
+    </div>
+  );
+}
+
 function AgentToolNode({
   data,
 }: NodeProps<AgentToolFlowNode>) {
+  function queuePortSelection(target: EventTarget | null): boolean {
+    if (!(target instanceof Element)) {
+      return false;
+    }
+    const portHandle = target.closest('.workflow-port-handle');
+    const parsed = parsePortHandle(portHandle?.getAttribute('data-handleid'));
+    if (!data.showDataPorts || !parsed || parsed.workflowId !== data.id) {
+      return false;
+    }
+    const ports = parsed.direction === 'input' ? data.inputPorts : data.outputPorts;
+    const portValue = ports.find((port) => port.id === parsed.portId);
+    if (!portValue) {
+      return false;
+    }
+    window.setTimeout(() => data.onSelectPort(data.id, portValue), 0);
+    return true;
+  }
+
   return (
-    <button
-      type="button"
+    <div
+      role="group"
+      tabIndex={0}
       className={[
         'agent-tool-node',
+        'nopan',
+        data.showDataPorts ? 'data-ports-visible' : '',
         data.kind === 'Tool' ? 'tool' : 'agent',
         `status-${data.status}`,
         data.selected ? 'selected' : '',
@@ -2351,105 +3237,191 @@ function AgentToolNode({
         .filter(Boolean)
         .join(' ')}
       data-testid={`agent-tool-node-${data.id}`}
-      onClick={data.onSelect}
+      onPointerDownCapture={(event) => {
+        if (queuePortSelection(event.target)) {
+          return;
+        }
+        if (!(event.target instanceof Element)) {
+          data.onSelect();
+          return;
+        }
+        if (event.target.closest('.react-flow__handle')) {
+          return;
+        }
+        data.onSelect();
+      }}
+      onMouseDownCapture={(event) => {
+        queuePortSelection(event.target);
+      }}
+      onPointerUpCapture={(event) => {
+        if (!(event.target instanceof Element) || !data.showDataPorts) {
+          return;
+        }
+        const handle = event.target.closest('.workflow-port-handle');
+        const parsed = parsePortHandle(handle?.getAttribute('data-handleid'));
+        if (!parsed || parsed.workflowId !== data.id) {
+          return;
+        }
+        const ports = parsed.direction === 'input' ? data.inputPorts : data.outputPorts;
+        const portValue = ports.find((port) => port.id === parsed.portId);
+        if (portValue) {
+          data.onSelectPort(data.id, portValue);
+        }
+      }}
+      onFocus={data.onSelect}
+      onKeyDown={(event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') {
+          return;
+        }
+        event.preventDefault();
+        data.onSelect();
+      }}
+      onClick={(event) => {
+        event.stopPropagation();
+        if (queuePortSelection(event.target)) {
+          return;
+        }
+        data.onSelect();
+      }}
     >
       <Handle
         type="target"
         position={Position.Left}
-        className="workflow-control-handle input"
+        className="workflow-control-handle input agent-control-handle"
+        style={{ top: AGENT_CONTROL_HANDLE_TOP }}
+        title="控制输入：只决定执行顺序，不传输数据"
+        aria-label="控制输入端口，只决定执行顺序，不传输数据"
       />
       <Handle
         type="source"
         position={Position.Right}
-        className="workflow-control-handle output"
+        className="workflow-control-handle output agent-control-handle"
+        style={{ top: AGENT_CONTROL_HANDLE_TOP }}
+        title="控制输出：只决定执行顺序，不传输数据"
+        aria-label="控制输出端口，只决定执行顺序，不传输数据"
       />
+      {!data.showDataPorts ? (
+        <HiddenAgentPortHandles
+          nodeId={data.id}
+          inputPorts={data.inputPorts}
+          outputPorts={data.outputPorts}
+        />
+      ) : null}
       {data.showDataPorts
-        ? data.inputPorts.map((portValue, index) => (
-            <Handle
-              key={portValue.id}
-              id={portHandleId(data.id, 'input', portValue.id)}
-              type="target"
-              position={Position.Left}
-              className="workflow-port-handle input"
-              style={{ top: 42 + index * 14 }}
-            />
-          ))
+        ? data.inputPorts.map((portValue, index) => {
+            const portTop = agentDataPortTop(index);
+            return (
+              <Fragment key={portValue.id}>
+                <Handle
+                  id={portHandleId(data.id, 'input', portValue.id)}
+                  type="target"
+                  position={Position.Left}
+                  className="workflow-port-handle input"
+                  style={{ top: portTop }}
+                  title={`数据输入端口：${portValue.id}`}
+                  aria-label={`数据输入端口 ${portValue.id}`}
+                />
+                <button
+                  type="button"
+                  className="workflow-port-click-target input nodrag nopan"
+                  style={{ top: portTop }}
+                  title={`数据输入端口：${portValue.id}`}
+                  aria-label={`选择数据输入端口 ${portValue.id}`}
+                  onPointerDown={(event) => {
+                    event.stopPropagation();
+                    data.onSelectPort(data.id, portValue);
+                  }}
+                  onMouseDown={(event) => {
+                    event.stopPropagation();
+                    data.onSelectPort(data.id, portValue);
+                  }}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    data.onSelectPort(data.id, portValue);
+                  }}
+                />
+              </Fragment>
+            );
+          })
         : null}
       {data.showDataPorts
-        ? data.outputPorts.map((portValue, index) => (
-            <Handle
-              key={portValue.id}
-              id={portHandleId(data.id, 'output', portValue.id)}
-              type="source"
-              position={Position.Right}
-              className="workflow-port-handle output"
-              style={{ top: 42 + index * 14 }}
-            />
-          ))
+        ? data.outputPorts.map((portValue, index) => {
+            const portTop = agentDataPortTop(index);
+            return (
+              <Fragment key={portValue.id}>
+                <Handle
+                  id={portHandleId(data.id, 'output', portValue.id)}
+                  type="source"
+                  position={Position.Right}
+                  className="workflow-port-handle output"
+                  style={{ top: portTop }}
+                  title={`数据输出端口：${portValue.id}`}
+                  aria-label={`数据输出端口 ${portValue.id}`}
+                />
+                <button
+                  type="button"
+                  className="workflow-port-click-target output nodrag nopan"
+                  style={{ top: portTop }}
+                  title={`数据输出端口：${portValue.id}`}
+                  aria-label={`选择数据输出端口 ${portValue.id}`}
+                  onPointerDown={(event) => {
+                    event.stopPropagation();
+                    data.onSelectPort(data.id, portValue);
+                  }}
+                  onMouseDown={(event) => {
+                    event.stopPropagation();
+                    data.onSelectPort(data.id, portValue);
+                  }}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    data.onSelectPort(data.id, portValue);
+                  }}
+                />
+              </Fragment>
+            );
+          })
         : null}
       <span className={`status-dot ${data.status}`} />
       <div>
         <strong>{data.title}</strong>
-        <p>{data.capsuleId || data.kind}</p>
+        <p>{data.subtitle || data.callableId || data.kind}</p>
+        {data.scopeLabel ? <span className="node-scope-badge">{data.scopeLabel}</span> : null}
       </div>
       <small>{data.kind}</small>
-    </button>
+    </div>
   );
 }
 
-function WorkflowDirectoryPill({
+function WorkflowHeader({
+  workflow,
   directory,
   status,
   onConfigure,
 }: {
+  workflow: WorkflowContainerModel;
   directory: string;
   status: string;
   onConfigure: () => void;
 }) {
   return (
-    <div className={`workflow-directory-pill ${status}`}>
-      <span>{directory}</span>
-      <button
-        type="button"
-        aria-label="配置工作目录"
-        onClick={(event) => {
-          event.stopPropagation();
-          onConfigure();
-        }}
-      >
-        <FolderCog size={13} aria-hidden="true" />
-      </button>
-    </div>
-  );
-}
-
-function WorkflowHeader({ workflow }: { workflow: WorkflowContainerModel }) {
-  return (
     <header className="workflow-container-header">
-      <div>
-        <h3>{workflow.title}</h3>
-        <p>{workflowSubtitle(workflow)}</p>
+      <span className={`workflow-status-marker ${workflow.status}`} aria-label={statusLabel(workflow.status)} />
+      <h3>{workflowInvocationLabel(workflow)}</h3>
+      <div className={`workflow-directory-line ${status}`}>
+        <span>{directory}</span>
+        <button
+          type="button"
+          aria-label="配置工作目录"
+          onClick={(event) => {
+            event.stopPropagation();
+            onConfigure();
+          }}
+        >
+          <FolderCog size={13} aria-hidden="true" />
+        </button>
       </div>
-      <span className={`status-dot ${workflow.status}`} aria-label={statusLabel(workflow.status)} />
-      <span className={`pill ${statusTone(workflow.status)}`}>{statusLabel(workflow.status)}</span>
     </header>
   );
-}
-
-function workflowSubtitle(workflow: WorkflowContainerModel): string {
-  if (workflow.boundaryKind === 'workflow_input') {
-    return 'Workflow Input Ports';
-  }
-  if (workflow.boundaryKind === 'workflow_output') {
-    return 'Workflow Output Ports';
-  }
-  if (workflow.sourceKind === 'agent_session') {
-    return workflow.capsuleId || 'Agent Capsule';
-  }
-  if (workflow.sourceKind === 'tool') {
-    return workflow.capsuleId || 'Tool Capsule';
-  }
-  return workflow.workflowRef || 'Workflow Template';
 }
 
 function WorkflowPortColumn({
@@ -2574,7 +3546,7 @@ function InternalNodeCard({
     >
       <span className={`status-dot ${node.status}`} />
       <div>
-        <strong>{node.name}</strong>
+        <strong>{internalInvocationLabel(node)}</strong>
         <p>{node.task}</p>
       </div>
       <span className={node.kind === 'Agent' ? 'node-badge agent' : 'node-badge tool'}>
@@ -2610,7 +3582,7 @@ function ResourceInspector({ resource }: { resource: ResourceTemplate }) {
               : 'Tool Class'}
         </dd>
         <dt>ID</dt>
-        <dd>{resource.kind === 'workflow_class' ? resource.workflowId : resource.capsuleId}</dd>
+        <dd>{resource.kind === 'workflow_class' ? resource.workflowId : resource.callableId}</dd>
         {resource.kind === 'workflow_class' ? (
           <>
             <dt>路径</dt>
@@ -2631,12 +3603,26 @@ function RightInspector({
   selectedEdge,
   selectedInternalNode,
   connectionMode,
+  dataConnectionDraft,
+  runtimeConfig,
+  liveLogs,
   workflowRun,
   workflowEvents,
+  workflows,
   binding,
   onConnectionMode,
+  onBeginDataConnection,
+  onCancelDataConnection,
+  onUpdateDataConnectionMaterialization,
+  onCompleteDataConnection,
+  onCompleteDataConnectionWithNewInputPort,
+  onAddDataConnectPort,
   onReadEvidence,
   onConfigureBinding,
+  onUpdateWorkflowInput,
+  onUpdateInternalInput,
+  onUpdateWorkflowLabel,
+  onUpdateInternalLabel,
 }: {
   canvas: WorkspaceCanvasModel;
   selection: CanvasSelection;
@@ -2645,16 +3631,43 @@ function RightInspector({
   selectedEdge?: WorkflowCanvasEdge;
   selectedInternalNode?: InternalNodeView;
   connectionMode: ConnectionMode;
+  dataConnectionDraft: DataConnectionDraft;
+  runtimeConfig: RuntimeConfig | null;
+  liveLogs: Record<string, NodeLiveLogs>;
   workflowRun: WorkflowRunResult | null;
   workflowEvents: RunEvent[];
+  workflows: WorkflowSummary[];
   binding?: WorkflowBindingView;
   onConnectionMode: (mode: ConnectionMode) => void;
+  onBeginDataConnection: (draft: Exclude<DataConnectionDraft, null>) => void;
+  onCancelDataConnection: () => void;
+  onUpdateDataConnectionMaterialization: (materialization: 'copy' | 'reference') => void;
+  onCompleteDataConnection: (
+    targetNodeId: string,
+    targetPortId: string,
+    options?: { replaceExisting?: boolean },
+  ) => void;
+  onCompleteDataConnectionWithNewInputPort: (targetNodeId: string, requestedPortId: string) => void;
+  onAddDataConnectPort: (
+    scopeWorkflowId: string | null,
+    nodeId: string,
+    direction: PortDirection,
+    requestedPortId: string,
+  ) => void;
   onReadEvidence: (path: string | null | undefined, title?: string) => void;
   onConfigureBinding: (workflowId: string) => void;
+  onUpdateWorkflowInput: (workflowId: string, input: Record<string, unknown>) => void;
+  onUpdateInternalInput: (
+    workflowId: string,
+    nodeId: string,
+    input: Record<string, unknown>,
+  ) => void;
+  onUpdateWorkflowLabel: (workflowId: string, label: string) => void;
+  onUpdateInternalLabel: (workflowId: string, nodeId: string, label: string) => void;
 }) {
   const [tab, setTab] = useState('overview');
   useEffect(() => {
-    setTab('overview');
+    setTab(selection.type === 'edge' ? 'mapping' : 'overview');
   }, [selection]);
 
   return (
@@ -2685,13 +3698,26 @@ function RightInspector({
       />
       {selection.type === 'workflow' && selectedWorkflow ? (
         <WorkflowInspector
+          canvas={canvas}
           workflow={selectedWorkflow}
           tab={tab}
           workflowRun={workflowRun}
+          runtimeConfig={runtimeConfig}
+          liveLogs={liveLogs}
           events={workflowEvents}
+          savedWorkflow={workflowSummaryForRef(workflows, selectedWorkflow.workflowRef)}
           binding={binding}
+          dataConnectionDraft={dataConnectionDraft}
           onReadEvidence={onReadEvidence}
           onConfigureBinding={onConfigureBinding}
+          onBeginDataConnection={onBeginDataConnection}
+          onCancelDataConnection={onCancelDataConnection}
+          onUpdateDataConnectionMaterialization={onUpdateDataConnectionMaterialization}
+          onCompleteDataConnection={onCompleteDataConnection}
+          onCompleteDataConnectionWithNewInputPort={onCompleteDataConnectionWithNewInputPort}
+          onAddDataConnectPort={onAddDataConnectPort}
+          onUpdateInput={onUpdateWorkflowInput}
+          onUpdateLabel={onUpdateWorkflowLabel}
         />
       ) : null}
       {selection.type === 'port' && selectedWorkflow && selectedPort ? (
@@ -2702,11 +3728,23 @@ function RightInspector({
       ) : null}
       {selection.type === 'internal' && selectedWorkflow && selectedInternalNode ? (
         <InternalNodeInspector
+          canvas={canvas}
           workflow={selectedWorkflow}
           node={selectedInternalNode}
           tab={tab}
           workflowRun={workflowRun}
+          runtimeConfig={runtimeConfig}
+          liveLogs={liveLogs}
+          dataConnectionDraft={dataConnectionDraft}
           onReadEvidence={onReadEvidence}
+          onBeginDataConnection={onBeginDataConnection}
+          onCancelDataConnection={onCancelDataConnection}
+          onUpdateDataConnectionMaterialization={onUpdateDataConnectionMaterialization}
+          onCompleteDataConnection={onCompleteDataConnection}
+          onCompleteDataConnectionWithNewInputPort={onCompleteDataConnectionWithNewInputPort}
+          onAddDataConnectPort={onAddDataConnectPort}
+          onUpdateInput={onUpdateInternalInput}
+          onUpdateLabel={onUpdateInternalLabel}
         />
       ) : null}
     </aside>
@@ -2728,8 +3766,8 @@ function InspectorTabs({
       : selection.type === 'port'
         ? ['overview', 'contract', 'connections', 'evidence']
         : selection.type === 'internal'
-          ? ['overview', 'steps', 'artifacts', 'logs']
-          : ['overview', 'input', 'output', 'config', 'history', 'raw'];
+          ? ['overview', 'invocation', 'connections', 'input', 'output', 'steps', 'artifacts', 'logs', 'raw']
+          : ['overview', 'invocation', 'connections', 'input', 'output', 'config', 'history', 'raw'];
   const labels: Record<string, string> = {
     queued: '排队中',
     cancel_requested: '停止中',
@@ -2759,6 +3797,7 @@ function InspectorTabs({
           key={tab}
           type="button"
           className={activeTab === tab ? 'active' : ''}
+          aria-label={tab === 'input' ? 'Inspector input tab' : undefined}
           onClick={() => onTab(tab)}
         >
           {labels[tab] || tab}
@@ -2769,24 +3808,102 @@ function InspectorTabs({
 }
 
 function WorkflowInspector({
+  canvas,
   workflow,
   tab,
   workflowRun,
+  runtimeConfig,
+  liveLogs,
   events,
+  savedWorkflow,
   binding,
+  dataConnectionDraft,
   onReadEvidence,
   onConfigureBinding,
+  onBeginDataConnection,
+  onCancelDataConnection,
+  onUpdateDataConnectionMaterialization,
+  onCompleteDataConnection,
+  onCompleteDataConnectionWithNewInputPort,
+  onAddDataConnectPort,
+  onUpdateInput,
+  onUpdateLabel,
 }: {
+  canvas: WorkspaceCanvasModel;
   workflow: WorkflowContainerModel;
   tab: string;
   workflowRun: WorkflowRunResult | null;
+  runtimeConfig: RuntimeConfig | null;
+  liveLogs: Record<string, NodeLiveLogs>;
   events: RunEvent[];
+  savedWorkflow?: WorkflowSummary;
   binding?: WorkflowBindingView;
+  dataConnectionDraft: DataConnectionDraft;
   onReadEvidence: (path: string | null | undefined, title?: string) => void;
   onConfigureBinding: (workflowId: string) => void;
+  onBeginDataConnection: (draft: Exclude<DataConnectionDraft, null>) => void;
+  onCancelDataConnection: () => void;
+  onUpdateDataConnectionMaterialization: (materialization: 'copy' | 'reference') => void;
+  onCompleteDataConnection: (
+    targetNodeId: string,
+    targetPortId: string,
+    options?: { replaceExisting?: boolean },
+  ) => void;
+  onCompleteDataConnectionWithNewInputPort: (targetNodeId: string, requestedPortId: string) => void;
+  onAddDataConnectPort: (
+    scopeWorkflowId: string | null,
+    nodeId: string,
+    direction: PortDirection,
+    requestedPortId: string,
+  ) => void;
+  onUpdateInput: (workflowId: string, input: Record<string, unknown>) => void;
+  onUpdateLabel: (workflowId: string, label: string) => void;
 }) {
   const nodeRun = nodeRunForWorkflow(workflowRun, workflow);
+  const nodeLogs = nodeLiveLogsFor(liveLogs, nodeRun);
   const executable = isExecutableNodeWorkflow(workflow);
+  if (tab === 'invocation') {
+    return (
+      <section className="inspector-stack">
+        <div className="inspector-note">
+          System/default prompt belongs to the reusable class resource. This panel edits only this invocation's user prompt and static input.
+        </div>
+        <InvocationInputEditor
+          input={workflow.sourceInput || {}}
+          onChange={(nextInput) => onUpdateInput(workflow.id, nextInput)}
+        />
+        <CodeBlock
+          title="core-v2-invocation-preview.json"
+          content={JSON.stringify(workflowInvocationPreview(workflow), null, 2)}
+          variant="json"
+        />
+      </section>
+    );
+  }
+  if (tab === 'connections') {
+    if (!executable) {
+      return <p className="muted">Workflow container 的边界端口连接会在后续单独建模；当前只支持可执行节点和内部节点。</p>;
+    }
+    return (
+      <DataConnectionsPanel
+        canvasNodeKind="workflow"
+        canvas={canvas}
+        scopeWorkflowId={null}
+        nodeId={workflow.id}
+        nodeLabel={workflowInvocationLabel(workflow)}
+        callableId={workflow.callableId || workflow.workflowRef}
+        inputPorts={workflow.inputPorts}
+        outputPorts={workflow.outputPorts}
+        dataConnectionDraft={dataConnectionDraft}
+        onBeginDataConnection={onBeginDataConnection}
+        onCancelDataConnection={onCancelDataConnection}
+        onUpdateDataConnectionMaterialization={onUpdateDataConnectionMaterialization}
+        onCompleteDataConnection={onCompleteDataConnection}
+        onCompleteDataConnectionWithNewInputPort={onCompleteDataConnectionWithNewInputPort}
+        onAddPort={onAddDataConnectPort}
+      />
+    );
+  }
   if (tab === 'input') {
     if (executable) {
       return (
@@ -2833,6 +3950,14 @@ function WorkflowInspector({
         <dl className="definition-grid compact">
           <dt>workflow_ref</dt>
           <dd>{workflow.workflowRef || 'inline/demo'}</dd>
+          {savedWorkflow ? (
+            <>
+              <dt>saved template</dt>
+              <dd>{savedWorkflow.workflow_id}</dd>
+              <dt>saved nodes</dt>
+              <dd>{savedWorkflow.task_count}</dd>
+            </>
+          ) : null}
           <dt>cwd</dt>
           <dd>{bindingDirectory(workflow, binding)}</dd>
           <dt>binding</dt>
@@ -2883,8 +4008,8 @@ function WorkflowInspector({
         <dl className="definition-grid compact">
           <dt>Agent</dt>
           <dd>{workflow.title}</dd>
-          <dt>capsule</dt>
-          <dd>{workflow.capsuleId || 'n/a'}</dd>
+          <dt>callable</dt>
+          <dd>{workflow.callableId || 'n/a'}</dd>
           <dt>runtime</dt>
           <dd>{workflow.sourceKind === 'tool' ? 'Tool' : 'Agent'}</dd>
           <dt>状态</dt>
@@ -2895,6 +4020,22 @@ function WorkflowInspector({
         <div className="inspector-note">
           系统提示词属于资源库里的 Agent Class；这里是本次任务里的调用实例，只显示用户输入、映射和运行证据。
         </div>
+        <div className="inspector-note">
+          Run mode: {runtimeConfig?.real_external_agents_enabled ? 'production / real CLI' : 'hermetic or external gate disabled'}
+        </div>
+        <LiveLogBlocks liveLogs={nodeLogs} />
+        <InvocationIdentityCard
+          scope="Root canvas"
+          nodeId={workflow.id}
+          label={workflowInvocationLabel(workflow)}
+          callableId={workflow.callableId}
+          workflowRef={workflow.workflowRef}
+          onLabelChange={(label) => onUpdateLabel(workflow.id, label)}
+        />
+        <InvocationInputEditor
+          input={workflow.sourceInput || {}}
+          onChange={(nextInput) => onUpdateInput(workflow.id, nextInput)}
+        />
         <CodeBlock
           title="用户提示词 / 静态输入"
           content={JSON.stringify(workflow.sourceInput || {}, null, 2)}
@@ -2933,8 +4074,241 @@ function WorkflowInspector({
         {workflow.inputPorts.length} in / {workflow.outputPorts.length} out
       </dd>
       <dt>内部节点</dt>
-      <dd>{workflow.internalNodes.length}</dd>
+      <dd>{savedWorkflow ? `${savedWorkflow.task_count} saved` : workflow.internalNodes.length}</dd>
     </dl>
+  );
+}
+
+function DataConnectionsPanel({
+  canvas,
+  scopeWorkflowId,
+  nodeId,
+  nodeLabel,
+  callableId,
+  inputPorts,
+  outputPorts,
+  dataConnectionDraft,
+  onBeginDataConnection,
+  onCancelDataConnection,
+  onUpdateDataConnectionMaterialization,
+  onCompleteDataConnection,
+  onCompleteDataConnectionWithNewInputPort,
+  onAddPort,
+}: {
+  canvasNodeKind: 'workflow' | 'internal';
+  canvas: WorkspaceCanvasModel;
+  scopeWorkflowId: string | null;
+  nodeId: string;
+  nodeLabel: string;
+  callableId?: string;
+  inputPorts: WorkflowPortView[];
+  outputPorts: WorkflowPortView[];
+  dataConnectionDraft: DataConnectionDraft;
+  onBeginDataConnection: (draft: Exclude<DataConnectionDraft, null>) => void;
+  onCancelDataConnection: () => void;
+  onUpdateDataConnectionMaterialization: (materialization: 'copy' | 'reference') => void;
+  onCompleteDataConnection: (
+    targetNodeId: string,
+    targetPortId: string,
+    options?: { replaceExisting?: boolean },
+  ) => void;
+  onCompleteDataConnectionWithNewInputPort: (targetNodeId: string, requestedPortId: string) => void;
+  onAddPort: (
+    scopeWorkflowId: string | null,
+    nodeId: string,
+    direction: PortDirection,
+    requestedPortId: string,
+  ) => void;
+}) {
+  const [newInputPortId, setNewInputPortId] = useState('');
+  const [newOutputPortId, setNewOutputPortId] = useState('');
+  const sourceScopeMatches = dataConnectionDraft?.scopeWorkflowId === scopeWorkflowId;
+  const targets = dataConnectNodes(canvas, scopeWorkflowId).filter(
+    (candidate) => candidate.nodeId !== dataConnectionDraft?.sourceNodeId,
+  );
+  const incoming = dataEdgesForNode(canvas, scopeWorkflowId, nodeId, 'input');
+  const outgoing = dataEdgesForNode(canvas, scopeWorkflowId, nodeId, 'output');
+
+  function addPort(direction: PortDirection) {
+    const requestedPortId = direction === 'input' ? newInputPortId : newOutputPortId;
+    onAddPort(scopeWorkflowId, nodeId, direction, requestedPortId);
+    if (direction === 'input') {
+      setNewInputPortId('');
+    } else {
+      setNewOutputPortId('');
+    }
+  }
+
+  return (
+    <section className="inspector-stack data-connections-panel">
+      <div className="connection-identity-card">
+        <strong>{nodeLabel}</strong>
+        <small>{nodeId}</small>
+        {callableId ? <small>{callableId}</small> : null}
+      </div>
+
+      {dataConnectionDraft ? (
+        <div className="data-connect-draft">
+          <strong>
+            正在连接: {dataConnectionDraft.sourceNodeLabel}.{dataConnectionDraft.sourcePortId}
+          </strong>
+          <label>
+            materialization
+            <select
+              value={dataConnectionDraft.materialization}
+              onChange={(event) =>
+                onUpdateDataConnectionMaterialization(
+                  event.target.value === 'reference' ? 'reference' : 'copy',
+                )
+              }
+            >
+              <option value="copy">copy</option>
+              <option value="reference">reference</option>
+            </select>
+          </label>
+          <button type="button" onClick={onCancelDataConnection}>
+            取消连接
+          </button>
+        </div>
+      ) : (
+        <p className="muted">先从某个 output port 发起连接，再选择目标 input port。</p>
+      )}
+
+      <section className="inspector-stack">
+        <h4>输出端口</h4>
+        {outputPorts.map((portValue) => {
+          const related = outgoing.filter((edge) => edge.source.portId === portValue.id);
+          return (
+            <article key={portValue.id} className="port-contract-row">
+              <strong>{portValue.id}</strong>
+              <span>{portValue.label}</span>
+              {related.length > 0 ? (
+                <small>
+                  输出到 {related.map((edge) => `${edge.target.workflowId}.${edge.target.portId}`).join(', ')}
+                </small>
+              ) : (
+                <small>暂无下游 data edge</small>
+              )}
+              <button
+                type="button"
+                className="secondary-action-button"
+                onClick={() =>
+                  onBeginDataConnection({
+                    scopeWorkflowId,
+                    sourceNodeId: nodeId,
+                    sourceNodeLabel: nodeLabel,
+                    sourcePortId: portValue.id,
+                    materialization: 'copy',
+                  })
+                }
+              >
+                从此输出连接...
+              </button>
+            </article>
+          );
+        })}
+        <div className="inline-port-form">
+          <input
+            value={newOutputPortId}
+            onChange={(event) => setNewOutputPortId(event.target.value)}
+            placeholder="new_output_port"
+            aria-label="new output port id"
+          />
+          <button type="button" onClick={() => addPort('output')}>
+            添加输出端口
+          </button>
+        </div>
+      </section>
+
+      <section className="inspector-stack">
+        <h4>输入端口</h4>
+        {inputPorts.map((portValue) => {
+          const related = incoming.filter((edge) => edge.target.portId === portValue.id);
+          return (
+            <article key={portValue.id} className="port-contract-row">
+              <strong>{portValue.id}</strong>
+              <span>{portValue.label}</span>
+              {related.length > 0 ? (
+                <small>
+                  来自 {related.map((edge) => `${edge.source.workflowId}.${edge.source.portId}`).join(', ')}
+                </small>
+              ) : (
+                <small>暂无上游 data edge</small>
+              )}
+            </article>
+          );
+        })}
+        <div className="inline-port-form">
+          <input
+            value={newInputPortId}
+            onChange={(event) => setNewInputPortId(event.target.value)}
+            placeholder="new_input_port"
+            aria-label="new input port id"
+          />
+          <button type="button" onClick={() => addPort('input')}>
+            添加输入端口
+          </button>
+        </div>
+      </section>
+
+      {dataConnectionDraft && sourceScopeMatches ? (
+        <section className="inspector-stack">
+          <h4>可连接目标</h4>
+          {targets.map((target) => (
+            <article key={target.nodeId} className="connection-target-card">
+              <strong>{target.label}</strong>
+              <small>{target.nodeId}</small>
+              {target.inputPorts.map((targetPort) => {
+                const conflicts = dataEdgesForNode(
+                  canvas,
+                  scopeWorkflowId,
+                  target.nodeId,
+                  'input',
+                ).filter((edge) => edge.target.portId === targetPort.id);
+                const hasOneCardinalityConflict =
+                  conflicts.length > 0 && (targetPort.cardinality || 'one') !== 'many';
+                const requestedPortId = `${dataConnectionDraft.sourceNodeId}_input`;
+                return (
+                  <div key={targetPort.id} className="connection-target-port">
+                    <span>
+                      {targetPort.id}
+                      {hasOneCardinalityConflict ? '（已有输入）' : ''}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onCompleteDataConnection(target.nodeId, targetPort.id, {
+                          replaceExisting: hasOneCardinalityConflict,
+                        })
+                      }
+                    >
+                      {hasOneCardinalityConflict ? '替换连接' : '连接到此输入'}
+                    </button>
+                    {hasOneCardinalityConflict ? (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onCompleteDataConnectionWithNewInputPort(
+                            target.nodeId,
+                            requestedPortId,
+                          )
+                        }
+                      >
+                        创建新输入端口并连接
+                      </button>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </article>
+          ))}
+          {targets.length === 0 ? <p className="muted">当前 scope 没有可连接目标。</p> : null}
+        </section>
+      ) : null}
+      {dataConnectionDraft && !sourceScopeMatches ? (
+        <p className="muted">当前连接来源不在这个 scope 内，请回到来源所在的画布层级。</p>
+      ) : null}
+    </section>
   );
 }
 
@@ -3008,6 +4382,15 @@ function EdgeInspector({
   if (tab === 'raw') {
     return <CodeBlock title="edge.json" content={JSON.stringify(edge, null, 2)} variant="json" />;
   }
+  if (tab === 'mapping') {
+    return (
+      <CodeBlock
+        title="core-v2-edge-preview.json"
+        content={JSON.stringify(edgeCanonicalPreview(edge, canvas), null, 2)}
+        variant="json"
+      />
+    );
+  }
   return (
     <dl className="definition-grid compact">
       <dt>类型</dt>
@@ -3029,19 +4412,103 @@ function EdgeInspector({
 }
 
 function InternalNodeInspector({
+  canvas,
   workflow,
   node,
   tab,
   workflowRun,
+  runtimeConfig,
+  liveLogs,
+  dataConnectionDraft,
   onReadEvidence,
+  onBeginDataConnection,
+  onCancelDataConnection,
+  onUpdateDataConnectionMaterialization,
+  onCompleteDataConnection,
+  onCompleteDataConnectionWithNewInputPort,
+  onAddDataConnectPort,
+  onUpdateInput,
+  onUpdateLabel,
 }: {
+  canvas: WorkspaceCanvasModel;
   workflow: WorkflowContainerModel;
   node: InternalNodeView;
   tab: string;
   workflowRun: WorkflowRunResult | null;
+  runtimeConfig: RuntimeConfig | null;
+  liveLogs: Record<string, NodeLiveLogs>;
+  dataConnectionDraft: DataConnectionDraft;
   onReadEvidence: (path: string | null | undefined, title?: string) => void;
+  onBeginDataConnection: (draft: Exclude<DataConnectionDraft, null>) => void;
+  onCancelDataConnection: () => void;
+  onUpdateDataConnectionMaterialization: (materialization: 'copy' | 'reference') => void;
+  onCompleteDataConnection: (
+    targetNodeId: string,
+    targetPortId: string,
+    options?: { replaceExisting?: boolean },
+  ) => void;
+  onCompleteDataConnectionWithNewInputPort: (targetNodeId: string, requestedPortId: string) => void;
+  onAddDataConnectPort: (
+    scopeWorkflowId: string | null,
+    nodeId: string,
+    direction: PortDirection,
+    requestedPortId: string,
+  ) => void;
+  onUpdateInput: (
+    workflowId: string,
+    nodeId: string,
+    input: Record<string, unknown>,
+  ) => void;
+  onUpdateLabel: (workflowId: string, nodeId: string, label: string) => void;
 }) {
   const nodeRun = nodeRunForInternalNode(workflowRun, workflow.id, node.id);
+  const nodeLogs = nodeLiveLogsFor(liveLogs, nodeRun);
+  if (tab === 'invocation') {
+    return (
+      <section className="inspector-stack">
+        <div className="inspector-note">
+          This is the invocation config for this node instance; class-level methodology remains in the resource library.
+        </div>
+        <InvocationIdentityCard
+          scope={`Workflow: ${workflowInvocationLabel(workflow)}`}
+          nodeId={node.id}
+          label={internalInvocationLabel(node)}
+          callableId={node.callableId || node.runtime}
+          onLabelChange={(label) => onUpdateLabel(workflow.id, node.id, label)}
+        />
+        <InvocationInputEditor
+          input={node.input || {}}
+          onChange={(nextInput) => onUpdateInput(workflow.id, node.id, nextInput)}
+        />
+        <CodeBlock
+          title="core-v2-invocation-preview.json"
+          content={JSON.stringify(internalNodeInvocationPreview(node), null, 2)}
+          variant="json"
+        />
+      </section>
+    );
+  }
+  if (tab === 'connections') {
+    return (
+      <DataConnectionsPanel
+        canvasNodeKind="internal"
+        canvas={canvas}
+        scopeWorkflowId={workflow.id}
+        nodeId={node.id}
+        nodeLabel={internalInvocationLabel(node)}
+        callableId={node.callableId || node.runtime}
+        inputPorts={node.inputPorts || [port('main', 'input', 'input')]}
+        outputPorts={node.outputPorts || [port('main', 'output', 'output')]}
+        dataConnectionDraft={dataConnectionDraft}
+        onBeginDataConnection={onBeginDataConnection}
+        onCancelDataConnection={onCancelDataConnection}
+        onUpdateDataConnectionMaterialization={onUpdateDataConnectionMaterialization}
+        onCompleteDataConnection={onCompleteDataConnection}
+        onCompleteDataConnectionWithNewInputPort={onCompleteDataConnectionWithNewInputPort}
+        onAddPort={onAddDataConnectPort}
+      />
+    );
+  }
   if (tab === 'input') {
     return (
       <section className="inspector-stack">
@@ -3094,6 +4561,7 @@ function InternalNodeInspector({
     return (
       <NodeEvidencePaths
         nodeRun={nodeRun}
+        liveLogs={nodeLogs}
         onReadEvidence={onReadEvidence}
       />
     );
@@ -3107,7 +4575,7 @@ function InternalNodeInspector({
         ) : (
           <p className="empty-state">尚无日志摘要。</p>
         )}
-        <NodeEvidencePaths nodeRun={nodeRun} onReadEvidence={onReadEvidence} />
+        <NodeEvidencePaths nodeRun={nodeRun} liveLogs={nodeLogs} onReadEvidence={onReadEvidence} />
       </section>
     );
   }
@@ -3131,8 +4599,8 @@ function InternalNodeInspector({
         <dd>{node.kind}</dd>
         <dt>状态</dt>
         <dd>{statusLabel(node.status)}</dd>
-        <dt>capsule</dt>
-        <dd>{node.capsuleId || 'n/a'}</dd>
+        <dt>callable</dt>
+        <dd>{node.callableId || 'n/a'}</dd>
         <dt>runtime</dt>
         <dd>{node.runtime || 'n/a'}</dd>
       </dl>
@@ -3142,6 +4610,21 @@ function InternalNodeInspector({
       <div className="inspector-note">
         这是工作流容器内部的调用实例；系统提示词仍由资源库 Agent Class 管理。
       </div>
+      <div className="inspector-note">
+        Run mode: {runtimeConfig?.real_external_agents_enabled ? 'production / real CLI' : 'hermetic or external gate disabled'}
+      </div>
+      <LiveLogBlocks liveLogs={nodeLogs} />
+      <InvocationIdentityCard
+        scope={`Workflow: ${workflowInvocationLabel(workflow)}`}
+        nodeId={node.id}
+        label={internalInvocationLabel(node)}
+        callableId={node.callableId || node.runtime}
+        onLabelChange={(label) => onUpdateLabel(workflow.id, node.id, label)}
+      />
+      <InvocationInputEditor
+        input={node.input || {}}
+        onChange={(nextInput) => onUpdateInput(workflow.id, node.id, nextInput)}
+      />
       {nodeRun?.output_preview ? (
         <CodeBlock
           title="输出摘要"
@@ -3155,6 +4638,179 @@ function InternalNodeInspector({
           emptyText="尚未运行；当前内部节点没有真实 output.json。"
         />
       )}
+    </section>
+  );
+}
+
+function promptFromInvocationInput(input: Record<string, unknown>): string {
+  const prompt = input.user_prompt ?? input.prompt ?? input.topic;
+  return typeof prompt === 'string' ? prompt : '';
+}
+
+function InvocationIdentityCard({
+  scope,
+  nodeId,
+  label,
+  callableId,
+  workflowRef,
+  onLabelChange,
+}: {
+  scope: string;
+  nodeId: string;
+  label: string;
+  callableId?: string;
+  workflowRef?: string;
+  onLabelChange?: (label: string) => void;
+}) {
+  return (
+    <dl className="invocation-identity-card">
+      <dt>scope</dt>
+      <dd>{scope}</dd>
+      <dt>node_id</dt>
+      <dd>{nodeId}</dd>
+      <dt>invocation</dt>
+      <dd>
+        {onLabelChange ? (
+          <input
+            type="text"
+            value={label}
+            onChange={(event) => onLabelChange(event.target.value)}
+            aria-label="Invocation label"
+          />
+        ) : (
+          label
+        )}
+      </dd>
+      {callableId ? (
+        <>
+          <dt>callable_id</dt>
+          <dd>{callableId}</dd>
+        </>
+      ) : null}
+      {workflowRef ? (
+        <>
+          <dt>workflow_ref</dt>
+          <dd>{workflowRef}</dd>
+        </>
+      ) : null}
+    </dl>
+  );
+}
+
+function staticInputFromInvocationInput(input: Record<string, unknown>): Record<string, unknown> {
+  const { user_prompt: _userPrompt, prompt: _prompt, topic: _topic, ...staticInput } = input;
+  return staticInput;
+}
+
+function mergeInvocationInput(
+  input: Record<string, unknown>,
+  userPrompt: string,
+  staticInput: Record<string, unknown>,
+): Record<string, unknown> {
+  const nextInput: Record<string, unknown> = { ...staticInput };
+  if (userPrompt.trim()) {
+    nextInput.user_prompt = userPrompt;
+  }
+  for (const key of Object.keys(input)) {
+    if (key !== 'user_prompt' && key !== 'prompt' && key !== 'topic') {
+      continue;
+    }
+    if (!userPrompt.trim()) {
+      delete nextInput[key];
+    }
+  }
+  return nextInput;
+}
+
+function InvocationInputEditor({
+  input,
+  onChange,
+}: {
+  input: Record<string, unknown>;
+  onChange: (input: Record<string, unknown>) => void;
+}) {
+  const [jsonText, setJsonText] = useState(() => JSON.stringify(staticInputFromInvocationInput(input), null, 2));
+  const [error, setError] = useState('');
+  const [lastSavedInput, setLastSavedInput] = useState(input);
+  useEffect(() => {
+    setJsonText(JSON.stringify(staticInputFromInvocationInput(input), null, 2));
+    setLastSavedInput(input);
+    setError('');
+  }, [input]);
+
+  function updatePrompt(value: string) {
+    onChange(mergeInvocationInput(input, value, staticInputFromInvocationInput(input)));
+  }
+
+  function updateJson(value: string) {
+    setJsonText(value);
+    try {
+      const parsed = JSON.parse(value);
+      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+        setError('');
+        onChange(mergeInvocationInput(input, promptFromInvocationInput(input), parsed as Record<string, unknown>));
+        return;
+      }
+      setError('JSON 必须是对象；当前修改不会提交。');
+    } catch (parseError) {
+      setError(parseError instanceof Error ? parseError.message : String(parseError));
+    }
+  }
+
+  function clearPrompt() {
+    updatePrompt('');
+  }
+
+  function resetInput() {
+    setJsonText(JSON.stringify(staticInputFromInvocationInput(lastSavedInput), null, 2));
+    setError('');
+    onChange(lastSavedInput);
+  }
+
+  function formatJson() {
+    try {
+      const parsed = JSON.parse(jsonText);
+      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+        setJsonText(JSON.stringify(parsed, null, 2));
+        setError('');
+        return;
+      }
+      setError('JSON 必须是对象；当前修改不会提交。');
+    } catch (parseError) {
+      setError(parseError instanceof Error ? parseError.message : String(parseError));
+    }
+  }
+
+  return (
+    <section className="invocation-input-editor" aria-label="Invocation 配置">
+      <label>
+        User Prompt
+        <textarea
+          aria-label="User Prompt"
+          rows={5}
+          value={promptFromInvocationInput(input)}
+          onChange={(event) => updatePrompt(event.target.value)}
+          placeholder="本节点实例的任务说明"
+        />
+      </label>
+      <div className="inline-action-row">
+        <button type="button" className="secondary-action compact-action" onClick={clearPrompt}>
+          清空 User Prompt
+        </button>
+        <button type="button" className="secondary-action compact-action" onClick={resetInput}>
+          重置为当前值
+        </button>
+      </div>
+      <label>
+        Static Input JSON
+        <textarea aria-label="Static Input JSON" rows={7} value={jsonText} onChange={(event) => updateJson(event.target.value)} />
+      </label>
+      <div className="inline-action-row">
+        <button type="button" className="secondary-action compact-action" onClick={formatJson}>
+          格式化 JSON
+        </button>
+      </div>
+      {error ? <p className="notice compact-notice">{error}</p> : null}
     </section>
   );
 }
@@ -3221,11 +4877,25 @@ function EvidencePreview({
 
 function NodeEvidencePaths({
   nodeRun,
+  liveLogs,
   onReadEvidence,
 }: {
   nodeRun?: NodeRunSummary;
+  liveLogs?: NodeLiveLogs;
   onReadEvidence: (path: string | null | undefined, title?: string) => void;
 }) {
+  const runtimeEvidence =
+    nodeRun?.runtime ||
+    (nodeRun?.execution_mode || nodeRun?.adapter
+      ? { execution_mode: nodeRun.execution_mode, adapter: nodeRun.adapter }
+      : null);
+  const bindingEvidence =
+    nodeRun?.binding_resolved?.length || nodeRun?.binding_manifest
+      ? {
+          binding_resolved: nodeRun?.binding_resolved || [],
+          binding_manifest: nodeRun?.binding_manifest || null,
+        }
+      : null;
   const paths = [
     ['输入', nodeRun?.input_path],
     ['提示词', nodeRun?.prompt_path],
@@ -3236,6 +4906,7 @@ function NodeEvidencePaths({
   ] as const;
   return (
     <section className="inspector-stack">
+      <LiveLogBlocks liveLogs={liveLogs} />
       {paths.map(([label, pathValue]) => (
         <button
           key={label}
@@ -3253,7 +4924,37 @@ function NodeEvidencePaths({
         <dt>artifacts</dt>
         <dd>{nodeRun?.artifact_dir ? shortPath(nodeRun.artifact_dir) : '尚未运行'}</dd>
       </dl>
+      {runtimeEvidence ? (
+        <CodeBlock
+          title="runtime.json"
+          content={JSON.stringify(runtimeEvidence, null, 2)}
+          variant="json"
+        />
+      ) : null}
+      {bindingEvidence ? (
+        <CodeBlock
+          title="data-binding-evidence.json"
+          content={JSON.stringify(bindingEvidence, null, 2)}
+          variant="json"
+        />
+      ) : null}
     </section>
+  );
+}
+
+function LiveLogBlocks({ liveLogs }: { liveLogs?: NodeLiveLogs }) {
+  if (!liveLogs || (!liveLogs.stdout && !liveLogs.stderr)) {
+    return null;
+  }
+  return (
+    <>
+      {liveLogs.stdout ? (
+        <CodeBlock title="Live stdout" content={liveLogs.stdout} variant="log" />
+      ) : null}
+      {liveLogs.stderr ? (
+        <CodeBlock title="Live stderr" content={liveLogs.stderr} variant="log" />
+      ) : null}
+    </>
   );
 }
 
@@ -3357,7 +5058,7 @@ function WorkflowBindingDialog({
             aria-label="workspace_root"
             value={workspaceRoot}
             onChange={(event) => setWorkspaceRoot(event.target.value)}
-            placeholder="F:\\Agent-Capsule-Conductor\\WorkFlowTest\\paper1"
+            placeholder="F:\\Agent-Callable-Conductor\\WorkFlowTest\\paper1"
           />
         </label>
         <dl className="definition-grid compact">
@@ -3463,6 +5164,7 @@ function toFlowNodes(
   canvas: WorkspaceCanvasModel,
   selection: CanvasSelection,
   bindings: Record<string, WorkflowBindingView>,
+  onSelectWorkflowFn: (workflowId: string) => void,
   onSelectPortFn: (workflowId: string, port: WorkflowPortView) => void,
   onSelectInternalFn: (workflowId: string, nodeId: string) => void,
   onOpenFocus: (workflowId: string) => void,
@@ -3477,7 +5179,7 @@ function toFlowNodes(
 ): CanvasFlowNode[] {
   return canvas.workflows.flatMap((workflow) => {
     if (isExecutableNodeWorkflow(workflow)) {
-      return [topLevelAgentToolFlowNode(workflow, selection, showDataPorts)];
+      return [topLevelAgentToolFlowNode(workflow, selection, showDataPorts, onSelectWorkflowFn, onSelectPortFn)];
     }
     const workflowNode: WorkflowFlowNode = {
       id: workflow.id,
@@ -3508,10 +5210,12 @@ function toFlowNodes(
         selection.nodeId === node.id,
       data: {
         id: internalFlowNodeId(workflow.id, node.id),
-        title: node.name,
+        title: internalInvocationLabel(node),
+        subtitle: node.callableId || node.runtime,
+        scopeLabel: `Inside: ${workflowInvocationLabel(workflow)}`,
         kind: node.kind,
         status: node.status,
-        capsuleId: node.capsuleId || node.runtime,
+        callableId: node.callableId || node.runtime,
         workflowId: workflow.id,
         internalNodeId: node.id,
         inputPorts: node.inputPorts || [port('main', 'input', 'input')],
@@ -3522,6 +5226,7 @@ function toFlowNodes(
           selection.nodeId === node.id,
         showDataPorts,
         onSelect: () => onSelectInternalFn(workflow.id, node.id),
+        onSelectPort: onSelectPortFn,
       },
     }));
     return [workflowNode, ...internalNodes];
@@ -3532,6 +5237,8 @@ function topLevelAgentToolFlowNode(
   workflow: WorkflowContainerModel,
   selection: CanvasSelection,
   showDataPorts: boolean,
+  onSelectWorkflowFn: (workflowId: string) => void,
+  onSelectPortFn: (workflowId: string, port: WorkflowPortView) => void,
 ): AgentToolFlowNode {
   const kind = workflow.sourceKind === 'tool' ? 'Tool' : 'Agent';
   return {
@@ -3541,15 +5248,17 @@ function topLevelAgentToolFlowNode(
     selected: selection.type === 'workflow' && selection.id === workflow.id,
     data: {
       id: workflow.id,
-      title: workflow.title,
+      title: workflowInvocationLabel(workflow),
+      subtitle: workflow.callableId,
       kind,
       status: workflow.status,
-      capsuleId: workflow.capsuleId,
+      callableId: workflow.callableId,
       inputPorts: workflow.inputPorts,
       outputPorts: workflow.outputPorts,
       selected: selection.type === 'workflow' && selection.id === workflow.id,
       showDataPorts,
-      onSelect: () => undefined,
+      onSelect: () => onSelectWorkflowFn(workflow.id),
+      onSelectPort: onSelectPortFn,
     },
   };
 }
@@ -3595,28 +5304,30 @@ function canvasEdgeToFlowEdge(
         id: edge.id,
         source: sourceId,
         target: targetId,
-        sourceHandle: showDataPorts ? portHandleId(sourceId, 'output', edge.source.portId) : undefined,
-        targetHandle: showDataPorts ? portHandleId(targetId, 'input', edge.target.portId) : undefined,
-        label: `${edge.source.portId} -> ${edge.target.portId}`,
+        sourceHandle: portHandleId(sourceId, 'output', edge.source.portId),
+        targetHandle: portHandleId(targetId, 'input', edge.target.portId),
         selected: isSelected,
-        type: 'smoothstep',
-        markerEnd: { type: MarkerType.ArrowClosed, color: '#aab4bd' },
+        type: 'bezier',
+        markerEnd: { type: MarkerType.ArrowClosed, color: isSelected ? '#fbbf24' : '#f8fafc' },
         className: 'workflow-edge-data',
-        style: { stroke: '#aab4bd', strokeWidth: isSelected ? 3 : 2, strokeDasharray: '6 6' },
+        style: {
+          stroke: isSelected ? '#fbbf24' : '#f8fafc',
+          strokeWidth: isSelected ? 4 : 3,
+          strokeDasharray: '8 6',
+        },
       }];
     }
     return [{
       id: edge.id,
       source: sourceId,
       target: targetId,
-      label: 'control',
       selected: isSelected,
-      type: 'smoothstep',
-      markerEnd: { type: MarkerType.ArrowClosed, color: '#303943' },
+      type: 'bezier',
+      markerEnd: { type: MarkerType.ArrowClosed, color: isSelected ? '#fbbf24' : '#f8fafc' },
       className: 'workflow-edge-control',
       style: {
-        stroke: connectionMode === 'control' || isSelected ? '#303943' : '#4c5661',
-        strokeWidth: isSelected ? 2.5 : 1.6,
+        stroke: isSelected ? '#fbbf24' : connectionMode === 'control' ? '#f8fafc' : '#94a3b8',
+        strokeWidth: isSelected ? 4 : 2.6,
       },
     }];
 }
@@ -3738,7 +5449,7 @@ function graphToWorkspaceCanvas(
   const nodeStatus = new Map(workflowRun?.nodes.map((node) => [node.node_id, node.status]) || []);
   const isWorkflowFocusGraph =
     graph.metadata?.layout === 'workflow-focus' ||
-    graph.nodes.every((node) => (node.kind || 'agent_session') !== 'workflow');
+    graph.nodes.every((node) => node.callable_ref.kind !== 'workflow_function');
   const runtimeWorkflows = graph.nodes.map((node, index) =>
     workflowFromGraphNode(node, index, nodeStatus, isWorkflowFocusGraph),
   );
@@ -3826,45 +5537,44 @@ function workflowFromGraphNode(
   isWorkflowFocusGraph = false,
 ): WorkflowContainerModel {
   const metadata = (node.ui || {}) as Record<string, unknown>;
+  const nodeMetadata = (node.metadata || {}) as Record<string, unknown>;
+  const uiLabel =
+    typeof nodeMetadata.ui_label === 'string' && nodeMetadata.ui_label.trim()
+      ? nodeMetadata.ui_label
+      : node.label || node.id;
   const explicitWorkflowContainer = metadata.semantic_kind === 'workflow_container';
+  const callableId = node.callable_ref.id;
+  const callableKind = node.callable_ref.kind;
+  const sourceKind =
+    callableKind === 'workflow_function'
+      ? 'workflow'
+      : callableKind === 'tool_class'
+        ? 'tool'
+        : 'agent_session';
   const internalNodes =
     Array.isArray(metadata.internal_nodes)
       ? (metadata.internal_nodes as InternalNodeView[])
       : [
           {
             id: `${node.id}_session`,
-            name: node.label || node.id,
-            task: node.capsule_id || 'Capsule Session',
-            kind: node.kind === 'tool' ? ('Tool' as const) : ('Agent' as const),
+            name: uiLabel,
+            invocationLabel: uiLabel,
+            task: callableId || 'Callable Session',
+            kind: callableKind === 'tool_class' ? ('Tool' as const) : ('Agent' as const),
             status: (nodeStatus.get(node.id) as WorkflowStatus) || 'not_run',
-            runtime: node.capsule_id,
+            callableId,
+            runtime: callableId,
           },
         ];
-  const isWrappedCapsuleNode =
-    !explicitWorkflowContainer &&
-    node.kind === 'workflow' &&
-    node.capsule_id === 'fake-agent.generic' &&
-    !node.workflow_ref &&
-    internalNodes.length === 1 &&
-    typeof internalNodes[0]?.runtime === 'string' &&
-    internalNodes[0].runtime !== node.capsule_id;
-  const recoveredCapsuleId = isWrappedCapsuleNode ? internalNodes[0].runtime : node.capsule_id;
-  const recoveredKind =
-    (isWorkflowFocusGraph || isWrappedCapsuleNode) &&
-    node.kind === 'workflow' &&
-    recoveredCapsuleId !== node.capsule_id
-      ? internalNodes[0]?.kind === 'Tool'
-        ? 'tool'
-        : 'agent_session'
-      : node.kind;
   return {
     id: node.id,
-    title: node.label || node.id,
-    sourceKind: explicitWorkflowContainer ? 'workflow' : recoveredKind,
-    capsuleId: recoveredCapsuleId,
+    title: uiLabel,
+    invocationLabel: uiLabel,
+    sourceKind: explicitWorkflowContainer ? 'workflow' : sourceKind,
+    callableId,
     sourceInput: node.input,
     sourceInputMapping: node.input_mapping,
-    workflowRef: node.workflow_ref,
+    workflowRef: callableKind === 'workflow_function' ? callableId : node.workflow_ref,
     directory:
       typeof metadata.directory === 'string'
         ? metadata.directory
@@ -3893,7 +5603,7 @@ function canvasToWorkflowGraph(canvas: WorkspaceCanvasModel): WorkflowGraph {
       to: edge.target.workflowId,
       label: 'control',
       condition: edge.condition || null,
-      context: 'upstream_output',
+      context: 'none',
       mapping: {},
     }));
   const dataEdges = executableEdges
@@ -4079,54 +5789,72 @@ function internalWorkflowToGraph(workflow: WorkflowContainerModel): WorkflowGrap
 }
 
 function internalNodeToGraphNode(node: InternalNodeView): WorkflowGraphNode {
+  const callableId = node.callableId || 'fake-agent.generic';
   return {
     id: node.id,
-    capsule_id: node.capsuleId || 'fake-agent.generic',
+    callable_ref: {
+      kind: node.kind === 'Tool' ? 'tool_class' : 'agent_class',
+      id: callableId,
+    },
     kind: node.kind === 'Tool' ? 'tool' : 'agent_session',
-    label: node.name,
+    label: internalInvocationLabel(node),
     input: internalNodeInput(node),
     input_mapping: {},
     cwd_policy: 'inherit_environment',
     input_ports: (node.inputPorts || [port('main', 'input', 'input')]).map(portViewToGraphPort),
     output_ports: (node.outputPorts || [port('main', 'output', 'output')]).map(portViewToGraphPort),
     position: node.position,
+    metadata: { ui_label: internalInvocationLabel(node) },
   };
 }
 
 function internalNodeInput(node: InternalNodeView): Record<string, unknown> {
   if (node.input && Object.keys(node.input).length > 0) {
-    return node.capsuleId === 'file-source.local'
+    return node.callableId === 'file-source.local'
       ? { path: String(node.input.path || '') }
-      : { topic: String(node.input.topic || node.task || node.name) };
+      : node.input;
   }
-  if (node.capsuleId === 'file-source.local') {
+  if (node.callableId === 'file-source.local') {
     return { path: '' };
   }
-  return { topic: node.task || node.name };
+  return { user_prompt: node.task || internalInvocationLabel(node) };
+}
+
+function workflowInvocationPreview(workflow: WorkflowContainerModel): Record<string, unknown> {
+  const input = workflow.sourceInput || {};
+  const userPrompt = promptFromInvocationInput(input);
+  return {
+    prompt_policy: userPrompt ? { user_prompt: userPrompt } : {},
+    overrides: { static_input: staticInputFromInvocationInput(input) },
+    input_bindings: workflow.sourceInputMapping || {},
+    workflow_call_input_bindings: workflow.sourceKind === 'workflow' ? [] : undefined,
+    workflow_call_output_bindings: workflow.sourceKind === 'workflow' ? [] : undefined,
+  };
+}
+
+function internalNodeInvocationPreview(node: InternalNodeView): Record<string, unknown> {
+  const input = node.input || {};
+  const userPrompt = promptFromInvocationInput(input) || node.task || '';
+  return {
+    prompt_policy: userPrompt ? { user_prompt: userPrompt } : {},
+    overrides: { static_input: staticInputFromInvocationInput(input) },
+    input_bindings: {},
+  };
 }
 
 function workflowToGraphNode(workflow: WorkflowContainerModel): WorkflowGraphNode {
-  const wrappedRuntime = workflow.internalNodes[0]?.runtime;
-  const isWrappedCapsuleWorkflow =
-    workflow.sourceKind !== 'workflow' &&
-    !workflow.workflowRef &&
-    (workflow.capsuleId ?? 'fake-agent.generic') === 'fake-agent.generic' &&
-    workflow.internalNodes.length === 1 &&
-    typeof wrappedRuntime === 'string' &&
-    wrappedRuntime !== workflow.capsuleId;
-  if ((workflow.sourceKind && workflow.sourceKind !== 'workflow') || isWrappedCapsuleWorkflow) {
-    const recoveredKind = isWrappedCapsuleWorkflow
-      ? workflow.internalNodes[0]?.kind === 'Tool'
-        ? 'tool'
-        : 'agent_session'
-      : workflow.sourceKind || 'agent_session';
+  if (workflow.sourceKind && workflow.sourceKind !== 'workflow') {
+    const callableId =
+      workflow.callableId || workflow.internalNodes[0]?.callableId || 'fake-agent.generic';
+    const callableKind = workflow.sourceKind === 'tool' ? 'tool_class' : 'agent_class';
     return {
       id: workflow.id,
-      capsule_id: isWrappedCapsuleWorkflow
-        ? wrappedRuntime
-        : workflow.capsuleId || workflow.internalNodes[0]?.capsuleId || 'fake-agent.generic',
-      kind: recoveredKind,
-      label: workflow.title,
+      callable_ref: {
+        kind: callableKind,
+        id: callableId,
+      },
+      kind: workflow.sourceKind,
+      label: workflowInvocationLabel(workflow),
       input: workflow.sourceInput || (workflow.internalNodes[0] ? internalNodeInput(workflow.internalNodes[0]) : {}),
       input_mapping: workflow.sourceInputMapping || {},
       cwd_policy: workflow.relativeCwd ? 'relative_subdir' : 'inherit_environment',
@@ -4134,14 +5862,18 @@ function workflowToGraphNode(workflow: WorkflowContainerModel): WorkflowGraphNod
       input_ports: workflow.inputPorts.map(portViewToGraphPort),
       output_ports: workflow.outputPorts.map(portViewToGraphPort),
       position: workflow.position,
+      metadata: { ui_label: workflowInvocationLabel(workflow) },
     };
   }
   return {
     id: workflow.id,
-    capsule_id: 'fake-agent.generic',
+    callable_ref: {
+      kind: 'workflow_function',
+      id: workflow.workflowRef || workflow.id,
+    },
     kind: 'workflow',
     workflow_ref: workflow.workflowRef,
-    label: workflow.title,
+    label: workflowInvocationLabel(workflow),
     input: { topic: `${workflow.title} workflow container` },
     input_mapping: {},
     cwd_policy: workflow.relativeCwd ? 'relative_subdir' : 'inherit_environment',
@@ -4149,6 +5881,7 @@ function workflowToGraphNode(workflow: WorkflowContainerModel): WorkflowGraphNod
     input_ports: workflow.inputPorts.map(portViewToGraphPort),
     output_ports: workflow.outputPorts.map(portViewToGraphPort),
     position: workflow.position,
+    metadata: { ui_label: workflowInvocationLabel(workflow) },
     ui: {
       semantic_kind: 'workflow_container',
       binding_ref: workflow.bindingPath || `bindings/${workflow.id}.binding.local.json`,
@@ -4499,7 +6232,10 @@ function graphFromLegacyWorkflow(workflow: WorkflowDetail): WorkflowGraph {
     description: workflow.workflow.description,
     nodes: tasks.map((task, index) => ({
       id: task.name,
-      capsule_id: findCapsuleId(task.command) || 'fake-agent.generic',
+      callable_ref: {
+        kind: 'agent_class',
+        id: findCallableId(task.command) || 'fake-agent.generic',
+      },
       kind: 'agent_session',
       label: task.name,
       input: { topic: task.name },
@@ -4655,7 +6391,7 @@ function focusCanvas(
     id: node.id,
     title: node.name,
     sourceKind: node.kind === 'Tool' ? 'tool' : 'agent_session',
-    capsuleId: node.capsuleId || node.runtime,
+    callableId: node.callableId || node.runtime,
     directory: workflow.directory,
     bindingPath: workflow.bindingPath,
     status: node.status,
@@ -4743,7 +6479,7 @@ function internalNode(
     task,
     kind,
     status: 'not_run',
-    capsuleId: 'fake-agent.generic',
+    callableId: 'fake-agent.generic',
     input: { topic: task || name },
   };
 }
@@ -4794,7 +6530,7 @@ function controlEdgeWithId(
     source: { workflowId: sourceWorkflowId },
     target: { workflowId: targetWorkflowId },
     condition: null,
-    context: 'upstream_output',
+    context: 'none',
   };
 }
 
@@ -4817,7 +6553,7 @@ function controlEdgeToCanvasEdge(edge: WorkflowGraphEdge): WorkflowCanvasEdge {
     source: { workflowId: edge.from },
     target: { workflowId: edge.to },
     condition: edge.condition || null,
-    context: edge.context === 'none' ? 'none' : 'upstream_output',
+    context: 'none',
   };
 }
 
@@ -4837,9 +6573,41 @@ function canvasEdgeToGraphMetadataEdge(edge: WorkflowCanvasEdge): WorkflowDataEd
     to: edge.target.workflowId,
     label: 'control',
     condition: edge.condition || null,
-    context: 'upstream_output',
+    context: 'none',
     mapping: {},
   };
+}
+
+function edgeCanonicalPreview(edge: WorkflowCanvasEdge, canvas?: WorkspaceCanvasModel): Record<string, unknown> {
+  if (edge.kind === 'data') {
+    const hasControlDependency = canvas
+      ? allCanvasEdges(canvas).some(
+          (candidate) =>
+            candidate.kind === 'control' &&
+            candidate.source.workflowId === edge.source.workflowId &&
+            candidate.target.workflowId === edge.target.workflowId,
+        )
+      : false;
+    return {
+      data_edge: {
+        source: { node: edge.source.workflowId, port: edge.source.portId || 'main' },
+        target: { node: edge.target.workflowId, port: edge.target.portId || 'main' },
+        materialization: edge.materialization,
+      },
+      auto_added_control_edge: !hasControlDependency,
+    };
+  }
+  return {
+    control_edge: {
+      from: edge.source.workflowId,
+      to: edge.target.workflowId,
+      context: 'none',
+    },
+  };
+}
+
+function allCanvasEdges(canvas: WorkspaceCanvasModel): WorkflowCanvasEdge[] {
+  return [...canvas.edges, ...canvas.workflows.flatMap((workflow) => workflow.internalEdges)];
 }
 
 function internalEdgesFromMetadata(metadata: Record<string, unknown>): WorkflowCanvasEdge[] {
@@ -4938,6 +6706,287 @@ function uniqueEdgeIdForScope(
   return edgeId;
 }
 
+function addEdgeWithControlDependency(
+  canvas: WorkspaceCanvasModel,
+  edge: WorkflowCanvasEdge,
+  scopeWorkflowId: string | null,
+): WorkspaceCanvasModel {
+  const edges = [...canvas.edges.filter((item) => item.id !== edge.id), edge];
+  if (edge.kind !== 'data') {
+    return { ...canvas, edges };
+  }
+  const hasControlEdge = edges.some(
+    (item) =>
+      item.kind === 'control' &&
+      item.source.workflowId === edge.source.workflowId &&
+      item.target.workflowId === edge.target.workflowId,
+  );
+  if (hasControlEdge) {
+    return { ...canvas, edges };
+  }
+  const control = controlEdgeWithId(
+    uniqueEdgeIdForScope(
+      { ...canvas, edges },
+      scopeWorkflowId,
+      'control',
+      edge.source.workflowId,
+      edge.target.workflowId,
+    ),
+    edge.source.workflowId,
+    edge.target.workflowId,
+  );
+  return { ...canvas, edges: [...edges, control] };
+}
+
+function createDataEdgeCommand(
+  canvas: WorkspaceCanvasModel,
+  request: DataEdgeCommandRequest,
+): DataEdgeCommandResult {
+  if (request.materialization !== 'copy' && request.materialization !== 'reference') {
+    throw new Error(`Unsupported data edge materialization: ${request.materialization}`);
+  }
+  if (request.sourceNodeId === request.targetNodeId) {
+    throw new Error('Data Edge 不能连接到同一个节点');
+  }
+  const sourceNode = findDataConnectNode(canvas, request.scopeWorkflowId, request.sourceNodeId);
+  const targetNode = findDataConnectNode(canvas, request.scopeWorkflowId, request.targetNodeId);
+  if (!sourceNode || !targetNode) {
+    throw new Error('Data Edge 必须连接同一层级内的节点');
+  }
+  if (!sourceNode.outputPorts.some((portValue) => portValue.id === request.sourcePortId)) {
+    throw new Error(`Source output port 不存在: ${request.sourceNodeId}.${request.sourcePortId}`);
+  }
+  const targetPort = targetNode.inputPorts.find((portValue) => portValue.id === request.targetPortId);
+  if (!targetPort) {
+    throw new Error(`Target input port 不存在: ${request.targetNodeId}.${request.targetPortId}`);
+  }
+  const scopedEdges = dataConnectEdges(canvas, request.scopeWorkflowId);
+  const hasTargetConflict = scopedEdges.some(
+    (edge) =>
+      edge.kind === 'data' &&
+      edge.target.workflowId === request.targetNodeId &&
+      edge.target.portId === request.targetPortId,
+  );
+  if (hasTargetConflict && (targetPort.cardinality || 'one') !== 'many' && !request.replaceExisting) {
+    throw new Error(`Target input port 已有 data edge: ${request.targetNodeId}.${request.targetPortId}`);
+  }
+  const dataEdge: Extract<WorkflowCanvasEdge, { kind: 'data' }> = {
+    id: uniqueEdgeIdForScope(
+      canvas,
+      request.scopeWorkflowId,
+      'data',
+      request.sourceNodeId,
+      request.targetNodeId,
+    ),
+    kind: 'data',
+    source: { workflowId: request.sourceNodeId, portId: request.sourcePortId },
+    target: { workflowId: request.targetNodeId, portId: request.targetPortId },
+    materialization: request.materialization,
+  };
+  const hadControlDependency = hasControlDependency(
+    canvas,
+    request.scopeWorkflowId,
+    request.sourceNodeId,
+    request.targetNodeId,
+  );
+  const filteredEdges = scopedEdges.filter((item) => {
+    if (item.id === dataEdge.id) {
+      return false;
+    }
+    if (!request.replaceExisting || item.kind !== 'data') {
+      return true;
+    }
+    return !(
+      item.target.workflowId === request.targetNodeId &&
+      item.target.portId === request.targetPortId
+    );
+  });
+
+  if (request.scopeWorkflowId) {
+    const scopedCanvas = { ...canvas, edges: filteredEdges };
+    const nextScopedCanvas = addEdgeWithControlDependency(scopedCanvas, dataEdge, request.scopeWorkflowId);
+    return {
+      canvas: {
+        ...canvas,
+        workflows: canvas.workflows.map((workflow) =>
+          workflow.id === request.scopeWorkflowId
+            ? { ...workflow, internalEdges: nextScopedCanvas.edges }
+            : workflow,
+        ),
+      },
+      edge: dataEdge,
+      autoAddedControlEdge: !hadControlDependency,
+    };
+  }
+
+  const nextCanvas = addEdgeWithControlDependency({ ...canvas, edges: filteredEdges }, dataEdge, null);
+  return {
+    canvas: nextCanvas,
+    edge: dataEdge,
+    autoAddedControlEdge: !hadControlDependency,
+  };
+}
+
+function applyDataEdgeCommandOrKeep(
+  canvas: WorkspaceCanvasModel,
+  request: DataEdgeCommandRequest,
+  onError?: (message: string) => void,
+): WorkspaceCanvasModel {
+  try {
+    return createDataEdgeCommand(canvas, request).canvas;
+  } catch (error) {
+    onError?.(error instanceof Error ? error.message : '创建 Data Edge 失败');
+    return canvas;
+  }
+}
+
+function dataConnectNodes(
+  canvas: WorkspaceCanvasModel,
+  scopeWorkflowId: string | null,
+): DataConnectNodeOption[] {
+  if (scopeWorkflowId) {
+    const workflow = canvas.workflows.find((item) => item.id === scopeWorkflowId);
+    return (workflow?.internalNodes || []).map((node) => ({
+      nodeId: node.id,
+      label: internalInvocationLabel(node),
+      subtitle: node.callableId || node.runtime,
+      inputPorts: node.inputPorts || [port('main', 'input', 'input')],
+      outputPorts: node.outputPorts || [port('main', 'output', 'output')],
+    }));
+  }
+  return canvas.workflows
+    .filter((workflow) => !workflow.boundaryKind)
+    .map((workflow) => ({
+      nodeId: workflow.id,
+      label: workflowInvocationLabel(workflow),
+      subtitle: workflow.callableId || workflow.workflowRef,
+      inputPorts: workflow.inputPorts,
+      outputPorts: workflow.outputPorts,
+    }));
+}
+
+function findDataConnectNode(
+  canvas: WorkspaceCanvasModel,
+  scopeWorkflowId: string | null,
+  nodeId: string,
+): DataConnectNodeOption | undefined {
+  return dataConnectNodes(canvas, scopeWorkflowId).find((node) => node.nodeId === nodeId);
+}
+
+function dataConnectEdges(
+  canvas: WorkspaceCanvasModel,
+  scopeWorkflowId: string | null,
+): WorkflowCanvasEdge[] {
+  if (!scopeWorkflowId) {
+    return canvas.edges;
+  }
+  return canvas.workflows.find((workflow) => workflow.id === scopeWorkflowId)?.internalEdges || [];
+}
+
+function dataEdgesForNode(
+  canvas: WorkspaceCanvasModel,
+  scopeWorkflowId: string | null,
+  nodeId: string,
+  direction: PortDirection,
+): Extract<WorkflowCanvasEdge, { kind: 'data' }>[] {
+  return dataConnectEdges(canvas, scopeWorkflowId).filter(
+    (edge): edge is Extract<WorkflowCanvasEdge, { kind: 'data' }> => {
+      if (edge.kind !== 'data') {
+        return false;
+      }
+      return direction === 'input'
+        ? edge.target.workflowId === nodeId
+        : edge.source.workflowId === nodeId;
+    },
+  );
+}
+
+function hasControlDependency(
+  canvas: WorkspaceCanvasModel,
+  scopeWorkflowId: string | null,
+  sourceNodeId: string,
+  targetNodeId: string,
+): boolean {
+  return dataConnectEdges(canvas, scopeWorkflowId).some(
+    (edge) =>
+      edge.kind === 'control' &&
+      edge.source.workflowId === sourceNodeId &&
+      edge.target.workflowId === targetNodeId,
+  );
+}
+
+function addInputPortToDataConnectNode(
+  canvas: WorkspaceCanvasModel,
+  scopeWorkflowId: string | null,
+  nodeId: string,
+  portId: string,
+): WorkspaceCanvasModel {
+  return addPortToDataConnectNode(canvas, scopeWorkflowId, nodeId, 'input', portId);
+}
+
+function addPortToDataConnectNode(
+  canvas: WorkspaceCanvasModel,
+  scopeWorkflowId: string | null,
+  nodeId: string,
+  direction: PortDirection,
+  requestedPortId: string,
+): WorkspaceCanvasModel {
+  const portId = slugId(requestedPortId);
+  if (!portId) {
+    throw new Error('端口 id 不能为空');
+  }
+  const nextPort = port(portId, portId, direction);
+  if (scopeWorkflowId) {
+    return {
+      ...canvas,
+      workflows: canvas.workflows.map((workflow) => {
+        if (workflow.id !== scopeWorkflowId) {
+          return workflow;
+        }
+        return {
+          ...workflow,
+          internalNodes: workflow.internalNodes.map((node) => {
+            if (node.id !== nodeId) {
+              return node;
+            }
+            const key = direction === 'input' ? 'inputPorts' : 'outputPorts';
+            const ports = node[key] || [port('main', direction, direction)];
+            if (ports.some((portValue) => portValue.id === portId)) {
+              throw new Error(`端口已存在: ${nodeId}.${portId}`);
+            }
+            return { ...node, [key]: [...ports, nextPort] };
+          }),
+        };
+      }),
+    };
+  }
+  return {
+    ...canvas,
+    workflows: canvas.workflows.map((workflow) => {
+      if (workflow.id !== nodeId) {
+        return workflow;
+      }
+      const key = direction === 'input' ? 'inputPorts' : 'outputPorts';
+      const ports = workflow[key];
+      if (ports.some((portValue) => portValue.id === portId)) {
+        throw new Error(`端口已存在: ${nodeId}.${portId}`);
+      }
+      return { ...workflow, [key]: [...ports, nextPort] };
+    }),
+  };
+}
+
+function uniqueInputPortIdForNode(
+  canvas: WorkspaceCanvasModel,
+  scopeWorkflowId: string | null,
+  nodeId: string,
+  requestedPortId: string,
+): string {
+  const target = findDataConnectNode(canvas, scopeWorkflowId, nodeId);
+  const existingIds = new Set((target?.inputPorts || []).map((portValue) => portValue.id));
+  return uniqueId(slugId(requestedPortId || 'input') || 'input', existingIds);
+}
+
 function internalFlowNodeId(workflowId: string, nodeId: string): string {
   return `${workflowId}__internal__${nodeId}`;
 }
@@ -4980,8 +7029,18 @@ function nodeRunForWorkflow(
     if (nodeRun.ui_node_id === workflow.id || nodeRun.node_id === workflow.id) {
       return true;
     }
-    return Boolean(workflow.capsuleId && nodeRun.capsule_id === workflow.capsuleId && nodeRun.node_id === workflow.id);
+    return Boolean(workflow.callableId && nodeRun.callable_id === workflow.callableId && nodeRun.node_id === workflow.id);
   });
+}
+
+function nodeLiveLogsFor(
+  liveLogs: Record<string, NodeLiveLogs>,
+  nodeRun?: NodeRunSummary,
+): NodeLiveLogs | undefined {
+  if (!nodeRun) {
+    return undefined;
+  }
+  return liveLogs[nodeRun.node_id] || (nodeRun.ui_node_id ? liveLogs[nodeRun.ui_node_id] : undefined);
 }
 
 function nodeRunForInternalNode(
@@ -5056,7 +7115,7 @@ function parsePaletteItem(raw: string): PaletteItem | null {
     }
     if (
       (item.kind === 'agent' || item.kind === 'tool' || item.kind === 'file_source') &&
-      item.capsuleId &&
+      item.callableId &&
       item.label
     ) {
       return item;
@@ -5096,14 +7155,7 @@ function isExecutableNodeWorkflow(workflow: WorkflowContainerModel): boolean {
   if (workflow.sourceKind && workflow.sourceKind !== 'workflow') {
     return true;
   }
-  const wrappedRuntime = workflow.internalNodes[0]?.runtime;
-  return (
-    !workflow.workflowRef &&
-    (workflow.capsuleId ?? 'fake-agent.generic') === 'fake-agent.generic' &&
-    workflow.internalNodes.length === 1 &&
-    typeof wrappedRuntime === 'string' &&
-    wrappedRuntime !== workflow.capsuleId
-  );
+  return false;
 }
 
 function workflowAtPosition(
@@ -5572,11 +7624,11 @@ function internalNodeFromExecutableWorkflow(
   return {
     id: workflow.id,
     name: workflow.title,
-    task: wrapped?.task || workflow.capsuleId || workflow.title,
+    task: wrapped?.task || workflow.callableId || workflow.title,
     kind: workflow.sourceKind === 'tool' ? 'Tool' : 'Agent',
     status: workflow.status,
-    capsuleId: workflow.capsuleId || wrapped?.capsuleId,
-    runtime: workflow.capsuleId || wrapped?.runtime,
+    callableId: workflow.callableId || wrapped?.callableId,
+    runtime: workflow.callableId || wrapped?.runtime,
     input: workflow.sourceInput || wrapped?.input,
     inputPorts: workflow.inputPorts,
     outputPorts: workflow.outputPorts,
@@ -5594,7 +7646,7 @@ function executableWorkflowFromInternalNode(
     id,
     title: node.name,
     sourceKind: node.kind === 'Tool' ? 'tool' : 'agent_session',
-    capsuleId: node.capsuleId || node.runtime,
+    callableId: node.callableId || node.runtime,
     sourceInput: node.input,
     directory: 'Root canvas environment',
     status: node.status,
@@ -5757,22 +7809,131 @@ function defaultInternalNodePosition(index: number): { x: number; y: number } {
 }
 
 function nextRootPalettePosition(canvas: WorkspaceCanvasModel): { x: number; y: number } {
+  const safeStartX = 620;
   const rootNodes = canvas.workflows.filter((workflow) => !workflow.boundaryKind);
   if (!rootNodes.length) {
-    return { x: 120, y: 180 };
+    return { x: safeStartX, y: 180 };
   }
   const rootAgentCount = rootNodes.filter(isExecutableNodeWorkflow).length;
-  const lastRootNode = rootNodes[rootNodes.length - 1];
-  const nextX = lastRootNode.position.x + lastRootNode.size.width + 120;
-  const rowIndex = Math.floor(rootAgentCount / 4);
+  const columns = 1;
+  const columnIndex = rootAgentCount % columns;
+  const rowIndex = Math.floor(rootAgentCount / columns);
   return {
-    x: rootAgentCount > 0 && rootAgentCount % 4 === 0 ? 120 : nextX,
+    x: safeStartX + columnIndex * (AGENT_TOOL_NODE_SIZE.width + 80),
     y: 180 + rowIndex * 160,
   };
 }
 
 function boundaryPort(portValue: WorkflowPortView, direction: PortDirection): WorkflowPortView {
   return { ...portValue, direction };
+}
+
+function workflowSummaryForRef(
+  workflows: WorkflowSummary[],
+  workflowRef: string | undefined,
+): WorkflowSummary | undefined {
+  if (!workflowRef) {
+    return undefined;
+  }
+  const normalized = workflowRef.replace(/\\/gu, '/');
+  return workflows.find((workflow) => {
+    const path = workflow.path.replace(/\\/gu, '/');
+    return path === normalized || workflow.workflow_id === workflowRef || workflow.file_id === workflowRef;
+  });
+}
+
+function workflowSearchHaystack(workflow: WorkflowSummary): string {
+  const workflowType = (workflow as WorkflowSummary & { type?: string }).type;
+  return [
+    workflow.workflow_id,
+    workflow.file_id,
+    workflow.name,
+    workflow.description,
+    workflow.path,
+    workflowType,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+}
+
+function isChildWorkflowSummary(workflow: WorkflowSummary): boolean {
+  const id = workflow.workflow_id || workflow.file_id || '';
+  const path = workflow.path || '';
+  return /__[^/\\]+\.accflow\.json$/u.test(path) || id.includes('__');
+}
+
+function workflowInvocationLabel(workflow: WorkflowContainerModel): string {
+  return workflow.invocationLabel || workflow.title || workflow.id;
+}
+
+function internalInvocationLabel(node: InternalNodeView): string {
+  return node.invocationLabel || node.name || node.id;
+}
+
+function uniqueInvocationLabel(baseLabel: string, existingLabels: Set<string>): string {
+  const normalizedBase = baseLabel.trim() || 'Invocation';
+  if (!existingLabels.has(normalizedBase)) {
+    return normalizedBase;
+  }
+  let index = 2;
+  let nextLabel = `${normalizedBase} #${index}`;
+  while (existingLabels.has(nextLabel)) {
+    index += 1;
+    nextLabel = `${normalizedBase} #${index}`;
+  }
+  return nextLabel;
+}
+
+function normalizeWorkbenchSelection(
+  canvas: WorkspaceCanvasModel,
+  selection: CanvasSelection,
+  focusedWorkflowId: string | null,
+): CanvasSelection {
+  if (selection.type === 'task_canvas') {
+    return selection.taskId === canvas.id ? selection : { type: 'task_canvas', taskId: canvas.id };
+  }
+  if (selection.type === 'workflow') {
+    if (canvas.workflows.some((workflow) => workflow.id === selection.id)) {
+      return selection;
+    }
+    return { type: 'task_canvas', taskId: canvas.id };
+  }
+  if (selection.type === 'edge') {
+    const hasEdge =
+      canvas.edges.some((edge) => edge.id === selection.id) ||
+      canvas.workflows.some((workflow) => workflow.internalEdges.some((edge) => edge.id === selection.id));
+    return hasEdge ? selection : { type: 'task_canvas', taskId: canvas.id };
+  }
+  const workflow = canvas.workflows.find((item) => item.id === selection.workflowId);
+  if (!workflow) {
+    return { type: 'task_canvas', taskId: canvas.id };
+  }
+  if (focusedWorkflowId && workflow.id !== focusedWorkflowId) {
+    return { type: 'task_canvas', taskId: canvas.id };
+  }
+  if (selection.type === 'port') {
+    const ports = selection.direction === 'input' ? workflow.inputPorts : workflow.outputPorts;
+    return ports.some((portValue) => portValue.id === selection.portId)
+      ? selection
+      : { type: 'task_canvas', taskId: canvas.id };
+  }
+  return workflow.internalNodes.some((node) => node.id === selection.nodeId)
+    ? selection
+    : { type: 'task_canvas', taskId: canvas.id };
+}
+
+function selectionKey(selection: CanvasSelection): string {
+  if (selection.type === 'task_canvas') {
+    return `task:${selection.taskId}`;
+  }
+  if (selection.type === 'workflow' || selection.type === 'edge') {
+    return `${selection.type}:${selection.id}`;
+  }
+  if (selection.type === 'port') {
+    return `port:${selection.workflowId}:${selection.direction}:${selection.portId}`;
+  }
+  return `internal:${selection.workflowId}:${selection.nodeId}`;
 }
 
 function addWorkflowFromPalette(
@@ -5782,9 +7943,14 @@ function addWorkflowFromPalette(
 ): WorkspaceCanvasModel {
   const baseId = slugId(item.workflowRef || item.label || 'workflow');
   const id = uniqueId(baseId || 'workflow', new Set(canvas.workflows.map((workflow) => workflow.id)));
+  const invocationLabel = uniqueInvocationLabel(
+    item.label || id,
+    new Set(canvas.workflows.map(workflowInvocationLabel)),
+  );
   const workflow: WorkflowContainerModel = {
     id,
-    title: item.label || id,
+    title: invocationLabel,
+    invocationLabel,
     sourceKind: 'workflow',
     workflowRef: item.workflowRef,
     directory: '未绑定工作目录',
@@ -5801,19 +7967,41 @@ function addWorkflowFromPalette(
   return { ...canvas, workflows: [...canvas.workflows, workflow] };
 }
 
-function addCapsuleNodeFromPalette(
+function nextPaletteSelection(
+  canvas: WorkspaceCanvasModel,
+  item: Exclude<PaletteItem, { kind: 'workflow' }>,
+  targetWorkflowId: string | null,
+): CanvasSelection {
+  if (targetWorkflowId) {
+    const workflow = canvas.workflows.find((candidate) => candidate.id === targetWorkflowId);
+    const existingIds = new Set(workflow?.internalNodes.map((node) => node.id) || []);
+    return {
+      type: 'internal',
+      workflowId: targetWorkflowId,
+      nodeId: uniqueId(paletteItemBaseId(item), existingIds),
+    };
+  }
+  return {
+    type: 'workflow',
+    id: uniqueId(paletteItemBaseId(item), new Set(canvas.workflows.map((workflow) => workflow.id))),
+  };
+}
+
+function addCallableNodeFromPalette(
   canvas: WorkspaceCanvasModel,
   item: Exclude<PaletteItem, { kind: 'workflow' }>,
   position: { x: number; y: number },
 ): WorkspaceCanvasModel {
   const existingIds = new Set(canvas.workflows.map((workflow) => workflow.id));
-  const node = internalNodeFromPaletteItem(item, position, existingIds);
+  const existingLabels = new Set(canvas.workflows.map(workflowInvocationLabel));
+  const node = internalNodeFromPaletteItem(item, position, existingIds, existingLabels);
   const id = node.id;
   const workflow: WorkflowContainerModel = {
     id,
     title: node.name,
+    invocationLabel: node.invocationLabel || node.name,
     sourceKind: node.kind === 'Tool' ? 'tool' : 'agent_session',
-    capsuleId: node.capsuleId,
+    callableId: node.callableId,
     sourceInput: node.input,
     directory: 'Root canvas environment',
     status: 'not_run',
@@ -5841,7 +8029,8 @@ function addInternalNodeFromPalette(
         return workflow;
       }
       const existingIds = new Set(workflow.internalNodes.map((node) => node.id));
-      const node = internalNodeFromPaletteItem(item, position, existingIds);
+      const existingLabels = new Set(workflow.internalNodes.map(internalInvocationLabel));
+      const node = internalNodeFromPaletteItem(item, position, existingIds, existingLabels);
       return expandWorkflowToFitChildren({ ...workflow, internalNodes: [...workflow.internalNodes, node] });
     }),
   };
@@ -5861,7 +8050,8 @@ function addInternalNodeFromPaletteWithConnection(
         return workflow;
       }
       const existingIds = new Set(workflow.internalNodes.map((node) => node.id));
-      const node = internalNodeFromPaletteItem(item, position, existingIds);
+      const existingLabels = new Set(workflow.internalNodes.map(internalInvocationLabel));
+      const node = internalNodeFromPaletteItem(item, position, existingIds, existingLabels);
       const pendingEdge = pendingConnection
         ? edgeFromPendingConnection(
             { ...focusCanvas(canvas, workflowId), workflows: [] },
@@ -5884,23 +8074,26 @@ function internalNodeFromPaletteItem(
   item: Exclude<PaletteItem, { kind: 'workflow' }>,
   position: { x: number; y: number },
   existingIds: Set<string>,
+  existingLabels: Set<string> = new Set(),
 ): InternalNodeView {
-  const capsuleId = item.kind === 'file_source' ? 'file-source.local' : item.capsuleId;
+  const callableId = item.kind === 'file_source' ? 'file-source.local' : item.callableId;
   const id = uniqueId(paletteItemBaseId(item), existingIds);
   const isTool = item.kind === 'tool' || item.kind === 'file_source';
-  const task = isTool ? '本地工具节点' : item.label;
+  const invocationLabel = uniqueInvocationLabel(item.label || callableId || id, existingLabels);
+  const task = isTool ? '本地工具节点' : invocationLabel;
   return {
     id,
-    name: item.label,
+    name: invocationLabel,
+    invocationLabel,
     task,
     kind: isTool ? 'Tool' : 'Agent',
     status: 'not_run',
-    capsuleId,
-    runtime: capsuleId,
+    callableId,
+    runtime: callableId,
     input:
       item.kind === 'file_source'
         ? { path: '' }
-        : { topic: item.label || capsuleId },
+        : { user_prompt: invocationLabel },
     inputPorts: [port('main', 'input', 'input')],
     outputPorts: [port('main', 'output', 'output')],
     position,
@@ -5908,7 +8101,7 @@ function internalNodeFromPaletteItem(
 }
 
 function paletteItemBaseId(item: Exclude<PaletteItem, { kind: 'workflow' }>): string {
-  const stableRef = item.kind === 'file_source' ? item.capsuleId : item.capsuleId;
+  const stableRef = item.kind === 'file_source' ? item.callableId : item.callableId;
   return slugId(stableRef || item.label || 'node');
 }
 
@@ -5972,6 +8165,13 @@ function slugId(value: string): string {
   return slug || 'node';
 }
 
+function isJsdomRuntime(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    window.navigator?.userAgent?.toLowerCase().includes('jsdom')
+  );
+}
+
 function uniqueId(baseId: string, existingIds: Set<string>): string {
   let id = baseId;
   let index = 1;
@@ -6026,7 +8226,7 @@ function truncateLargeLog(content: ArtifactContent): ArtifactContent {
   };
 }
 
-function findCapsuleId(command: unknown): string {
+function findCallableId(command: unknown): string {
   if (!Array.isArray(command)) {
     return '';
   }
@@ -6036,17 +8236,25 @@ function findCapsuleId(command: unknown): string {
 }
 
 export const __workflowViewerTestables = {
+  AgentToolNode,
   WorkspaceCanvas,
-  addCapsuleNodeFromPalette,
+  addCallableNodeFromPalette,
   addInternalNodeFromPalette,
   addWorkflowFromPalette,
   canvasToWorkflowGraph,
+  canvasEdgeToFlowEdge,
+  createDataEdgeCommand,
   expandWorkflowToFitChildren,
   expandWorkflowToFitChildrenCenterLocked,
   graphToWorkspaceCanvas,
+  internalInvocationLabel,
   isExecutableNodeWorkflow,
   layoutCanvasForSelection,
   reusableWorkflowClassGraph,
   layoutWorkspaceCanvas,
   nextRootPalettePosition,
+  normalizeWorkbenchSelection,
+  promptFromInvocationInput,
+  staticInputFromInvocationInput,
+  workflowInvocationLabel,
 };

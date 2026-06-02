@@ -12,16 +12,19 @@ Read these first when you need the current system contract:
 - `docs/CURRENT_ARCHITECTURE.md`: current first-principles architecture and runtime boundaries.
 - `docs/concepts/FIRST_PRINCIPLES_ANALYSIS.md`: why ACC separates reusable definitions from runtime
   executions and keeps GraphOps human-governed.
-- `docs/concepts/CAPSULE_TEMPLATE_SESSION.md`: template/session and callable runtime mental model.
-- `docs/concepts/GRAPHOPS_CONTROL_PLANE.md`: controlled workflow/capsule mutation path.
+- `docs/concepts/CAPSULE_TEMPLATE_SESSION.md`: class-template/session and callable runtime mental
+  model. The filename is historical; the content describes Core v2 concepts.
+- `docs/concepts/GRAPHOPS_CONTROL_PLANE.md`: controlled callable/workflow mutation path.
 
 ## Current Implementation Goal Packages
 
 These packages describe work that is reflected in the current architecture:
 
 - `docs/codex_goal_callable_semantics/`
-  - Current callable domain model, runtime evidence, compatibility mapping, and final acceptance.
+  - Current callable domain model, runtime evidence, migration boundary, and final acceptance.
   - Prefer `DESIGN.md`, `DOMAIN_MODEL.md`, `EXECUTION_BOUNDARIES.md`, and `QUALITY_REPORT.md`.
+  - Some files in this package preserve the goal-run acceptance wording. Check `STATUS.md` before
+    treating old compatibility or manifest-file names as current runtime facts.
 
 - `docs/codex_goal_visual_workbench_ux_refactor/`
   - Current Workbench UX, task persistence, resource/class vs node/instance boundary, and browser
@@ -35,6 +38,10 @@ These packages describe work that is reflected in the current architecture:
 - `docs/human/ACC_WORKFLOW_ORCHESTRATION_COMPARISON.md` compares ACC with Multica, Paperclip,
   LangGraph, Dify, Conductor, and related systems. It is explanatory; architecture facts still defer
   to `docs/CURRENT_ARCHITECTURE.md`.
+- Other `docs/human/*_PLAIN_LANGUAGE.md` files may describe historical design phases using terms
+  such as `Capsule`, `WorkflowTemplate`, `NodeSpec`, or `EnvironmentFrame`. They remain useful for
+  rationale, but current product terminology is Core v2 callable-only unless the file states
+  otherwise.
 
 ## Historical Goal Packages
 
@@ -46,8 +53,9 @@ Examples:
 
 - Early docs that say "do not build visual UI" are historical. The Workbench now exists and is in
   scope.
-- Early docs that describe only `Capsule Template` / `Session` are historical shorthand. The current
-  model is callable-first and maps legacy concepts through compatibility layers.
+- Early docs that describe only old capsule/session runtime are historical shorthand. The current
+  model is Core v2 callable-only; legacy concepts are accepted only as migration input or explicit
+  rejection evidence.
 - Old progress or findings files may describe failures that were later fixed. Check the relevant
   `QUALITY_REPORT.md` before treating a finding as current.
 - `FINDINGS.md` files are usually baseline or audit snapshots. They are evidence of what was found
@@ -61,7 +69,7 @@ Examples:
 
 The Workbench is no longer read-only.
 
-- It edits task canvases and saves workflow graphs through server APIs.
+- It edits task canvases and saves Core v2 workflow templates through server APIs.
 - It submits async runs through `POST /api/workflows/run-graph/submit`.
 - It observes runs through `GET /api/runs/{run_id}` and `GET /api/runs/{run_id}/events`.
 - It can cancel queued/running runs through `POST /api/runs/{run_id}/cancel`.

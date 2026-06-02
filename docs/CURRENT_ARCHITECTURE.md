@@ -23,7 +23,7 @@ The architecture follows four separations:
    - Runtime evidence lives under run directories and can be inspected or replayed.
 
 4. **Human-governed editing vs agent execution**
-   - LLMs may propose graph/capsule changes through GraphOps.
+   - LLMs may propose callable/workflow changes through GraphOps.
    - Persistent mutation requires validation, dry-run evidence, and human approval.
 
 ## Core Data Flow
@@ -81,21 +81,20 @@ the host environment. `web/` must not become runtime truth.
 | `ScopeFrame` | The invocation's cwd, inbox, outbox, artifact root, environment root, and behavior snapshot evidence. |
 | `SessionInstance` | One agent/tool execution inside a scope frame. |
 
-## Legacy Compatibility
+## Legacy Boundary
 
-ACC still supports legacy files and names:
+ACC no longer treats the old runtime architecture as an active product architecture. Legacy inputs
+are allowed only at these edges:
 
 ```text
-CapsuleSpec(kind=agent_session) -> AgentClassTemplate compatibility view
-CapsuleSpec(kind=agent_workflow) -> AgentClassTemplate compatibility view
-CapsuleSpec(kind=atomic) -> ToolClassTemplate compatibility view
-CapsuleSpec(kind=acc_workflow) -> WorkflowFunctionTemplate compatibility wrapper
-NodeSpec(kind=agent, runtime=...) -> NodeInvocationSpec(callable_ref=agent_class:runtime)
-NodeSpec(kind=tool, tool=...) -> NodeInvocationSpec(callable_ref=tool_class:tool)
-NodeSpec(kind=workflow, workflow_ref=...) -> NodeInvocationSpec(callable_ref=workflow_function:workflow_ref)
+raw legacy document -> migration parser -> canonical Core v2 output
+raw legacy document -> explicit rejection with migration hint
+historical fixture   -> read-only documentation or regression evidence
 ```
 
-Compatibility is intentional. Removing it requires migration notes and regression tests.
+Product runtime, CLI/API execution, Workbench save/run, Debugger projection, and GraphOps apply paths
+must consume canonical Core v2 objects. They must not instantiate old runtime classes, load a legacy
+registry, run an old graph runtime, or use old node raw fields as execution semantics.
 
 ## Workbench Model
 
@@ -164,38 +163,32 @@ projection, not clear another task's run evidence.
 
 ## Runtime Evidence Files
 
-Legacy `acc run` evidence includes:
+Core v2 workflow/callable evidence includes:
 
 ```text
-session_manifest.json
-run_manifest.json
-input.json
-resolved_prompt.md
-output.json
-conductor_output.json
+run_record.json
+run_summary.json
+function_invocation.json
+scope_frame.json
 events.jsonl
-stdout.log
-stderr.log
-artifacts/
-```
-
-Clean workflow/callable evidence includes:
-
-```text
-function_invocation_manifest.json
-scope_frame_manifest.json
-workflow_run_manifest.json
-workflow_summary.json
-workflow_run.json
+result_store/
+workflow_outputs/<port>/output.json
 nodes/<node_id>/session_instance_manifest.json
 nodes/<workflow_node>/workflow_call_manifest.json
-nodes/<node_id>/input.json
+nodes/<node_id>/agent_payload.json
+nodes/<node_id>/runtime_payload.json
+nodes/<node_id>/binding_manifest.json
 nodes/<node_id>/output.json
 nodes/<node_id>/events.jsonl
+nodes/<node_id>/artifact_bundle.json
 ```
 
-The exact file set can grow additively. Existing public artifacts should not be renamed in place
-without compatibility tests and migration notes.
+The exact file set can grow additively. New runtime evidence must remain a projection of
+`FunctionInvocation`, `ScopeFrame`, `SessionInstance`, `ArtifactBundle`, `ResultStore`, and
+`EventLog`; it must not resurrect old `node_runs/` or `workflow_graph.json` source-of-truth files.
+Older goal documents may mention `function_invocation_manifest.json`,
+`scope_frame_manifest.json`, `workflow_run_manifest.json`, or `workflow_summary.json`; treat those
+as historical target names unless the runtime starts writing them again.
 
 ## Verification Contract
 

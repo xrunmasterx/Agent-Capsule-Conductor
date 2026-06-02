@@ -99,6 +99,8 @@ class WorkbenchRunManager:
                 and result.get("status") not in TERMINAL_RUN_STATUSES
             ):
                 self._write_summary(job, "cancelled", ended_at=utc_now_iso())
+            else:
+                self._write_terminal_summary(job, str(result.get("status") or "success"))
         except Exception as exc:  # noqa: BLE001 - background tasks must persist failure facts
             status = "cancelled" if self._cancel_marker(job.run_dir).exists() else "failed"
             self._write_summary(job, status, ended_at=utc_now_iso(), error=str(exc))
@@ -144,7 +146,7 @@ class WorkbenchRunManager:
             summary.nodes.append(
                 NodeRunSummary(
                     node_id=job.workflow_id,
-                    capsule_id="workflow",
+                    callable_id="workflow",
                     status=status,
                     summary=error,
                     run_dir=str(job.run_dir.resolve()),
@@ -158,6 +160,21 @@ class WorkbenchRunManager:
     def _write_summary_from_existing(self, summary: RunSummary, status: str) -> None:
         next_summary = summary.model_copy(update={"status": status})
         self._write_summary_model(next_summary)
+
+    def _write_terminal_summary(self, job: WorkbenchRunJob, status: str) -> None:
+        terminal_status = status if status in TERMINAL_RUN_STATUSES else "success"
+        summary = self._load_existing_summary(job.run_dir)
+        if summary is None:
+            self._write_summary(job, terminal_status, ended_at=utc_now_iso())
+            return
+        update: dict[str, Any] = {"status": terminal_status}
+        if summary.ended_at is None:
+            update["ended_at"] = utc_now_iso()
+        if not summary.workflow_id:
+            update["workflow_id"] = job.workflow_id
+        next_summary = summary.model_copy(update=update)
+        extra = {"task_id": job.task_id} if job.task_id else None
+        self._write_summary_model(next_summary, extra=extra)
 
     def _write_summary_model(
         self,

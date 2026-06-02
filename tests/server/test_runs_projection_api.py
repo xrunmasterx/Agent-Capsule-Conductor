@@ -5,7 +5,7 @@ import json
 
 def test_get_node_includes_projection_fields(client, project_root) -> None:
     run_dir = project_root / "runs" / "projection_fixture_run"
-    node_dir = run_dir / "node_runs" / "echo"
+    node_dir = run_dir / "nodes" / "echo"
     node_dir.mkdir(parents=True, exist_ok=True)
     (node_dir / "stdout.log").write_text("hello stdout\nsecond line\n", encoding="utf-8")
     (node_dir / "output.json").write_text(
@@ -35,7 +35,7 @@ def test_get_node_includes_projection_fields(client, project_root) -> None:
                 "nodes": [
                     {
                         "node_id": "echo",
-                        "capsule_id": "echo-test.generic",
+                        "callable_id": "echo-test.generic",
                         "status": "success",
                         "summary": "done",
                         "run_dir": str(node_dir.resolve()),

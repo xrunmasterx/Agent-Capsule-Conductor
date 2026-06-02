@@ -3,7 +3,6 @@ from pathlib import Path
 import pytest
 
 from acc.artifact_store import ArtifactStore
-from acc.registry import CapsuleRegistry
 from acc.utils import AccError, load_json
 
 
@@ -18,17 +17,14 @@ def test_creates_expected_run_directory_files(tmp_path: Path) -> None:
     assert store.events_log_path.exists()
 
 
-def test_writes_input_manifest_and_capsule_snapshot(tmp_path: Path) -> None:
+def test_writes_input_and_manifest(tmp_path: Path) -> None:
     store = ArtifactStore(tmp_path / "run")
-    capsule = CapsuleRegistry().get("echo-test.generic")
     store.prepare()
 
     store.write_input({"message": "hello"})
-    store.write_capsule_snapshot(capsule)
     store.write_manifest({"status": "started"})
 
     assert load_json(store.input_path)["message"] == "hello"
-    assert "echo-test.generic" in store.capsule_snapshot_path.read_text(encoding="utf-8")
     assert load_json(store.session_manifest_path)["status"] == "started"
     assert load_json(store.run_manifest_path)["status"] == "started"
 

@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "status",
+    "summary",
+    "cleaned_evidence",
+    "source_credibility",
+    "rejected_items",
+    "consolidated_signals",
+    "confidence"
+  ],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["success"]
+    },
+    "summary": {
+      "type": "string"
+    },
+    "cleaned_evidence": {
+      "type": "string"
+    },
+    "source_credibility": {
+      "type": "string"
+    },
+    "rejected_items": {
+      "type": "string"
+    },
+    "consolidated_signals": {
+      "type": "string"
+    },
+    "confidence": {
+      "type": "string",
+      "enum": ["low", "medium", "high"]
+    }
+  },
+  "additionalProperties": false
+}

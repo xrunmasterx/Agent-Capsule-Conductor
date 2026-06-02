@@ -1,0 +1,37 @@
+{
+  "id": "ac01_control_only_no_data_leak",
+  "version": "0.1.0",
+  "name": "AC1 Control Edge Only - No Data Leak",
+  "metadata": {
+    "binding_mode": "explicit_only",
+    "canonical_format": "accflow",
+    "e2e_ac": "AC01"
+  },
+  "nodes": [
+    {
+      "id": "A",
+      "kind": "tool",
+      "tool": "fake_producer",
+      "output_ports": [
+        {"id": "main", "direction": "output", "required": false}
+      ]
+    },
+    {
+      "id": "B",
+      "kind": "agent",
+      "runtime": "generic_fake_agent",
+      "prompt": "B is downstream of A by control only and must not see A's output.",
+      "input_ports": [
+        {"id": "main", "direction": "input", "required": false}
+      ],
+      "output_ports": [
+        {"id": "main", "direction": "output", "required": false}
+      ]
+    }
+  ],
+  "control_edges": [
+    {"from": "A", "to": "B", "condition": null, "context": "upstream_output"}
+  ],
+  "data_edges": [],
+  "policies": {"failure_mode": "fail_fast", "max_concurrency": 1}
+}

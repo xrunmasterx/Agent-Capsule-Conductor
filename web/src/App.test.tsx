@@ -20,7 +20,7 @@ const runSummary = {
   nodes: [
     {
       node_id: 'ui_acceptance_fake',
-      capsule_id: 'fake-agent.generic',
+      callable_id: 'fake-agent.generic',
       session_id: 'session_fixture',
       status: 'success',
       summary: 'Created deterministic report',
@@ -103,73 +103,68 @@ const routes: Record<string, unknown> = {
     content: '{"message":"hello from input"}',
     size_bytes: 30,
   },
-  '/api/capsules': {
-    capsules: [
+  '/api/callables': {
+    callables: [
       {
         id: 'echo-test.generic',
         version: '0.1.0',
         name: 'Echo Test',
-        description: 'Echo fixture capsule',
-        runtime: 'generic_cli',
-        workspace: 'existing_dir',
+        kind: 'agent_class',
+        backend: 'native',
+        source_id: 'echo-test.generic',
+        source_path: 'callables/agents/echo-test.generic.yaml',
       },
       {
         id: 'nested-workflow.example',
         version: '0.1.0',
         name: 'Nested Workflow',
-        description: 'Workflow capsule fixture',
-        runtime: 'codex_cli',
-        workspace: 'existing_dir',
+        kind: 'agent_class',
+        backend: 'native',
+        source_id: 'nested-workflow.example',
+        source_path: 'callables/agents/nested-workflow.example.yaml',
       },
       {
         id: 'fake-agent.generic',
         version: '0.1.0',
         name: 'Fake Agent',
-        description: 'Fixture capsule',
-        runtime: 'generic_cli',
-        workspace: 'existing_dir',
+        kind: 'tool_class',
+        backend: 'native',
+        source_id: 'fake-agent.generic',
+        source_path: 'callables/tools/fake-agent.generic.yaml',
       },
     ],
   },
-  '/api/capsules/echo-test.generic': {
-    id: 'echo-test.generic',
-    version: '0.1.0',
-    name: 'Echo Test',
-    description: 'Echo fixture capsule',
-    runtime: 'generic_cli',
-    workspace: 'existing_dir',
-    yaml_path: 'capsules/echo-test.generic/capsule.yaml',
-    prompt_template: 'prompt_template.md',
-    input_schema: 'input_schema.json',
-    output_schema: 'output_schema.json',
-    artifact_manifest: 'artifact_manifest.yaml',
-    permissions: { sandbox: 'read-only', network: false },
+  '/api/callables/echo-test.generic': {
+    callable: {
+      id: 'echo-test.generic',
+      version: '0.1.0',
+      name: 'Echo Test',
+      kind: 'agent_class',
+      backend: 'native',
+      source_id: 'echo-test.generic',
+      source_path: 'callables/agents/echo-test.generic.yaml',
+      metadata: { description: 'Echo fixture callable' },
+      input_ports: { main: { type: 'json' } },
+      output_ports: { main: { type: 'json' } },
+      artifact_contract: {},
+      runtime: 'generic_cli',
+    },
   },
-  '/api/capsules/echo-test.generic/files/prompt_template.md': {
-    capsule_id: 'echo-test.generic',
-    file: 'prompt_template.md',
-    path: 'capsules/echo-test.generic/prompt_template.md',
-    content: 'Echo {{ input.message }}.',
-  },
-  '/api/capsules/fake-agent.generic': {
-    id: 'fake-agent.generic',
-    version: '0.1.0',
-    name: 'Fake Agent',
-    description: 'Fixture capsule',
-    runtime: 'generic_cli',
-    workspace: 'existing_dir',
-    yaml_path: 'capsules/fake-agent.generic/capsule.yaml',
-    prompt_template: 'prompt_template.md',
-    input_schema: 'input_schema.json',
-    output_schema: 'output_schema.json',
-    artifact_manifest: 'artifact_manifest.yaml',
-    permissions: { sandbox: 'read-only', network: false },
-  },
-  '/api/capsules/fake-agent.generic/files/prompt_template.md': {
-    capsule_id: 'fake-agent.generic',
-    file: 'prompt_template.md',
-    path: 'capsules/fake-agent.generic/prompt_template.md',
-    content: 'Write about {{ input.topic }}.',
+  '/api/callables/fake-agent.generic': {
+    callable: {
+      id: 'fake-agent.generic',
+      version: '0.1.0',
+      name: 'Fake Agent',
+      kind: 'tool_class',
+      backend: 'native',
+      source_id: 'fake-agent.generic',
+      source_path: 'callables/tools/fake-agent.generic.yaml',
+      metadata: { description: 'Fixture callable' },
+      input_ports: { main: { type: 'json' } },
+      output_ports: { main: { type: 'json' } },
+      artifact_contract: {},
+      runner: 'generic_cli',
+    },
   },
   '/api/workflows': {
     workflows: [
@@ -198,7 +193,7 @@ const routes: Record<string, unknown> = {
       nodes: [
         {
           id: 'echo',
-          capsule_id: 'echo-test.generic',
+          callable_id: 'echo-test.generic',
           label: '输入回显',
           input: { message: 'hello' },
           input_mapping: {},
@@ -206,7 +201,7 @@ const routes: Record<string, unknown> = {
         },
         {
           id: 'fake',
-          capsule_id: 'fake-agent.generic',
+          callable_id: 'fake-agent.generic',
           label: '下游处理',
           input: {},
           input_mapping: { topic: '{{ nodes.echo.output.summary }}' },
@@ -223,7 +218,7 @@ const routes: Record<string, unknown> = {
       nodes: [
         {
           id: 'echo',
-          capsule_id: 'echo-test.generic',
+          callable_id: 'echo-test.generic',
           label: '输入回显',
           input: { message: 'hello' },
           input_mapping: {},
@@ -231,7 +226,7 @@ const routes: Record<string, unknown> = {
         },
         {
           id: 'fake',
-          capsule_id: 'fake-agent.generic',
+          callable_id: 'fake-agent.generic',
           label: '下游处理',
           input: {},
           input_mapping: { topic: '{{ nodes.echo.output.summary }}' },
@@ -250,7 +245,7 @@ const routes: Record<string, unknown> = {
     nodes: [
       {
         node_id: 'echo',
-        capsule_id: 'echo-test.generic',
+        callable_id: 'echo-test.generic',
         status: 'success',
         run_dir: 'runs/ui_workflow_demo_serial/nodes/echo',
         input_path: 'runs/ui_workflow_demo_serial/nodes/echo/input.json',
@@ -273,7 +268,7 @@ const routes: Record<string, unknown> = {
     nodes: [
       {
         node_id: 'Research_Flow',
-        capsule_id: 'fake-agent.generic',
+        callable_id: 'fake-agent.generic',
         status: 'success',
         run_dir: 'runs/ui_workflow_acc_workspace_canvas/nodes/Research_Flow',
         input_path: 'runs/ui_workflow_acc_workspace_canvas/nodes/Research_Flow/input.json',
@@ -295,7 +290,7 @@ const routes: Record<string, unknown> = {
     nodes: [
       {
         node_id: 'Research_Flow',
-        capsule_id: 'fake-agent.generic',
+        callable_id: 'fake-agent.generic',
         status: 'success',
         run_dir: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow',
         input_path: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/input.json',
@@ -310,7 +305,7 @@ const routes: Record<string, unknown> = {
         node_id: 'research_codex',
         ui_node_id: 'Research_Flow__internal__research_codex',
         parent_node_id: 'Research_Flow',
-        capsule_id: 'fake-agent.generic',
+        callable_id: 'fake-agent.generic',
         status: 'success',
         run_dir: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_codex',
         input_path: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_codex/input.json',
@@ -378,7 +373,7 @@ const routes: Record<string, unknown> = {
     target_path: 'examples/workflows/control_plane_demo.graph.json',
     mutated: false,
     apply_requires_human_approval: true,
-    operations: [{ op: 'add_node', description: 'Would add node review using capsule critical-review.claude' }],
+    operations: [{ op: 'add_node', description: 'Would add node review using callable critical-review.claude' }],
     semantic_diff: { status: 'valid', added_nodes: ['review'], added_edges: ['a->review'] },
   },
   'POST /api/debugger/runs/ui_acceptance_fake/replay': {
@@ -426,6 +421,12 @@ const routes: Record<string, unknown> = {
   },
 };
 
+const failedRoutes = new Map<string, { status: number; detail: string }>();
+
+function failRoute(method: string, url: string, detail: string, status = 500) {
+  failedRoutes.set(`${method} ${url}`, { status, detail });
+}
+
 function workspaceCanvasRunSummary(runId: string) {
   return {
     run_id: runId,
@@ -442,7 +443,7 @@ function workspaceCanvasRunSummary(runId: string) {
     nodes: [
       {
         node_id: 'Research_Flow',
-        capsule_id: 'fake-agent.generic',
+        callable_id: 'fake-agent.generic',
         status: 'success',
         run_dir: `runs/${runId}/nodes/Research_Flow`,
         input_path: `runs/${runId}/nodes/Research_Flow/input.json`,
@@ -457,7 +458,7 @@ function workspaceCanvasRunSummary(runId: string) {
         node_id: 'research_codex',
         ui_node_id: 'Research_Flow__internal__research_codex',
         parent_node_id: 'Research_Flow',
-        capsule_id: 'fake-agent.generic',
+        callable_id: 'fake-agent.generic',
         status: 'success',
         run_dir: `runs/${runId}/nodes/Research_Flow/internal/research_codex`,
         input_path: `runs/${runId}/nodes/Research_Flow/internal/research_codex/input.json`,
@@ -497,6 +498,13 @@ beforeEach(() => {
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input.toString();
       const method = init?.method || 'GET';
+      const failedRoute = failedRoutes.get(`${method} ${url}`) ?? failedRoutes.get(url);
+      if (failedRoute) {
+        return new Response(JSON.stringify({ detail: failedRoute.detail }), {
+          status: failedRoute.status,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
       if (method === 'POST' && url === '/api/workflows/run-graph/submit') {
         const body = JSON.parse(String(init?.body || '{}'));
         const runId = String(body.run_dir || '').split('/').pop() || body.graph?.id || 'ui_workflow_acc_workspace_canvas_fixture';
@@ -579,11 +587,12 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  failedRoutes.clear();
   window.localStorage.clear();
   vi.unstubAllGlobals();
 });
 
-describe('Agent Capsule Workbench editable UI', () => {
+describe('Agent Callable Workbench editable UI', () => {
   async function openNavigation(user: ReturnType<typeof userEvent.setup>, name: RegExp | string) {
     const navigation = await screen.findByLabelText('Workbench navigation');
     await user.click(within(navigation).getByRole('button', { name }));
@@ -634,16 +643,17 @@ describe('Agent Capsule Workbench editable UI', () => {
     );
   });
 
-  test('Capsule Browser renders capsule metadata and permissions', async () => {
+  test('Callable Browser renders callable metadata and ports', async () => {
     const user = userEvent.setup();
     render(<App />);
 
     await openNavIndex(user, 1);
 
-    const browser = await screen.findByLabelText('节点库');
-    expect(within(browser).getByRole('heading', { name: 'Echo Test' })).toBeInTheDocument();
-    expect(browser).toHaveTextContent('沙箱');
-    expect(browser).toHaveTextContent('read-only');
+    const browser = await screen.findByLabelText('Callable 资源库');
+    expect(within(browser).getByRole('heading', { name: 'Callable 资源库' })).toBeInTheDocument();
+    expect(browser).toHaveTextContent('echo-test.generic');
+    expect(within(browser).getAllByText('agent_class').length).toBeGreaterThan(0);
+    expect(await within(browser).findByText('callables/agents/echo-test.generic.yaml')).toBeInTheDocument();
   });
 
   test('Workflow Builder renders graph-first workspace canvas', async () => {
@@ -677,6 +687,61 @@ describe('Agent Capsule Workbench editable UI', () => {
     }
     expect(navigation).not.toHaveTextContent('浠诲姟');
     expect(navigation).not.toHaveTextContent('璧勬簮');
+  });
+
+  test('startup keeps task resources usable when run index fails', async () => {
+    failRoute('GET', '/api/runs', 'Run index exploded');
+    const user = userEvent.setup();
+    render(<App />);
+
+    expect(await screen.findByText('API 部分可用')).toBeInTheDocument();
+
+    const toolbar = await screen.findByLabelText('工作流工具栏');
+    await user.click(within(toolbar).getByRole('button', { name: /^资源$/i }));
+    expect(await screen.findByText('Fake Agent')).toBeInTheDocument();
+    expect((await screen.findByText('Demo Workflow')).closest('article')).toHaveClass(
+      'resource-kind-workflow',
+    );
+    expect(screen.getByText('Echo Test').closest('article')).toHaveClass('resource-kind-agent');
+    expect(screen.getByText('Fake Agent').closest('article')).toHaveClass('resource-kind-tool');
+    expect(screen.getByText('File Source').closest('article')).toHaveClass('resource-kind-file-source');
+
+    await openNavIndex(user, 2);
+    expect(await screen.findByText(/运行记录加载失败：/)).toHaveTextContent('Run index exploded');
+  });
+
+  test('startup keeps runs usable when callable index fails', async () => {
+    failRoute('GET', '/api/callables', 'Callable registry exploded');
+    const user = userEvent.setup();
+    render(<App />);
+
+    expect(await screen.findByText('API 部分可用')).toBeInTheDocument();
+
+    await openNavIndex(user, 2);
+    expect((await screen.findAllByText('ui_acceptance_fake')).length).toBeGreaterThan(0);
+
+    await openNavIndex(user, 1);
+    expect(await screen.findByText(/Callable 模板加载失败：/)).toHaveTextContent(
+      'Callable registry exploded',
+    );
+  });
+
+  test('startup keeps callable resources usable when workflow index fails', async () => {
+    failRoute('GET', '/api/workflows', 'Workflow index exploded');
+    const user = userEvent.setup();
+    render(<App />);
+
+    expect(await screen.findByText('API 部分可用')).toBeInTheDocument();
+
+    await openNavIndex(user, 1);
+    expect((await screen.findAllByText('echo-test.generic')).length).toBeGreaterThan(0);
+
+    await openNavIndex(user, 0);
+    const toolbar = await screen.findByLabelText('工作流工具栏');
+    await user.click(within(toolbar).getByRole('button', { name: /^资源$/i }));
+    expect(await screen.findByText(/Workflow 模板加载失败：/)).toHaveTextContent(
+      'Workflow index exploded',
+    );
   });
 
   test('Task list persists across navigation switches and supports explicit delete', async () => {
@@ -754,7 +819,7 @@ describe('Agent Capsule Workbench editable UI', () => {
     expect(fakeAgentResource).toBeTruthy();
     expect(
       within(fakeAgentResource as HTMLElement).getByRole('button', {
-        name: '加入到选中 Workflow',
+        name: /加入到选中 Workflow/,
       }),
     ).toBeInTheDocument();
   });
@@ -796,7 +861,7 @@ describe('Agent Capsule Workbench editable UI', () => {
     const withInternalAgent = helpers.addInternalNodeFromPalette(
       withWorkflow,
       workflowId,
-      { kind: 'agent', capsuleId: 'fake-agent.generic', label: 'Fake Agent' },
+      { kind: 'agent', callableId: 'fake-agent.generic', label: 'Fake Agent' },
       { x: 120, y: 130 },
     );
     const workflow = withInternalAgent.workflows[0];
@@ -858,30 +923,30 @@ describe('Agent Capsule Workbench editable UI', () => {
       workflows: [],
       edges: [],
     };
-    const first = helpers.addCapsuleNodeFromPalette(
+    const first = helpers.addCallableNodeFromPalette(
       baseCanvas,
-      { kind: 'agent', capsuleId: 'semiconductor-stock-news-collector.codex', label: '半导体股市信息收集' },
+      { kind: 'agent', callableId: 'semiconductor-stock-news-collector.codex', label: '半导体股市信息收集' },
       helpers.nextRootPalettePosition(baseCanvas),
     );
-    const second = helpers.addCapsuleNodeFromPalette(
+    const second = helpers.addCallableNodeFromPalette(
       first,
-      { kind: 'agent', capsuleId: 'semiconductor-stock-news-cleaner.codex', label: '半导体股市信息清洗' },
+      { kind: 'agent', callableId: 'semiconductor-stock-news-cleaner.codex', label: '半导体股市信息清洗' },
       helpers.nextRootPalettePosition(first),
     );
-    const third = helpers.addCapsuleNodeFromPalette(
+    const third = helpers.addCallableNodeFromPalette(
       second,
-      { kind: 'agent', capsuleId: 'semiconductor-stock-analysis-advisor.codex', label: '半导体股市分析和建议' },
+      { kind: 'agent', callableId: 'semiconductor-stock-analysis-advisor.codex', label: '半导体股市分析和建议' },
       helpers.nextRootPalettePosition(second),
     );
 
     expect(third.workflows.map((workflow: any) => workflow.position)).toEqual([
-      { x: 120, y: 180 },
-      { x: 500, y: 180 },
-      { x: 880, y: 180 },
+      { x: 620, y: 180 },
+      { x: 620, y: 340 },
+      { x: 620, y: 500 },
     ]);
   });
 
-  test('Chinese resource labels use stable capsule ids instead of colliding node fallback ids', () => {
+  test('Chinese resource labels use stable callable ids instead of colliding node fallback ids', () => {
     const helpers = __workflowViewerTestables as any;
     const baseCanvas = {
       id: 'root_task',
@@ -902,16 +967,16 @@ describe('Agent Capsule Workbench editable UI', () => {
       workflowId,
       {
         kind: 'agent',
-        capsuleId: 'semiconductor-stock-news-collector.codex',
+        callableId: 'semiconductor-stock-news-collector.codex',
         label: '半导体股市信息收集',
       },
       { x: 120, y: 130 },
     );
-    const withRoot = helpers.addCapsuleNodeFromPalette(
+    const withRoot = helpers.addCallableNodeFromPalette(
       withInternal,
       {
         kind: 'agent',
-        capsuleId: 'semiconductor-stock-analysis-advisor.codex',
+        callableId: 'semiconductor-stock-analysis-advisor.codex',
         label: '半导体股市分析和建议',
       },
       { x: 700, y: 180 },
@@ -919,6 +984,37 @@ describe('Agent Capsule Workbench editable UI', () => {
 
     expect(withRoot.workflows[0].internalNodes[0].id).toBe('semiconductor_stock_news_collector_codex');
     expect(withRoot.workflows[1].id).toBe('semiconductor_stock_analysis_advisor_codex');
+  });
+
+  test('Repeated callable instances get distinct invocation labels without changing callable identity', () => {
+    const helpers = __workflowViewerTestables as any;
+    const baseCanvas = {
+      id: 'root_task',
+      name: 'Root Task',
+      rootWorkflowId: 'root_task',
+      layout: 'workspace-canvas',
+      workflows: [],
+      edges: [],
+    };
+    const item = { kind: 'agent', callableId: 'fake-agent.generic', label: 'Fake Agent' };
+    const first = helpers.addCallableNodeFromPalette(baseCanvas, item, { x: 120, y: 180 });
+    const second = helpers.addCallableNodeFromPalette(first, item, { x: 500, y: 180 });
+
+    expect(second.workflows.map((workflow: any) => workflow.title)).toEqual(['Fake Agent', 'Fake Agent #2']);
+    expect(second.workflows.map((workflow: any) => workflow.callableId)).toEqual([
+      'fake-agent.generic',
+      'fake-agent.generic',
+    ]);
+    const graph = helpers.canvasToWorkflowGraph(second);
+    expect(graph.nodes.map((node: any) => node.metadata.ui_label)).toEqual(['Fake Agent', 'Fake Agent #2']);
+  });
+
+  test('Invocation input helpers keep user prompt separate from static input', () => {
+    const helpers = __workflowViewerTestables as any;
+    const input = { user_prompt: 'write report', region: 'US', limit: 5 };
+
+    expect(helpers.promptFromInvocationInput(input)).toBe('write report');
+    expect(helpers.staticInputFromInvocationInput(input)).toEqual({ region: 'US', limit: 5 });
   });
 
   test('Repeated palette adds keep internal node positions bounded inside workflow', () => {
@@ -937,7 +1033,7 @@ describe('Agent Capsule Workbench editable UI', () => {
       { x: 100, y: 100 },
     );
     const workflowId = withWorkflow.workflows[0].id;
-    const item = { kind: 'agent', capsuleId: 'fake-agent.generic', label: 'Fake Agent' };
+    const item = { kind: 'agent', callableId: 'fake-agent.generic', label: 'Fake Agent' };
     const positions = [
       { x: 120, y: 130 },
       { x: 460, y: 130 },
@@ -972,7 +1068,7 @@ describe('Agent Capsule Workbench editable UI', () => {
       source: { workflowId: from },
       target: { workflowId: to },
       condition: null,
-      context: 'upstream_output',
+      context: 'none',
     });
     const workflow = {
       id: 'analysis_flow',
@@ -1092,7 +1188,7 @@ describe('Agent Capsule Workbench editable UI', () => {
 
     expect(expanded.position).toEqual(workflow.position);
     expect(expanded.size.width).toBe(784);
-    expect(expanded.size.height).toBe(496);
+    expect(expanded.size.height).toBe(552);
   });
 
   test('Center-locked workflow expansion preserves child absolute position', () => {
@@ -1317,42 +1413,27 @@ describe('Agent Capsule Workbench editable UI', () => {
     expect(b.position.y).not.toBe(c.position.y);
   });
 
-  test('Capsule Library exposes create, edit, validate, and test controls', async () => {
+  test('Callable Library is a read-only Core v2 template browser', async () => {
     const user = userEvent.setup();
     render(<App />);
 
     await openNavIndex(user, 1);
 
-    expect(await screen.findByLabelText('创建 Capsule')).toBeInTheDocument();
-    await user.click(await screen.findByRole('button', { name: /高级设置 \/ 原始文件/i }));
-    expect(await screen.findByLabelText('Capsule 编辑器')).toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: /\u4fdd\u5b58/i }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole('button', { name: /校验/i }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole('button', { name: /测试/i }).length).toBeGreaterThan(0);
+    const browser = await screen.findByLabelText('Callable 资源库');
+    expect(browser).toHaveTextContent('AgentClassTemplate / ToolClassTemplate');
+    expect(screen.queryByLabelText('创建 Callable')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Callable 编辑器')).not.toBeInTheDocument();
   });
 
-  test('Capsule scaffold defaults stay least-privilege for codex and expand for generic cli', async () => {
+  test('Callable Library does not expose legacy scaffold controls', async () => {
     const user = userEvent.setup();
     render(<App />);
 
     await openNavIndex(user, 1);
 
-    const runtime = await screen.findByRole('combobox', { name: 'Capsule 类型' });
-    const sandbox = screen.getByRole('combobox', { name: '沙箱' });
-    await user.click(screen.getByText('高级设置'));
-    const network = screen.getByLabelText('允许网络');
-    const writeFiles = screen.getByLabelText(/写文件|鍐欐枃浠/);
-
-    expect(runtime).toHaveValue('codex_cli');
-    expect(sandbox).toHaveValue('read-only');
-    expect(network).toBeChecked();
-    expect(writeFiles).not.toBeChecked();
-
-    await user.selectOptions(runtime, 'generic_cli');
-
-    expect(sandbox).toHaveValue('workspace-write');
-    expect(network).not.toBeChecked();
-    expect(writeFiles).toBeChecked();
+    await screen.findByLabelText('Callable 资源库');
+    expect(screen.queryByRole('combobox', { name: /Callable/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^测试$/ })).not.toBeInTheDocument();
   });
 
   test('New workflow graph saves with parallel-friendly default policy', async () => {
@@ -1361,7 +1442,7 @@ describe('Agent Capsule Workbench editable UI', () => {
 
     await openNavIndex(user, 0);
     const toolbar = await screen.findByLabelText('工作流工具栏');
-    await user.click(within(toolbar).getByRole('button', { name: /^新建$/i }));
+    await user.click(within(toolbar).getByRole('button', { name: '新建任务（工具栏）' }));
     await user.click(within(toolbar).getByRole('button', { name: /\u4fdd\u5b58/i }));
 
     const calls = vi.mocked(fetch).mock.calls;
@@ -1425,7 +1506,7 @@ describe('Agent Capsule Workbench editable UI', () => {
     const savedPayload = JSON.parse(String(saveCall?.[1]?.body));
     expect(savedPayload.graph.id).toBe('Research_Flow');
     expect(savedPayload.graph.nodes.length).toBeGreaterThan(0);
-    expect(savedPayload.graph.nodes[0].capsule_id).toBe('fake-agent.generic');
+    expect(savedPayload.graph.nodes[0].callable_ref.id).toBe('fake-agent.generic');
     expect(savedPayload.graph.nodes[0].input.topic).toBeTruthy();
     expect(savedPayload.graph.control_edges.length).toBeGreaterThan(0);
   });
@@ -1456,7 +1537,7 @@ describe('Agent Capsule Workbench editable UI', () => {
     expect(savedPayload.graph.control_edges.length).toBeGreaterThan(0);
   });
 
-  test('Workflow Builder drops palette capsule into workflow container internals', async () => {
+  test('Workflow Builder drops palette callable into workflow container internals', async () => {
     const user = userEvent.setup();
     render(<App />);
 
@@ -1472,7 +1553,7 @@ describe('Agent Capsule Workbench editable UI', () => {
           key === 'application/x-acc-palette'
             ? JSON.stringify({
                 kind: 'agent',
-                capsuleId: 'fake-agent.generic',
+                callableId: 'fake-agent.generic',
                 label: 'Dropped Agent',
               })
             : '',
@@ -1493,7 +1574,7 @@ describe('Agent Capsule Workbench editable UI', () => {
       expect.arrayContaining([
         expect.objectContaining({
           name: 'Dropped Agent',
-          capsuleId: 'fake-agent.generic',
+          callableId: 'fake-agent.generic',
           position: expect.objectContaining({
             x: expect.any(Number),
             y: expect.any(Number),
@@ -1521,7 +1602,7 @@ describe('Agent Capsule Workbench editable UI', () => {
     expect(fakeAgentCard).toBeTruthy();
     await user.click(
       within(fakeAgentCard as HTMLElement).getByRole('button', {
-        name: '加入到选中 Workflow',
+        name: /加入到选中 Workflow/,
       }),
     );
     await user.click(within(toolbar).getByRole('button', { name: /\u4fdd\u5b58/i }));
@@ -1537,7 +1618,7 @@ describe('Agent Capsule Workbench editable UI', () => {
     expect(workflow.ui.internal_nodes).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          capsuleId: 'fake-agent.generic',
+          callableId: 'fake-agent.generic',
           name: 'Fake Agent',
         }),
       ]),
@@ -1560,7 +1641,7 @@ describe('Agent Capsule Workbench editable UI', () => {
     expect(fakeAgentCard).toBeTruthy();
     await user.click(
       within(fakeAgentCard as HTMLElement).getByRole('button', {
-        name: '加入到选中 Workflow',
+        name: /加入到选中 Workflow/,
       }),
     );
     await user.click(
@@ -1580,7 +1661,7 @@ describe('Agent Capsule Workbench editable UI', () => {
     expect(workflow.ui.internal_nodes).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          capsuleId: 'fake-agent.generic',
+          callableId: 'fake-agent.generic',
           name: 'Fake Agent',
         }),
       ]),
@@ -1589,14 +1670,14 @@ describe('Agent Capsule Workbench editable UI', () => {
       expect.arrayContaining([
         expect.objectContaining({
           id: 'fake_agent_generic',
-          capsule_id: 'fake-agent.generic',
+          callable_ref: expect.objectContaining({ id: 'fake-agent.generic' }),
           label: 'Fake Agent',
         }),
       ]),
     );
   });
 
-  test('Workflow Builder drops palette capsule on root as plain executable node', async () => {
+  test('Workflow Builder drops palette callable on root as plain executable node', async () => {
     const user = userEvent.setup();
     render(<App />);
 
@@ -1611,7 +1692,7 @@ describe('Agent Capsule Workbench editable UI', () => {
           key === 'application/x-acc-palette'
             ? JSON.stringify({
                 kind: 'agent',
-                capsuleId: 'fake-agent.generic',
+                callableId: 'fake-agent.generic',
                 label: 'Root Agent',
               })
             : '',
@@ -1629,7 +1710,7 @@ describe('Agent Capsule Workbench editable UI', () => {
       (node: { label: string }) => node.label === 'Root Agent',
     );
     expect(rootAgent.kind).toBe('agent_session');
-    expect(rootAgent.capsule_id).toBe('fake-agent.generic');
+    expect(rootAgent.callable_ref.id).toBe('fake-agent.generic');
     expect(rootAgent.ui).toBeUndefined();
   });
 
@@ -1649,7 +1730,7 @@ describe('Agent Capsule Workbench editable UI', () => {
           key === 'application/x-acc-palette'
             ? JSON.stringify({
                 kind: 'tool',
-                capsuleId: 'fake-agent.generic',
+                callableId: 'fake-agent.generic',
                 label: 'Wide Tool',
               })
             : '',
@@ -1700,7 +1781,7 @@ describe('Agent Capsule Workbench editable UI', () => {
         expect.objectContaining({
           from: 'research_codex',
           to: 'research_merge',
-          context: 'upstream_output',
+          context: 'none',
         }),
       ]),
     );
@@ -1779,9 +1860,9 @@ describe('Agent Capsule Workbench editable UI', () => {
     await openNavIndex(user, 0);
     await loadWorkspaceDemo(user);
     const codexLabel = (await screen.findAllByText('Codex CLI'))[0];
-    const codexButton = codexLabel.closest('button');
-    expect(codexButton).toBeTruthy();
-    fireEvent.click(codexButton as HTMLButtonElement);
+    const codexNode = codexLabel.closest('[role="group"]');
+    expect(codexNode).toBeTruthy();
+    fireEvent.click(codexNode as HTMLElement);
 
     const toolbar = await screen.findByLabelText('工作流工具栏');
     await user.click(within(toolbar).getByRole('button', { name: /^运行$/i }));
@@ -1842,3 +1923,4 @@ describe('Agent Capsule Workbench editable UI', () => {
     });
   });
 });
+

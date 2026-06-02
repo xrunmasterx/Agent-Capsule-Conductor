@@ -137,7 +137,7 @@ export function RunInspectorCore({ runId }: Props) {
                 <span className="node-index">{index + 1}</span>
                 <span>
                   <strong>{node.node_id}</strong>
-                  <small>{node.capsule_id}</small>
+                  <small>{node.callable_id}</small>
                 </span>
                 <span className={`pill ${statusTone(node.status)}`}>{node.status}</span>
               </button>

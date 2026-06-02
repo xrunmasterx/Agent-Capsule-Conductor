@@ -34,7 +34,7 @@ export function RunList({ runs, selectedRunId, onSelect }: Props) {
           >
             <span>
               <strong>{run.run_id}</strong>
-              <small>{run.workflow_id || '单 Capsule Session'}</small>
+              <small>{run.workflow_id || '单 Callable Session'}</small>
             </span>
             <span className={`pill ${statusTone(run.status)}`}>
               {run.status === 'success' ? (

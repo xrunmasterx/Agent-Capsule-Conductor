@@ -1,36 +1,28 @@
 {
+  "control_edges": [],
+  "data_edges": [],
+  "exposed_inputs": {},
+  "exposed_outputs": {},
   "id": "environment_stateful_demo",
-  "version": "0.1.0",
-  "name": "绑定工作目录 Demo",
+  "metadata": {
+    "canonical_format": "accflow",
+    "imported_from": "examples\\workflows\\environment_stateful_demo.accflow.json"
+  },
   "nodes": [
     {
+      "callable_ref": {
+        "id": "generic_fake_agent",
+        "kind": "agent_class"
+      },
       "id": "agent_in_workspace",
-      "kind": "agent",
-      "runtime": "generic_fake_agent",
-      "prompt": "Print effective cwd and detect workspace files.",
       "ports": {
-        "outputs": {
-          "cwd_report": {
-            "type": "artifact"
-          }
-        }
-      },
-      "behavior_pack": {
-        "mode": "workspace_native"
-      },
-      "position": {
-        "x": 0,
-        "y": 0
+        "inputs": {},
+        "outputs": {}
       }
     }
   ],
-  "control_edges": [],
-  "data_edges": [],
-  "policies": {
-    "max_concurrency": 1,
-    "failure_mode": "fail_fast"
-  },
-  "metadata": {
-    "layout": "left-to-right"
-  }
+  "schema_version": "acc.core.v2",
+  "version": "0.1.0",
+  "workflow_input_bindings": [],
+  "workflow_output_bindings": []
 }

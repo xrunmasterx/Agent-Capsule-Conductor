@@ -1,5 +1,10 @@
 # ACC 理想分层重构：大白话说明
 
+状态：历史设计说明。本文保留分层重构的设计动机，但其中的 `WorkflowTemplate`、`NodeSpec`、
+`EnvironmentFrame` 是旧阶段术语；当前产品合同使用 Core v2 callable-only 术语：
+`WorkflowFunctionTemplate`、`NodeInvocationSpec`、`FunctionInvocation`、`ScopeFrame` 和
+`SessionInstance`。
+
 ## 一句话
 
 这次不是加功能，而是把 ACC 的核心内核拆成真正清晰的几层，避免一个 `acc.clean_workflow.py` 同时管读文件、校验图、调度节点、执行节点、写产物、管权限。

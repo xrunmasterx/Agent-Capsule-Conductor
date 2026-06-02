@@ -4,8 +4,8 @@
   "type": "object",
   "required": [
     "workflow",
-    "capsuleLibrary",
-    "createCapsule",
+    "callableLibrary",
+    "createCallable",
     "save",
     "validate",
     "run",
@@ -18,8 +18,8 @@
   ],
   "properties": {
     "workflow": { "const": "工作流" },
-    "capsuleLibrary": { "const": "节点库" },
-    "createCapsule": { "const": "创建 Capsule" },
+    "callableLibrary": { "const": "节点库" },
+    "createCallable": { "const": "创建 Callable" },
     "save": { "const": "保存" },
     "validate": { "const": "校验" },
     "run": { "const": "运行" },
@@ -31,3 +31,4 @@
     "rawData": { "const": "原始数据" }
   }
 }
+

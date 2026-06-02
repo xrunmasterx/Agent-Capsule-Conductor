@@ -26,7 +26,7 @@ ACC 管“外部成熟 agent 如何在本地 workflow 中可控、隔离、可�
 2. 结果不稳定：agent 说“完成了”不等于有稳定的 `output.json`、artifact、event log 和 manifest。
 3. 工作流边界不清：上游任务结果如何进入下游任务，很多系统依赖聊天上下文或隐式状态。
 4. 权限边界不硬：真实 agent 会读写文件、调用 shell、继承环境变量、访问网络，需要外部执行边界约束。
-5. LLM 自改 workflow 风险高：如果 agent 可以直接改 workflow/capsule，就可能删除 human gate、放开危险权限或破坏 schema。
+5. LLM 自改 workflow 风险高：如果 agent 可以直接改 callable/workflow，就可能删除 human gate、放开危险权限或破坏 schema。
 
 ACC 的问题定义不是“让 LLM 更聪明”，而是：
 
@@ -34,20 +34,22 @@ ACC 的问题定义不是“让 LLM 更聪明”，而是：
 成熟 agent 负责推理和工具循环。
 ACC 负责执行边界、artifact、session、workspace、port 和权限。
 Workflow/Conductor 负责确定性拓扑。
-Human Authority 负责最终批准 workflow/capsule 变更。
+Human Authority 负责最终批准 callable/workflow 变更。
 ```
 
 ## 当前架构如何解决
 
-当前真实代码已经形成一条主链：
+当前真实代码已经收敛到 Core v2 callable-only 主链：
 
 ```text
-acc.cli
-  -> acc.app.WorkflowAppService
-  -> acc.engine
-  -> acc.store.FileSystemWorkflowStore
-  -> acc.runtime
-  -> acc.store artifact/inbox/outbox/event persistence
+canonical .accflow.json
+  -> WorkflowFunctionTemplate
+  -> ExecutionPlan
+  -> FunctionInvocation
+  -> ScopeFrame
+  -> NodeInvocationSpec
+  -> SessionInstance or child FunctionInvocation
+  -> events / result_store / artifacts / run_summary
 ```
 
 ### 1. Domain：只表达概念和不变量
@@ -58,11 +60,14 @@ acc.cli
 
 它定义：
 
-- `WorkflowTemplate`：可保存、可复用、无状态的 workflow 模板。
-- `NodeSpec`：workflow 中的一个节点，可以是 `agent`、`tool` 或 `workflow`。
+- `AgentClassTemplate` / `ToolClassTemplate`：可复用 agent/tool class。
+- `WorkflowFunctionTemplate`：可保存、可复用、无状态的 workflow function body。
+- `NodeInvocationSpec`：workflow function 中的一次 call site。
+- `FunctionInvocation`：一次 workflow function runtime call。
+- `ScopeFrame`：这次调用能看到的 cwd、inbox、outbox、artifact root 和 behavior snapshot。
+- `SessionInstance`：一个 agent/tool 节点的具体执行实例。
 - `ControlEdge`：控制依赖，决定谁先跑。
 - `DataEdge`：数据依赖，决定 artifact 从哪个 output port 到哪个 input port。
-- `EnvironmentFrame`：一次 workflow 运行绑定出来的运行环境。
 - `PermissionProfile`：节点运行权限，如 workspace 写权限、network、shell、env policy、timeout。
 - `ArtifactBundle`：节点产物的稳定描述。
 
@@ -76,117 +81,106 @@ acc.cli
 
 它负责：
 
-- 解析 `.accflow.json` 为 `WorkflowTemplate`。
+- 解析 canonical `.accflow.json` 为 `WorkflowFunctionTemplate`。
+- 拒绝 Core v2 模板和节点中的未知字段。
+- 拒绝旧 `capsule_id`、`input_mapping`、`runtime`、`tool`、`workflow_ref` 等旧节点语义。
 - 校验 node id、port、control edge、data edge。
-- 拒绝 template 内保存本机绝对 workspace path。
-- 校验权限：默认拒绝 `dangerous`、hermetic 模式拒绝 network、拒绝 full env inheritance。
-- 计算 `topological_levels()`，把 DAG 拆成可并行执行层。
-- 校验 `DataEdge` 的 source 必须是 target 的 control ancestor。
+- 编译 `ExecutionPlan`。
+- 计算 `callable_topological_levels()`，把 DAG 拆成可并行执行层。
 
 关键机制：
 
 ```text
 ControlEdge = 执行顺序
-DataEdge    = artifact 传输
+DataEdge    = 显式数据传输
 ```
 
-这避免了一个常见错误：下游节点读取一个并不在控制路径上的上游产物。
+这避免了一个常见错误：把“谁先执行”误解成“谁可以读取谁的全部上下文”。
 
-### 3. Store：只管落盘和 artifact 边界
+### 3. Runtime evidence：只认运行事实文件
 
 关键代码：
 
 - `acc/store/__init__.py`
+- `acc/app/core_v2_runtime.py`
+- `acc/result_store/filesystem.py`
 
-它负责：
-
-- 创建 `run_dir`
-- 创建 `environment_manifest.json`
-- 写 `workflow_events.jsonl`
-- 写每个节点的 `events.jsonl`
-- 创建 `nodes/<node_id>/input.json`
-- 写 `nodes/<node_id>/output.json`
-- 写 `artifact_bundle.json`
-- 管理 `inbox/` 和 `outbox/`
-- 做 path traversal 防护
-
-最关键的是 `materialize_clean_inbox_edge()`：
+当前 Core v2 run directory 的关键事实文件是：
 
 ```text
-upstream node outbox
-  -> store materialize
-  -> downstream node inbox
+run_record.json
+run_summary.json
+function_invocation.json
+scope_frame.json
+events.jsonl
+result_store/
+workflow_outputs/<port>/output.json
+nodes/<node_id>/agent_payload.json
+nodes/<node_id>/runtime_payload.json
+nodes/<node_id>/binding_manifest.json
+nodes/<node_id>/session_instance_manifest.json
+nodes/<node_id>/output.json
+nodes/<node_id>/artifact_bundle.json
+nodes/<node_id>/events.jsonl
 ```
 
-上游不能直接写下游 workspace。数据传输只能通过 store 管理的 port/inbox/outbox 合同。
+这组文件的意义是：CLI/API/Workbench/Debugger 应从这些运行事实投影 UI，而不是从旧
+`node_runs/`、`workflow_graph.json` 或 `.graph.json` 反推真相。
 
-### 4. Runtime：只管节点执行策略
-
-关键代码：
-
-- `acc/runtime/__init__.py`
-
-它负责：
-
-- retry
-- timeout
-- workspace write lock
-- fake/tool/agent node 执行
-- env whitelist 构造
-- read-only / writes-run-only / writes-workspace 权限校验
-
-当前 clean runtime 主要用于 hermetic fake/tool/agent 路径。真实 Codex/Claude capsule 仍通过 `acc.runner.CapsuleRunner` 和 adapter 层执行。
-
-### 5. App：串起 engine / store / runtime
+### 4. App/runtime：串起 engine、registry、result store 和执行边界
 
 关键代码：
 
 - `acc/app/__init__.py`
+- `acc/app/core_v2_loader.py`
+- `acc/app/core_v2_runtime.py`
+- `acc/callable_registry.py`
 
-核心函数是 `run_workflow_template_instance()`。
+当前主入口是：
+
+```text
+WorkflowAppService.run
+  -> run_clean_workflow_template
+  -> run_core_v2_workflow_path
+  -> load_workflow_function_template
+  -> compile_execution_plan
+  -> run_workflow_function_invocation
+```
 
 执行流程：
 
 ```text
-1. validate workflow input
-2. prepare run dir
-3. create EnvironmentFrame
-4. engine.topological_levels()
-5. 按 level 调度节点
-6. materialize inbox
-7. build node input
-8. runtime 执行 node
-9. store 写 output/artifacts/outbox
-10. publish workflow outputs
-11. 写 workflow summary / manifest / events
+1. load canonical Core v2 .accflow.json
+2. compile ExecutionPlan
+3. create FunctionInvocation and root ScopeFrame
+4. 按 ExecutionPlan level 调度 NodeInvocationSpec
+5. resolve agent_payload / runtime_payload / binding_manifest
+6. 执行 CallableRef
+7. 写 node output、artifact_bundle、events
+8. 写 ResultStore 和 workflow_outputs
+9. 更新 run_record / run_summary
 ```
 
-同一个 level 内用 semaphore 控制并发，因此 ACC 支持 DAG level parallel execution，但仍保持确定性拓扑。
+同一个 level 内使用 `asyncio.gather()` 并发。这个调度是 run-scoped、进程内的轻量调度，不是
+durable distributed scheduler。
 
-### 6. CapsuleRunner：包装成熟外部 agent
+### 5. Callable discovery：不再扫描 capsule YAML
 
 关键代码：
 
-- `acc/runner.py`
-- `acc/adapters/generic_cli.py`
-- `acc/adapters/codex_cli.py`
-- `acc/adapters/claude_sdk.py`
+- `acc/callable_registry.py`
 
-`CapsuleRunner` 做的是 session 边界：
+当前 reusable callable class 从这里发现：
 
 ```text
-capsule.yaml
-  -> input validation
-  -> session_manifest.json
-  -> resolved_prompt.md
-  -> workspace preparation
-  -> adapter execution
-  -> output.json validation
-  -> artifact validation
-  -> conductor_output.json
+callables/agents/*.yaml
+callables/tools/*.yaml
 ```
 
-当 `--emit-conductor-json` 启用时，stdout 必须只有一个 JSON object。日志只能进入 stderr 或文件。这是 ACC 与 Conductor / CI / workflow engine 对接的关键合同。
+旧 `capsules/*/capsule.yaml` 不再是产品运行时的可执行资产入口。真实外部 agent 仍由 mature
+agent 自己负责 reasoning/tool loop；ACC 负责调用边界、payload、cwd、stdout/stderr、artifact 和
+证据文件。当前默认测试路径主要依赖 hermetic fake/stub；native external-agent Core v2 adapter 仍是
+后续需要补齐的边界。
 
 ## ACC 的核心优势
 
@@ -211,27 +205,32 @@ workflow edge
 
 很多 agent 平台的中心是 task/comment/chat/status。ACC 的中心是文件事实：
 
-- `input.json`
-- `resolved_prompt.md`
+- `agent_payload.json`
+- `runtime_payload.json`
+- `binding_manifest.json`
 - `output.json`
 - `artifacts/`
 - `artifact_bundle.json`
 - `events.jsonl`
-- `session_manifest.json`
-- `workflow_run_manifest.json`
+- `session_instance_manifest.json`
+- `function_invocation.json`
+- `scope_frame.json`
+- `run_record.json`
+- `run_summary.json`
 
 这让 ACC 更适合工程场景：调试、复现、批处理、CI、审计、Conductor script step。
 
-### 3. Session 隔离明确
+### 3. Invocation / Session 隔离明确
 
-`Capsule Template` 是静态定义，`Session` 是一次运行实例。
+`AgentClassTemplate` / `ToolClassTemplate` / `WorkflowFunctionTemplate` 是静态定义，
+`FunctionInvocation` / `ScopeFrame` / `SessionInstance` 是运行事实。
 
 这解决了一个常见混乱：
 
 ```text
 同一个 agent 定义
-  -> 可以创建多个独立 session
-  -> 每个 session 有独立 run dir / artifacts / events / manifest
+  -> 可以创建多个独立 SessionInstance
+  -> 每个 SessionInstance 有独立 payload / output / events / artifact bundle
 ```
 
 因此 bug 可以定位到 template 还是某次 session，而不是混在一个长期 agent 状态里。
@@ -259,7 +258,7 @@ ACC 明确区分：
 
 ### 6. GraphOps 把 LLM 自改系统关进控制面
 
-ACC 允许 LLM 辅助改 workflow/capsule，但边界是：
+ACC 允许 LLM 辅助改 callable/workflow，但边界是：
 
 ```text
 proposal -> validation -> dry-run -> human approval -> apply
@@ -486,73 +485,77 @@ ACC 与 Conductor 的关系不是替代，而是互补：
 ```text
 ACC owns its local workflow/callable topology and execution evidence.
 Conductor can be an external production orchestration/export target.
-ACC owns capsule/callable execution boundaries.
+ACC owns callable/workflow execution boundaries.
 External agents own reasoning/tool loop.
 ```
 
 Conductor 可以调用：
 
 ```bash
-uv run acc run <capsule_id> --input <input.json> --run-dir <run_dir> --emit-conductor-json
+uv run acc workflow run <workflow.accflow.json> --input <input.json> --run-dir <run_dir> --emit-json
 ```
 
-ACC 保证 stdout 是单个 JSON object，方便 Conductor script step 消费。
+ACC 保证 machine-readable flag 下 stdout 是单个 JSON object，方便 Conductor script step 消费。兼容
+`acc run ... --emit-conductor-json` 的 stdout 合同仍应保持，但它不是 Core v2 workflow 的新主入口。
 
 ## 当前代码与文档的差距
 
-### 1. `domain` 仍使用 `Path`
+### 1. 运行证据命名仍有历史漂移
 
-文档倾向 `domain` 使用 JSON-compatible primitive 或纯 value object。当前 `acc/domain.py` 中 `source_path`、`workspace_root` 等字段仍是 `Path`。
+部分历史 goal 文档仍写 `function_invocation_manifest.json`、`scope_frame_manifest.json`、
+`workflow_run_manifest.json` 或 `workflow_summary.json`。当前 Core v2 runtime 实际写
+`function_invocation.json`、`scope_frame.json`、`run_record.json` 和 `run_summary.json`。
 
-这不是 IO 违规，但比理想 domain 更贴近 Python 本地实现。未来如果要更强 portability，可以引入 path value wrapper 或 string-based domain model。
+这会影响 Debugger/Inspector/API 投影层：投影层应读取当前 runtime 事实，或显式兼容旧文件名，而不能只按历史 goal 文件名查找。
 
-### 2. Engine 还不是完整状态机
+### 2. native external-agent Core v2 adapter 仍未完全成熟
 
-文档里理想 engine 会有更完整的 execution plan / state transition API。当前 engine 主要负责 parse、validate、topological sort、failure policy helper。
+Core v2 已经建立 class-template、scope、session、payload 和 result-store 边界，但默认验证主要依赖
+hermetic fake/stub。真实 Codex/Claude/Cursor/Gemini 长流程接入应走 native Core v2 adapter，而不是恢复
+旧 `CapsuleRunner`。
 
-真实执行循环在 `acc/app/__init__.py` 中。这是可接受的，但如果以后要做 debugger、resume、partial rerun，更明确的 engine state transition API 会更稳。
+### 3. binding provenance 还偏轻
 
-### 3. `RuntimeResult` 尚未成为统一返回类型
+`agent_payload.json`、`runtime_payload.json`、`binding_manifest.json` 已经分离，但 `binding_manifest` 仍主要记录输入 key。后续如果要让 RunInspector 解释“这个字段来自哪个上游 port、selector 是什么、是否 required、如何 materialize”，需要增强 provenance。
 
-`acc/domain.py` 有 `RuntimeResult`，`acc/ports` 也定义了 `NodeRunnerProtocol`。但当前 `acc/runtime` 真实执行返回的是 `(dict, attempts)`。
+### 4. GraphOps real apply 仍偏 MVP
 
-这说明 ports/domain 已经铺了方向，但实现还没有完全收敛到 protocol-first。
+GraphOps 的安全设计是对的：validate、dry-run、human approval。但真实 persistent apply 还不是完整产品级闭环。
 
-### 4. env whitelist 未覆盖所有路径
+这符合“安全优先”的阶段性选择。未来如果要让 agent 辅助修改 workflow，GraphOps 需要更完整的 semantic diff、backup/apply manifest、rollback 和 audit。
 
-`acc/runtime.build_allowed_env()` 已经拒绝 full env inheritance。但 `acc/runner.py` 某些 workflow capsule 路径仍有 `os.environ.copy()` 语义。
+### 5. durable scheduler 不是当前事实
 
-这和“默认不继承完整 host env”的理想合同存在差距。真实外部 agent 接入前，这一块应继续收紧。
+当前 Core v2 workflow 调度是 run-scoped、进程内、按拓扑 level 执行。Workbench 的
+`WorkbenchRunManager` 是轻量 server-scoped execution handle manager，不是持久化分布式队列。
 
-### 5. CLI 还不够薄
+### 6. 历史术语仍会干扰读者
 
-`acc.cli` 已经把 workflow run/validate 委托给 `WorkflowAppService`，但仍直接连接 debugger、graphops、environment、control_plane 等模块。
-
-它已经比早期更清晰，但还没有完全达到“CLI 只做参数解析和展示”的理想状态。
-
-### 6. GraphOps real apply 仍偏 MVP
-
-GraphOps 的安全设计是对的：validate、dry-run、human approval。但真实 destructive apply 还不是完整产品级闭环。
-
-这符合“安全优先”的阶段性选择，但如果未来要让 agent 辅助修改 workflow，GraphOps 需要更完整的 semantic validation、diff preview、rollback 和 audit。
+`run_clean_workflow_template`、`run-graph` endpoint、一些旧 plain-language 文档里的 `Capsule`、
+`WorkflowTemplate`、`NodeSpec`、`EnvironmentFrame` 都有历史原因。判断是否当前 runtime 事实，要看代码是否消费
+Core v2 `WorkflowFunctionTemplate` / `NodeInvocationSpec`，而不是看旧名字。
 
 ## 关键术语
 
-### Capsule Template
+### AgentClassTemplate / ToolClassTemplate
 
-静态可复用 agent 定义。它描述一个 agent 节点是谁、用什么 runtime、输入输出 schema 是什么、权限是什么。
+静态可复用 agent/tool class 定义。它描述一个 class 用什么 runtime/runner、默认 prompt、权限、端口和 artifact contract。
 
-### Session
+### WorkflowFunctionTemplate
 
-一次具体执行实例。它有独立 `run_dir`、`session_manifest.json`、`events.jsonl`、`output.json` 和 artifacts。
+ACC 的 canonical workflow function IR。它是保存下来的无状态函数体，不应该保存 run dir、session id、本机 workspace binding、历史输出或 agent memory。
 
-### WorkflowTemplate
+### NodeInvocationSpec
 
-ACC 的 canonical workflow IR。它是保存下来的无状态 DAG 模板，不应该保存本机 workspace path。
+workflow function 内的一次 call site。它通过 `CallableRef` 调用 agent class、tool class 或 child workflow function，并携带 invocation-scoped prompt/input/bindings。
 
-### EnvironmentFrame
+### FunctionInvocation / ScopeFrame
 
-workflow 运行时绑定出来的环境。它把 workflow template 绑定到某个 workspace、inbox/outbox/artifact root。
+一次 workflow function 调用及其运行 scope。`ScopeFrame` 拥有 cwd、inbox、outbox、artifact root、environment root 和 behavior snapshot evidence。
+
+### SessionInstance
+
+一个 agent/tool 节点的具体执行实例。它有独立 `session_instance_manifest.json`、`events.jsonl`、`output.json`、stdout/stderr 和 artifact bundle。
 
 ### ControlEdge
 
@@ -572,7 +575,7 @@ workflow 运行时绑定出来的环境。它把 workflow template 绑定到某�
 
 ### GraphOps
 
-LLM 辅助修改 workflow/capsule 的控制面。它的作用是把修改变成 patch、验证、dry-run 和人工审批，而不是让 LLM 直接改系统。
+LLM 辅助修改 callable/workflow 的控制面。它的作用是把修改变成 patch、验证、dry-run 和人工审批，而不是让 LLM 直接改系统。
 
 ## 最终判断
 
@@ -584,10 +587,10 @@ ACC 真正有价值的地方是它选择了一个更窄、更硬的边界：
 local-first
 artifact-first
 session-isolated
-workflow-template-based
-environment-scoped
+workflow-function-based
+scope-frame-scoped
 explicit inbox/outbox
-external mature-agent wrapper
+external mature-agent boundary
 human-approved GraphOps
 ```
 

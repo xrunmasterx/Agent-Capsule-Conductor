@@ -1,0 +1,49 @@
+{
+  "inbox": {
+    "records": [
+      {
+        "direction": "input",
+        "materialization": "copy",
+        "node_id": "merge",
+        "port_id": "review",
+        "source_node_id": "review",
+        "source_outbox": "<<RUN_DIR>>\\nodes\\review\\outbox\\review",
+        "source_port_id": "review",
+        "source_refs": [
+          "review_review"
+        ],
+        "source_session_id": "",
+        "target_inbox": "<<RUN_DIR>>\\nodes\\merge\\inbox\\review\\review_review",
+        "target_node_id": "merge",
+        "target_port_id": "review"
+      }
+    ]
+  },
+  "input": {},
+  "node": {
+    "id": "merge",
+    "kind": "tool"
+  },
+  "upstream_context": [
+    {
+      "node_id": "review",
+      "output_bytes": 447,
+      "output_inline": {
+        "cwd": "<<RUN_DIR>>\\environments\\root_env\\workspace",
+        "inbox_file_count": 4,
+        "prompt": "Review the collected artifact.",
+        "read_from_inbox": true,
+        "read_from_upstream_context": true,
+        "status": "success",
+        "summary": "Fake agent review ran in <<RUN_DIR>>\\environments\\root_env\\workspace",
+        "upstream_context_count": 1
+      },
+      "output_path": "<<RUN_DIR>>\\nodes\\review\\output.json",
+      "output_summary": "Fake agent review ran in <<RUN_DIR>>\\environments\\root_env\\workspace",
+      "status": "success"
+    }
+  ],
+  "workflow": {
+    "input": {}
+  }
+}

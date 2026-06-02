@@ -1,0 +1,64 @@
+{
+  "control_edges": [
+    {
+      "from": "subworkflow_node",
+      "to": "final_review"
+    }
+  ],
+  "data_edges": [],
+  "exposed_inputs": {},
+  "exposed_outputs": {},
+  "id": "workflow_capsule_nested_demo",
+  "metadata": {
+    "canonical_format": "accflow",
+    "imported_from": "examples\\workflows\\workflow_capsule_nested_demo.accflow.json"
+  },
+  "nodes": [
+    {
+      "callable_ref": {
+        "id": "generic_fake_agent",
+        "kind": "agent_class"
+      },
+      "id": "subworkflow_node",
+      "input_bindings": [
+        {
+          "static_value": "nested workflow input",
+          "target_port": "message"
+        }
+      ],
+      "ports": {
+        "inputs": {
+          "message": {
+            "type": "json"
+          }
+        },
+        "outputs": {}
+      }
+    },
+    {
+      "callable_ref": {
+        "id": "generic_fake_agent",
+        "kind": "agent_class"
+      },
+      "id": "final_review",
+      "input_bindings": [
+        {
+          "static_value": "consumes nested workflow output",
+          "target_port": "notes"
+        }
+      ],
+      "ports": {
+        "inputs": {
+          "notes": {
+            "type": "json"
+          }
+        },
+        "outputs": {}
+      }
+    }
+  ],
+  "schema_version": "acc.core.v2",
+  "version": "0.1.0",
+  "workflow_input_bindings": [],
+  "workflow_output_bindings": []
+}

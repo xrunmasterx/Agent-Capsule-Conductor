@@ -41,7 +41,7 @@ into reusable workflow templates or class templates.
 
 ### LLM assistance is not authority
 
-An LLM may propose a graph or capsule edit. It must not silently become the owner of persistent
+An LLM may propose a callable or workflow edit. It must not silently become the owner of persistent
 workflow mutation. GraphOps keeps mutation typed, validated, dry-run, reviewable, and human-approved.
 
 ## 3. Why This Matters
@@ -65,7 +65,7 @@ FunctionInvocation                      = one workflow call
 ScopeFrame                              = call stack frame and workspace boundary
 SessionInstance                         = one agent/tool execution
 ArtifactBundle                          = stable evidence output
-GraphOps Patch                          = reviewable workflow/capsule diff
+GraphOps Patch                          = reviewable callable/workflow diff
 Human Gate                              = approval before persistent mutation
 ```
 

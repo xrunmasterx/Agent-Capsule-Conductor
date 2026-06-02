@@ -23,6 +23,14 @@ def build_node_run_projection(
     run_dir = Path(node.run_dir)
     payload["output_preview"] = build_output_preview(node.output_path)
     payload["steps"] = build_event_steps(node.event_log, run_dir=run_dir)
+    runtime_payload = load_optional_json(run_dir / "runtime.json")
+    binding_manifest = load_optional_json(run_dir / "binding_manifest.json")
+    payload["runtime"] = runtime_payload
+    payload["binding_manifest"] = binding_manifest
+    if isinstance(runtime_payload, dict):
+        payload["execution_mode"] = runtime_payload.get("execution_mode")
+        payload["adapter"] = runtime_payload.get("adapter")
+        payload["binding_resolved"] = runtime_payload.get("binding_materializations") or []
     payload["log_ref"] = node.log_ref or node.stdout_log
     payload["log_excerpt"] = node.log_excerpt or read_log_excerpt(payload["log_ref"])
     payload["transcript_ref"] = node.transcript_ref or node.stdout_log
@@ -31,6 +39,15 @@ def build_node_run_projection(
     if project_root is not None and payload.get("transcript_ref"):
         payload["transcript_ref"] = _relative_or_keep(project_root, payload["transcript_ref"])
     return payload
+
+
+def load_optional_json(path: Path) -> Any:
+    if not path.exists() or not path.is_file():
+        return None
+    try:
+        return load_json(path)
+    except AccError:
+        return None
 
 
 def build_output_preview(output_path: str | None) -> Any:

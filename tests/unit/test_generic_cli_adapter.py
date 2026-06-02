@@ -14,7 +14,7 @@ def make_request(tmp_path: Path, args: list[str], timeout: float = 5) -> AgentRu
     store.write_input({"message": "hello", "topic": "unit"})
     store.write_prompt("prompt")
     return AgentRunRequest(
-        capsule_id="test.generic",
+        callable_id="test.generic",
         run_dir=store.run_dir,
         workspace_dir=Path.cwd(),
         prompt_path=store.prompt_path,
@@ -61,4 +61,3 @@ def test_missing_output_json_returns_failed(tmp_path: Path) -> None:
 
     assert result.status == "failed"
     assert "did not produce" in (result.error or "")
-

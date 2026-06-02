@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from acc.callable_registry import CallableRegistry
 from acc.domain import AccError, WorkflowFunctionTemplate
-from acc.registry import CapsuleRegistry
 from acc.utils import load_json
 
 HERMETIC_CALLABLE_REFS: set[tuple[str, str]] = {
@@ -18,7 +18,7 @@ HERMETIC_CALLABLE_REFS: set[tuple[str, str]] = {
 
 
 def discover_known_callable_refs(
-    registry: CapsuleRegistry,
+    callable_registry: CallableRegistry | None = None,
     *,
     workflows_dir: Path | None = None,
 ) -> tuple[set[tuple[str, str]], set[str]]:
@@ -26,19 +26,9 @@ def discover_known_callable_refs(
     refs: set[tuple[str, str]] = set(HERMETIC_CALLABLE_REFS)
     workflow_ids: set[str] = set()
 
-    for capsule in registry.discover():
-        kind = capsule.spec.kind or "agent_session"
-        refs.add(("legacy_capsule", capsule.spec.id))
-        refs.add(("agent_class", capsule.spec.runtime.type))
-        refs.add(("agent_class", capsule.spec.id))
-        refs.add(("tool_class", capsule.spec.id))
-        if kind in {"atomic"}:
-            refs.add(("tool_class", capsule.spec.runtime.type))
-        elif kind in {"agent_session", "agent_workflow", "external_workflow"}:
-            pass
-        elif kind == "acc_workflow":
-            refs.add(("workflow_function", capsule.spec.id))
-            workflow_ids.add(capsule.spec.id)
+    if callable_registry is not None:
+        refs.update(callable_registry.ref_keys())
+        workflow_ids.update(callable_registry.workflow_ids())
 
     if workflows_dir is not None and workflows_dir.exists():
         for path in sorted(workflows_dir.glob("*.accflow.json")):
@@ -70,11 +60,11 @@ def expand_workflow_ids_for_template(
         if node.callable_ref.kind != "workflow_function":
             continue
         ref_id = node.callable_ref.id
-        expanded.add(ref_id)
         candidate = Path(ref_id)
         if not candidate.is_absolute():
             candidate = base_dir / candidate
         if candidate.exists():
+            expanded.add(ref_id)
             expanded.add(candidate.name)
             expanded.add(str(candidate.resolve()))
             try:

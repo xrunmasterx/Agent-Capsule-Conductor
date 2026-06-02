@@ -1,0 +1,49 @@
+{
+  "inbox": {
+    "records": [
+      {
+        "direction": "input",
+        "materialization": "copy",
+        "node_id": "branch_a",
+        "port_id": "input",
+        "source_node_id": "start",
+        "source_outbox": "<<RUN_DIR>>\\nodes\\start\\outbox\\main",
+        "source_port_id": "main",
+        "source_refs": [
+          "start_main"
+        ],
+        "source_session_id": "",
+        "target_inbox": "<<RUN_DIR>>\\nodes\\branch_a\\inbox\\input\\start_main",
+        "target_node_id": "branch_a",
+        "target_port_id": "input"
+      }
+    ]
+  },
+  "input": {},
+  "node": {
+    "id": "branch_a",
+    "kind": "tool"
+  },
+  "upstream_context": [
+    {
+      "node_id": "start",
+      "output_bytes": 328,
+      "output_inline": {
+        "cwd": "<<RUN_DIR>>\\environments\\root_env\\workspace",
+        "inbox_file_count": 0,
+        "producer_node_id": "start",
+        "read_from_inbox": false,
+        "read_from_upstream_context": false,
+        "status": "success",
+        "summary": "Produced artifact from start",
+        "upstream_context_count": 0
+      },
+      "output_path": "<<RUN_DIR>>\\nodes\\start\\output.json",
+      "output_summary": "Produced artifact from start",
+      "status": "success"
+    }
+  ],
+  "workflow": {
+    "input": {}
+  }
+}

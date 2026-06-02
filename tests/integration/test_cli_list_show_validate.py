@@ -3,36 +3,29 @@ from typer.testing import CliRunner
 from acc.cli import app
 
 
-def test_acc_list_exits_zero() -> None:
+def test_acc_list_legacy_surface_is_not_registered() -> None:
     result = CliRunner().invoke(app, ["list"])
 
-    assert result.exit_code == 0
-    assert "echo-test.generic" in result.stdout
+    assert result.exit_code == 2
+    assert "No such command" in result.stderr
 
 
-def test_acc_show_exits_zero() -> None:
+def test_acc_show_legacy_surface_is_not_registered() -> None:
     result = CliRunner().invoke(app, ["show", "echo-test.generic"])
 
-    assert result.exit_code == 0
-    assert "Echo Test" in result.stdout
+    assert result.exit_code == 2
+    assert "No such command" in result.stderr
 
 
-def test_acc_validate_echo_exits_zero() -> None:
+def test_acc_validate_legacy_surface_is_not_registered() -> None:
     result = CliRunner().invoke(app, ["validate", "echo-test.generic"])
 
+    assert result.exit_code == 2
+    assert "No such command" in result.stderr
+
+
+def test_acc_callable_list_exits_zero() -> None:
+    result = CliRunner().invoke(app, ["callable", "list", "--json"])
+
     assert result.exit_code == 0
-    assert '"status": "valid"' in result.stdout
-
-
-def test_acc_validate_workflow_editor_exits_zero() -> None:
-    result = CliRunner().invoke(app, ["validate", "workflow-editor.codex"])
-
-    assert result.exit_code == 0
-    assert '"status": "valid"' in result.stdout
-
-
-def test_acc_validate_missing_exits_nonzero() -> None:
-    result = CliRunner().invoke(app, ["validate", "broken-capsule"])
-
-    assert result.exit_code != 0
-    assert "Capsule not found" in result.stderr
+    assert '"callables"' in result.stdout

@@ -3,15 +3,26 @@ import { ChevronDown, ChevronUp } from 'lucide-react';
 import type { ArtifactContent, RunEvent, WorkflowRunResult } from '../../types';
 import { ReadableArtifact } from '../ArtifactViewer';
 
+type EvidenceOwner = {
+  kind: 'validation' | 'run' | 'node' | 'artifact';
+  taskId?: string;
+  runId?: string;
+  nodeId?: string;
+  createdAt?: string;
+};
+
 type Props = {
   state: {
     open: boolean;
     title: string;
     content: ArtifactContent | null;
+    owner?: EvidenceOwner;
   };
   message: string;
   workflowRun: WorkflowRunResult | null;
   workflowEvents: RunEvent[];
+  currentTaskId?: string;
+  selectedRunId?: string | null;
   onToggle: () => void;
 };
 
@@ -20,8 +31,16 @@ export function WorkflowEvidenceDock({
   message,
   workflowRun,
   workflowEvents,
+  currentTaskId,
+  selectedRunId,
   onToggle,
 }: Props) {
+  const failure = workflowRun ? runFailureSummary(workflowRun, workflowEvents) : null;
+  const content = evidenceContentForCurrentContext(state, {
+    currentTaskId,
+    selectedRunId,
+    hasWorkflowRun: Boolean(workflowRun),
+  });
   return (
     <footer className={state.open ? 'evidence-dock open' : 'evidence-dock'} aria-label="Workflow Evidence Dock">
       <button type="button" className="evidence-dock-toggle" onClick={onToggle}>
@@ -33,13 +52,97 @@ export function WorkflowEvidenceDock({
         <div className="evidence-dock-body">
           <section>
             <h3>{state.title}</h3>
-            {state.content ? <ReadableArtifact content={state.content} /> : <p>暂无打开的证据。</p>}
+            {failure ? <FailureSummaryCard failure={failure} /> : null}
+            {content ? <ReadableArtifact content={content} /> : <p>暂无打开的证据。</p>}
           </section>
           <EventTimeline events={workflowEvents} title="最近事件" />
         </div>
       ) : null}
     </footer>
   );
+}
+
+function evidenceContentForCurrentContext(
+  state: Props['state'],
+  context: { currentTaskId?: string; selectedRunId?: string | null; hasWorkflowRun: boolean },
+): ArtifactContent | null {
+  if (!state.content) {
+    return null;
+  }
+  const owner = state.owner;
+  if (!owner) {
+    return state.content;
+  }
+  if (owner.taskId && context.currentTaskId && owner.taskId !== context.currentTaskId) {
+    return null;
+  }
+  if (owner.kind === 'validation') {
+    return context.hasWorkflowRun || context.selectedRunId ? null : state.content;
+  }
+  if ((owner.kind === 'run' || owner.kind === 'node' || owner.kind === 'artifact') && owner.runId) {
+    return owner.runId === context.selectedRunId ? state.content : null;
+  }
+  return state.content;
+}
+
+type FailureSummary = {
+  nodeId: string;
+  reason: string;
+  evidencePath: string;
+  stderrPath?: string | null;
+  outputPath?: string | null;
+};
+
+function FailureSummaryCard({ failure }: { failure: FailureSummary }) {
+  return (
+    <article className="failure-summary-card" aria-label="Run failure summary">
+      <strong>失败节点: {failure.nodeId}</strong>
+      <p>原因: {failure.reason}</p>
+      <small>证据: {failure.evidencePath}</small>
+      {failure.stderrPath ? <small>stderr: {failure.stderrPath}</small> : null}
+      {failure.outputPath ? <small>output: {failure.outputPath}</small> : null}
+    </article>
+  );
+}
+
+function runFailureSummary(
+  workflowRun: WorkflowRunResult,
+  events: RunEvent[],
+): FailureSummary | null {
+  if (!['failed', 'crashed', 'timeout', 'schema_error', 'artifact_error'].includes(workflowRun.status)) {
+    return null;
+  }
+  const failedNode =
+    workflowRun.nodes.find((node) => node.status !== 'success') || workflowRun.nodes[0] || null;
+  const eventError = latestEventError(events);
+  const errorMessage =
+    failedNode?.error ||
+    failedNode?.errors?.map((error) => error.message).filter(Boolean).join('\n') ||
+    failedNode?.summary ||
+    eventError ||
+    workflowRun.errors?.join('\n') ||
+    'Run failed without a detailed error message.';
+  return {
+    nodeId: failedNode?.node_id || workflowRun.workflow_id || workflowRun.run_dir,
+    reason: errorMessage,
+    evidencePath: `${workflowRun.run_dir}/run_summary.json`,
+    stderrPath: failedNode?.stderr_log,
+    outputPath: failedNode?.output_path,
+  };
+}
+
+function latestEventError(events: RunEvent[]): string {
+  for (const event of [...events].reverse()) {
+    const payloadError = event.payload?.error || event.payload?.message || event.payload?.detail;
+    if (typeof payloadError === 'string' && payloadError) {
+      return payloadError;
+    }
+    const directError = event.error || event.message || event.detail;
+    if (typeof directError === 'string' && directError) {
+      return directError;
+    }
+  }
+  return '';
 }
 
 function EventTimeline({ events, title }: { events: RunEvent[]; title: string }) {

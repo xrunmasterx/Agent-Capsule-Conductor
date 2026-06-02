@@ -1,72 +1,64 @@
 {
-  "id": "stateless_template_demo",
-  "version": "0.1.0",
-  "name": "无状态模板 Demo",
-  "nodes": [
-    {
-      "id": "producer",
-      "kind": "tool",
-      "tool": "fake_producer",
-      "ports": {
-        "outputs": {
-          "main": {
-            "type": "artifact"
-          }
-        }
-      },
-      "position": {
-        "x": 0,
-        "y": 0
-      }
-    },
-    {
-      "id": "consumer",
-      "kind": "agent",
-      "runtime": "generic_fake_agent",
-      "prompt": "Read from inbox and summarize.",
-      "ports": {
-        "inputs": {
-          "main": {
-            "type": "artifact"
-          }
-        },
-        "outputs": {
-          "summary": {
-            "type": "artifact"
-          }
-        }
-      },
-      "position": {
-        "x": 360,
-        "y": 0
-      }
-    }
-  ],
   "control_edges": [
     {
       "from": "producer",
-      "to": "consumer",
-      "condition": null
+      "to": "consumer"
     }
   ],
   "data_edges": [
     {
-      "from": {
+      "materialization": "copy",
+      "source": {
         "node": "producer",
         "port": "main"
       },
-      "to": {
+      "target": {
         "node": "consumer",
         "port": "main"
-      },
-      "materialization": "copy"
+      }
     }
   ],
-  "policies": {
-    "max_concurrency": 2,
-    "failure_mode": "fail_fast"
-  },
+  "exposed_inputs": {},
+  "exposed_outputs": {},
+  "id": "stateless_template_demo",
   "metadata": {
-    "layout": "left-to-right"
-  }
+    "canonical_format": "accflow",
+    "imported_from": "examples\\workflows\\stateless_template_demo.accflow.json"
+  },
+  "nodes": [
+    {
+      "callable_ref": {
+        "id": "fake_producer",
+        "kind": "tool_class"
+      },
+      "id": "producer",
+      "ports": {
+        "inputs": {},
+        "outputs": {
+          "main": {
+            "type": "json"
+          }
+        }
+      }
+    },
+    {
+      "callable_ref": {
+        "id": "generic_fake_agent",
+        "kind": "agent_class"
+      },
+      "id": "consumer",
+      "ports": {
+        "inputs": {
+          "main": {
+            "type": "json"
+          }
+        },
+        "outputs": {}
+      }
+    }
+  ],
+  "schema_version": "acc.core.v2",
+  "version": "0.1.0",
+  "workflow_input_bindings": [],
+  "workflow_output_bindings": []
 }

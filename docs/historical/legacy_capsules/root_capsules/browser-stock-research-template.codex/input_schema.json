@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "focus": {
+      "description": "重点维度",
+      "type": "string"
+    },
+    "task": {
+      "description": "调研任务",
+      "type": "string"
+    },
+    "time_scope": {
+      "description": "时间范围",
+      "type": "string"
+    }
+  },
+  "required": [
+    "task",
+    "time_scope"
+  ],
+  "type": "object"
+}

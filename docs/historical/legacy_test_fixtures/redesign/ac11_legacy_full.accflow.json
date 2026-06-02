@@ -1,0 +1,37 @@
+{
+  "id": "ac11_legacy_byte_equiv",
+  "version": "0.1.0",
+  "name": "AC11 Legacy Byte Equivalence",
+  "metadata": {
+    "binding_mode": "legacy_full",
+    "canonical_format": "accflow",
+    "e2e_ac": "AC11"
+  },
+  "nodes": [
+    {
+      "id": "first",
+      "kind": "tool",
+      "tool": "fake_producer",
+      "output_ports": [
+        {"id": "main", "direction": "output", "required": false}
+      ]
+    },
+    {
+      "id": "second",
+      "kind": "agent",
+      "runtime": "generic_fake_agent",
+      "prompt": "Legacy mode preserves the 5-segment input shape.",
+      "input_ports": [
+        {"id": "main", "direction": "input", "required": false}
+      ],
+      "output_ports": [
+        {"id": "main", "direction": "output", "required": false}
+      ]
+    }
+  ],
+  "control_edges": [
+    {"from": "first", "to": "second", "condition": null, "context": "upstream_output"}
+  ],
+  "data_edges": [],
+  "policies": {"failure_mode": "fail_fast", "max_concurrency": 1}
+}

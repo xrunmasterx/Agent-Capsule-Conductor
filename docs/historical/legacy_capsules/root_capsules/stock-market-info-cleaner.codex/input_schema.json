@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "market",
+    "as_of_date",
+    "news_dossier",
+    "news_sources",
+    "sentiment_dossier",
+    "sentiment_sources",
+    "cleaning_question"
+  ],
+  "properties": {
+    "market": {
+      "type": "string"
+    },
+    "as_of_date": {
+      "type": "string"
+    },
+    "news_dossier": {
+      "type": "string"
+    },
+    "news_sources": {
+      "type": "string"
+    },
+    "sentiment_dossier": {
+      "type": "string"
+    },
+    "sentiment_sources": {
+      "type": "string"
+    },
+    "cleaning_question": {
+      "type": "string"
+    },
+    "output_language": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}

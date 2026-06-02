@@ -1,70 +1,68 @@
 {
-  "id": "callable_child_function",
-  "version": "0.1.0",
-  "name": "Callable Child Function Demo",
+  "control_edges": [],
+  "data_edges": [],
   "exposed_inputs": {
     "brief": {
       "direction": "input",
-      "type": "artifact",
-      "required": true
+      "required": false,
+      "type": "artifact"
     }
   },
   "exposed_outputs": {
     "report": {
       "direction": "output",
-      "type": "artifact",
-      "required": true
+      "required": false,
+      "type": "artifact"
     }
   },
-  "workflow_input_bindings": [
-    {
-      "source_port": "brief",
-      "target": {
-        "node": "child_agent",
-        "port": "main"
-      },
-      "materialization": "copy",
-      "required": true
-    }
-  ],
-  "workflow_output_bindings": [
-    {
-      "source": {
-        "node": "child_agent",
-        "port": "summary"
-      },
-      "target_port": "report",
-      "materialization": "copy",
-      "required": true
-    }
-  ],
+  "id": "callable_child_function",
+  "metadata": {
+    "canonical_format": "accflow",
+    "imported_from": "examples\\workflows\\callable_child_function.accflow.json"
+  },
   "nodes": [
     {
+      "callable_ref": {
+        "id": "generic_fake_agent",
+        "kind": "agent_class"
+      },
       "id": "child_agent",
-      "kind": "agent",
-      "runtime": "generic_fake_agent",
-      "prompt": "Read explicit child workflow input from inbox.",
       "ports": {
         "inputs": {
           "main": {
-            "type": "artifact"
+            "type": "json"
           }
         },
         "outputs": {
           "summary": {
-            "type": "artifact"
+            "type": "json"
           }
         }
       }
     }
   ],
-  "control_edges": [],
-  "data_edges": [],
-  "policies": {
-    "max_concurrency": 1,
-    "failure_mode": "fail_fast"
-  },
-  "metadata": {
-    "layout": "left-to-right"
-  }
+  "schema_version": "acc.core.v2",
+  "version": "0.1.0",
+  "workflow_input_bindings": [
+    {
+      "materialization": "copy",
+      "required": true,
+      "source_port": "brief",
+      "target": {
+        "node": "child_agent",
+        "port": "main"
+      }
+    }
+  ],
+  "workflow_output_bindings": [
+    {
+      "materialization": "copy",
+      "required": true,
+      "source": {
+        "node": "child_agent",
+        "port": "summary"
+      },
+      "target_port": "report"
+    }
+  ]
 }

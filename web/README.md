@@ -1,7 +1,7 @@
-# Agent Capsule Workbench Web
+# Agent Callable Workbench Web
 
 React/TypeScript Workbench for editing local task canvases, saving workflows, submitting async
-workflow runs, and inspecting Agent Capsule Conductor run evidence.
+workflow runs, and inspecting Agent Callable Conductor run evidence.
 
 ## Run locally
 
@@ -44,7 +44,7 @@ Current Workbench responsibilities:
 - create browser-local tasks;
 - edit graph-first task canvases;
 - insert resource-library Agent/Tool/Workflow classes as invocation nodes;
-- save validated workflow graphs through server APIs;
+- save validated Core v2 workflow templates through server APIs;
 - submit runs through `/api/workflows/run-graph/submit`;
 - poll `/api/runs/{run_id}` and `/api/runs/{run_id}/events`;
 - show real `input.json`, `output.json`, events, and artifact evidence in inspectors.

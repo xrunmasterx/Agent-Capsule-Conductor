@@ -1,56 +1,4 @@
 {
-  "id": "callable_agent_tool_demo",
-  "version": "0.1.0",
-  "name": "Callable Agent Tool Demo",
-  "nodes": [
-    {
-      "id": "collect",
-      "kind": "tool",
-      "tool": "fake_producer",
-      "ports": {
-        "outputs": {
-          "raw": {
-            "type": "artifact"
-          }
-        }
-      }
-    },
-    {
-      "id": "review",
-      "kind": "agent",
-      "runtime": "generic_fake_agent",
-      "prompt": "Review the collected artifact.",
-      "ports": {
-        "inputs": {
-          "raw": {
-            "type": "artifact"
-          }
-        },
-        "outputs": {
-          "review": {
-            "type": "artifact"
-          }
-        }
-      }
-    },
-    {
-      "id": "merge",
-      "kind": "tool",
-      "tool": "merge",
-      "ports": {
-        "inputs": {
-          "review": {
-            "type": "artifact"
-          }
-        },
-        "outputs": {
-          "bundle": {
-            "type": "artifact"
-          }
-        }
-      }
-    }
-  ],
   "control_edges": [
     {
       "from": "collect",
@@ -63,33 +11,88 @@
   ],
   "data_edges": [
     {
-      "from": {
+      "materialization": "copy",
+      "source": {
         "node": "collect",
         "port": "raw"
       },
-      "to": {
+      "target": {
         "node": "review",
         "port": "raw"
-      },
-      "materialization": "copy"
+      }
     },
     {
-      "from": {
+      "materialization": "copy",
+      "source": {
         "node": "review",
         "port": "review"
       },
-      "to": {
+      "target": {
         "node": "merge",
         "port": "review"
-      },
-      "materialization": "copy"
+      }
     }
   ],
-  "policies": {
-    "max_concurrency": 2,
-    "failure_mode": "fail_fast"
-  },
+  "exposed_inputs": {},
+  "exposed_outputs": {},
+  "id": "callable_agent_tool_demo",
   "metadata": {
-    "layout": "left-to-right"
-  }
+    "canonical_format": "accflow",
+    "imported_from": "examples\\workflows\\callable_agent_tool_demo.accflow.json"
+  },
+  "nodes": [
+    {
+      "callable_ref": {
+        "id": "fake_producer",
+        "kind": "tool_class"
+      },
+      "id": "collect",
+      "ports": {
+        "inputs": {},
+        "outputs": {
+          "raw": {
+            "type": "json"
+          }
+        }
+      }
+    },
+    {
+      "callable_ref": {
+        "id": "generic_fake_agent",
+        "kind": "agent_class"
+      },
+      "id": "review",
+      "ports": {
+        "inputs": {
+          "raw": {
+            "type": "json"
+          }
+        },
+        "outputs": {
+          "review": {
+            "type": "json"
+          }
+        }
+      }
+    },
+    {
+      "callable_ref": {
+        "id": "merge",
+        "kind": "tool_class"
+      },
+      "id": "merge",
+      "ports": {
+        "inputs": {
+          "review": {
+            "type": "json"
+          }
+        },
+        "outputs": {}
+      }
+    }
+  ],
+  "schema_version": "acc.core.v2",
+  "version": "0.1.0",
+  "workflow_input_bindings": [],
+  "workflow_output_bindings": []
 }

@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from acc.domain import AgentCapabilities
-from acc.registry import CapsuleDefinition
+from acc.domain import AgentCapabilities, AgentClassTemplate, ClassTemplate
 
 ADAPTER_DEFAULT_CAPABILITIES: dict[str, AgentCapabilities] = {
     "generic_cli": AgentCapabilities(log_streaming=True),
@@ -34,31 +33,26 @@ def capabilities_from_mapping(raw: dict[str, Any] | None) -> AgentCapabilities:
 
 def merge_capabilities(
     adapter_caps: AgentCapabilities,
-    capsule_caps: AgentCapabilities,
+    declared_caps: AgentCapabilities,
 ) -> tuple[AgentCapabilities, list[str]]:
     warnings: list[str] = []
     merged = AgentCapabilities(
-        resumable_session=capsule_caps.resumable_session or adapter_caps.resumable_session,
-        status_updates=capsule_caps.status_updates or adapter_caps.status_updates,
-        log_streaming=capsule_caps.log_streaming or adapter_caps.log_streaming,
-        token_usage=capsule_caps.token_usage or adapter_caps.token_usage,
+        resumable_session=declared_caps.resumable_session or adapter_caps.resumable_session,
+        status_updates=declared_caps.status_updates or adapter_caps.status_updates,
+        log_streaming=declared_caps.log_streaming or adapter_caps.log_streaming,
+        token_usage=declared_caps.token_usage or adapter_caps.token_usage,
     )
-    for key in capsule_caps.effective_keys():
+    for key in declared_caps.effective_keys():
         if key not in adapter_caps.effective_keys():
             warnings.append(
-                f"Capsule declares capability {key!r} but adapter does not implement it"
+                f"Callable template declares capability {key!r} but adapter does not implement it"
             )
     return merged, warnings
 
 
-def resolve_capsule_capabilities(capsule: CapsuleDefinition) -> AgentCapabilities:
-    adapter_key = capsule.spec.runtime.type
+def resolve_class_template_capabilities(template: ClassTemplate) -> AgentCapabilities:
+    adapter_key = template.runtime if isinstance(template, AgentClassTemplate) else template.runner
     adapter_caps = default_adapter_capabilities(adapter_key)
-    yaml_caps = getattr(capsule.spec.runtime, "capabilities", None)
-    capsule_caps = (
-        capabilities_from_mapping(yaml_caps.model_dump())
-        if yaml_caps is not None
-        else AgentCapabilities()
-    )
-    merged, _warnings = merge_capabilities(adapter_caps, capsule_caps)
+    declared_caps = capabilities_from_mapping(template.metadata.get("capabilities"))
+    merged, _warnings = merge_capabilities(adapter_caps, declared_caps)
     return merged

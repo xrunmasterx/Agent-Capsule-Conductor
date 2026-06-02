@@ -9,15 +9,16 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from acc.domain import AccError
-from acc.registry import CapsuleRegistry
+import yaml
+
+from acc.callable_registry import CallableRegistry
+from acc.domain import AccError, AgentClassTemplate
 from acc.session import utc_now_iso
 from acc.store import load_json, write_json
 
 BUNDLE_VERSION = "1.0.0"
 STATE_DENYLIST = {
     "runs",
-    "node_runs",
     "session_manifest.json",
     "session_id",
     "run_dir",
@@ -75,16 +76,27 @@ def export_template_bundle(
         "skills": [],
     }
     if class_id:
-        registry = CapsuleRegistry(project_root / "capsules")
-        capsule = registry.get(class_id)
-        source = capsule.capsule_dir
+        callable_registry = CallableRegistry.from_project_root(project_root)
+        asset = callable_registry.resolve_class_id(class_id)
+        source = asset.source_path
+        if source is None:
+            raise AccError(f"Callable class has no exportable source path: {class_id}")
         target = staging / "classes" / source.name
-        shutil.copytree(source, target)
-        manifest["classes"].append({"id": class_id, "path": f"classes/{source.name}"})
-        skills_src = source / "skills"
-        if skills_src.exists():
-            shutil.copytree(skills_src, staging / "skills" / source.name)
-            manifest["skills"].append({"class_id": class_id, "path": f"skills/{source.name}"})
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if source.is_dir():
+            shutil.copytree(source, target)
+            skills_src = source / "skills"
+            if skills_src.exists():
+                shutil.copytree(skills_src, staging / "skills" / source.name)
+                manifest["skills"].append({"class_id": class_id, "path": f"skills/{source.name}"})
+        else:
+            shutil.copy2(source, target)
+        class_kind = (
+            "agent_class" if isinstance(asset.template, AgentClassTemplate) else "tool_class"
+        )
+        manifest["classes"].append(
+            {"id": class_id, "kind": class_kind, "path": f"classes/{source.name}"}
+        )
     if workflow_id:
         workflows_dir = project_root / "workflows"
         workflow_path = workflows_dir / f"{workflow_id}.accflow.json"
@@ -147,27 +159,43 @@ def import_template_bundle(
             if not isinstance(rel, str):
                 continue
             source = staging / rel
-            target_name = fork_id or source.name
-            target = project_root / "capsules" / target_name
+            class_kind = entry.get("kind")
+            target_name = fork_id or source.stem if source.is_file() else fork_id or source.name
+            if class_kind == "tool_class":
+                target_root = project_root / "callables" / "tools"
+            else:
+                target_root = project_root / "callables" / "agents"
+            target = (
+                target_root / f"{target_name}.yaml"
+                if source.is_file()
+                else target_root / target_name
+            )
             if target.exists() and not replace:
                 raise AccError(f"Class already exists: {target_name}; use --fork-id or --replace")
             if target.exists():
-                shutil.rmtree(target)
-            shutil.copytree(source, target)
-            if isinstance(manifest.get("lineage"), dict):
-                capsule_yaml = target / "capsule.yaml"
-                if capsule_yaml.exists():
-                    import yaml
-
-                    raw = yaml.safe_load(capsule_yaml.read_text(encoding="utf-8"))
-                    if isinstance(raw, dict):
-                        metadata = raw.setdefault("metadata", {})
-                        if isinstance(metadata, dict):
-                            metadata["acc_lineage"] = manifest["lineage"]
-                        capsule_yaml.write_text(
-                            yaml.safe_dump(raw, sort_keys=False, allow_unicode=True),
-                            encoding="utf-8",
-                        )
+                if target.is_dir():
+                    shutil.rmtree(target)
+                else:
+                    target.unlink()
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if source.is_dir():
+                shutil.copytree(source, target)
+                callable_yaml = target / "callable.yaml"
+            else:
+                shutil.copy2(source, target)
+                callable_yaml = target
+            if isinstance(manifest.get("lineage"), dict) and callable_yaml.exists():
+                raw = yaml.safe_load(callable_yaml.read_text(encoding="utf-8"))
+                if isinstance(raw, dict):
+                    if fork_id:
+                        raw["id"] = fork_id
+                    metadata = raw.setdefault("metadata", {})
+                    if isinstance(metadata, dict):
+                        metadata["acc_lineage"] = manifest["lineage"]
+                    callable_yaml.write_text(
+                        yaml.safe_dump(raw, sort_keys=False, allow_unicode=True),
+                        encoding="utf-8",
+                    )
             result["imported_classes"].append(target_name)
         for entry in manifest.get("workflows") or []:
             rel = entry.get("path")

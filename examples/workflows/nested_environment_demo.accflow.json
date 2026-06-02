@@ -1,72 +1,64 @@
 {
-  "id": "nested_environment_demo",
-  "version": "0.1.0",
-  "name": "嵌套 Workflow Demo",
-  "nodes": [
-    {
-      "id": "subflow",
-      "kind": "workflow",
-      "workflow_ref": "examples/workflows/stateless_template_demo.accflow.json",
-      "environment_policy": "inherit_parent",
-      "ports": {
-        "outputs": {
-          "summary": {
-            "type": "artifact"
-          }
-        }
-      },
-      "position": {
-        "x": 0,
-        "y": 0
-      }
-    },
-    {
-      "id": "final_merge",
-      "kind": "tool",
-      "tool": "merge",
-      "ports": {
-        "inputs": {
-          "summary": {
-            "type": "artifact"
-          }
-        },
-        "outputs": {
-          "bundle": {
-            "type": "artifact"
-          }
-        }
-      },
-      "position": {
-        "x": 360,
-        "y": 0
-      }
-    }
-  ],
   "control_edges": [
     {
       "from": "subflow",
-      "to": "final_merge",
-      "condition": null
+      "to": "final_merge"
     }
   ],
   "data_edges": [
     {
-      "from": {
+      "materialization": "copy",
+      "source": {
         "node": "subflow",
         "port": "summary"
       },
-      "to": {
+      "target": {
         "node": "final_merge",
         "port": "summary"
-      },
-      "materialization": "copy"
+      }
     }
   ],
-  "policies": {
-    "max_concurrency": 2,
-    "failure_mode": "fail_fast"
-  },
+  "exposed_inputs": {},
+  "exposed_outputs": {},
+  "id": "nested_environment_demo",
   "metadata": {
-    "layout": "left-to-right"
-  }
+    "canonical_format": "accflow",
+    "imported_from": "examples\\workflows\\nested_environment_demo.accflow.json"
+  },
+  "nodes": [
+    {
+      "callable_ref": {
+        "id": "stateless_template_demo.accflow.json",
+        "kind": "workflow_function"
+      },
+      "id": "subflow",
+      "ports": {
+        "inputs": {},
+        "outputs": {
+          "summary": {
+            "type": "json"
+          }
+        }
+      }
+    },
+    {
+      "callable_ref": {
+        "id": "merge",
+        "kind": "tool_class"
+      },
+      "id": "final_merge",
+      "ports": {
+        "inputs": {
+          "summary": {
+            "type": "json"
+          }
+        },
+        "outputs": {}
+      }
+    }
+  ],
+  "schema_version": "acc.core.v2",
+  "version": "0.1.0",
+  "workflow_input_bindings": [],
+  "workflow_output_bindings": []
 }

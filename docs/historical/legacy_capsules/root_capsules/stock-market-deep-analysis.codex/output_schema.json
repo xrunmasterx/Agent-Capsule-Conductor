@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "status",
+    "summary",
+    "final_report",
+    "message_surface",
+    "sentiment_surface",
+    "analysis_notes",
+    "confidence"
+  ],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["success"]
+    },
+    "summary": {
+      "type": "string"
+    },
+    "final_report": {
+      "type": "string"
+    },
+    "message_surface": {
+      "type": "string"
+    },
+    "sentiment_surface": {
+      "type": "string"
+    },
+    "analysis_notes": {
+      "type": "string"
+    },
+    "confidence": {
+      "type": "string",
+      "enum": ["low", "medium", "high"]
+    }
+  },
+  "additionalProperties": false
+}

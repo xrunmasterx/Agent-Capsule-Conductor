@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import shutil
+from pathlib import Path
 
 from acc.adapters.base import AgentRunRequest, AgentRunResult, ResumeRequest
 from acc.adapters.capabilities import default_adapter_capabilities
@@ -15,12 +16,17 @@ class CodexCliAdapter:
         return default_adapter_capabilities("codex_cli")
 
     async def run(self, request: AgentRunRequest) -> AgentRunResult:
-        if request.sandbox == "danger-full-access" and not request.allow_dangerous:
+        if (
+            (request.sandbox == "danger-full-access" or request.bypass_approvals_and_sandbox)
+            and not request.allow_dangerous
+        ):
             return failed(request, "danger-full-access requires allow_dangerous=true")
 
         command = build_codex_command(request)
         env = os.environ.copy()
         env.update(request.env)
+        if "CODEX_HOME" not in request.env:
+            env["CODEX_HOME"] = str(prepare_isolated_codex_home(request))
         if request.inbox_dir is not None:
             env["ACC_INBOX_DIR"] = str(request.inbox_dir)
         if request.outbox_dir is not None:
@@ -29,6 +35,9 @@ class CodexCliAdapter:
             env["ACC_ENVIRONMENT_ID"] = request.environment_id
         if request.node_id is not None:
             env["ACC_NODE_ID"] = request.node_id
+        if request.run_id is not None:
+            env["ACC_RUN_ID"] = request.run_id
+        env["ACC_RUN_DIR"] = str(request.run_dir)
         prompt_bytes = request.prompt_path.read_bytes()
 
         try:
@@ -52,25 +61,62 @@ class CodexCliAdapter:
                 request.stdout_log_path.write_bytes(stdout)
                 request.stderr_log_path.write_bytes(stderr)
             else:
-                stdout, stderr = await asyncio.wait_for(
+                stdout, stderr, cancelled = await asyncio.wait_for(
                     stream_process(process, prompt_bytes, request),
                     timeout=request.timeout_seconds,
                 )
+                if cancelled:
+                    write_jsonl(
+                        request.events_log_path,
+                        {
+                            "type": "adapter_event",
+                            "runtime": "codex_cli",
+                            "command": redact_command(command),
+                            "exit_code": process.returncode,
+                            "cancelled": True,
+                        },
+                    )
+                    return AgentRunResult(
+                        status="cancelled",
+                        summary="Codex CLI cancelled",
+                        output_json_path=None,
+                        event_log_path=request.events_log_path,
+                        artifacts_dir=request.artifacts_dir,
+                        exit_code=process.returncode,
+                        error="cancelled",
+                    )
             write_jsonl(
                 request.events_log_path,
                 {
                     "type": "adapter_event",
                     "runtime": "codex_cli",
+                    "command": redact_command(command),
                     "stdout_bytes": len(stdout),
                     "stderr_bytes": len(stderr),
                     "exit_code": process.returncode,
                 },
             )
+        except FileNotFoundError:
+            return failed(request, "codex executable not found", None)
         except TimeoutError:
             process.kill()
             await process.wait()
-            append_bytes(request.stderr_log_path, b"Codex CLI timed out\n")
-            write_jsonl(request.events_log_path, {"type": "timeout", "command": command})
+            timeout_message = b"Codex CLI timed out\n"
+            append_bytes(request.stderr_log_path, timeout_message)
+            timeout_event = {"type": "timeout", "command": command}
+            if request.output_json_path.exists():
+                timeout_event["output_json_path"] = str(request.output_json_path)
+                timeout_event["output_salvaged"] = True
+                write_jsonl(request.events_log_path, timeout_event)
+                return AgentRunResult(
+                    status="success",
+                    summary="Codex CLI timed out after producing output.json",
+                    output_json_path=request.output_json_path,
+                    event_log_path=request.events_log_path,
+                    artifacts_dir=request.artifacts_dir,
+                    exit_code=process.returncode,
+                )
+            write_jsonl(request.events_log_path, timeout_event)
             return AgentRunResult(
                 status="timeout",
                 summary="Codex CLI timed out",
@@ -112,24 +158,50 @@ def build_codex_command(request: AgentRunRequest) -> list[str]:
     workspace_dir = request.workspace_dir.resolve()
     output_schema_path = request.output_schema_path.resolve()
     output_json_path = request.output_json_path.resolve()
-    return [
-        command,
-        *args,
-        "--cd",
-        str(workspace_dir),
-        "--sandbox",
-        request.sandbox,
-        "--json",
-        "--output-schema",
-        str(output_schema_path),
-        "-o",
-        str(output_json_path),
-        "-",
-    ]
+    command_args = [command]
+    if request.enable_search:
+        command_args.append("--search")
+    command_args.extend(
+        [
+            *args,
+            "--cd",
+            str(workspace_dir),
+        ]
+    )
+    if request.bypass_approvals_and_sandbox:
+        command_args.append("--dangerously-bypass-approvals-and-sandbox")
+    else:
+        command_args.extend(["--sandbox", request.sandbox])
+    command_args.extend(
+        [
+            "--json",
+            "--output-schema",
+            str(output_schema_path),
+            "-o",
+            str(output_json_path),
+            "-",
+        ]
+    )
+    return command_args
+
+
+def redact_command(command: list[str]) -> list[str]:
+    return list(command)
 
 
 def resolve_executable(command: str) -> str:
     return shutil.which(command) or command
+
+
+def prepare_isolated_codex_home(request: AgentRunRequest) -> Path:
+    codex_home = request.run_dir / "codex_home"
+    codex_home.mkdir(parents=True, exist_ok=True)
+    source_home = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
+    for file_name in ("auth.json", "config.toml", "AGENTS.md"):
+        source = source_home / file_name
+        if source.exists() and source.is_file():
+            shutil.copy2(source, codex_home / file_name)
+    return codex_home
 
 
 def failed(
@@ -159,16 +231,29 @@ async def stream_process(
     process,
     prompt_bytes: bytes,
     request: AgentRunRequest,
-) -> tuple[bytes, bytes]:
+) -> tuple[bytes, bytes, bool]:
     process.stdin.write(prompt_bytes)
     await process.stdin.drain()
     process.stdin.close()
 
     stdout_task = asyncio.create_task(capture_stream(process.stdout, request.stdout_log_path))
     stderr_task = asyncio.create_task(capture_stream(process.stderr, request.stderr_log_path))
-    await process.wait()
+    cancelled = False
+    while True:
+        if request.cancel_path is not None and request.cancel_path.exists():
+            cancelled = True
+            append_bytes(request.stderr_log_path, b"Codex CLI cancellation requested\n")
+            process.kill()
+            break
+        try:
+            await asyncio.wait_for(process.wait(), timeout=0.25)
+            break
+        except TimeoutError:
+            continue
+    if cancelled:
+        await process.wait()
     stdout, stderr = await asyncio.gather(stdout_task, stderr_task)
-    return stdout, stderr
+    return stdout, stderr, cancelled
 
 
 async def capture_stream(stream, primary_path) -> bytes:

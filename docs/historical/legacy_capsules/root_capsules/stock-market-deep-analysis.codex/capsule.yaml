@@ -1,0 +1,25 @@
+id: stock-market-deep-analysis.codex
+version: "0.1.0"
+name: Stock Market Deep Analysis
+description: Codex-backed capsule for producing a final stock market message and sentiment report from cleaned evidence.
+kind: agent_session
+runtime:
+  type: codex_cli
+  command: codex
+  args_base:
+    - exec
+workspace:
+  mode: existing_dir
+permissions:
+  sandbox: read-only
+  network: false
+  write_files: false
+  timeout_seconds: 600
+  allow_dangerous: false
+prompt:
+  template: prompt_template.md
+schema:
+  input: input_schema.json
+  output: output_schema.json
+artifacts:
+  manifest: artifact_manifest.yaml

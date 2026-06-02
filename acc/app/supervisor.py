@@ -7,15 +7,17 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from acc.app.capabilities import resolve_capsule_capabilities
+from acc.app.capabilities import default_adapter_capabilities
 from acc.app.invocation import CallableInvocationService
+from acc.callable_registry import CallableRegistry
 from acc.domain import (
     AccError,
+    AgentClassTemplate,
     CallableRef,
     DynamicInvocationIntent,
     DynamicInvocationProposal,
     EnvironmentFrame,
-    NodeSpec,
+    NodeInvocationSpec,
     RosterEntry,
     SupervisorDecision,
     SupervisorPlan,
@@ -29,7 +31,6 @@ from acc.engine.supervisor import (
     validate_intent_against_roster,
     validate_supervisor_plan,
 )
-from acc.registry import CapsuleRegistry
 from acc.session import utc_now_iso
 from acc.store import load_json, write_json
 
@@ -38,20 +39,23 @@ DEFAULT_REPEAT_LIMIT = 3
 DEFAULT_MAX_DEPTH = 4
 
 
-def build_supervisor_roster(registry: CapsuleRegistry) -> SupervisorRoster:
+def build_supervisor_roster(callable_registry: CallableRegistry) -> SupervisorRoster:
     entries: list[RosterEntry] = []
-    for capsule in sorted(registry.discover(), key=lambda item: item.spec.id):
-        if (capsule.spec.kind or "agent_session") not in {"agent_session", "atomic"}:
+    for asset in callable_registry.iter_assets():
+        template = asset.template
+        if not isinstance(template, AgentClassTemplate):
             continue
         entries.append(
             RosterEntry(
                 callable_ref=CallableRef(
-                    kind="agent_class", id=capsule.spec.id, version=capsule.spec.version
+                    kind="agent_class",
+                    id=template.id,
+                    version=template.version,
                 ),
-                title=capsule.spec.name,
-                capabilities=resolve_capsule_capabilities(capsule),
-                input_ports={},
-                output_ports={},
+                title=str(template.metadata.get("name") or template.id),
+                capabilities=default_adapter_capabilities(template.runtime),
+                input_ports=template.input_ports,
+                output_ports=template.output_ports,
             )
         )
     return SupervisorRoster(entries=tuple(entries), generated_at=utc_now_iso())
@@ -134,20 +138,20 @@ class SupervisorRouter:
     def __init__(
         self,
         *,
-        registry: CapsuleRegistry,
+        callable_registry: CallableRegistry,
         callable_service: CallableInvocationService,
         run_dir: Path,
         supervisor_node_id: str,
         repeat_limit: int = DEFAULT_REPEAT_LIMIT,
         max_depth: int = DEFAULT_MAX_DEPTH,
     ) -> None:
-        self.registry = registry
+        self.callable_registry = callable_registry
         self.callable_service = callable_service
         self.run_dir = run_dir
         self.supervisor_node_id = supervisor_node_id
         self.repeat_limit = repeat_limit
         self.max_depth = max_depth
-        self.roster = build_supervisor_roster(registry)
+        self.roster = build_supervisor_roster(callable_registry)
 
     def validate_intent(self, intent: DynamicInvocationIntent) -> None:
         validate_intent_against_roster(intent, self.roster)
@@ -222,7 +226,7 @@ class SupervisorRouter:
         self,
         intent: DynamicInvocationIntent,
         *,
-        node: NodeSpec,
+        node: NodeInvocationSpec,
         workflow_path: Path,
         node_dir: Path,
         frame: EnvironmentFrame,
@@ -334,7 +338,11 @@ def proposal_to_graphops_patch(
                 {
                     "op": "add_node",
                     "node_id": node_id,
-                    "capsule_id": intent.target_callable_ref.id,
+                    "callable_ref": {
+                        "kind": intent.target_callable_ref.kind,
+                        "id": intent.target_callable_ref.id,
+                        "version": intent.target_callable_ref.version,
+                    },
                 }
             )
     return {

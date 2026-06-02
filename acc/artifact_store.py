@@ -5,9 +5,6 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-import yaml
-
-from acc.registry import CapsuleDefinition
 from acc.utils import AccError
 
 
@@ -19,7 +16,6 @@ class ArtifactStore:
         self.lifecycle_logs_dir = self.run_dir / "lifecycle_logs"
         self.input_path = self.run_dir / "input.json"
         self.prompt_path = self.run_dir / "resolved_prompt.md"
-        self.capsule_snapshot_path = self.run_dir / "capsule.yaml.snapshot"
         self.session_manifest_path = self.run_dir / "session_manifest.json"
         self.run_manifest_path = self.run_dir / "run_manifest.json"
         self.stdout_log_path = self.run_dir / "stdout.log"
@@ -61,52 +57,6 @@ class ArtifactStore:
 
     def write_prompt(self, rendered_prompt: str) -> None:
         self.prompt_path.write_text(rendered_prompt, encoding="utf-8")
-
-    def write_capsule_snapshot(self, capsule: CapsuleDefinition) -> None:
-        self.capsule_snapshot_path.write_text(
-            yaml.safe_dump(capsule.raw, sort_keys=False),
-            encoding="utf-8",
-        )
-
-    def materialize_template_snapshot(self, capsule: CapsuleDefinition) -> None:
-        self._copy_path(capsule.yaml_path, self.template_snapshot_dir / "capsule.yaml")
-        self._copy_path(capsule.input_schema_path, self.template_snapshot_dir / "input_schema.json")
-        self._copy_path(
-            capsule.output_schema_path,
-            self.template_snapshot_dir / "output_schema.json",
-        )
-        self._copy_path(
-            capsule.artifact_manifest_path,
-            self.template_snapshot_dir / "artifact_manifest.yaml",
-        )
-        if capsule.prompt_template_path is not None and capsule.prompt_template_path.exists():
-            self._copy_path(
-                capsule.prompt_template_path,
-                self.template_snapshot_dir / capsule.prompt_template_path.name,
-            )
-        if capsule.spec.behavior_pack is not None:
-            source_root = capsule.capsule_dir / capsule.spec.behavior_pack.root
-            if source_root.exists():
-                self._copy_path(source_root, self.template_snapshot_dir / "behavior_pack")
-        if capsule.spec.workflow is not None:
-            workflow_path = capsule.capsule_dir / capsule.spec.workflow.path
-            if workflow_path.exists():
-                self._copy_path(workflow_path, self.template_snapshot_dir / workflow_path.name)
-
-        extra_assets = (
-            "AGENTS.md",
-            "CLAUDE.md",
-            "GEMINI.md",
-            "scripts",
-            "hooks",
-            "prompts",
-            "skills",
-            "config",
-        )
-        for name in extra_assets:
-            source = capsule.capsule_dir / name
-            if source.exists():
-                self._copy_path(source, self.template_snapshot_dir / name)
 
     def write_manifest(self, payload: dict[str, Any]) -> None:
         self.write_json(self.session_manifest_path, payload)
