@@ -8,7 +8,6 @@ from typing import Any, Literal
 from acc.domain import (
     CallableRef,
     NodeInvocationSpec,
-    RecursionPolicy,
     WorkflowFunctionTemplate,
     WorkflowInputBinding,
 )
@@ -104,7 +103,6 @@ def collect_callable_validation_issues(
                 template,
                 node,
                 known_callable_refs=augmented_refs,
-                recursion_policy=RecursionPolicy(),
                 parent_stateful=False,
             )
         except Exception as exc:
@@ -123,6 +121,7 @@ def collect_callable_validation_issues(
                 )
 
     issues.extend(_collect_port_binding_issues(template))
+    issues.extend(_collect_output_schema_port_issues(template))
     issues.extend(_collect_workflow_boundary_issues(template))
     issues.extend(_collect_port_type_issues(template, port_type_check_mode(template)))
     issues.extend(_collect_artifact_binding_issues(template))
@@ -196,10 +195,28 @@ def _collect_unknown_workflow_refs(
     return issues
 
 
+def _control_main_can_satisfy_input(source_node: NodeInvocationSpec) -> bool:
+    if source_node.control.forward_main_output_on_control is False:
+        return False
+    if (
+        source_node.callable_ref.kind == "workflow_function"
+        and source_node.workflow_call_output_bindings
+    ):
+        return any(
+            binding.parent_port == "main" and binding.required
+            for binding in source_node.workflow_call_output_bindings
+        )
+    return True
+
+
 def _incoming_data_ports(template: WorkflowFunctionTemplate) -> dict[str, set[str]]:
     incoming: dict[str, set[str]] = {node_id: set() for node_id in template.node_invocations}
     for edge in template.data_edges:
         incoming[edge.target.node].add(edge.target.port)
+    for edge in template.control_edges:
+        source_node = template.node_invocations.get(edge.source)
+        if source_node is not None and _control_main_can_satisfy_input(source_node):
+            incoming[edge.target].add("main")
     for node in template.node_invocations.values():
         for binding in node.input_bindings:
             if binding.source is not None or binding.static_value is not None:
@@ -225,6 +242,20 @@ def _collect_port_binding_issues(
     }
 
     for edge in template.data_edges:
+        if edge.source.node in template.node_invocations:
+            source_node = template.node_invocations[edge.source.node]
+            if source_node.output_ports and edge.source.port not in source_node.output_ports:
+                issues.append(
+                    ValidationIssue(
+                        code="dangling_data_edge_source",
+                        message=(
+                            f"Data edge references unknown output port "
+                            f"{edge.source.node}.{edge.source.port}"
+                        ),
+                        node_id=edge.source.node,
+                        port=edge.source.port,
+                    )
+                )
         if edge.target.node not in template.node_invocations:
             issues.append(
                 ValidationIssue(
@@ -249,6 +280,36 @@ def _collect_port_binding_issues(
                     ),
                     node_id=edge.target.node,
                     port=edge.target.port,
+                )
+            )
+
+    control_main_sources_by_target: dict[str, list[str]] = {}
+    for edge in template.control_edges:
+        source_node = template.node_invocations.get(edge.source)
+        if source_node is None or not _control_main_can_satisfy_input(source_node):
+            continue
+        control_main_sources_by_target.setdefault(edge.target, []).append(edge.source)
+    for target_node, source_nodes in control_main_sources_by_target.items():
+        target_spec = template.node_invocations.get(target_node)
+        explicit_main = any(
+            edge.target.node == target_node and edge.target.port == "main"
+            for edge in template.data_edges
+        )
+        if target_spec is not None:
+            explicit_main = explicit_main or any(
+                binding.target_port == "main" for binding in target_spec.input_bindings
+            )
+            explicit_main = explicit_main or "main" in target_spec.overrides.static_input
+        if len(source_nodes) > 1 and not explicit_main:
+            issues.append(
+                ValidationIssue(
+                    code="ambiguous_control_main_input",
+                    message=(
+                        f"Multiple control predecessors can forward main into {target_node}: "
+                        f"{', '.join(sorted(source_nodes))}"
+                    ),
+                    node_id=target_node,
+                    port="main",
                 )
             )
 
@@ -328,21 +389,31 @@ def _validate_workflow_input_binding(
                 port=binding.source_port,
             )
         )
-    port = template.exposed_inputs.get(binding.source_port)
-    if port is not None and port.required:
-        target_key = (binding.target.node, binding.target.port)
-        if target_key not in connected_targets:
-            issues.append(
-                ValidationIssue(
-                    code="unbound_workflow_input",
-                    message=(
-                        f"Required workflow input {binding.source_port!r} is not connected to "
-                        f"node {binding.target.node}.{binding.target.port}"
-                    ),
-                    port=binding.source_port,
-                    node_id=binding.target.node,
-                )
+    target_node = template.node_invocations.get(binding.target.node)
+    if target_node is None:
+        issues.append(
+            ValidationIssue(
+                code="unbound_workflow_input",
+                message=(
+                    "Workflow input binding references missing target node "
+                    f"{binding.target.node!r}"
+                ),
+                port=binding.target.port,
+                node_id=binding.target.node,
             )
+        )
+    elif target_node.input_ports and binding.target.port not in target_node.input_ports:
+        issues.append(
+            ValidationIssue(
+                code="unbound_workflow_input",
+                message=(
+                    "Workflow input binding references unknown target input port "
+                    f"{binding.target.node}.{binding.target.port}"
+                ),
+                port=binding.target.port,
+                node_id=binding.target.node,
+            )
+        )
     return issues
 
 
@@ -364,7 +435,135 @@ def _collect_workflow_boundary_issues(
                     port=port_id,
                 )
             )
+    output_bindings_by_target: dict[str, list[tuple[str, str]]] = {}
+    source_nodes_by_target: dict[str, set[str]] = {}
+    for binding in template.workflow_output_bindings:
+        output_bindings_by_target.setdefault(binding.target_port, []).append(
+            (binding.source.node, binding.source.port)
+        )
+        if binding.target_port not in template.exposed_outputs:
+            issues.append(
+                ValidationIssue(
+                    code="unbound_workflow_output",
+                    message=(
+                        "Workflow output binding references missing exposed port "
+                        f"{binding.target_port!r}"
+                    ),
+                    port=binding.target_port,
+                    node_id=binding.source.node,
+                )
+            )
+        source_node = template.node_invocations.get(binding.source.node)
+        if source_node is None:
+            issues.append(
+                ValidationIssue(
+                    code="unbound_workflow_output",
+                    message=(
+                        "Workflow output binding references missing source node "
+                        f"{binding.source.node!r}"
+                    ),
+                    port=binding.source.port,
+                    node_id=binding.source.node,
+                )
+            )
+            continue
+        if source_node.output_ports and binding.source.port not in source_node.output_ports:
+            issues.append(
+                ValidationIssue(
+                    code="unbound_workflow_output",
+                    message=(
+                        "Workflow output binding references unknown source output port "
+                        f"{binding.source.node}.{binding.source.port}"
+                    ),
+                    port=binding.source.port,
+                    node_id=binding.source.node,
+                )
+            )
+        source_nodes = source_nodes_by_target.setdefault(binding.target_port, set())
+        if binding.source.node in source_nodes:
+            issues.append(
+                ValidationIssue(
+                    code="duplicate_workflow_output_source",
+                    message=(
+                        "Workflow output port cannot aggregate multiple ports from the same "
+                        f"source node: {binding.source.node} -> {binding.target_port}"
+                    ),
+                    port=binding.target_port,
+                    node_id=binding.source.node,
+                )
+            )
+        source_nodes.add(binding.source.node)
     return issues
+
+
+def _collect_output_schema_port_issues(
+    template: WorkflowFunctionTemplate,
+) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
+    for node in template.node_invocations.values():
+        if node.callable_ref.kind != "agent_class":
+            continue
+        non_main_ports = [
+            port_id
+            for port_id in node.output_ports
+            if port_id not in {"main", "default"}
+        ]
+        if not non_main_ports:
+            if node.output_schema is None:
+                issues.append(
+                    ValidationIssue(
+                        code="node_output_schema_missing_compat",
+                        message=(
+                            f"Agent node {node.id!r} has no instance output_schema; "
+                            "runtime will fall back to the callable template schema if available"
+                        ),
+                        node_id=node.id,
+                        severity="warning",
+                    )
+                )
+            continue
+        if node.output_schema is None:
+            for port_id in non_main_ports:
+                issues.append(
+                    ValidationIssue(
+                        code="output_port_schema_missing",
+                        message=(
+                            f"Agent node {node.id!r} output port {port_id!r} "
+                            "is not declared by an instance output_schema"
+                        ),
+                        node_id=node.id,
+                        port=port_id,
+                    )
+                )
+            continue
+        for port_id in non_main_ports:
+            if _output_schema_declares_port(node.output_schema, port_id):
+                continue
+            issues.append(
+                ValidationIssue(
+                    code="output_port_schema_missing",
+                    message=(
+                        f"Agent node {node.id!r} output port {port_id!r} must be declared in "
+                        "output_schema.properties.outputs.properties or legacy top-level "
+                        "output_schema.properties"
+                    ),
+                    node_id=node.id,
+                    port=port_id,
+                )
+            )
+    return issues
+
+
+def _output_schema_declares_port(schema: dict[str, Any], port_id: str) -> bool:
+    properties = schema.get("properties")
+    if not isinstance(properties, dict):
+        return False
+    outputs = properties.get("outputs")
+    if isinstance(outputs, dict):
+        output_properties = outputs.get("properties")
+        if isinstance(output_properties, dict) and port_id in output_properties:
+            return True
+    return port_id in properties
 
 
 def _port_type_compatible(source_type: str, target_type: str) -> bool:

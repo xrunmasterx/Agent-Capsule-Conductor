@@ -3,7 +3,7 @@ import type { ComponentType, ReactNode } from 'react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
 import { __workflowViewerTestables } from './WorkflowViewer';
-import { liveWorkflowRunFromEvents } from './workflow-viewer/runState';
+import { applyRunOverlayToCanvas, liveWorkflowRunFromEvents, runOverlayFromRun } from './workflow-viewer/runState';
 
 const flowMock = vi.hoisted(() => ({
   props: null as Record<string, unknown> | null,
@@ -21,7 +21,8 @@ vi.mock('@xyflow/react', async () => {
     MiniMap: () => react.createElement('div', { 'data-testid': 'mini-map' }),
     Controls: () => react.createElement('div', { 'data-testid': 'controls' }),
     Background: () => react.createElement('div', { 'data-testid': 'background' }),
-    Handle: (props: Record<string, unknown>) => react.createElement('div', props),
+    Handle: ({ position, ...props }: Record<string, unknown>) =>
+      react.createElement('div', { ...props, 'data-position': position }),
     NodeResizer: () => null,
   };
 });
@@ -34,10 +35,48 @@ const createDataEdgeCommand = __workflowViewerTestables.createDataEdgeCommand as
 ) => { canvas: ReturnType<typeof canvasFixture>; edge: Record<string, unknown>; autoAddedControlEdge: boolean };
 const canvasEdgeToFlowEdge = __workflowViewerTestables.canvasEdgeToFlowEdge as unknown as (
   edge: Record<string, unknown>,
+  scopeWorkflowId: string | null,
   selection: Record<string, unknown>,
   connectionMode: string,
   parentWorkflowId?: string,
+  edgeViewMode?: string,
+  showDataPorts?: boolean,
+  workflowContainerIds?: Set<string>,
 ) => Array<Record<string, unknown>>;
+const workflowInternalEdgePaths = __workflowViewerTestables.workflowInternalEdgePaths as unknown as (
+  workflow: Record<string, unknown>,
+  selection: Record<string, unknown>,
+  connectionMode: string,
+  edgeViewMode: string,
+  layoutOverlay?: Map<string, { x: number; y: number }>,
+) => Array<{ address: { scopeWorkflowId: string | null; edgeId: string }; path: string }>;
+const resolveScopedConnection = __workflowViewerTestables.resolveScopedConnection as unknown as (
+  canvas: ReturnType<typeof canvasFixture>,
+  connection: Record<string, unknown>,
+  connectionMode: string,
+) => Record<string, unknown>;
+const connectionCandidatesFromPendingEndpoint = __workflowViewerTestables.connectionCandidatesFromPendingEndpoint as unknown as (
+  pending: Record<string, unknown>,
+  connection: Record<string, unknown>,
+) => Array<Record<string, unknown>>;
+const connectionFromPendingEndpoint = __workflowViewerTestables.connectionFromPendingEndpoint as unknown as (
+  pending: Record<string, unknown>,
+  target: Record<string, unknown> | null,
+) => Record<string, unknown> | null;
+const reverseConnection = __workflowViewerTestables.reverseConnection as unknown as (
+  connection: Record<string, unknown>,
+) => Record<string, unknown> | null;
+const canvasToWorkflowGraph = __workflowViewerTestables.canvasToWorkflowGraph as unknown as (
+  canvas: Record<string, unknown>,
+) => Record<string, unknown>;
+const deleteSelectionFromCanvas = __workflowViewerTestables.deleteSelectionFromCanvas as unknown as (
+  canvas: ReturnType<typeof canvasFixture>,
+  selection: Record<string, unknown>,
+) => ReturnType<typeof canvasFixture>;
+const isConnectionHandleForMode = __workflowViewerTestables.isConnectionHandleForMode as unknown as (
+  handle: HTMLElement,
+  mode: string,
+) => boolean;
 
 function workflow(id: string, x: number, y: number, internalNodes: unknown[] = []) {
   return {
@@ -89,11 +128,30 @@ function canvasFixture() {
   };
 }
 
+function canvasWithTargetEvidencePort() {
+  const canvas = canvasFixture();
+  return {
+    ...canvas,
+    workflows: canvas.workflows.map((item) =>
+      item.id === 'target_flow'
+        ? {
+            ...item,
+            inputPorts: [
+              { id: 'main', label: 'input', direction: 'input' },
+              { id: 'evidence', label: 'evidence', direction: 'input' },
+            ],
+          }
+        : item,
+    ),
+  };
+}
+
 function renderCanvas(
   canvas = canvasFixture(),
   selection: Record<string, unknown> = { type: 'workflow', id: 'source_flow' },
   connectionMode = 'control',
   onNotice = vi.fn(),
+  focusedWorkflowId: string | null = null,
 ) {
   const onCanvasChange = vi.fn();
   const onSelect = vi.fn();
@@ -103,7 +161,7 @@ function renderCanvas(
       selection={selection}
       connectionMode={connectionMode}
       workflowRun={null}
-      focusedWorkflowId={null}
+      focusedWorkflowId={focusedWorkflowId}
       callables={[]}
       workflows={[]}
       bindings={{}}
@@ -137,35 +195,170 @@ afterEach(() => {
 });
 
 describe('WorkspaceCanvas data edges', () => {
-  test('createDataEdgeCommand creates root data edge and auto-adds control dependency', () => {
-    const canvas = canvasFixture();
-    const result = createDataEdgeCommand(canvas, {
-      scopeWorkflowId: null,
-      sourceNodeId: 'source_agent',
+  test('createDataEdgeCommand rejects explicit main-to-main data edge', () => {
+    const canvas = canvasWithTargetEvidencePort();
+    expect(() =>
+      createDataEdgeCommand(canvas, {
+        scopeWorkflowId: null,
+        sourceNodeId: 'source_agent',
+        sourcePortId: 'main',
+        targetNodeId: 'target_flow',
+        targetPortId: 'main',
+        materialization: 'copy',
+      }),
+    ).toThrow(/Data Edge/u);
+  });
+
+  test('createDataEdgeCommand allows workflow input boundary main fan-out', () => {
+    const base = canvasFixture();
+    const canvas = {
+      ...base,
+      workflows: base.workflows.map((item) =>
+        item.id === 'source_flow'
+          ? {
+              ...item,
+              internalNodes: [
+                ...item.internalNodes,
+                {
+                  id: 'reviewer',
+                  name: 'Reviewer',
+                  task: 'agent',
+                  kind: 'Agent',
+                  status: 'not_run',
+                  callableId: 'fake-agent.generic',
+                  position: { x: 400, y: 72 },
+                },
+              ],
+            }
+          : item,
+      ),
+    };
+    const first = createDataEdgeCommand(canvas, {
+      scopeWorkflowId: 'source_flow',
+      sourceNodeId: 'source_flow__workflow_inputs',
       sourcePortId: 'main',
-      targetNodeId: 'target_flow',
+      targetNodeId: 'codex',
       targetPortId: 'main',
       materialization: 'copy',
     });
+    const second = createDataEdgeCommand(first.canvas, {
+      scopeWorkflowId: 'source_flow',
+      sourceNodeId: 'source_flow__workflow_inputs',
+      sourcePortId: 'main',
+      targetNodeId: 'reviewer',
+      targetPortId: 'main',
+      materialization: 'copy',
+    });
+    const sourceFlow = second.canvas.workflows.find((item) => item.id === 'source_flow');
 
-    expect(result.edge).toEqual(
-      expect.objectContaining({
-        kind: 'data',
-        source: { workflowId: 'source_agent', portId: 'main' },
-        target: { workflowId: 'target_flow', portId: 'main' },
-        materialization: 'copy',
-      }),
-    );
-    expect(result.autoAddedControlEdge).toBe(true);
-    expect(result.canvas.edges).toEqual(
+    expect(first.autoAddedControlEdge).toBe(false);
+    expect(second.autoAddedControlEdge).toBe(false);
+    expect(sourceFlow?.internalEdges).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ kind: 'data' }),
         expect.objectContaining({
-          kind: 'control',
-          source: { workflowId: 'source_agent' },
-          target: { workflowId: 'target_flow' },
+          kind: 'data',
+          source: { workflowId: 'source_flow__workflow_inputs', portId: 'main' },
+          target: { workflowId: 'codex', portId: 'main' },
+        }),
+        expect.objectContaining({
+          kind: 'data',
+          source: { workflowId: 'source_flow__workflow_inputs', portId: 'main' },
+          target: { workflowId: 'reviewer', portId: 'main' },
         }),
       ]),
+    );
+  });
+
+  test('createDataEdgeCommand allows workflow output boundary aggregation', () => {
+    const base = canvasFixture();
+    const canvas = {
+      ...base,
+      workflows: base.workflows.map((item) =>
+        item.id === 'source_flow'
+          ? {
+              ...item,
+              internalNodes: [
+                ...item.internalNodes,
+                {
+                  id: 'reviewer',
+                  name: 'Reviewer',
+                  task: 'agent',
+                  kind: 'Agent',
+                  status: 'not_run',
+                  callableId: 'fake-agent.generic',
+                  position: { x: 400, y: 72 },
+                },
+              ],
+            }
+          : item,
+      ),
+    };
+
+    const first = createDataEdgeCommand(canvas, {
+      scopeWorkflowId: 'source_flow',
+      sourceNodeId: 'codex',
+      sourcePortId: 'main',
+      targetNodeId: 'source_flow__workflow_outputs',
+      targetPortId: 'main',
+      materialization: 'copy',
+    });
+    const second = createDataEdgeCommand(first.canvas, {
+      scopeWorkflowId: 'source_flow',
+      sourceNodeId: 'reviewer',
+      sourcePortId: 'main',
+      targetNodeId: 'source_flow__workflow_outputs',
+      targetPortId: 'main',
+      materialization: 'copy',
+    });
+    const sourceFlow = second.canvas.workflows.find((item) => item.id === 'source_flow');
+
+    expect(first.autoAddedControlEdge).toBe(false);
+    expect(second.autoAddedControlEdge).toBe(false);
+    expect(sourceFlow?.internalEdges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'data',
+          source: { workflowId: 'codex', portId: 'main' },
+          target: { workflowId: 'source_flow__workflow_outputs', portId: 'main' },
+        }),
+        expect.objectContaining({
+          kind: 'data',
+          source: { workflowId: 'reviewer', portId: 'main' },
+          target: { workflowId: 'source_flow__workflow_outputs', portId: 'main' },
+        }),
+      ]),
+    );
+  });
+
+  test('createDataEdgeCommand reuses duplicate workflow output binding from the same source node', () => {
+    const canvas = canvasFixture();
+
+    const first = createDataEdgeCommand(canvas, {
+      scopeWorkflowId: 'source_flow',
+      sourceNodeId: 'codex',
+      sourcePortId: 'main',
+      targetNodeId: 'source_flow__workflow_outputs',
+      targetPortId: 'main',
+      materialization: 'copy',
+    });
+    const second = createDataEdgeCommand(first.canvas, {
+      scopeWorkflowId: 'source_flow',
+      sourceNodeId: 'codex',
+      sourcePortId: 'main',
+      targetNodeId: 'source_flow__workflow_outputs',
+      targetPortId: 'main',
+      materialization: 'copy',
+    });
+    const sourceFlow = second.canvas.workflows.find((item) => item.id === 'source_flow');
+
+    expect(second.edge).toEqual(first.edge);
+    expect(sourceFlow?.internalEdges).toHaveLength(1);
+    expect(sourceFlow?.internalEdges[0]).toEqual(
+      expect.objectContaining({
+        kind: 'data',
+        source: { workflowId: 'codex', portId: 'main' },
+        target: { workflowId: 'source_flow__workflow_outputs', portId: 'main' },
+      }),
     );
   });
 
@@ -219,13 +412,13 @@ describe('WorkspaceCanvas data edges', () => {
   });
 
   test('createDataEdgeCommand rejects one-cardinality target conflicts unless replaced', () => {
-    const canvas = canvasFixture();
+    const canvas = canvasWithTargetEvidencePort();
     const first = createDataEdgeCommand(canvas, {
       scopeWorkflowId: null,
       sourceNodeId: 'source_agent',
       sourcePortId: 'main',
       targetNodeId: 'target_flow',
-      targetPortId: 'main',
+      targetPortId: 'evidence',
       materialization: 'copy',
     });
 
@@ -235,7 +428,7 @@ describe('WorkspaceCanvas data edges', () => {
         sourceNodeId: 'source_flow',
         sourcePortId: 'main',
         targetNodeId: 'target_flow',
-        targetPortId: 'main',
+        targetPortId: 'evidence',
         materialization: 'copy',
       }),
     ).toThrow(/已有 data edge/u);
@@ -243,7 +436,7 @@ describe('WorkspaceCanvas data edges', () => {
 
   test('data mode creates a data edge from node handles and auto-adds control dependency', async () => {
     const { canvas, onCanvasChange } = renderCanvas(
-      canvasFixture(),
+      canvasWithTargetEvidencePort(),
       { type: 'workflow', id: 'source_agent' },
       'data',
     );
@@ -254,7 +447,7 @@ describe('WorkspaceCanvas data edges', () => {
         source: 'source_agent',
         target: 'target_flow',
         sourceHandle: 'source_agent:output:main',
-        targetHandle: 'target_flow:input:main',
+        targetHandle: 'target_flow:input:evidence',
       });
     });
 
@@ -266,7 +459,7 @@ describe('WorkspaceCanvas data edges', () => {
         expect.objectContaining({
           kind: 'data',
           source: expect.objectContaining({ workflowId: 'source_agent', portId: 'main' }),
-          target: expect.objectContaining({ workflowId: 'target_flow', portId: 'main' }),
+          target: expect.objectContaining({ workflowId: 'target_flow', portId: 'evidence' }),
         }),
         expect.objectContaining({
           kind: 'control',
@@ -275,6 +468,889 @@ describe('WorkspaceCanvas data edges', () => {
         }),
       ]),
     );
+  });
+
+  test('control mode maps external node to workflow outer input as root control', async () => {
+    const { canvas, onCanvasChange } = renderCanvas(canvasFixture(), { type: 'workflow', id: 'source_flow' }, 'control');
+    await waitForFlowNodes();
+
+    act(() => {
+      (flowMock.props?.onConnect as (connection: unknown) => void)({
+        source: 'source_agent',
+        target: 'source_flow',
+        sourceHandle: null,
+        targetHandle: 'source_flow:workflow-input-outer-target',
+      });
+    });
+
+    expect(onCanvasChange).toHaveBeenCalledTimes(1);
+    const updater = onCanvasChange.mock.calls[0][0] as (current: typeof canvas) => typeof canvas;
+    const nextCanvas = updater(canvas);
+    expect(nextCanvas.edges).toEqual([
+      expect.objectContaining({
+        kind: 'control',
+        source: { workflowId: 'source_agent' },
+        target: { workflowId: 'source_flow' },
+      }),
+    ]);
+    const sourceFlow = nextCanvas.workflows.find((item) => item.id === 'source_flow');
+    expect(sourceFlow?.internalEdges).toEqual([]);
+  });
+
+  test('control mode maps workflow outer output to workflow outer input as root workflow control', async () => {
+    const { canvas, onCanvasChange } = renderCanvas(canvasFixture(), { type: 'workflow', id: 'source_flow' }, 'control');
+    await waitForFlowNodes();
+
+    act(() => {
+      (flowMock.props?.onConnect as (connection: unknown) => void)({
+        source: 'source_flow',
+        target: 'target_flow',
+        sourceHandle: 'source_flow:workflow-output-outer-source',
+        targetHandle: 'target_flow:workflow-input-outer-target',
+      });
+    });
+
+    expect(onCanvasChange).toHaveBeenCalledTimes(1);
+    const updater = onCanvasChange.mock.calls[0][0] as (current: typeof canvas) => typeof canvas;
+    const nextCanvas = updater(canvas);
+    expect(nextCanvas.edges).toEqual([
+      expect.objectContaining({
+        kind: 'control',
+        source: { workflowId: 'source_flow' },
+        target: { workflowId: 'target_flow' },
+      }),
+    ]);
+    expect(nextCanvas.workflows.find((item) => item.id === 'source_flow')?.internalEdges).toEqual([]);
+    expect(nextCanvas.workflows.find((item) => item.id === 'target_flow')?.internalEdges).toEqual([]);
+  });
+
+  test('control fallback hit-test ignores hidden data port handles', () => {
+    const workflowControlHandle = document.createElement('div');
+    workflowControlHandle.className = 'react-flow__handle workflow-control-handle target';
+    const agentControlHandle = document.createElement('div');
+    agentControlHandle.className = 'react-flow__handle agent-control-handle source';
+    const hiddenDataHandle = document.createElement('div');
+    hiddenDataHandle.className = 'react-flow__handle workflow-port-handle hidden input target';
+
+    expect(isConnectionHandleForMode(workflowControlHandle, 'control')).toBe(true);
+    expect(isConnectionHandleForMode(agentControlHandle, 'control')).toBe(true);
+    expect(isConnectionHandleForMode(hiddenDataHandle, 'control')).toBe(false);
+    expect(isConnectionHandleForMode(hiddenDataHandle, 'data')).toBe(true);
+  });
+
+  test('React Flow click-to-connect stays disabled while Workbench owns click state', async () => {
+    renderCanvas(canvasFixture(), { type: 'workflow', id: 'source_flow' }, 'control');
+    await waitForFlowNodes();
+
+    expect(flowMock.props?.connectOnClick).toBe(false);
+  });
+
+  test('document release fallback commits root agent to workflow outer input', async () => {
+    const { canvas, onCanvasChange } = renderCanvas(canvasFixture(), { type: 'workflow', id: 'source_flow' }, 'control');
+    await waitForFlowNodes();
+
+    const sourceHandle = document.createElement('div');
+    sourceHandle.className = 'react-flow__handle workflow-control-handle output agent-control-handle source';
+    sourceHandle.setAttribute('data-nodeid', 'source_agent');
+    sourceHandle.setAttribute('data-handleid', 'source_agent:control:source');
+    const targetHandle = document.createElement('div');
+    targetHandle.className = 'react-flow__handle workflow-control-handle input workflow-shell-outer-input target';
+    targetHandle.setAttribute('data-nodeid', 'source_flow');
+    targetHandle.setAttribute('data-handleid', 'source_flow:workflow-input-outer-target');
+    document.body.append(sourceHandle, targetHandle);
+    const originalElementFromPoint = document.elementFromPoint;
+    Object.defineProperty(document, 'elementFromPoint', {
+      configurable: true,
+      value: vi.fn(() => targetHandle),
+    });
+
+    try {
+      fireEvent.pointerDown(sourceHandle, { button: 0, clientX: 10, clientY: 10 });
+      fireEvent.pointerUp(targetHandle, { button: 0, clientX: 20, clientY: 20 });
+
+      await waitFor(() => expect(onCanvasChange).toHaveBeenCalledTimes(1));
+    } finally {
+      Object.defineProperty(document, 'elementFromPoint', {
+        configurable: true,
+        value: originalElementFromPoint,
+      });
+      sourceHandle.remove();
+      targetHandle.remove();
+    }
+
+    const updater = onCanvasChange.mock.calls[0][0] as (current: typeof canvas) => typeof canvas;
+    const nextCanvas = updater(canvas);
+    expect(nextCanvas.edges).toEqual([
+      expect.objectContaining({
+        kind: 'control',
+        source: { workflowId: 'source_agent' },
+        target: { workflowId: 'source_flow' },
+      }),
+    ]);
+  });
+
+  test('visible control handles start control connections even when global mode is data', async () => {
+    const { canvas, onCanvasChange } = renderCanvas(canvasFixture(), { type: 'workflow', id: 'source_flow' }, 'data');
+    await waitForFlowNodes();
+
+    const sourceHandle = document.createElement('div');
+    sourceHandle.className = 'react-flow__handle workflow-control-handle output agent-control-handle source';
+    sourceHandle.setAttribute('data-nodeid', 'source_agent');
+    sourceHandle.setAttribute('data-handleid', 'source_agent:control:source');
+    const targetHandle = document.createElement('div');
+    targetHandle.className = 'react-flow__handle workflow-control-handle input workflow-shell-outer-input target';
+    targetHandle.setAttribute('data-nodeid', 'source_flow');
+    targetHandle.setAttribute('data-handleid', 'source_flow:workflow-input-outer-target');
+    document.body.append(sourceHandle, targetHandle);
+    const originalElementFromPoint = document.elementFromPoint;
+    Object.defineProperty(document, 'elementFromPoint', {
+      configurable: true,
+      value: vi.fn(() => targetHandle),
+    });
+
+    try {
+      fireEvent.pointerDown(sourceHandle, { button: 0, clientX: 10, clientY: 10 });
+      fireEvent.pointerUp(targetHandle, { button: 0, clientX: 20, clientY: 20 });
+
+      await waitFor(() => expect(onCanvasChange).toHaveBeenCalledTimes(1));
+    } finally {
+      Object.defineProperty(document, 'elementFromPoint', {
+        configurable: true,
+        value: originalElementFromPoint,
+      });
+      sourceHandle.remove();
+      targetHandle.remove();
+    }
+
+    const updater = onCanvasChange.mock.calls[0][0] as (current: typeof canvas) => typeof canvas;
+    const nextCanvas = updater(canvas);
+    expect(nextCanvas.edges).toEqual([
+      expect.objectContaining({
+        kind: 'control',
+        source: { workflowId: 'source_agent' },
+        target: { workflowId: 'source_flow' },
+      }),
+    ]);
+  });
+
+  test('document release fallback commits from release target handle when coordinates miss', async () => {
+    const { canvas, onCanvasChange } = renderCanvas(canvasFixture(), { type: 'workflow', id: 'source_flow' }, 'control');
+    await waitForFlowNodes();
+
+    const sourceHandle = document.createElement('div');
+    sourceHandle.className = 'react-flow__handle workflow-control-handle output agent-control-handle source';
+    sourceHandle.setAttribute('data-nodeid', 'source_agent');
+    sourceHandle.setAttribute('data-handleid', 'source_agent:control:source');
+    const targetHandle = document.createElement('div');
+    targetHandle.className = 'react-flow__handle workflow-control-handle input workflow-shell-outer-input target';
+    targetHandle.setAttribute('data-nodeid', 'source_flow');
+    targetHandle.setAttribute('data-handleid', 'source_flow:workflow-input-outer-target');
+    document.body.append(sourceHandle, targetHandle);
+    const originalElementFromPoint = document.elementFromPoint;
+    Object.defineProperty(document, 'elementFromPoint', {
+      configurable: true,
+      value: vi.fn(() => document.body),
+    });
+
+    try {
+      fireEvent.pointerDown(sourceHandle, { button: 0, clientX: 10, clientY: 10 });
+      fireEvent.pointerUp(targetHandle, { button: 0, clientX: -200, clientY: -200 });
+
+      await waitFor(() => expect(onCanvasChange).toHaveBeenCalledTimes(1));
+    } finally {
+      Object.defineProperty(document, 'elementFromPoint', {
+        configurable: true,
+        value: originalElementFromPoint,
+      });
+      sourceHandle.remove();
+      targetHandle.remove();
+    }
+
+    const updater = onCanvasChange.mock.calls[0][0] as (current: typeof canvas) => typeof canvas;
+    const nextCanvas = updater(canvas);
+    expect(nextCanvas.edges).toEqual([
+      expect.objectContaining({
+        kind: 'control',
+        source: { workflowId: 'source_agent' },
+        target: { workflowId: 'source_flow' },
+      }),
+    ]);
+  });
+
+  test('ACC control hitboxes commit root agent to workflow outer input', async () => {
+    const { canvas, onCanvasChange } = renderCanvas(canvasFixture(), { type: 'workflow', id: 'source_flow' }, 'control');
+    await waitForFlowNodes();
+
+    const sourceHandle = document.createElement('div');
+    sourceHandle.className = 'acc-connect-hitbox agent-control-hitbox';
+    sourceHandle.setAttribute('data-nodeid', 'source_agent');
+    sourceHandle.setAttribute('data-handleid', 'source_agent:control:source');
+    const targetHandle = document.createElement('div');
+    targetHandle.className = 'acc-connect-hitbox workflow-shell-outer-input';
+    targetHandle.setAttribute('data-nodeid', 'source_flow');
+    targetHandle.setAttribute('data-handleid', 'source_flow:workflow-input-outer-target');
+    document.body.append(sourceHandle, targetHandle);
+    const originalElementFromPoint = document.elementFromPoint;
+    Object.defineProperty(document, 'elementFromPoint', {
+      configurable: true,
+      value: vi.fn(() => targetHandle),
+    });
+
+    try {
+      fireEvent.pointerDown(sourceHandle, { button: 0, clientX: 10, clientY: 10 });
+      fireEvent.pointerUp(targetHandle, { button: 0, clientX: 20, clientY: 20 });
+
+      await waitFor(() => expect(onCanvasChange).toHaveBeenCalledTimes(1));
+    } finally {
+      Object.defineProperty(document, 'elementFromPoint', {
+        configurable: true,
+        value: originalElementFromPoint,
+      });
+      sourceHandle.remove();
+      targetHandle.remove();
+    }
+
+    const updater = onCanvasChange.mock.calls[0][0] as (current: typeof canvas) => typeof canvas;
+    const nextCanvas = updater(canvas);
+    expect(nextCanvas.edges).toEqual([
+      expect.objectContaining({
+        kind: 'control',
+        source: { workflowId: 'source_agent' },
+        target: { workflowId: 'source_flow' },
+      }),
+    ]);
+  });
+
+  test('visible workflow control handles commit workflow to workflow root control', async () => {
+    const { canvas, onCanvasChange } = renderCanvas(canvasFixture(), { type: 'workflow', id: 'source_flow' }, 'control');
+    await waitForFlowNodes();
+
+    const sourceHandle = document.createElement('div');
+    sourceHandle.className = 'react-flow__handle workflow-control-handle output workflow-shell-outer-output';
+    sourceHandle.setAttribute('data-nodeid', 'source_flow');
+    sourceHandle.setAttribute('data-handleid', 'source_flow:workflow-output-outer-source');
+    sourceHandle.setAttribute('data-acc-connection-mode', 'control');
+    sourceHandle.setAttribute('data-acc-connection-side', 'source');
+    const targetHandle = document.createElement('div');
+    targetHandle.className = 'react-flow__handle workflow-control-handle input workflow-shell-outer-input';
+    targetHandle.setAttribute('data-nodeid', 'target_flow');
+    targetHandle.setAttribute('data-handleid', 'target_flow:workflow-input-outer-target');
+    targetHandle.setAttribute('data-acc-connection-mode', 'control');
+    targetHandle.setAttribute('data-acc-connection-side', 'target');
+    document.body.append(sourceHandle, targetHandle);
+    const originalElementFromPoint = document.elementFromPoint;
+    Object.defineProperty(document, 'elementFromPoint', {
+      configurable: true,
+      value: vi.fn(() => targetHandle),
+    });
+
+    try {
+      fireEvent.pointerDown(sourceHandle, { button: 0, clientX: 10, clientY: 10 });
+      fireEvent.pointerUp(targetHandle, { button: 0, clientX: 20, clientY: 20 });
+
+      await waitFor(() => expect(onCanvasChange).toHaveBeenCalledTimes(1));
+    } finally {
+      Object.defineProperty(document, 'elementFromPoint', {
+        configurable: true,
+        value: originalElementFromPoint,
+      });
+      sourceHandle.remove();
+      targetHandle.remove();
+    }
+
+    const updater = onCanvasChange.mock.calls[0][0] as (current: typeof canvas) => typeof canvas;
+    const nextCanvas = updater(canvas);
+    expect(nextCanvas.edges).toEqual([
+      expect.objectContaining({
+        kind: 'control',
+        source: { workflowId: 'source_flow' },
+        target: { workflowId: 'target_flow' },
+      }),
+    ]);
+  });
+
+  test('visible workflow control handles commit workflow control when drag starts from target side', async () => {
+    const { canvas, onCanvasChange } = renderCanvas(canvasFixture(), { type: 'workflow', id: 'source_flow' }, 'control');
+    await waitForFlowNodes();
+
+    const sourceHandle = document.createElement('div');
+    sourceHandle.className = 'react-flow__handle workflow-control-handle output workflow-shell-outer-output';
+    sourceHandle.setAttribute('data-nodeid', 'source_flow');
+    sourceHandle.setAttribute('data-handleid', 'source_flow:workflow-output-outer-source');
+    sourceHandle.setAttribute('data-acc-connection-mode', 'control');
+    sourceHandle.setAttribute('data-acc-connection-side', 'source');
+    const targetHandle = document.createElement('div');
+    targetHandle.className = 'react-flow__handle workflow-control-handle input workflow-shell-outer-input';
+    targetHandle.setAttribute('data-nodeid', 'target_flow');
+    targetHandle.setAttribute('data-handleid', 'target_flow:workflow-input-outer-target');
+    targetHandle.setAttribute('data-acc-connection-mode', 'control');
+    targetHandle.setAttribute('data-acc-connection-side', 'target');
+    document.body.append(sourceHandle, targetHandle);
+    const originalElementFromPoint = document.elementFromPoint;
+    Object.defineProperty(document, 'elementFromPoint', {
+      configurable: true,
+      value: vi.fn(() => sourceHandle),
+    });
+
+    try {
+      fireEvent.pointerDown(targetHandle, { button: 0, clientX: 20, clientY: 20 });
+      fireEvent.pointerUp(sourceHandle, { button: 0, clientX: 10, clientY: 10 });
+
+      await waitFor(() => expect(onCanvasChange).toHaveBeenCalledTimes(1));
+    } finally {
+      Object.defineProperty(document, 'elementFromPoint', {
+        configurable: true,
+        value: originalElementFromPoint,
+      });
+      sourceHandle.remove();
+      targetHandle.remove();
+    }
+
+    const updater = onCanvasChange.mock.calls[0][0] as (current: typeof canvas) => typeof canvas;
+    const nextCanvas = updater(canvas);
+    expect(nextCanvas.edges).toEqual([
+      expect.objectContaining({
+        kind: 'control',
+        source: { workflowId: 'source_flow' },
+        target: { workflowId: 'target_flow' },
+      }),
+    ]);
+  });
+
+  test('document release fallback uses the release-time pending snapshot after connect end clears refs', async () => {
+    const { canvas, onCanvasChange } = renderCanvas(canvasFixture(), { type: 'workflow', id: 'source_flow' }, 'control');
+    await waitForFlowNodes();
+
+    const sourceHandle = document.createElement('div');
+    sourceHandle.className = 'react-flow__handle workflow-control-handle output agent-control-handle source';
+    sourceHandle.setAttribute('data-nodeid', 'source_agent');
+    sourceHandle.setAttribute('data-handleid', 'source_agent:control:source');
+    const targetHandle = document.createElement('div');
+    targetHandle.className = 'react-flow__handle workflow-control-handle input workflow-shell-outer-input target';
+    targetHandle.setAttribute('data-nodeid', 'source_flow');
+    targetHandle.setAttribute('data-handleid', 'source_flow:workflow-input-outer-target');
+    document.body.append(sourceHandle, targetHandle);
+    const originalElementFromPoint = document.elementFromPoint;
+    Object.defineProperty(document, 'elementFromPoint', {
+      configurable: true,
+      value: vi.fn(() => targetHandle),
+    });
+
+    try {
+      fireEvent.pointerDown(sourceHandle, { button: 0, clientX: 10, clientY: 10 });
+      fireEvent.pointerUp(targetHandle, { button: 0, clientX: 20, clientY: 20 });
+      act(() => {
+        (flowMock.props?.onConnectEnd as (event: unknown) => void)({
+          target: targetHandle,
+          clientX: 20,
+          clientY: 20,
+        });
+      });
+
+      await waitFor(() => expect(onCanvasChange).toHaveBeenCalledTimes(1));
+    } finally {
+      Object.defineProperty(document, 'elementFromPoint', {
+        configurable: true,
+        value: originalElementFromPoint,
+      });
+      sourceHandle.remove();
+      targetHandle.remove();
+    }
+
+    const updater = onCanvasChange.mock.calls[0][0] as (current: typeof canvas) => typeof canvas;
+    const nextCanvas = updater(canvas);
+    expect(nextCanvas.edges).toEqual([
+      expect.objectContaining({
+        kind: 'control',
+        source: { workflowId: 'source_agent' },
+        target: { workflowId: 'source_flow' },
+      }),
+    ]);
+  });
+
+  test('node drag start cannot clear an active handle connection', async () => {
+    const { canvas, onCanvasChange } = renderCanvas(canvasFixture(), { type: 'workflow', id: 'source_flow' }, 'control');
+    await waitForFlowNodes();
+
+    const targetHandle = document.createElement('div');
+    targetHandle.className = 'react-flow__handle workflow-control-handle input workflow-shell-outer-input target';
+    targetHandle.setAttribute('data-nodeid', 'source_flow');
+    targetHandle.setAttribute('data-handleid', 'source_flow:workflow-input-outer-target');
+    document.body.append(targetHandle);
+    const originalElementFromPoint = document.elementFromPoint;
+    Object.defineProperty(document, 'elementFromPoint', {
+      configurable: true,
+      value: vi.fn(() => targetHandle),
+    });
+
+    try {
+      act(() => {
+        (flowMock.props?.onConnectStart as (event: unknown, params: unknown) => void)(
+          { target: document.createElement('div') },
+          {
+            nodeId: 'source_agent',
+            handleId: 'source_agent:control:source',
+            handleType: 'source',
+          },
+        );
+        (flowMock.props?.onNodeDragStart as (event: unknown, node: unknown) => void)(
+          { target: document.createElement('div') },
+          { id: 'source_agent', position: { x: 120, y: 450 } },
+        );
+        (flowMock.props?.onConnectEnd as (event: unknown) => void)({
+          target: document.createElement('div'),
+          clientX: 20,
+          clientY: 20,
+        });
+      });
+
+      await waitFor(() => expect(onCanvasChange).toHaveBeenCalledTimes(1));
+    } finally {
+      Object.defineProperty(document, 'elementFromPoint', {
+        configurable: true,
+        value: originalElementFromPoint,
+      });
+      targetHandle.remove();
+    }
+
+    const updater = onCanvasChange.mock.calls[0][0] as (current: typeof canvas) => typeof canvas;
+    const nextCanvas = updater(canvas);
+    expect(nextCanvas.edges).toEqual([
+      expect.objectContaining({
+        kind: 'control',
+        source: { workflowId: 'source_agent' },
+        target: { workflowId: 'source_flow' },
+      }),
+    ]);
+  });
+
+  test('document release fallback commits workflow inner input to internal agent', async () => {
+    const { canvas, onCanvasChange } = renderCanvas(canvasFixture(), { type: 'workflow', id: 'source_flow' }, 'control');
+    await waitForFlowNodes();
+
+    const sourceHandle = document.createElement('div');
+    sourceHandle.className = 'react-flow__handle workflow-control-handle input workflow-shell-inner-input source';
+    sourceHandle.setAttribute('data-nodeid', 'source_flow');
+    sourceHandle.setAttribute('data-handleid', 'source_flow:workflow-input-inner-source');
+    const targetHandle = document.createElement('div');
+    targetHandle.className = 'react-flow__handle workflow-control-handle input agent-control-handle target';
+    targetHandle.setAttribute('data-nodeid', 'source_flow__internal__codex');
+    targetHandle.setAttribute('data-handleid', 'source_flow__internal__codex:control:target');
+    document.body.append(sourceHandle, targetHandle);
+    const originalElementFromPoint = document.elementFromPoint;
+    Object.defineProperty(document, 'elementFromPoint', {
+      configurable: true,
+      value: vi.fn(() => targetHandle),
+    });
+
+    try {
+      fireEvent.pointerDown(sourceHandle, { button: 0, clientX: 10, clientY: 10 });
+      fireEvent.pointerUp(targetHandle, { button: 0, clientX: 20, clientY: 20 });
+
+      await waitFor(() => expect(onCanvasChange).toHaveBeenCalledTimes(1));
+    } finally {
+      Object.defineProperty(document, 'elementFromPoint', {
+        configurable: true,
+        value: originalElementFromPoint,
+      });
+      sourceHandle.remove();
+      targetHandle.remove();
+    }
+
+    const updater = onCanvasChange.mock.calls[0][0] as (current: typeof canvas) => typeof canvas;
+    const nextCanvas = updater(canvas);
+    const sourceFlow = nextCanvas.workflows.find((item) => item.id === 'source_flow');
+    expect(sourceFlow?.internalEdges).toEqual([
+      expect.objectContaining({
+        kind: 'data',
+        source: { workflowId: 'source_flow__workflow_inputs', portId: 'main' },
+        target: { workflowId: 'codex', portId: 'main' },
+      }),
+    ]);
+  });
+
+  test('ACC control hitboxes commit workflow inner input without React Flow source target classes', async () => {
+    const { canvas, onCanvasChange } = renderCanvas(canvasFixture(), { type: 'workflow', id: 'source_flow' }, 'control');
+    await waitForFlowNodes();
+
+    const sourceHandle = document.createElement('div');
+    sourceHandle.className = 'acc-connect-hitbox workflow-shell-inner-input';
+    sourceHandle.setAttribute('data-nodeid', 'source_flow');
+    sourceHandle.setAttribute('data-handleid', 'source_flow:workflow-input-inner-source');
+    const targetHandle = document.createElement('div');
+    targetHandle.className = 'acc-connect-hitbox agent-control-hitbox';
+    targetHandle.setAttribute('data-nodeid', 'source_flow__internal__codex');
+    targetHandle.setAttribute('data-handleid', 'source_flow__internal__codex:control:target');
+    document.body.append(sourceHandle, targetHandle);
+    const originalElementFromPoint = document.elementFromPoint;
+    Object.defineProperty(document, 'elementFromPoint', {
+      configurable: true,
+      value: vi.fn(() => targetHandle),
+    });
+
+    try {
+      fireEvent.pointerDown(sourceHandle, { button: 0, clientX: 10, clientY: 10 });
+      fireEvent.pointerUp(targetHandle, { button: 0, clientX: 20, clientY: 20 });
+
+      await waitFor(() => expect(onCanvasChange).toHaveBeenCalledTimes(1));
+    } finally {
+      Object.defineProperty(document, 'elementFromPoint', {
+        configurable: true,
+        value: originalElementFromPoint,
+      });
+      sourceHandle.remove();
+      targetHandle.remove();
+    }
+
+    const updater = onCanvasChange.mock.calls[0][0] as (current: typeof canvas) => typeof canvas;
+    const nextCanvas = updater(canvas);
+    const sourceFlow = nextCanvas.workflows.find((item) => item.id === 'source_flow');
+    expect(sourceFlow?.internalEdges).toEqual([
+      expect.objectContaining({
+        kind: 'data',
+        source: { workflowId: 'source_flow__workflow_inputs', portId: 'main' },
+        target: { workflowId: 'codex', portId: 'main' },
+      }),
+    ]);
+  });
+
+  test('visible workflow inner control handle connects to internal agent even when global mode is data', async () => {
+    const { canvas, onCanvasChange } = renderCanvas(canvasFixture(), { type: 'workflow', id: 'source_flow' }, 'data');
+    await waitForFlowNodes();
+
+    const sourceHandle = document.createElement('div');
+    sourceHandle.className = 'react-flow__handle workflow-control-handle input workflow-shell-inner-input source';
+    sourceHandle.setAttribute('data-nodeid', 'source_flow');
+    sourceHandle.setAttribute('data-handleid', 'source_flow:workflow-input-inner-source');
+    const targetHandle = document.createElement('div');
+    targetHandle.className = 'react-flow__handle workflow-control-handle input agent-control-handle target';
+    targetHandle.setAttribute('data-nodeid', 'source_flow__internal__codex');
+    targetHandle.setAttribute('data-handleid', 'source_flow__internal__codex:control:target');
+    document.body.append(sourceHandle, targetHandle);
+    const originalElementFromPoint = document.elementFromPoint;
+    Object.defineProperty(document, 'elementFromPoint', {
+      configurable: true,
+      value: vi.fn(() => targetHandle),
+    });
+
+    try {
+      fireEvent.pointerDown(sourceHandle, { button: 0, clientX: 10, clientY: 10 });
+      fireEvent.pointerUp(targetHandle, { button: 0, clientX: 20, clientY: 20 });
+
+      await waitFor(() => expect(onCanvasChange).toHaveBeenCalledTimes(1));
+    } finally {
+      Object.defineProperty(document, 'elementFromPoint', {
+        configurable: true,
+        value: originalElementFromPoint,
+      });
+      sourceHandle.remove();
+      targetHandle.remove();
+    }
+
+    const updater = onCanvasChange.mock.calls[0][0] as (current: typeof canvas) => typeof canvas;
+    const nextCanvas = updater(canvas);
+    const sourceFlow = nextCanvas.workflows.find((item) => item.id === 'source_flow');
+    expect(sourceFlow?.internalEdges).toEqual([
+      expect.objectContaining({
+        kind: 'data',
+        source: { workflowId: 'source_flow__workflow_inputs', portId: 'main' },
+        target: { workflowId: 'codex', portId: 'main' },
+      }),
+    ]);
+  });
+
+  test('root graph compilation preserves external caller, workflow node, and shell control edge', () => {
+    const canvas = {
+      ...canvasFixture(),
+      edges: [
+        {
+          id: 'control_source_agent_source_flow',
+          kind: 'control' as const,
+          source: { workflowId: 'source_agent' },
+          target: { workflowId: 'source_flow' },
+        },
+      ],
+    };
+
+    const graph = canvasToWorkflowGraph(canvas);
+
+    expect(graph.nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'source_agent' }),
+        expect.objectContaining({ id: 'source_flow' }),
+      ]),
+    );
+    expect(graph.control_edges).toEqual([
+      expect.objectContaining({
+        from: 'source_agent',
+        to: 'source_flow',
+      }),
+    ]);
+  });
+
+  test('control mode maps workflow inner input to workflow input boundary binding', async () => {
+    const { canvas, onCanvasChange } = renderCanvas(canvasFixture(), { type: 'workflow', id: 'source_flow' }, 'control');
+    await waitForFlowNodes();
+
+    act(() => {
+      (flowMock.props?.onConnect as (connection: unknown) => void)({
+        source: 'source_flow',
+        target: 'source_flow__internal__codex',
+        sourceHandle: 'source_flow:workflow-input-inner-source',
+        targetHandle: null,
+      });
+    });
+
+    expect(onCanvasChange).toHaveBeenCalledTimes(1);
+    const updater = onCanvasChange.mock.calls[0][0] as (current: typeof canvas) => typeof canvas;
+    const nextCanvas = updater(canvas);
+    const sourceFlow = nextCanvas.workflows.find((item) => item.id === 'source_flow');
+    expect(sourceFlow?.internalEdges).toEqual([
+      expect.objectContaining({
+        kind: 'data',
+        source: { workflowId: 'source_flow__workflow_inputs', portId: 'main' },
+        target: { workflowId: 'codex', portId: 'main' },
+      }),
+    ]);
+    expect(nextCanvas.edges).toEqual([]);
+  });
+
+  test('state machine accepts workflow inner input to internal agent input', () => {
+    const resolved = resolveScopedConnection(
+      canvasFixture(),
+      {
+        source: 'source_flow',
+        target: 'source_flow__internal__codex',
+        sourceHandle: 'source_flow:workflow-input-inner-source',
+        targetHandle: null,
+      },
+      'control',
+    );
+
+    expect(resolved).toEqual(
+      expect.objectContaining({
+        accepted: true,
+        semantic: 'workflow_input_main_binding',
+        scopeWorkflowId: 'source_flow',
+        edge: expect.objectContaining({
+          kind: 'data',
+          source: { workflowId: 'source_flow__workflow_inputs', portId: 'main' },
+          target: { workflowId: 'codex', portId: 'main' },
+        }),
+      }),
+    );
+  });
+
+  test('connect-end fallback builds the same connection from pending source and release target', () => {
+    const connection = connectionFromPendingEndpoint(
+      {
+        nodeId: 'source_flow',
+        handleId: 'source_flow:workflow-input-inner-source',
+        mode: 'control',
+        side: 'source',
+      },
+      {
+        nodeId: 'source_flow__internal__codex',
+        handleId: null,
+        side: 'target',
+      },
+    );
+
+    expect(connection).toEqual({
+      source: 'source_flow',
+      sourceHandle: 'source_flow:workflow-input-inner-source',
+      target: 'source_flow__internal__codex',
+      targetHandle: null,
+    });
+  });
+
+  test('connect fallback recovers workflow input binding when direct connection direction is wrong', () => {
+    const candidates = connectionCandidatesFromPendingEndpoint(
+      {
+        nodeId: 'source_flow',
+        handleId: 'source_flow:workflow-input-inner-source',
+        mode: 'control',
+        side: 'target',
+        endpoint: {
+          view: 'root-shell',
+          role: 'workflow_inner_input',
+          nodeId: 'source_flow',
+          workflowId: 'source_flow',
+          portId: 'main',
+          handleId: 'source_flow:workflow-input-inner-source',
+        },
+      },
+      {
+        source: 'source_flow__internal__codex',
+        sourceHandle: null,
+        target: 'source_flow',
+        targetHandle: 'source_flow:workflow-input-inner-source',
+      },
+    );
+    const accepted = candidates
+      .map((candidate) => resolveScopedConnection(canvasFixture(), candidate, 'control'))
+      .find((candidate) => candidate.accepted);
+
+    expect(accepted).toEqual(
+      expect.objectContaining({
+        accepted: true,
+        semantic: 'workflow_input_main_binding',
+        scopeWorkflowId: 'source_flow',
+      }),
+    );
+  });
+
+  test('reversed direct connection can still resolve to workflow input boundary binding', () => {
+    const reversed = reverseConnection({
+      source: 'source_flow__internal__codex',
+      sourceHandle: null,
+      target: 'source_flow',
+      targetHandle: 'source_flow:workflow-input-inner-source',
+    });
+    const resolved = resolveScopedConnection(canvasFixture(), reversed || {}, 'control');
+
+    expect(resolved).toEqual(
+      expect.objectContaining({
+        accepted: true,
+        semantic: 'workflow_input_main_binding',
+        scopeWorkflowId: 'source_flow',
+      }),
+    );
+  });
+
+  test('control mode maps workflow shell output to workflow output boundary binding', async () => {
+    const { canvas, onCanvasChange } = renderCanvas(canvasFixture(), { type: 'workflow', id: 'source_flow' }, 'control');
+    await waitForFlowNodes();
+
+    act(() => {
+      (flowMock.props?.onConnect as (connection: unknown) => void)({
+        source: 'source_flow__internal__codex',
+        target: 'source_flow',
+        sourceHandle: null,
+        targetHandle: 'source_flow:workflow-output-inner-target',
+      });
+    });
+
+    expect(onCanvasChange).toHaveBeenCalledTimes(1);
+    const updater = onCanvasChange.mock.calls[0][0] as (current: typeof canvas) => typeof canvas;
+    const nextCanvas = updater(canvas);
+    const sourceFlow = nextCanvas.workflows.find((item) => item.id === 'source_flow');
+    expect(sourceFlow?.internalEdges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'data',
+          source: { workflowId: 'codex', portId: 'main' },
+          target: { workflowId: 'source_flow__workflow_outputs', portId: 'main' },
+        }),
+      ]),
+    );
+    expect(nextCanvas.edges).toEqual([]);
+  });
+
+  test('focused workflow control mode connects internal agents in the original workflow scope', async () => {
+    const base = canvasFixture();
+    const canvas = {
+      ...base,
+      workflows: base.workflows.map((item) =>
+        item.id === 'source_flow'
+          ? {
+              ...item,
+              internalNodes: [
+                ...item.internalNodes,
+                {
+                  id: 'reviewer',
+                  name: 'Reviewer',
+                  task: 'agent',
+                  kind: 'Agent',
+                  status: 'not_run',
+                  callableId: 'fake-agent.generic',
+                  position: { x: 400, y: 72 },
+                },
+              ],
+            }
+          : item,
+      ),
+    };
+    const { onCanvasChange } = renderCanvas(
+      canvas,
+      { type: 'internal', workflowId: 'source_flow', nodeId: 'codex' },
+      'control',
+      vi.fn(),
+      'source_flow',
+    );
+    await waitFor(() => {
+      expect(flowMock.props?.nodes).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'codex' })]));
+    });
+
+    act(() => {
+      (flowMock.props?.onConnect as (connection: unknown) => void)({
+        source: 'codex',
+        target: 'reviewer',
+        sourceHandle: null,
+        targetHandle: null,
+      });
+    });
+
+    expect(onCanvasChange).toHaveBeenCalledTimes(1);
+    const updater = onCanvasChange.mock.calls[0][0] as (current: typeof canvas) => typeof canvas;
+    const nextCanvas = updater(canvas);
+    const sourceFlow = nextCanvas.workflows.find((item) => item.id === 'source_flow');
+    expect(sourceFlow?.internalEdges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'control',
+          source: { workflowId: 'codex' },
+          target: { workflowId: 'reviewer' },
+        }),
+      ]),
+    );
+    expect(nextCanvas.edges).toEqual([]);
+  });
+
+  test('clicking two internal nodes selects them without creating a control edge', async () => {
+    const base = canvasFixture();
+    const canvas = {
+      ...base,
+      workflows: base.workflows.map((item) =>
+        item.id === 'source_flow'
+          ? {
+              ...item,
+              internalNodes: [
+                ...item.internalNodes,
+                {
+                  id: 'reviewer',
+                  name: 'Reviewer',
+                  task: 'agent',
+                  kind: 'Agent',
+                  status: 'not_run',
+                  callableId: 'fake-agent.generic',
+                  position: { x: 400, y: 72 },
+                },
+              ],
+            }
+          : item,
+      ),
+    };
+    const { onCanvasChange, onSelect } = renderCanvas(
+      canvas,
+      { type: 'internal', workflowId: 'source_flow', nodeId: 'codex' },
+      'control',
+    );
+    await waitForFlowNodes();
+
+    act(() => {
+      (flowMock.props?.onNodeClick as (event: unknown, node: unknown) => void)(
+        {},
+        { id: 'source_flow__internal__reviewer' },
+      );
+    });
+
+    expect(onCanvasChange).not.toHaveBeenCalled();
+    expect(onSelect).toHaveBeenCalledWith({
+      type: 'internal',
+      workflowId: 'source_flow',
+      nodeId: 'reviewer',
+    });
   });
 
   test('data edge projection connects to data port handles instead of control handles', () => {
@@ -286,7 +1362,7 @@ describe('WorkspaceCanvas data edges', () => {
       materialization: 'copy',
     };
 
-    const [flowEdge] = canvasEdgeToFlowEdge(edge, { type: 'task_canvas', taskId: 'acc_workspace_canvas' }, 'data');
+    const [flowEdge] = canvasEdgeToFlowEdge(edge, null, { type: 'task_canvas', taskId: 'acc_workspace_canvas' }, 'data');
 
     expect(flowEdge).toEqual(
       expect.objectContaining({
@@ -339,6 +1415,7 @@ describe('WorkspaceCanvas data edges', () => {
 
     const [flowEdge] = canvasEdgeToFlowEdge(
       edge,
+      'source_flow',
       { type: 'task_canvas', taskId: 'acc_workspace_canvas' },
       'data',
       'source_flow',
@@ -355,9 +1432,413 @@ describe('WorkspaceCanvas data edges', () => {
     );
   });
 
+  test('boundary main data edge projection maps to visible workflow shell handles', () => {
+    const edge = {
+      id: 'data_source_flow_workflow_inputs_codex',
+      kind: 'data',
+      source: { workflowId: 'source_flow__workflow_inputs', portId: 'main' },
+      target: { workflowId: 'codex', portId: 'main' },
+      materialization: 'copy',
+    };
+
+    const [flowEdge] = canvasEdgeToFlowEdge(
+      edge,
+      'source_flow',
+      { type: 'task_canvas', taskId: 'acc_workspace_canvas' },
+      'data',
+      'source_flow',
+    );
+
+    expect(flowEdge).toEqual(
+      expect.objectContaining({
+        source: 'source_flow',
+        target: 'source_flow__internal__codex',
+        sourceHandle: 'source_flow:workflow-input-inner-source',
+        targetHandle: 'source_flow__internal__codex:control:target',
+        className: 'workflow-edge-control workflow-edge-boundary-main',
+      }),
+    );
+  });
+
+  test('workflow shell inner handles point into the container', async () => {
+    renderCanvas(canvasFixture(), { type: 'workflow', id: 'source_flow' }, 'control');
+    await waitForFlowNodes();
+    const nodes = flowMock.props?.nodes as Array<{ id: string; type?: string; data: Record<string, unknown> }>;
+    const nodeTypes = flowMock.props?.nodeTypes as Record<string, ComponentType<Record<string, unknown>>>;
+    const workflowNode = nodes.find((item) => item.id === 'source_flow');
+    expect(workflowNode).toBeTruthy();
+
+    const WorkflowContainerNode = nodeTypes.workflowContainer;
+    const { container } = render(
+      <WorkflowContainerNode id="source_flow" data={workflowNode!.data} selected={false} />,
+    );
+
+    expect(container.querySelector('.workflow-shell-outer-input')?.getAttribute('data-position')).toBe('left');
+    expect(container.querySelector('.workflow-shell-inner-input')?.getAttribute('data-position')).toBe('right');
+    expect(container.querySelector('.workflow-shell-inner-output')?.getAttribute('data-position')).toBe('left');
+    expect(container.querySelector('.workflow-shell-outer-output')?.getAttribute('data-position')).toBe('right');
+  });
+
+  test('boundary main data edge projection stays on focused boundary nodes', () => {
+    const edge = {
+      id: 'data_source_flow_workflow_inputs_codex',
+      kind: 'data',
+      source: { workflowId: 'source_flow__workflow_inputs', portId: 'main' },
+      target: { workflowId: 'codex', portId: 'main' },
+      materialization: 'copy',
+    };
+
+    const [flowEdge] = canvasEdgeToFlowEdge(
+      edge,
+      'source_flow',
+      { type: 'task_canvas', taskId: 'acc_workspace_canvas' },
+      'data',
+    );
+
+    expect(flowEdge).toEqual(
+      expect.objectContaining({
+        source: 'source_flow__workflow_inputs',
+        target: 'codex',
+        sourceHandle: 'source_flow__workflow_inputs:output:main',
+        targetHandle: 'codex:input:main',
+        className: 'workflow-edge-data',
+      }),
+    );
+  });
+
+  test('workflow shell output boundary projection maps to visible output handle', () => {
+    const edge = {
+      id: 'data_codex_source_flow_workflow_outputs',
+      kind: 'data',
+      source: { workflowId: 'codex', portId: 'main' },
+      target: { workflowId: 'source_flow__workflow_outputs', portId: 'main' },
+      materialization: 'copy',
+    };
+
+    const [flowEdge] = canvasEdgeToFlowEdge(
+      edge,
+      'source_flow',
+      { type: 'task_canvas', taskId: 'acc_workspace_canvas' },
+      'control',
+      'source_flow',
+    );
+
+    expect(flowEdge).toEqual(
+      expect.objectContaining({
+        source: 'source_flow__internal__codex',
+        target: 'source_flow',
+        sourceHandle: 'source_flow__internal__codex:control:source',
+        targetHandle: 'source_flow:workflow-output-inner-target',
+        className: 'workflow-edge-control workflow-edge-boundary-main',
+      }),
+    );
+  });
+
+  test('root workflow control projection uses outer shell handles', () => {
+    const workflowIds = new Set(['source_flow', 'target_flow']);
+    const edge = {
+      id: 'control_source_flow_target_flow',
+      kind: 'control',
+      source: { workflowId: 'source_flow' },
+      target: { workflowId: 'target_flow' },
+    };
+
+    const [flowEdge] = canvasEdgeToFlowEdge(
+      edge,
+      null,
+      { type: 'task_canvas', taskId: 'acc_workspace_canvas' },
+      'control',
+      undefined,
+      'all',
+      false,
+      workflowIds,
+    );
+
+    expect(flowEdge).toEqual(
+      expect.objectContaining({
+        source: 'source_flow',
+        target: 'target_flow',
+        sourceHandle: 'source_flow:workflow-output-outer-source',
+        targetHandle: 'target_flow:workflow-input-outer-target',
+      }),
+    );
+  });
+
+  test('workspace canvas passes root workflow control projection to React Flow', async () => {
+    const baseCanvas = canvasFixture();
+    const canvas = {
+      ...baseCanvas,
+      workflows: baseCanvas.workflows.map((item) =>
+        item.id === 'source_flow' || item.id === 'target_flow'
+          ? { ...item, sourceKind: 'workflow' as const }
+          : item,
+      ),
+      edges: [
+        {
+          id: 'control_source_flow_target_flow',
+          kind: 'control' as const,
+          source: { workflowId: 'source_flow' },
+          target: { workflowId: 'target_flow' },
+        },
+      ],
+    };
+
+    renderCanvas(
+      canvas as ReturnType<typeof canvasFixture>,
+      { type: 'edge', id: 'control_source_flow_target_flow', scopeWorkflowId: null },
+      'control',
+    );
+    await waitForFlowNodes();
+
+    const edges = flowMock.props?.edges as Array<{
+      id: string;
+      source: string;
+      target: string;
+      sourceHandle?: string;
+      targetHandle?: string;
+    }>;
+    expect(edges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'root::control_source_flow_target_flow',
+          source: 'source_flow',
+          target: 'target_flow',
+          sourceHandle: 'source_flow:workflow-output-outer-source',
+          targetHandle: 'target_flow:workflow-input-outer-target',
+        }),
+      ]),
+    );
+  });
+
+  test('root and child edges with the same canonical id project to unique flow ids', async () => {
+    const sharedEdgeId = 'control_shared_source_target';
+    const base = canvasFixture();
+    const canvas = {
+      ...base,
+      edges: [
+        {
+          id: sharedEdgeId,
+          kind: 'control' as const,
+          source: { workflowId: 'source_agent' },
+          target: { workflowId: 'target_flow' },
+        },
+      ],
+      workflows: base.workflows.map((workflowValue) =>
+        workflowValue.id === 'source_flow'
+          ? {
+              ...workflowValue,
+              internalNodes: [
+                ...workflowValue.internalNodes,
+                {
+                  id: 'reviewer',
+                  name: 'Reviewer',
+                  task: 'agent',
+                  kind: 'Agent',
+                  status: 'not_run',
+                  callableId: 'fake-agent.generic',
+                  position: { x: 260, y: 72 },
+                },
+              ],
+              internalEdges: [
+                {
+                  id: sharedEdgeId,
+                  kind: 'control' as const,
+                  source: { workflowId: 'codex' },
+                  target: { workflowId: 'reviewer' },
+                },
+              ],
+            }
+          : workflowValue,
+      ),
+    };
+
+    renderCanvas(canvas as ReturnType<typeof canvasFixture>, { type: 'task_canvas', taskId: 'acc_workspace_canvas' }, 'control');
+    await waitForFlowNodes();
+
+    const edges = flowMock.props?.edges as Array<{ id: string; data?: { edgeAddress?: { scopeWorkflowId: string | null; edgeId: string } } }>;
+    const ids = edges.map((edgeValue) => edgeValue.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toEqual([`root::${sharedEdgeId}`]);
+    expect(edges.map((edgeValue) => edgeValue.data?.edgeAddress)).toEqual(
+      [{ scopeWorkflowId: null, edgeId: sharedEdgeId }],
+    );
+    const childPaths = workflowInternalEdgePaths(
+      canvas.workflows.find((workflowValue) => workflowValue.id === 'source_flow') as unknown as Record<string, unknown>,
+      { type: 'task_canvas', taskId: 'acc_workspace_canvas' },
+      'control',
+      'all',
+    );
+    expect(childPaths.map((item) => item.address)).toEqual([
+      { scopeWorkflowId: 'source_flow', edgeId: sharedEdgeId },
+    ]);
+  });
+
+  test('workflow internal edge paths use transient layout overlay while dragging', () => {
+    const base = canvasFixture();
+    const workflowValue = {
+      ...base.workflows.find((workflowItem) => workflowItem.id === 'source_flow')!,
+      internalNodes: [
+        ...(base.workflows.find((workflowItem) => workflowItem.id === 'source_flow')?.internalNodes || []),
+        {
+          id: 'reviewer',
+          name: 'Reviewer',
+          task: 'agent',
+          kind: 'Agent',
+          status: 'not_run',
+          callableId: 'fake-agent.generic',
+          position: { x: 260, y: 72 },
+        },
+      ],
+      internalEdges: [
+        {
+          id: 'control_codex_reviewer',
+          kind: 'control' as const,
+          source: { workflowId: 'codex' },
+          target: { workflowId: 'reviewer' },
+        },
+      ],
+    };
+
+    const committedPath = workflowInternalEdgePaths(
+      workflowValue as unknown as Record<string, unknown>,
+      { type: 'task_canvas', taskId: 'acc_workspace_canvas' },
+      'control',
+      'all',
+    )[0].path;
+    const draggingPath = workflowInternalEdgePaths(
+      workflowValue as unknown as Record<string, unknown>,
+      { type: 'task_canvas', taskId: 'acc_workspace_canvas' },
+      'control',
+      'all',
+      new Map([['codex', { x: 180, y: 140 }]]),
+    )[0].path;
+
+    expect(draggingPath).not.toEqual(committedPath);
+    expect(draggingPath.startsWith('M 456 ')).toBe(true);
+  });
+
+  test('scoped edge deletion does not remove an edge with the same id in another scope', () => {
+    const sharedEdgeId = 'control_shared_source_target';
+    const base = canvasFixture();
+    const canvas = {
+      ...base,
+      edges: [
+        {
+          id: sharedEdgeId,
+          kind: 'control' as const,
+          source: { workflowId: 'source_agent' },
+          target: { workflowId: 'target_flow' },
+        },
+      ],
+      workflows: base.workflows.map((workflowValue) =>
+        workflowValue.id === 'source_flow'
+          ? {
+              ...workflowValue,
+              internalEdges: [
+                {
+                  id: sharedEdgeId,
+                  kind: 'control' as const,
+                  source: { workflowId: 'codex' },
+                  target: { workflowId: 'reviewer' },
+                },
+              ],
+            }
+          : workflowValue,
+      ),
+    } as ReturnType<typeof canvasFixture>;
+
+    const withoutRoot = deleteSelectionFromCanvas(canvas, {
+      type: 'edge',
+      id: sharedEdgeId,
+      scopeWorkflowId: null,
+    });
+    expect(withoutRoot.edges).toHaveLength(0);
+    expect(withoutRoot.workflows.find((workflowValue) => workflowValue.id === 'source_flow')?.internalEdges).toHaveLength(1);
+
+    const withoutChild = deleteSelectionFromCanvas(canvas, {
+      type: 'edge',
+      id: sharedEdgeId,
+      scopeWorkflowId: 'source_flow',
+    });
+    expect(withoutChild.edges).toHaveLength(1);
+    expect(withoutChild.workflows.find((workflowValue) => workflowValue.id === 'source_flow')?.internalEdges).toHaveLength(0);
+  });
+
+  test('state machine rejects workflow inner handles connected to root nodes', () => {
+    const canvas = canvasFixture();
+
+    const innerInputToRoot = resolveScopedConnection(
+      canvas,
+      {
+        source: 'source_flow',
+        target: 'source_agent',
+        sourceHandle: 'source_flow:workflow-input-inner-source',
+        targetHandle: null,
+      },
+      'control',
+    );
+    const rootToInnerOutput = resolveScopedConnection(
+      canvas,
+      {
+        source: 'source_agent',
+        target: 'source_flow',
+        sourceHandle: null,
+        targetHandle: 'source_flow:workflow-output-inner-target',
+      },
+      'control',
+    );
+
+    expect(innerInputToRoot).toEqual(expect.objectContaining({ accepted: false }));
+    expect(rootToInnerOutput).toEqual(expect.objectContaining({ accepted: false }));
+  });
+
+  test('workflow shell rendering hides duplicate equivalent internal boundary edges', async () => {
+    const base = canvasFixture();
+    const duplicateEdge = {
+      id: 'data_codex_source_flow_workflow_outputs',
+      kind: 'data' as const,
+      source: { workflowId: 'codex', portId: 'main' },
+      target: { workflowId: 'source_flow__workflow_outputs', portId: 'main' },
+      materialization: 'copy' as const,
+    };
+    const canvas = {
+      ...base,
+      workflows: base.workflows.map((workflow) =>
+        workflow.id === 'source_flow'
+          ? {
+              ...workflow,
+              internalEdges: [
+                duplicateEdge,
+                { ...duplicateEdge, id: 'data_codex_source_flow_workflow_outputs_2' },
+              ],
+            }
+          : workflow,
+      ),
+    };
+
+    renderCanvas(
+      canvas as unknown as ReturnType<typeof canvasFixture>,
+      { type: 'workflow', id: 'source_flow' },
+      'control',
+    );
+    await waitForFlowNodes();
+
+    const edges = flowMock.props?.edges as Array<{ id: string }>;
+    expect(edges.filter((edge) => edge.id.includes('workflow_outputs'))).toHaveLength(0);
+    const workflowValue = canvas.workflows.find((workflow) => workflow.id === 'source_flow');
+    expect(workflowValue).toBeTruthy();
+    const childPaths = workflowInternalEdgePaths(
+      workflowValue as unknown as Record<string, unknown>,
+      { type: 'workflow', id: 'source_flow' },
+      'control',
+      'all',
+    );
+    expect(childPaths.filter((edge) => edge.address.edgeId.includes('workflow_outputs'))).toHaveLength(1);
+  });
+
   test('data mode creates a data edge by clicking output then input ports', async () => {
     const { canvas, onCanvasChange, onSelect } = renderCanvas(
-      canvasFixture(),
+      canvasWithTargetEvidencePort(),
       { type: 'port', workflowId: 'source_agent', portId: 'main', direction: 'output' },
       'data',
     );
@@ -369,8 +1850,8 @@ describe('WorkspaceCanvas data edges', () => {
 
     act(() => {
       (targetNode!.data.onSelectPort as (workflowId: string, port: unknown) => void)('target_flow', {
-        id: 'main',
-        label: 'input',
+        id: 'evidence',
+        label: 'evidence',
         direction: 'input',
       });
     });
@@ -383,7 +1864,7 @@ describe('WorkspaceCanvas data edges', () => {
         expect.objectContaining({
           kind: 'data',
           source: expect.objectContaining({ workflowId: 'source_agent', portId: 'main' }),
-          target: expect.objectContaining({ workflowId: 'target_flow', portId: 'main' }),
+          target: expect.objectContaining({ workflowId: 'target_flow', portId: 'evidence' }),
         }),
       ]),
     );
@@ -411,6 +1892,7 @@ describe('WorkspaceCanvas data edges', () => {
             kind: 'Agent',
             status: 'not_run',
             callableId: 'fake-agent.generic',
+            inputPorts: [{ id: 'evidence', label: 'evidence', direction: 'input' }],
             position: { x: 360, y: 72 },
           },
         ]),
@@ -423,12 +1905,13 @@ describe('WorkspaceCanvas data edges', () => {
     );
     await waitForFlowNodes();
 
-    const nodes = flowMock.props?.nodes as Array<{ id: string; data: Record<string, unknown> }>;
-    const targetNode = nodes.find((node) => node.id === 'source_flow__internal__target_internal');
-    expect(targetNode).toBeTruthy();
-
     act(() => {
-      (targetNode!.data.onSelect as () => void)();
+      (flowMock.props?.onConnect as (connection: unknown) => void)({
+        source: 'source_flow__internal__source_internal',
+        target: 'source_flow__internal__target_internal',
+        sourceHandle: 'source_flow__internal__source_internal:output:main',
+        targetHandle: 'source_flow__internal__target_internal:input:evidence',
+      });
     });
 
     expect(onCanvasChange).toHaveBeenCalledTimes(1);
@@ -439,7 +1922,7 @@ describe('WorkspaceCanvas data edges', () => {
         expect.objectContaining({
           kind: 'data',
           source: expect.objectContaining({ workflowId: 'source_internal', portId: 'main' }),
-          target: expect.objectContaining({ workflowId: 'target_internal', portId: 'main' }),
+          target: expect.objectContaining({ workflowId: 'target_internal', portId: 'evidence' }),
         }),
         expect.objectContaining({
           kind: 'control',
@@ -547,6 +2030,54 @@ describe('WorkspaceCanvas drag buffer', () => {
     );
   });
 
+  test('run overlay does not project a root node status onto same-id internal nodes', () => {
+    const base = canvasFixture();
+    const canvas = {
+      ...base,
+      workflows: base.workflows.map((workflowValue) =>
+        workflowValue.id === 'source_flow'
+          ? {
+              ...workflowValue,
+              internalNodes: [
+                {
+                  id: 'source_agent',
+                  name: 'Same ID Internal Agent',
+                  task: 'agent',
+                  kind: 'Agent',
+                  status: 'not_run',
+                  callableId: 'fake-agent.generic',
+                  position: { x: 40, y: 72 },
+                },
+              ],
+            }
+          : workflowValue,
+      ),
+    };
+    const overlay = runOverlayFromRun(
+      {
+        workflow_id: 'task_run',
+        status: 'running',
+        run_dir: 'runs/task_run',
+        nodes: [
+          {
+            node_id: 'source_agent',
+            callable_id: 'fake-agent.generic',
+            status: 'running',
+            run_dir: 'runs/task_run/nodes/source_agent',
+          },
+        ],
+        edges: [],
+      },
+      { runId: 'task_run', scope: 'task', targetId: 'acc_workspace_canvas' },
+    );
+
+    const projected = applyRunOverlayToCanvas(canvas as any, overlay) as typeof canvas;
+    const internalNodes = projected.workflows.find((workflowValue) => workflowValue.id === 'source_flow')
+      ?.internalNodes as Array<{ id: string; status: string }> | undefined;
+    expect(projected.workflows.find((workflowValue) => workflowValue.id === 'source_agent')?.status).toBe('running');
+    expect(internalNodes?.find((node) => node.id === 'source_agent')?.status).toBe('not_run');
+  });
+
   test('dragging position changes update local flow nodes without committing canvas', async () => {
     const { onCanvasChange } = renderCanvas();
     await waitForFlowNodes();
@@ -623,6 +2154,65 @@ describe('WorkspaceCanvas drag buffer', () => {
       y: 72,
     });
     expect(onCanvasChange).not.toHaveBeenCalled();
+  });
+
+  test('internal node drag does not create a click-to-connect edge from prior selection', async () => {
+    const base = canvasFixture();
+    const canvas = {
+      ...base,
+      workflows: base.workflows.map((item) =>
+        item.id === 'source_flow'
+          ? {
+              ...item,
+              internalNodes: [
+                ...item.internalNodes,
+                {
+                  id: 'reviewer',
+                  name: 'Reviewer',
+                  task: 'agent',
+                  kind: 'Agent',
+                  status: 'not_run',
+                  callableId: 'fake-agent.generic',
+                  position: { x: 360, y: 72 },
+                },
+              ],
+            }
+          : item,
+      ),
+    };
+    const { onCanvasChange, onSelect } = renderCanvas(canvas, {
+      type: 'internal',
+      workflowId: 'source_flow',
+      nodeId: 'codex',
+    });
+    await waitForFlowNodes();
+
+    act(() => {
+      (flowMock.props?.onNodeDragStart as () => void)();
+      (flowMock.props?.onNodesChange as (changes: unknown[]) => void)([
+        {
+          id: 'source_flow__internal__reviewer',
+          type: 'position',
+          position: { x: 420, y: 112 },
+          dragging: false,
+        },
+      ]);
+      (flowMock.props?.onNodeClick as (event: unknown, node: unknown) => void)(
+        {},
+        { id: 'source_flow__internal__reviewer' },
+      );
+    });
+
+    expect(onCanvasChange).toHaveBeenCalledTimes(1);
+    const updater = onCanvasChange.mock.calls[0][0] as (current: typeof canvas) => typeof canvas;
+    const nextCanvas = updater(canvas);
+    const sourceFlow = nextCanvas.workflows.find((item) => item.id === 'source_flow');
+    expect(sourceFlow?.internalEdges).toEqual([]);
+    expect(onSelect).toHaveBeenLastCalledWith({
+      type: 'internal',
+      workflowId: 'source_flow',
+      nodeId: 'reviewer',
+    });
   });
 
   test('internal node drag end expands workflow around its center without moving the child visually', async () => {

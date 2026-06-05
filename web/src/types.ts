@@ -129,6 +129,9 @@ export type CallableSummary = {
   source_path?: string | null;
   name?: string;
   description?: string;
+  input_ports?: Record<string, unknown>;
+  output_ports?: Record<string, unknown>;
+  artifact_contract?: Record<string, unknown> | unknown[];
 };
 
 export type CallableDetail = CallableSummary & {
@@ -220,6 +223,13 @@ export type WorkflowGraphNode = {
   relative_cwd?: string;
   input_ports?: WorkflowPort[];
   output_ports?: WorkflowPort[];
+  control?: {
+    require_human_approval?: boolean;
+    approval_prompt?: string | null;
+    approval_reject_status?: 'failed' | 'skipped' | string;
+    forward_main_output_on_control?: boolean;
+  };
+  output_schema?: Record<string, unknown>;
   notes?: string;
   position?: { x: number; y: number };
   metadata?: Record<string, unknown>;
@@ -355,6 +365,9 @@ export type DecisionInboxItem = {
     target_path: string;
     operation_count: number;
     apply_requires_human_approval: true;
+    apply_status?: 'not_implemented';
+    dry_run_only?: boolean;
+    governance_mode?: 'proposal_dry_run_only';
     semantic_status?: 'valid' | 'invalid';
   };
   evidence: Array<{

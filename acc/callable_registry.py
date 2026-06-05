@@ -72,18 +72,7 @@ class CallableRegistry:
         raise AccError(f"Unknown callable class: {class_id}")
 
     def ref_keys(self) -> set[tuple[str, str]]:
-        refs = set(self._assets)
-        refs.update(
-            {
-                ("tool_class", "fake_producer"),
-                ("tool_class", "fake"),
-                ("tool_class", "merge"),
-                ("tool_class", "fail"),
-                ("agent_class", "generic_fake_agent"),
-                ("agent_class", "fake-agent.generic"),
-            }
-        )
-        return refs
+        return set(self._assets)
 
     def workflow_ids(self) -> set[str]:
         ids: set[str] = set()

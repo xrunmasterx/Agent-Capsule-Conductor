@@ -213,3 +213,67 @@ When a node is selected:
 - Do not add network-dependent market data tests.
 - Do not let UI task persistence become runtime truth.
 - Do not save local absolute workspace path inside reusable workflow templates; save it only as local binding.
+
+## 6. Current visual language target
+
+The current ACC Workbench visual direction is documented in
+`docs/ACC_WORKBENCH_PRODUCT_UI_ARCHITECTURE_BRANDKIT.md`. For implementation, treat that document as
+the visual contract and use these rules as the short version.
+
+### 6.1 Product surface
+
+ACC should look like a dark, local-first, rounded engineering workbench:
+
+```text
+left workspace rail
+  + top project/action bar
+  + rounded graph canvas shell
+  + selected node settings inspector
+  + current run evidence dock
+  + change review surface
+```
+
+It should not look like a SaaS landing page, a chat app, or a sharp military terminal.
+
+### 6.2 User-facing translation
+
+The main UI should use Chinese product language and expose only necessary runtime facts:
+
+| Runtime/Core term | User-facing label |
+| --- | --- |
+| `WorkflowFunctionTemplate` | 工作流模板 / 任务流 |
+| `NodeInvocationSpec` | 任务节点 / 节点设置 |
+| `control_edges` | 执行顺序 |
+| `data_edges` / `bindings` | 数据传递 / 输入来源 |
+| `RunSummary` / events | 本次运行 / 最近事件 |
+| `ArtifactBundle` | 结果文件 / 产物 |
+| GraphOps | 变更审核 |
+
+Raw names such as `SessionInstance`, `ScopeFrame`, `manifest`, `output_schema.json`, and raw Core v2
+JSON should stay behind "更多技术详情" or debugging views.
+
+### 6.3 Shape and color
+
+Use a soft bounded shape system:
+
+- app shell radius around 24px;
+- canvas shell around 20px;
+- inspector/dock/list panels around 16px;
+- workflow nodes and review cards around 12px;
+- buttons, selects, search boxes, and status chips around 10px.
+
+Use near-black and graphite surfaces, warm off-white text, teal for primary run/callable identity,
+cyan only for data transfer, amber for waiting or human confirmation, and red only for failure,
+rejection, or destructive actions.
+
+### 6.4 Default information hierarchy
+
+Default views should answer:
+
+1. 哪个工作区、哪个任务流正在编辑？
+2. 哪个节点正在运行、等待或需要确认？
+3. 这个节点用了哪些输入、产生了什么结果？
+4. 本次运行有哪些最近事件、结果文件和日志入口？
+5. 如果有流程变更，哪些已经自动校验，哪些需要人工确认？
+
+This keeps the UI focused on user operation while preserving the Core v2 evidence boundary.

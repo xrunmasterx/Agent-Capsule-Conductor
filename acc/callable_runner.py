@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import copy
 import json
-import os
 from pathlib import Path
 from typing import Any
 
@@ -21,10 +21,14 @@ from acc.domain import (
     ScopeFrame,
     SessionInstance,
 )
-
-PRODUCTION_RUN_MODE = "production"
-HERMETIC_RUN_MODE = "hermetic"
-DEFAULT_PRODUCTION_CODEX_TIMEOUT_SECONDS = 900
+from acc.runtime.policy import (
+    HERMETIC_RUN_MODE,
+    PRODUCTION_RUN_MODE,
+    acc_run_mode,
+    external_agent_execution_enabled,
+    production_codex_timeout_seconds,
+)
+from acc.store import write_json
 
 
 class CallableClassRunner:
@@ -43,7 +47,7 @@ class CallableClassRunner:
         context = AgentExecutionContext.from_value(execution_context)
         write_json(run_dir / "agent_payload.json", input_payload)
         write_json(run_dir / "input.json", input_payload)
-        schema = output_schema_for_agent(template)
+        schema = output_schema_for_agent(template, context.node)
         write_json(run_dir / "output_schema.json", schema)
         prompt = render_agent_prompt(template, context.node, input_payload)
         (run_dir / "resolved_prompt.md").write_text(prompt, encoding="utf-8")
@@ -156,21 +160,6 @@ class AgentExecutionContext:
         raise AccError("Agent execution context is required for Core v2 adapter dispatch")
 
 
-def acc_run_mode() -> str:
-    value = os.getenv("ACC_RUN_MODE", HERMETIC_RUN_MODE).strip().lower()
-    if value in {HERMETIC_RUN_MODE, "test", "ci"}:
-        return HERMETIC_RUN_MODE
-    return PRODUCTION_RUN_MODE
-
-
-def external_agent_execution_enabled() -> bool:
-    return os.getenv("ACC_ENABLE_EXTERNAL_AGENT_EXECUTION", "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-    }
-
-
 class AgentAdapterDispatcher:
     """Resolve an agent runtime name to an external adapter."""
 
@@ -228,84 +217,180 @@ def codex_sandbox_for_permissions(profile: PermissionProfile) -> str:
     return "read-only"
 
 
-def output_schema_for_agent(template: AgentClassTemplate) -> dict[str, Any]:
-    raw_schema = template.artifact_contract.get("output_schema")
-    if isinstance(raw_schema, dict):
-        return raw_schema
-    return {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {
-            "status": {"type": "string"},
-            "summary": {"type": "string"},
-            "findings": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "properties": {
-                        "title": {"type": "string"},
-                        "detail": {"type": "string"},
-                        "evidence": {"type": "array", "items": {"type": "string"}},
-                        "sources": {"type": "array", "items": {"type": "string"}},
-                        "confidence": {"type": "string"},
+DEFAULT_AGENT_OUTPUT_SCHEMA: dict[str, Any] = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "schema_version": {
+            "type": "string",
+            "enum": ["acc.agent.output.v1"],
+            "description": "ACC agent output contract version.",
+        },
+        "status": {
+            "type": "string",
+            "enum": ["success", "partial", "failed"],
+            "description": "Task-level result status, not the ACC runtime status.",
+        },
+        "summary": {
+            "type": "string",
+            "description": "Concise human-readable result summary.",
+        },
+        "report_markdown": {
+            "type": "string",
+            "description": "Detailed report content in Markdown. Empty string when not applicable.",
+        },
+        "findings": {
+            "type": "array",
+            "description": "Structured findings extracted from the work.",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "id": {"type": "string"},
+                    "severity": {
+                        "type": "string",
+                        "enum": ["info", "low", "medium", "high", "critical"],
                     },
-                    "required": ["title", "detail", "evidence", "sources", "confidence"],
-                },
-            },
-            "analysis": {"type": "string"},
-            "sources": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "properties": {
-                        "title": {"type": "string"},
-                        "url": {"type": "string"},
-                        "publisher": {"type": "string"},
-                        "published_at": {"type": "string"},
-                        "accessed_at": {"type": "string"},
-                        "note": {"type": "string"},
+                    "title": {"type": "string"},
+                    "detail": {"type": "string"},
+                    "recommendation": {"type": "string"},
+                    "evidence_ids": {"type": "array", "items": {"type": "string"}},
+                    "confidence": {
+                        "type": "string",
+                        "enum": ["low", "medium", "high"],
                     },
-                    "required": [
-                        "title",
-                        "url",
-                        "publisher",
-                        "published_at",
-                        "accessed_at",
-                        "note",
-                    ],
                 },
-            },
-            "confidence": {"type": "string"},
-            "uncertainties": {"type": "array", "items": {"type": "string"}},
-            "artifacts": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "properties": {
-                        "name": {"type": "string"},
-                        "path": {"type": "string"},
-                        "type": {"type": "string"},
-                        "description": {"type": "string"},
-                    },
-                    "required": ["name", "path", "type", "description"],
-                },
+                "required": [
+                    "id",
+                    "severity",
+                    "title",
+                    "detail",
+                    "recommendation",
+                    "evidence_ids",
+                    "confidence",
+                ],
             },
         },
-        "required": [
-            "status",
-            "summary",
-            "findings",
-            "analysis",
-            "sources",
-            "confidence",
-            "uncertainties",
-            "artifacts",
-        ],
-    }
+        "evidence": {
+            "type": "array",
+            "description": "Evidence references used by findings or report.",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "id": {"type": "string"},
+                    "kind": {
+                        "type": "string",
+                        "enum": [
+                            "input",
+                            "file",
+                            "artifact",
+                            "url",
+                            "command",
+                            "log",
+                            "observation",
+                        ],
+                    },
+                    "ref": {"type": "string"},
+                    "note": {"type": "string"},
+                    "quote": {"type": "string"},
+                },
+                "required": ["id", "kind", "ref", "note", "quote"],
+            },
+        },
+        "artifacts": {
+            "type": "array",
+            "description": "Files or directories produced by the agent.",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "id": {"type": "string"},
+                    "name": {"type": "string"},
+                    "kind": {
+                        "type": "string",
+                        "enum": [
+                            "json",
+                            "markdown",
+                            "text",
+                            "html",
+                            "image",
+                            "pdf",
+                            "directory",
+                            "other",
+                        ],
+                    },
+                    "path": {"type": "string"},
+                    "description": {"type": "string"},
+                },
+                "required": ["id", "name", "kind", "path", "description"],
+            },
+        },
+        "quality": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "confidence": {
+                    "type": "string",
+                    "enum": ["low", "medium", "high"],
+                },
+                "assumptions": {"type": "array", "items": {"type": "string"}},
+                "uncertainties": {"type": "array", "items": {"type": "string"}},
+                "limitations": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["confidence", "assumptions", "uncertainties", "limitations"],
+        },
+        "next_actions": {
+            "type": "array",
+            "description": "Recommended follow-up actions.",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "title": {"type": "string"},
+                    "reason": {"type": "string"},
+                    "owner": {
+                        "type": "string",
+                        "enum": ["human", "downstream_agent", "tool", "unknown"],
+                    },
+                },
+                "required": ["title", "reason", "owner"],
+            },
+        },
+        "outputs": {
+            "type": "object",
+            "description": "Named non-main output ports. Empty when only main is exposed.",
+            "additionalProperties": False,
+            "properties": {},
+            "required": [],
+        },
+    },
+    "required": [
+        "schema_version",
+        "status",
+        "summary",
+        "report_markdown",
+        "findings",
+        "evidence",
+        "artifacts",
+        "quality",
+        "next_actions",
+        "outputs",
+    ],
+}
+
+
+def output_schema_for_agent(
+    template: AgentClassTemplate,
+    node: NodeInvocationSpec | None = None,
+) -> dict[str, Any]:
+    if node is not None and isinstance(node.output_schema, dict):
+        return copy.deepcopy(node.output_schema)
+    raw_schema = template.artifact_contract.get("output_schema")
+    if isinstance(raw_schema, dict):
+        return copy.deepcopy(raw_schema)
+    return copy.deepcopy(DEFAULT_AGENT_OUTPUT_SCHEMA)
 
 
 def render_agent_prompt(
@@ -347,16 +432,7 @@ def effective_timeout_seconds(template: AgentClassTemplate, node: NodeInvocation
     if node.runtime_policy.timeout.seconds is not None:
         return int(node.runtime_policy.timeout.seconds)
     if template.runtime == "codex_cli" and acc_run_mode() == PRODUCTION_RUN_MODE:
-        raw_value = os.getenv("ACC_CODEX_TIMEOUT_SECONDS")
-        if raw_value:
-            try:
-                value = int(raw_value)
-            except ValueError as exc:
-                raise AccError("ACC_CODEX_TIMEOUT_SECONDS must be an integer") from exc
-            if value <= 0:
-                raise AccError("ACC_CODEX_TIMEOUT_SECONDS must be positive")
-            return value
-        return DEFAULT_PRODUCTION_CODEX_TIMEOUT_SECONDS
+        return production_codex_timeout_seconds()
     return int(template.default_permissions.timeout_seconds or 60)
 
 
@@ -365,23 +441,33 @@ def hermetic_stub_output(
     node: NodeInvocationSpec,
     input_payload: dict[str, Any],
 ) -> dict[str, Any]:
+    report = json.dumps(
+        {
+            "node_id": node.id,
+            "callable_id": template.id,
+            "input": input_payload,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
     return {
+        "schema_version": "acc.agent.output.v1",
         "status": "success",
         "summary": f"Callable agent_class:{template.id} executed in hermetic stub mode",
         "findings": [],
-        "analysis": json.dumps(
-            {
-                "node_id": node.id,
-                "callable_id": template.id,
-                "input": input_payload,
-            },
-            ensure_ascii=False,
-            sort_keys=True,
-        ),
-        "sources": [],
-        "confidence": "hermetic_stub",
-        "uncertainties": ["External codex_cli execution was disabled by ACC_RUN_MODE=hermetic."],
+        "report_markdown": report,
+        "evidence": [],
         "artifacts": [],
+        "quality": {
+            "confidence": "high",
+            "assumptions": [],
+            "uncertainties": [
+                "External codex_cli execution was disabled by ACC_RUN_MODE=hermetic."
+            ],
+            "limitations": [],
+        },
+        "next_actions": [],
+        "outputs": {},
     }
 
 
@@ -437,11 +523,3 @@ def update_runtime_json(path: Path, updates: dict[str, Any]) -> None:
             payload = {}
     payload.update(updates)
     write_json(path, payload)
-
-
-def write_json(path: Path, payload: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True),
-        encoding="utf-8",
-    )

@@ -66,17 +66,6 @@ def safe_child_path(path: Path, root: Path) -> None:
         raise AccError(f"Path escapes root: {path}")
 
 
-def copy_path(source: Path, target: Path) -> None:
-    safe_child_path(target, target.parent)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if source.is_dir():
-        if target.exists():
-            shutil.rmtree(target)
-        shutil.copytree(source, target)
-    else:
-        shutil.copy2(source, target)
-
-
 def file_record(path: Path, root: Path) -> dict[str, Any]:
     safe_child_path(path, root)
     return {

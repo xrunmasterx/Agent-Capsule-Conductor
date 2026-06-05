@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from acc.app.run_lifecycle import resume_waiting_run
 from acc.domain import AccError, CallableRef, RecoveryLevel, WakeupReason, WakeupRequest
 from acc.session import utc_now_iso
 from acc.store import load_json, write_json
@@ -89,29 +90,27 @@ def reconcile_wakeup_state(run_dir: Path) -> dict[str, Any]:
     queue_path = _queue_path(run_dir)
     pending: dict[str, dict[str, Any]] = {}
     consumed_ids: set[str] = set()
+    queue_records: list[dict[str, Any]] = []
     if queue_path.exists():
         for line in queue_path.read_text(encoding="utf-8").splitlines():
             if not line.strip():
                 continue
             raw = json.loads(line)
+            queue_records.append(raw)
             request_id = str(raw.get("request_id"))
             if raw.get("status") == "consumed":
                 consumed_ids.add(request_id)
-    if queue_path.exists():
-        for line in queue_path.read_text(encoding="utf-8").splitlines():
-            if not line.strip():
-                continue
-            raw = json.loads(line)
-            request_id = str(raw.get("request_id"))
-            if request_id in consumed_ids:
-                continue
-            if raw.get("status") == "consumed":
-                continue
-            coalesce_key = raw.get("coalesce_key")
-            if coalesce_key:
-                pending[str(coalesce_key)] = raw
-            else:
-                pending[request_id] = raw
+    for raw in queue_records:
+        request_id = str(raw.get("request_id"))
+        if request_id in consumed_ids:
+            continue
+        if raw.get("status") == "consumed":
+            continue
+        coalesce_key = raw.get("coalesce_key")
+        if coalesce_key:
+            pending[str(coalesce_key)] = raw
+        else:
+            pending[request_id] = raw
     state = {"pending": list(pending.values()), "updated_at": utc_now_iso()}
     write_json(_state_path(run_dir), state)
     return state
@@ -147,6 +146,45 @@ def claim_next_ready(run_dir: Path) -> WakeupRequest | None:
         pending, key=lambda item: (int(item.get("priority", 0)), item.get("created_at", ""))
     )
     raw = pending_sorted[0]
+    request = parse_wakeup_request(raw)
+    raw["status"] = "consumed"
+    raw["consumed_at"] = utc_now_iso()
+    _append_jsonl(_queue_path(run_dir), raw)
+    reconcile_wakeup_state(run_dir)
+    return request
+
+
+def claim_next_human_wakeup_for_resume(run_dir: Path) -> dict[str, Any] | None:
+    request = _claim_next_ready_by_reason(run_dir, "human")
+    if request is None:
+        return None
+    interaction_id = request.payload.get("interaction_id")
+    if not isinstance(interaction_id, str) or not interaction_id:
+        raise AccError("Human wakeup requires payload.interaction_id")
+    resume = resume_waiting_run(run_dir, reason="human", interaction_id=interaction_id)
+    return {
+        "request_id": request.request_id,
+        "reason": request.reason,
+        "resume": resume.as_payload(),
+    }
+
+
+def _claim_next_ready_by_reason(run_dir: Path, reason: WakeupReason) -> WakeupRequest | None:
+    state = reconcile_wakeup_state(run_dir)
+    pending = state.get("pending")
+    if not isinstance(pending, list) or not pending:
+        return None
+    matching = [
+        item
+        for item in pending
+        if item.get("reason") == reason and item.get("status") != "consumed"
+    ]
+    if not matching:
+        return None
+    raw = sorted(
+        matching,
+        key=lambda item: (int(item.get("priority", 0)), item.get("created_at", "")),
+    )[0]
     request = parse_wakeup_request(raw)
     raw["status"] = "consumed"
     raw["consumed_at"] = utc_now_iso()

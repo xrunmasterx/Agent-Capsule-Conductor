@@ -11,6 +11,7 @@ from acc.domain import (
     DataEndpoint,
     ExecutionNode,
     ExecutionPlan,
+    NodeControlPolicy,
     NodeInvocationSpec,
     PortContract,
     RuntimePolicy,
@@ -36,6 +37,16 @@ def test_workflow_function_template_json_round_trip_is_stable() -> None:
         id="consumer",
         callable_ref=CallableRef(kind="agent_class", id="consumer.codex"),
         input_ports={"main": PortContract(id="main", direction="input")},
+        control=NodeControlPolicy(
+            require_human_approval=True,
+            approval_prompt="Approve consumer?",
+            forward_main_output_on_control=False,
+        ),
+        output_schema={
+            "type": "object",
+            "properties": {"summary": {"type": "string"}},
+            "required": ["summary"],
+        },
         metadata={"label": "Consumer"},
     )
     template = WorkflowFunctionTemplate(
@@ -61,6 +72,9 @@ def test_workflow_function_template_json_round_trip_is_stable() -> None:
     validate_core_v2_workflow_function_template(decoded)
     assert workflow_function_template_to_dict(decoded) == payload
     assert payload["schema_version"] == CORE_V2_SCHEMA_VERSION
+    consumer_payload = next(node for node in payload["nodes"] if node["id"] == "consumer")
+    assert consumer_payload["control"]["forward_main_output_on_control"] is False
+    assert consumer_payload["output_schema"]["required"] == ["summary"]
 
 
 def test_execution_plan_serializes_to_jsonable_payload() -> None:
@@ -80,4 +94,3 @@ def test_execution_plan_serializes_to_jsonable_payload() -> None:
 
     assert payload["schema_version"] == CORE_V2_SCHEMA_VERSION
     assert payload["nodes"][0]["invocation"]["callable_ref"]["kind"] == "tool_class"
-

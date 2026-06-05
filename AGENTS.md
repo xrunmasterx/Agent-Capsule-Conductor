@@ -5,6 +5,11 @@
 Agent Callable Conductor (`acc`) is a local-first workflow runtime and Workbench for wrapping mature
 external agents or local tools as reusable callable assets.
 
+Current cleanup work is problem-led, not phase-led. `docs/problem/*.md` contains the active
+architecture debt inventory. `docs/goal.md` defines the execution contract for closing that
+inventory. Older phase documents remain useful evidence, but they do not outrank this file,
+`docs/CURRENT_ARCHITECTURE.md`, or the verified problem list.
+
 Current architecture is Core v2 callable-only:
 
 - `AgentClassTemplate` / `ToolClassTemplate`: reusable, stateless behavior definitions.
@@ -28,6 +33,10 @@ Legacy runtime architecture is not an active product architecture:
   archived evidence. Do not reintroduce a compatibility registry, old runner, old graph runtime, or
   hidden fallback execution path.
 
+If product code cannot express a needed behavior with the current Core v2 objects, extend the
+canonical model and validation explicitly. Do not smuggle semantics through `raw`,
+`metadata.legacy_*`, compatibility registries, or hidden normalization branches.
+
 ## Workflow Format
 
 - **Canonical on-disk template**: `workflows/<id>.accflow.json` (Workbench/API save default).
@@ -37,6 +46,72 @@ Legacy runtime architecture is not an active product architecture:
 - **Runtime path**: canonical `.accflow.json` parses directly to `WorkflowFunctionTemplate`, compiles
   to `ExecutionPlan`, and executes `CallableRef` as `SessionInstance` evidence. There is no
   opt-in legacy or compatibility hot path.
+- **Active examples**: active `examples/` and `workflows/` assets must be canonical Core v2 assets.
+  Legacy runnable examples belong under `tests/fixtures/legacy/`, migration tests, or historical
+  docs only.
+
+## Disposable Local Assets
+
+The user has explicitly confirmed that the current workflow canvases, Workbench nodes, and
+agent/tool template assets created only for functional testing are disposable. They may be deleted
+or regenerated in cleanup work when doing so simplifies the architecture and no production contract
+depends on preserving those concrete assets.
+
+This authorization applies to temporary product-surface assets such as ad hoc
+`workflows/*.accflow.json` files and testing-only agent/tool templates after their role has been
+verified. It does not automatically apply to schemas, migration fixtures, explicit rejection tests,
+historical evidence under `docs/historical/`, or checked-in examples that are still referenced by
+tests, docs, CLI behavior, or server/API discovery contracts.
+
+Deletion still requires a current `git status --short`, code/search evidence for each asset class,
+focused tests for any changed discovery/runtime behavior, and an update to
+`docs/problem/RESOLUTION_MATRIX.md` when the deletion closes a problem finding.
+
+## Problem Repair Contract
+
+When working on the current architecture cleanup, use `docs/problem/RESOLUTION_MATRIX.md` as the
+required ledger. Every valid finding under `docs/problem/*.md` must end in exactly one of these
+states:
+
+- `fixed`: repaired with changed files and verification command recorded.
+- `stale`: current code no longer has the issue, with file/line evidence.
+- `deferred-with-reason`: real issue, but it needs ADR, profiling, contract change, or a separate
+  risk-bounded batch.
+- `blocked-with-evidence`: real issue, but progress is blocked; record the exact command/action,
+  error evidence, and missing condition.
+
+Repair order should follow the problem inventory's risk model:
+
+1. Dead code and patch scars that are locally provable.
+2. Legacy and compatibility boundary cleanup.
+3. Duplicate implementations and single-source-of-truth cleanup.
+4. Layering violations.
+5. Workbench/API run-model cleanup.
+6. Performance issues with evidence.
+7. Complexity hotspots and policy consolidation.
+
+Do not mix unrelated categories in one broad cleanup. For each batch, verify the current code facts
+first, make the smallest architecture-consistent change, run focused tests, then update the ledger.
+
+### Deletion Rules
+
+For active product paths, replace product callers and add Core v2 or rejection tests before deleting
+old code.
+
+For zero-import tombstones, deletion may happen first after full-repo `rg` confirms no product
+caller. Confirm whether any remaining test reference is historical evidence, an explicit rejection
+test, or a misleading dependency that should be removed.
+
+Allowed legacy hits are limited to:
+
+- `acc.migration.*` raw parser or migration provenance.
+- `tests/migration/*`.
+- Explicit rejection tests.
+- `tests/fixtures/legacy/*`.
+- Historical docs or archived fixtures.
+
+These locations must not participate in default discovery, default execution, Workbench lists,
+server lists, or active examples.
 
 ## Stable Invariants
 
@@ -81,8 +156,22 @@ These rules outrank older phase docs when there is a conflict.
    - `acc.store` owns filesystem manifests, inbox/outbox materialization, and path protection.
    - `acc.runtime` owns process/workspace execution policy.
    - `acc.app` coordinates use cases across engine/store/runtime.
-   - `acc.server` is a thin API layer.
+   - `acc.server` is a thin API layer: request parsing, service call, response shaping, and HTTP
+     error translation only.
    - `web/` owns interaction state and visual projection, not runtime truth.
+
+9. Keep runtime evidence auditable.
+   - `RunRecord`, `run_summary.json`, events, indexes, and UI projections must have explicit,
+     non-overlapping responsibilities.
+   - Runtime status should use canonical names such as `success`, `failed`, `cancelled`, and
+     `crashed`; do not write `succeeded` and normalize it on read as a permanent compatibility scar.
+   - `events.jsonl` must have one canonical event schema per evidence stream. Multiple writers may
+     exist only if they write that same schema.
+
+10. Keep foundation helpers centralized.
+    - Do not add new ad hoc `write_json`, `copy_path`, JSON Schema validation, path-safety, or
+      event-writing helpers when an existing store/runtime primitive can be extended.
+    - If helper behavior differs by layer, document the boundary instead of copy-pasting a variant.
 
 ## Current Workbench Rules
 
@@ -113,6 +202,9 @@ Workbench async runs use a lightweight server-scoped `WorkbenchRunManager`.
 - In-memory active-task maps are execution handles only; they must not be treated as durable facts.
 - Queued/running/terminal state must be scoped by `run_id` and associated with a `task_id` in UI
   projections.
+- Do not delete or change `/api/workflows/run-graph` unless this file, `docs/CURRENT_ARCHITECTURE.md`,
+  server routes, web callers, and tests are updated in the same change. New Workbench behavior should
+  prefer async submit.
 
 ## Documentation Source of Truth
 
@@ -126,6 +218,13 @@ Start here for architecture or documentation work:
 - `docs/concepts/FIRST_PRINCIPLES_ANALYSIS.md`
 - `docs/concepts/CAPSULE_TEMPLATE_SESSION.md`
 - `docs/concepts/GRAPHOPS_CONTROL_PLANE.md`
+
+For the current architecture-debt cleanup, also read:
+
+- `docs/goal.md`
+- `docs/problem/README.md`
+- `docs/problem/RESOLUTION_MATRIX.md`
+- The specific `docs/problem/*.md` files relevant to the category being fixed.
 
 For callable runtime changes, also read:
 
@@ -151,8 +250,16 @@ logs. Prefer the package's `QUALITY_REPORT.md` for final state when it exists.
 
 1. Inspect the current implementation first. Prefer `rg` / `rg --files` for search.
 2. Check `git status --short` and avoid overwriting unrelated user changes.
-3. Identify the smallest architecture-consistent change. Do not stack patches on a wrong model.
-4. If a doc says one thing and the code proves another, update the doc or report the discrepancy.
+3. Treat untracked generated artifacts cautiously. Files such as `progress.jsonl`,
+   `web/test-results/`, `tests/e2e/` artifacts, and timestamped Workbench `workflows/*.accflow.json`
+   may be user or test output. Do not promote them to active examples without confirming their role.
+   If the current goal invokes the disposable local asset authorization above, workflow/template
+   artifacts that are verified as test-only may be deleted, but the deletion scope must be explicit
+   and recorded.
+4. Identify the smallest architecture-consistent change. Do not stack patches on a wrong model.
+5. If the work targets `docs/problem`, update `docs/problem/RESOLUTION_MATRIX.md` as part of the
+   same batch.
+6. If a doc says one thing and the code proves another, update the doc or report the discrepancy.
 
 ## Verification Expectations
 
@@ -167,6 +274,10 @@ uv run ruff check .
 
 When changing server/API/workflow behavior, include focused backend tests under `tests/server`,
 `tests/unit`, or `tests/integration`.
+
+When changing CLI behavior, run existing focused CLI/integration tests. If `tests/cli/` does not
+exist, do not treat the missing directory as a failure; use existing integration tests or add a
+minimal focused test for the changed behavior.
 
 When changing the Workbench, include:
 

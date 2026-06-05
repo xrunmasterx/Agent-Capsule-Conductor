@@ -23,7 +23,6 @@
     },
     "nodes": {
       "type": "array",
-      "minItems": 1,
       "items": { "$ref": "#/$defs/node_invocation" }
     },
     "control_edges": {
@@ -115,8 +114,24 @@
           },
           "additionalProperties": false
         },
+        "control": { "$ref": "#/$defs/node_control_policy" },
         "artifact_contract": { "type": "object" },
+        "output_schema": { "type": "object" },
         "metadata": { "type": "object" }
+      },
+      "additionalProperties": false
+    },
+    "node_control_policy": {
+      "type": "object",
+      "properties": {
+        "require_human_approval": { "type": "boolean", "default": false },
+        "approval_prompt": { "type": ["string", "null"] },
+        "approval_reject_status": {
+          "type": "string",
+          "enum": ["failed", "skipped"],
+          "default": "failed"
+        },
+        "forward_main_output_on_control": { "type": "boolean" }
       },
       "additionalProperties": false
     },

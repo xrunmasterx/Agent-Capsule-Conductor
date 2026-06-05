@@ -45,6 +45,9 @@ export function runOverlayFromRun(
 ): RunOverlayState {
   const nodeStatusEntries = workflowRun.nodes.flatMap((node) => {
     const status = normalizeWorkflowStatus(node.status);
+    if (node.parent_node_id) {
+      return [[node.ui_node_id || internalFlowNodeId(node.parent_node_id, node.node_id), status]];
+    }
     return node.ui_node_id
       ? [
           [node.node_id, status],
@@ -86,7 +89,6 @@ export function applyRunOverlayToCanvas<TCanvas extends RunStateCanvas>(
         ...node,
         status:
           overlay.nodeStatusById[internalFlowNodeId(workflow.id, node.id)] ||
-          overlay.nodeStatusById[node.id] ||
           node.status,
       }));
       return {
@@ -120,7 +122,7 @@ export function liveWorkflowRunFromEvents(
 ): WorkflowRunResult {
   const rootNodeIds = new Set(graph.nodes.map((node) => node.id));
   const statusByNode = new Map(graph.nodes.map((node) => [node.id, 'not_run']));
-  const nestedNodeMeta = new Map<string, { nodeId: string; parentNodeId: string; callableId: string }>();
+  const nestedNodeMeta = new Map<string, { nodeId: string; parentNodeId: string; callableId: string; runDir?: string }>();
   let workflowStatus = events.length ? 'running' : 'not_run';
   for (const event of events) {
     const type = String(event.type || event.event || '');
@@ -132,11 +134,12 @@ export function liveWorkflowRunFromEvents(
       if (!statusByNode.has(nodeId)) {
         statusByNode.set(nodeId, 'not_run');
       }
-      if (uiNodeId && parentNodeId && !rootNodeIds.has(rawNodeId)) {
+      if (uiNodeId && parentNodeId) {
         nestedNodeMeta.set(uiNodeId, {
           nodeId: rawNodeId || uiNodeId,
           parentNodeId,
           callableId: typeof event.callable_id === 'string' ? event.callable_id : '',
+          runDir: typeof event.node_run_dir === 'string' ? event.node_run_dir : undefined,
         });
       }
       if (type === 'node_scheduled') {
@@ -185,14 +188,14 @@ export function liveWorkflowRunFromEvents(
         parent_node_id: meta.parentNodeId,
         callable_id: meta.callableId,
         status: statusByNode.get(uiNodeId) || 'not_run',
-        run_dir: `${runDir}/nodes/${meta.parentNodeId}/nested_workflow/nodes/${meta.nodeId}`,
-        input_path: `${runDir}/nodes/${meta.parentNodeId}/nested_workflow/nodes/${meta.nodeId}/agent_payload.json`,
-        prompt_path: `${runDir}/nodes/${meta.parentNodeId}/nested_workflow/nodes/${meta.nodeId}/resolved_prompt.md`,
-        output_path: `${runDir}/nodes/${meta.parentNodeId}/nested_workflow/nodes/${meta.nodeId}/output.json`,
-        artifact_dir: `${runDir}/nodes/${meta.parentNodeId}/nested_workflow/nodes/${meta.nodeId}/artifacts`,
-        event_log: `${runDir}/nodes/${meta.parentNodeId}/nested_workflow/nodes/${meta.nodeId}/events.jsonl`,
-        stdout_log: `${runDir}/nodes/${meta.parentNodeId}/nested_workflow/nodes/${meta.nodeId}/stdout.log`,
-        stderr_log: `${runDir}/nodes/${meta.parentNodeId}/nested_workflow/nodes/${meta.nodeId}/stderr.log`,
+        run_dir: meta.runDir || `${runDir}/nodes/${meta.parentNodeId}/nested_workflow/nodes/${meta.nodeId}`,
+        input_path: `${meta.runDir || `${runDir}/nodes/${meta.parentNodeId}/nested_workflow/nodes/${meta.nodeId}`}/agent_payload.json`,
+        prompt_path: `${meta.runDir || `${runDir}/nodes/${meta.parentNodeId}/nested_workflow/nodes/${meta.nodeId}`}/resolved_prompt.md`,
+        output_path: `${meta.runDir || `${runDir}/nodes/${meta.parentNodeId}/nested_workflow/nodes/${meta.nodeId}`}/output.json`,
+        artifact_dir: `${meta.runDir || `${runDir}/nodes/${meta.parentNodeId}/nested_workflow/nodes/${meta.nodeId}`}/artifacts`,
+        event_log: `${meta.runDir || `${runDir}/nodes/${meta.parentNodeId}/nested_workflow/nodes/${meta.nodeId}`}/events.jsonl`,
+        stdout_log: `${meta.runDir || `${runDir}/nodes/${meta.parentNodeId}/nested_workflow/nodes/${meta.nodeId}`}/stdout.log`,
+        stderr_log: `${meta.runDir || `${runDir}/nodes/${meta.parentNodeId}/nested_workflow/nodes/${meta.nodeId}`}/stderr.log`,
         errors: [],
       })),
     ],

@@ -8,12 +8,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from acc.app.run_lifecycle import (
+    is_active_run_status,
+    is_restart_interrupted_run_status,
+    is_terminal_run_status,
+)
 from acc.run_index import NodeRunSummary, RunSummary, rebuild_run_index, write_json
 from acc.session import utc_now_iso
 from acc.utils import AccError
-
-TERMINAL_RUN_STATUSES = {"success", "failed", "cancelled", "crashed"}
-ACTIVE_RUN_STATUSES = {"queued", "running", "cancel_requested"}
 
 
 @dataclass(frozen=True)
@@ -96,11 +98,11 @@ class WorkbenchRunManager:
             )
             if (
                 self._cancel_marker(job.run_dir).exists()
-                and result.get("status") not in TERMINAL_RUN_STATUSES
+                and not is_terminal_run_status(str(result.get("status") or ""))
             ):
                 self._write_summary(job, "cancelled", ended_at=utc_now_iso())
             else:
-                self._write_terminal_summary(job, str(result.get("status") or "success"))
+                self._write_result_summary(job, str(result.get("status") or "success"))
         except Exception as exc:  # noqa: BLE001 - background tasks must persist failure facts
             status = "cancelled" if self._cancel_marker(job.run_dir).exists() else "failed"
             self._write_summary(job, status, ended_at=utc_now_iso(), error=str(exc))
@@ -161,15 +163,21 @@ class WorkbenchRunManager:
         next_summary = summary.model_copy(update={"status": status})
         self._write_summary_model(next_summary)
 
-    def _write_terminal_summary(self, job: WorkbenchRunJob, status: str) -> None:
-        terminal_status = status if status in TERMINAL_RUN_STATUSES else "success"
+    def _write_result_summary(self, job: WorkbenchRunJob, status: str) -> None:
+        if is_terminal_run_status(status) or is_active_run_status(status):
+            result_status = status
+        else:
+            result_status = "success"
         summary = self._load_existing_summary(job.run_dir)
         if summary is None:
-            self._write_summary(job, terminal_status, ended_at=utc_now_iso())
+            ended_at = utc_now_iso() if is_terminal_run_status(result_status) else None
+            self._write_summary(job, result_status, ended_at=ended_at)
             return
-        update: dict[str, Any] = {"status": terminal_status}
-        if summary.ended_at is None:
+        update: dict[str, Any] = {"status": result_status}
+        if is_terminal_run_status(result_status) and summary.ended_at is None:
             update["ended_at"] = utc_now_iso()
+        if not is_terminal_run_status(result_status):
+            update["ended_at"] = None
         if not summary.workflow_id:
             update["workflow_id"] = job.workflow_id
         next_summary = summary.model_copy(update=update)
@@ -213,7 +221,7 @@ class WorkbenchRunManager:
             if not run_dir.is_dir():
                 continue
             summary = self._load_existing_summary(run_dir)
-            if summary is None or summary.status not in ACTIVE_RUN_STATUSES:
+            if summary is None or not is_restart_interrupted_run_status(summary.status):
                 continue
             self._write_summary_from_existing(summary, "crashed")
             changed = True

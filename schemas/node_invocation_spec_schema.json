@@ -25,6 +25,11 @@
       "default": "inherit_parent"
     },
     "invocation_policy": {"type": "object"},
+    "runtime_policy": {"type": "object"},
+    "prompt_policy": {"type": "object"},
+    "control": {"$ref": "#/$defs/node_control_policy"},
+    "artifact_contract": {"type": "object"},
+    "output_schema": {"type": "object"},
     "input_ports": {"$ref": "#/$defs/ports"},
     "output_ports": {"$ref": "#/$defs/ports"},
     "metadata": {"type": "object"}
@@ -93,6 +98,20 @@
       "properties": {
         "node": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+$"},
         "port": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+$"}
+      },
+      "additionalProperties": false
+    },
+    "node_control_policy": {
+      "type": "object",
+      "properties": {
+        "require_human_approval": {"type": "boolean", "default": false},
+        "approval_prompt": {"type": ["string", "null"]},
+        "approval_reject_status": {
+          "type": "string",
+          "enum": ["failed", "skipped"],
+          "default": "failed"
+        },
+        "forward_main_output_on_control": {"type": "boolean"}
       },
       "additionalProperties": false
     },

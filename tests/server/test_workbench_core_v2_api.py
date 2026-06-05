@@ -56,6 +56,36 @@ def workbench_container_draft() -> dict:
                         "outputPorts": [{"id": "main"}],
                     }
                 ],
+                "internal_edges": [
+                    {
+                        "id": "collect_news_workflow_output",
+                        "kind": "data",
+                        "from": {"node": "collect_news", "port": "main"},
+                        "to": {"node": "New_Workflow__workflow_outputs", "port": "main"},
+                        "materialization": "copy",
+                    }
+                ],
+            },
+        }
+    ]
+    return draft
+
+
+def empty_workbench_container_draft() -> dict:
+    draft = workbench_draft()
+    draft["id"] = "empty_workbench_container_flow"
+    draft["nodes"] = [
+        {
+            "id": "New_Workflow_2",
+            "kind": "workflow",
+            "label": "New Workflow #2",
+            "callable_ref": {"kind": "workflow_function", "id": "New_Workflow_2"},
+            "input": {"topic": "wrapper"},
+            "input_ports": [{"id": "main"}],
+            "output_ports": [{"id": "main"}],
+            "ui": {
+                "semantic_kind": "workflow_container",
+                "internal_nodes": [],
                 "internal_edges": [],
             },
         }
@@ -79,6 +109,66 @@ def test_post_workflow_canonicalizes_workbench_draft(
     saved_path = project_root / "workflows" / "workbench_stock_flow.accflow.json"
     saved = json.loads(saved_path.read_text())
     assert saved["nodes"][0]["ports"]["inputs"]["main"]["type"] == "artifact"
+    assert "output_schema" in saved["nodes"][0]
+    assert payload["normalization"]["snapshotted_output_schemas"] == 1
+
+
+def test_post_workflow_normalizes_main_data_edge_to_control_main_channel(
+    client: TestClient,
+    project_root: Path,
+) -> None:
+    draft = workbench_draft()
+    draft["id"] = "main_data_edge_migration"
+    draft["nodes"].append(
+        {
+            "id": "consume",
+            "kind": "agent_session",
+            "label": "Consume",
+            "callable_ref": {"kind": "agent_class", "id": "echo-test.generic"},
+            "input": {"prompt": "Consume facts."},
+            "input_ports": [{"id": "main"}],
+            "output_ports": [{"id": "main"}],
+            "position": {"x": 400, "y": 100},
+        }
+    )
+    draft["data_edges"] = [
+        {
+            "id": "collect-main-consume-main",
+            "from": {"node": "collect", "port": "main"},
+            "to": {"node": "consume", "port": "main"},
+            "materialization": "copy",
+        }
+    ]
+
+    response = client.post("/api/workflows", json={"graph": draft, "force": True})
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["normalization"]["removed_main_data_edges"] == 1
+    saved = json.loads(
+        (project_root / "workflows" / "main_data_edge_migration.accflow.json").read_text()
+    )
+    assert saved["data_edges"] == []
+    assert saved["control_edges"] == [{"context": "none", "from": "collect", "to": "consume"}]
+
+
+def test_post_workflow_rejects_non_main_output_port_missing_schema(
+    client: TestClient,
+    project_root: Path,
+) -> None:
+    draft = workbench_draft()
+    draft["id"] = "schema_port_mismatch"
+    draft["nodes"][0]["output_ports"] = [{"id": "main"}, {"id": "risk_table"}]
+    draft["nodes"][0]["output_schema"] = {
+        "type": "object",
+        "properties": {"outputs": {"type": "object", "properties": {}}},
+    }
+
+    response = client.post("/api/workflows", json={"graph": draft, "force": True})
+
+    assert response.status_code == 400
+    assert "output_port_schema_missing" in response.text
+    assert not (project_root / "workflows" / "schema_port_mismatch.accflow.json").exists()
 
 
 def test_post_workflow_saves_compiled_child_for_workbench_container(
@@ -125,6 +215,19 @@ def write_saved_workflow(path: Path, workflow_id: str) -> None:
         ),
         encoding="utf-8",
     )
+
+
+def test_get_workflow_uses_filename_first_lookup(
+    client: TestClient,
+    project_root: Path,
+) -> None:
+    write_saved_workflow(project_root / "workflows" / "target.accflow.json", "target")
+    (project_root / "workflows" / "broken.accflow.json").write_text("{", encoding="utf-8")
+
+    response = client.get("/api/workflows/target")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["workflow_id"] == "target"
 
 
 def test_post_workflow_can_reference_existing_saved_workflow_resource(
@@ -272,6 +375,27 @@ def test_submit_workbench_container_writes_run_local_child_specs(
     spec_dir = project_root / "runs" / "_workflow_function_specs" / "container_submit"
     assert (spec_dir / "workbench_container_flow.accflow.json").exists()
     assert (spec_dir / "workbench_container_flow__New_Workflow.accflow.json").exists()
+
+
+def test_submit_empty_workbench_container_writes_noop_child_spec(
+    client: TestClient,
+    project_root: Path,
+) -> None:
+    response = client.post(
+        "/api/workflows/run-graph/submit",
+        json={
+            "graph": empty_workbench_container_draft(),
+            "run_dir": "runs/empty_container_submit",
+            "task_id": "task_empty_container",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    spec_dir = project_root / "runs" / "_workflow_function_specs" / "empty_container_submit"
+    child_path = spec_dir / "empty_workbench_container_flow__New_Workflow_2.accflow.json"
+    assert child_path.exists()
+    child = json.loads(child_path.read_text())
+    assert child["nodes"] == []
 
 
 def test_agent_callable_authoring_round_trip(client: TestClient, project_root: Path) -> None:

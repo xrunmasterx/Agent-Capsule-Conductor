@@ -6,7 +6,13 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict
 
-from acc.graphops import dry_run_patch, semantic_diff_for_patch, validate_patch_file
+from acc.graphops import (
+    apply_patch_request,
+    dry_run_patch,
+    graphops_governance_payload,
+    semantic_diff_for_patch,
+    validate_patch_file,
+)
 from acc.server.context import get_project_root, relative_project_path, resolve_inside_project
 from acc.utils import AccError
 
@@ -18,6 +24,11 @@ class GraphOpsRequest(BaseModel):
 
     patch_path: str
     semantic: bool = False
+
+
+class GraphOpsApplyRequest(GraphOpsRequest):
+    apply: bool = False
+    human_approved: bool = False
 
 
 @router.get("/examples")
@@ -47,7 +58,7 @@ def validate_graphops(payload: GraphOpsRequest, request: Request) -> dict[str, A
         "target_type": patch["target_type"],
         "target_path": patch["target_path"],
         "operations": len(patch["operations"]),
-        "apply_requires_human_approval": True,
+        **graphops_governance_payload(),
     }
     if payload.semantic:
         response["semantic_diff"] = semantic_diff_for_patch(patch)
@@ -59,8 +70,22 @@ def dry_run_graphops(payload: GraphOpsRequest, request: Request) -> dict[str, An
     patch = load_patch(payload.patch_path, request)
     return {
         **dry_run_patch(patch, semantic=payload.semantic),
-        "apply_requires_human_approval": True,
     }
+
+
+@router.post("/apply")
+def apply_graphops(payload: GraphOpsApplyRequest, request: Request) -> dict[str, Any]:
+    try:
+        patch_path = resolve_inside_project(get_project_root(request), payload.patch_path)
+        return apply_patch_request(
+            Path(patch_path),
+            dry_run=False,
+            apply=payload.apply,
+            human_approved=payload.human_approved,
+            semantic=payload.semantic,
+        )
+    except AccError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 def load_patch(path_value: str, request: Request) -> dict[str, Any]:

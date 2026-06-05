@@ -364,6 +364,9 @@ const routes: Record<string, unknown> = {
     target_path: 'examples/workflows/control_plane_demo.graph.json',
     operations: 3,
     apply_requires_human_approval: true,
+    apply_status: 'not_implemented',
+    dry_run_only: true,
+    governance_mode: 'proposal_dry_run_only',
     semantic_diff: { status: 'valid', added_nodes: ['review'], added_edges: ['a->review'] },
   },
   'POST /api/graphops/dry-run': {
@@ -373,6 +376,9 @@ const routes: Record<string, unknown> = {
     target_path: 'examples/workflows/control_plane_demo.graph.json',
     mutated: false,
     apply_requires_human_approval: true,
+    apply_status: 'not_implemented',
+    dry_run_only: true,
+    governance_mode: 'proposal_dry_run_only',
     operations: [{ op: 'add_node', description: 'Would add node review using callable critical-review.claude' }],
     semantic_diff: { status: 'valid', added_nodes: ['review'], added_edges: ['a->review'] },
   },
@@ -387,30 +393,6 @@ const routes: Record<string, unknown> = {
     timeline: [{ type: 'node_completed', node_id: 'ui_acceptance_fake', status: 'success' }],
     errors: [],
     event_log: 'runs/ui_acceptance_fake/events.jsonl',
-  },
-  'POST /api/debugger/runs/ui_acceptance_fake/nodes/ui_acceptance_fake/rerun': {
-    workflow_id: 'ui_acceptance_fake',
-    status: 'success',
-    run_dir: 'runs/ui_rerun_node_ui_acceptance_fake',
-    nodes: [],
-    edges: [],
-    errors: [],
-  },
-  'POST /api/debugger/runs/ui_acceptance_fake/nodes/ui_acceptance_fake/rerun-from': {
-    workflow_id: 'ui_acceptance_fake',
-    status: 'success',
-    run_dir: 'runs/ui_rerun_from_ui_acceptance_fake',
-    nodes: [],
-    edges: [],
-    errors: [],
-  },
-  'POST /api/debugger/runs/ui_acceptance_fake/nodes/ui_acceptance_fake/fork': {
-    workflow_id: 'ui_acceptance_fake',
-    status: 'success',
-    run_dir: 'runs/ui_fork_ui_acceptance_fake',
-    nodes: [],
-    edges: [],
-    errors: [],
   },
   'POST /api/debugger/diff': {
     run_a: 'runs/ui_acceptance_fake',
@@ -468,6 +450,23 @@ function workspaceCanvasRunSummary(runId: string) {
         event_log: `runs/${runId}/nodes/Research_Flow/internal/research_codex/events.jsonl`,
         stdout_log: `runs/${runId}/nodes/Research_Flow/internal/research_codex/stdout.log`,
         stderr_log: `runs/${runId}/nodes/Research_Flow/internal/research_codex/stderr.log`,
+        output_preview: {
+          status: 'success',
+          summary: 'Codex agent output fixture',
+          outputs: {},
+        },
+        binding_manifest: {
+          inputs: ['main'],
+          bindings: [
+            {
+              binding_kind: 'control_main_default',
+              source_node: 'Research_Flow',
+              source_port: 'main',
+              target_node: 'research_codex',
+              target_port: 'main',
+            },
+          ],
+        },
       },
     ],
   };
@@ -514,6 +513,34 @@ beforeEach(() => {
             task_id: body.task_id,
             status: 'running',
             run_dir: `runs/${runId}`,
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        );
+      }
+      if (method === 'POST' && url === '/api/callables/agents') {
+        const body = JSON.parse(String(init?.body || '{}'));
+        return new Response(
+          JSON.stringify({
+            status: 'saved',
+            callable: {
+              id: body.id,
+              version: body.version || '0.1.0',
+              name: body.name,
+              description: body.description,
+              kind: 'agent_class',
+              backend: 'native',
+              source_id: body.id,
+              source_path: `callables/agents/${body.id}.yaml`,
+              metadata: body.metadata || {},
+              input_ports: body.input_ports || { main: { type: 'artifact', required: false } },
+              output_ports: body.output_ports || { main: { type: 'artifact', required: true } },
+              artifact_contract: body.artifact_contract || {},
+              runtime: body.runtime || 'codex_cli',
+              default_prompt: body.default_prompt || '',
+            },
           }),
           {
             status: 200,
@@ -643,17 +670,20 @@ describe('Agent Callable Workbench editable UI', () => {
     );
   });
 
-  test('Callable Browser renders callable metadata and ports', async () => {
+  test('Resource library renders human-facing callable metadata', async () => {
     const user = userEvent.setup();
     render(<App />);
 
     await openNavIndex(user, 1);
 
-    const browser = await screen.findByLabelText('Callable 资源库');
-    expect(within(browser).getByRole('heading', { name: 'Callable 资源库' })).toBeInTheDocument();
+    const browser = await screen.findByLabelText('智能体工具资源库');
+    expect(within(browser).getByRole('heading', { name: '智能体工具资源库' })).toBeInTheDocument();
     expect(browser).toHaveTextContent('echo-test.generic');
-    expect(within(browser).getAllByText('agent_class').length).toBeGreaterThan(0);
-    expect(await within(browser).findByText('callables/agents/echo-test.generic.yaml')).toBeInTheDocument();
+    expect(within(browser).getAllByText('智能体').length).toBeGreaterThan(0);
+    expect(await within(browser).findByText('Echo fixture callable')).toBeInTheDocument();
+    expect(browser).not.toHaveTextContent('AgentClassTemplate');
+    expect(browser).not.toHaveTextContent('ToolClassTemplate');
+    expect(browser).not.toHaveTextContent('input_ports');
   });
 
   test('Workflow Builder renders graph-first workspace canvas', async () => {
@@ -668,9 +698,9 @@ describe('Agent Callable Workbench editable UI', () => {
     expect(canvas).toHaveTextContent('Implementation_Flow');
     expect(canvas).toHaveTextContent('Review_Flow');
     expect(canvas).toHaveTextContent('Paper_Digest_Pipeline');
-    expect(canvas).toHaveTextContent('F:\\UE5_Project_A\\workflows\\research');
+    expect(canvas).toHaveTextContent('workflows/research');
     const toolbar = await screen.findByLabelText('工作流工具栏');
-    await user.click(within(toolbar).getByRole('button', { name: /^属性$/i }));
+    await user.click(within(toolbar).getByRole('button', { name: /^节点设置$/i }));
     await user.click(within(await screen.findByLabelText('连接模式')).getByRole('button', { name: '数据' }));
     expect(canvas).toHaveTextContent('in_requirements');
     expect(canvas).toHaveTextContent('out_report');
@@ -721,9 +751,7 @@ describe('Agent Callable Workbench editable UI', () => {
     expect((await screen.findAllByText('ui_acceptance_fake')).length).toBeGreaterThan(0);
 
     await openNavIndex(user, 1);
-    expect(await screen.findByText(/Callable 模板加载失败：/)).toHaveTextContent(
-      'Callable registry exploded',
-    );
+    expect(await screen.findByText(/资源加载失败：/)).toHaveTextContent('Callable registry exploded');
   });
 
   test('startup keeps callable resources usable when workflow index fails', async () => {
@@ -801,7 +829,7 @@ describe('Agent Callable Workbench editable UI', () => {
     expect(runCallsAfterSwitch).toBe(runCallsBeforeSwitch);
   });
 
-  test('Resource drawer can create a workflow and add selected agents into it', async () => {
+  test('Resource drawer creates workflows without exposing selected-workflow add buttons', async () => {
     const user = userEvent.setup();
     render(<App />);
 
@@ -818,10 +846,96 @@ describe('Agent Callable Workbench editable UI', () => {
     const fakeAgentResource = within(navigator).getByText('Fake Agent').closest('article');
     expect(fakeAgentResource).toBeTruthy();
     expect(
-      within(fakeAgentResource as HTMLElement).getByRole('button', {
+      within(fakeAgentResource as HTMLElement).queryByRole('button', {
         name: /加入到选中 Workflow/,
       }),
-    ).toBeInTheDocument();
+    ).not.toBeInTheDocument();
+    expect(
+      within(fakeAgentResource as HTMLElement).queryByRole('button', {
+        name: '根画布',
+      }),
+    ).not.toBeInTheDocument();
+    expect(navigator).toHaveTextContent('当前拖入目标：New Workflow');
+  });
+
+  test('Blank canvas click keeps the last selected agent node settings visible', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await openNavIndex(user, 0);
+    const workbench = await screen.findByLabelText('ACC Workbench');
+    await user.click(within(workbench).getByRole('button', { name: '新建任务' }));
+    await user.click(within(workbench).getByRole('button', { name: '资源' }));
+    const navigator = await screen.findByLabelText('Workspace Navigator');
+    const fakeAgentCard = within(navigator).getByText('Fake Agent').closest('article');
+    expect(fakeAgentCard).toBeTruthy();
+    await user.dblClick(fakeAgentCard as HTMLElement);
+
+    const agentNode = await screen.findByTestId('agent-tool-node-fake_agent_generic');
+    fireEvent.click(agentNode);
+    expect(await screen.findByLabelText('节点设置面板')).toHaveTextContent('Fake Agent');
+
+    const workspaceCanvas = await screen.findByLabelText('任务画布');
+    fireEvent.pointerDown(workspaceCanvas);
+    fireEvent.click(workspaceCanvas);
+    expect(screen.getByLabelText('节点设置面板')).toHaveTextContent('Fake Agent');
+    expect(screen.queryByLabelText('任务设置面板')).not.toBeInTheDocument();
+  });
+
+  test('Backspace deletes the selected root agent but not focused prompt text', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await openNavIndex(user, 0);
+    const workbench = await screen.findByLabelText('ACC Workbench');
+    await user.click(within(workbench).getByRole('button', { name: '新建任务' }));
+    await user.click(within(workbench).getByRole('button', { name: '资源' }));
+    const navigator = await screen.findByLabelText('Workspace Navigator');
+    const fakeAgentCard = within(navigator).getByText('Fake Agent').closest('article');
+    expect(fakeAgentCard).toBeTruthy();
+    await user.dblClick(fakeAgentCard as HTMLElement);
+
+    const agentNode = await screen.findByTestId('agent-tool-node-fake_agent_generic');
+    fireEvent.click(agentNode);
+    const promptEditor = await screen.findByLabelText('用户提示词');
+    await user.clear(promptEditor);
+    await user.type(promptEditor, 'abc');
+    await user.keyboard('{Backspace}');
+    expect(promptEditor).toHaveValue('ab');
+    expect(screen.getByTestId('agent-tool-node-fake_agent_generic')).toBeInTheDocument();
+
+    fireEvent.click(agentNode);
+    fireEvent.keyDown(window, { key: 'Backspace' });
+    await waitFor(() => expect(screen.queryByTestId('agent-tool-node-fake_agent_generic')).not.toBeInTheDocument());
+  });
+
+  test('Alt left click maps to edge disconnect and removes the selected edge', () => {
+    const helpers = __workflowViewerTestables as any;
+    const canvas = {
+      id: 'root_task',
+      name: 'Root Task',
+      rootWorkflowId: 'root_task',
+      layout: 'workspace-canvas',
+      workflows: [
+        { id: 'source', status: 'not_run', internalNodes: [], internalEdges: [] },
+        { id: 'target', status: 'not_run', internalNodes: [], internalEdges: [] },
+      ],
+      edges: [
+        {
+          id: 'control_source_target',
+          kind: 'control',
+          source: { workflowId: 'source' },
+          target: { workflowId: 'target' },
+        },
+      ],
+    };
+
+    expect(helpers.shouldDisconnectEdgeOnClick({ altKey: true, button: 0 })).toBe(true);
+    expect(helpers.shouldDisconnectEdgeOnClick({ altKey: false, button: 0 })).toBe(false);
+    expect(helpers.shouldDisconnectEdgeOnClick({ altKey: true, button: 2 })).toBe(false);
+
+    const deleted = helpers.deleteSelectionFromCanvas(canvas, { type: 'edge', id: 'control_source_target' });
+    expect(deleted.edges).toHaveLength(0);
   });
 
   test('Node create menu is dismissed when switching to a new task', async () => {
@@ -880,6 +994,138 @@ describe('Agent Callable Workbench editable UI', () => {
     const roundTrippedWorkflow = roundTripped.workflows.find((item: { id: string }) => item.id === workflowId);
     expect(roundTrippedWorkflow?.internalNodes).toHaveLength(1);
     expect(helpers.isExecutableNodeWorkflow(roundTrippedWorkflow)).toBe(false);
+  });
+
+  test('Deleting a workflow container removes its root edges and internal graph', () => {
+    const helpers = __workflowViewerTestables as any;
+    const baseCanvas = {
+      id: 'root_task',
+      name: 'Root Task',
+      rootWorkflowId: 'root_task',
+      layout: 'workspace-canvas',
+      workflows: [],
+      edges: [],
+    };
+    const withWorkflow = helpers.addWorkflowFromPalette(
+      baseCanvas,
+      { kind: 'workflow', label: 'New Workflow' },
+      { x: 100, y: 100 },
+    );
+    const withRootAgent = helpers.addCallableNodeFromPalette(
+      withWorkflow,
+      { kind: 'agent', callableId: 'fake-agent.generic', label: 'Root Agent' },
+      { x: 520, y: 120 },
+    );
+    const workflowId = 'New_Workflow';
+    const rootAgentId = 'fake_agent_generic';
+    const withInternal = helpers.addInternalNodeFromPalette(
+      withRootAgent,
+      workflowId,
+      { kind: 'agent', callableId: 'fake-agent.generic', label: 'Inner Agent' },
+      { x: 120, y: 130 },
+    );
+    const canvas = {
+      ...withInternal,
+      edges: [
+        {
+          id: 'control_New_Workflow_root_agent',
+          kind: 'control',
+          source: { workflowId },
+          target: { workflowId: rootAgentId },
+        },
+      ],
+    };
+
+    const deleted = helpers.deleteSelectionFromCanvas(canvas, { type: 'workflow', id: workflowId });
+
+    expect(deleted.workflows.some((workflow: { id: string }) => workflow.id === workflowId)).toBe(false);
+    expect(deleted.workflows.some((workflow: { id: string }) => workflow.id === rootAgentId)).toBe(true);
+    expect(deleted.edges).toHaveLength(0);
+  });
+
+  test('Deleting an internal agent keeps its workflow and removes touched internal edges only', () => {
+    const helpers = __workflowViewerTestables as any;
+    const baseCanvas = {
+      id: 'root_task',
+      name: 'Root Task',
+      rootWorkflowId: 'root_task',
+      layout: 'workspace-canvas',
+      workflows: [],
+      edges: [],
+    };
+    const withWorkflow = helpers.addWorkflowFromPalette(
+      baseCanvas,
+      { kind: 'workflow', label: 'New Workflow' },
+      { x: 100, y: 100 },
+    );
+    const workflowId = 'New_Workflow';
+    const withFirst = helpers.addInternalNodeFromPalette(
+      withWorkflow,
+      workflowId,
+      { kind: 'agent', callableId: 'fake-agent.generic', label: 'First Agent' },
+      { x: 120, y: 130 },
+    );
+    const withSecond = helpers.addInternalNodeFromPalette(
+      withFirst,
+      workflowId,
+      { kind: 'agent', callableId: 'fake-agent.generic', label: 'Second Agent' },
+      { x: 440, y: 130 },
+    );
+    const firstId = 'fake_agent_generic';
+    const secondId = 'fake_agent_generic_2';
+    const canvas = {
+      ...withSecond,
+      workflows: withSecond.workflows.map((workflow: any) =>
+        workflow.id === workflowId
+          ? {
+              ...workflow,
+              internalEdges: [
+                {
+                  id: 'control_first_second',
+                  kind: 'control',
+                  source: { workflowId: firstId },
+                  target: { workflowId: secondId },
+                },
+              ],
+            }
+          : workflow,
+      ),
+    };
+
+    const deleted = helpers.deleteSelectionFromCanvas(canvas, {
+      type: 'internal',
+      workflowId,
+      nodeId: firstId,
+    });
+    const workflow = deleted.workflows.find((item: { id: string }) => item.id === workflowId);
+
+    expect(workflow).toBeTruthy();
+    expect(workflow.internalNodes).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: secondId })]),
+    );
+    expect(workflow.internalNodes.some((node: { id: string }) => node.id === firstId)).toBe(false);
+    expect(workflow.internalEdges).toHaveLength(0);
+  });
+
+  test('Deletion is blocked while the current task is running', () => {
+    const helpers = __workflowViewerTestables as any;
+    const canvas = helpers.addCallableNodeFromPalette(
+      {
+        id: 'root_task',
+        name: 'Root Task',
+        rootWorkflowId: 'root_task',
+        layout: 'workspace-canvas',
+        workflows: [],
+        edges: [],
+      },
+      { kind: 'agent', callableId: 'fake-agent.generic', label: 'Root Agent' },
+      { x: 120, y: 130 },
+    );
+
+    const result = helpers.selectionCanBeDeleted(canvas, { type: 'workflow', id: 'root_agent' }, true);
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/运行中/);
   });
 
   test('Root resource add position avoids overlapping existing workflow containers', () => {
@@ -1187,8 +1433,8 @@ describe('Agent Callable Workbench editable UI', () => {
     const expanded = __workflowViewerTestables.expandWorkflowToFitChildren(workflow);
 
     expect(expanded.position).toEqual(workflow.position);
-    expect(expanded.size.width).toBe(784);
-    expect(expanded.size.height).toBe(552);
+    expect(expanded.size.width).toBe(800);
+    expect(expanded.size.height).toBe(556);
   });
 
   test('Center-locked workflow expansion preserves child absolute position', () => {
@@ -1413,25 +1659,48 @@ describe('Agent Callable Workbench editable UI', () => {
     expect(b.position.y).not.toBe(c.position.y);
   });
 
-  test('Callable Library is a read-only Core v2 template browser', async () => {
+  test('Resource library creates an agent from user-facing fields', async () => {
     const user = userEvent.setup();
     render(<App />);
 
     await openNavIndex(user, 1);
 
-    const browser = await screen.findByLabelText('Callable 资源库');
-    expect(browser).toHaveTextContent('AgentClassTemplate / ToolClassTemplate');
-    expect(screen.queryByLabelText('创建 Callable')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Callable 编辑器')).not.toBeInTheDocument();
+    const browser = await screen.findByLabelText('智能体工具资源库');
+    await user.click(within(browser).getByRole('button', { name: /新建智能体/i }));
+
+    const dialog = await screen.findByLabelText('创建智能体');
+    await user.type(within(dialog).getByLabelText('名称'), '深度研究智能体');
+    await user.type(within(dialog).getByLabelText('描述'), '分析复杂工程问题');
+    await user.selectOptions(within(dialog).getByLabelText('Agent'), 'claude');
+    await user.selectOptions(within(dialog).getByLabelText('思考强度'), 'high');
+    await user.type(within(dialog).getByLabelText('系统提示词'), '先解释机制，再给验证方式。');
+    await user.type(within(dialog).getByPlaceholderText('输入 skill 名称'), 'frontend-design');
+    await user.click(within(dialog).getByRole('button', { name: '添加' }));
+    await user.click(within(dialog).getByRole('button', { name: '创建' }));
+
+    const calls = vi.mocked(fetch).mock.calls;
+    const createCall = calls.find(([url, init]) => url === '/api/callables/agents' && init?.method === 'POST');
+    expect(createCall).toBeTruthy();
+    const payload = JSON.parse(String(createCall?.[1]?.body));
+    expect(payload.name).toBe('深度研究智能体');
+    expect(payload.description).toBe('分析复杂工程问题');
+    expect(payload.runtime).toBe('claude_sdk');
+    expect(payload.default_prompt).toBe('先解释机制，再给验证方式。');
+    expect(payload.metadata).toMatchObject({
+      agent_provider: 'claude',
+      reasoning_effort: 'high',
+      skills: ['frontend-design'],
+    });
+    expect(JSON.stringify(payload)).not.toContain('AgentClassTemplate');
   });
 
-  test('Callable Library does not expose legacy scaffold controls', async () => {
+  test('Resource library does not expose legacy scaffold controls', async () => {
     const user = userEvent.setup();
     render(<App />);
 
     await openNavIndex(user, 1);
 
-    await screen.findByLabelText('Callable 资源库');
+    await screen.findByLabelText('智能体工具资源库');
     expect(screen.queryByRole('combobox', { name: /Callable/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^测试$/ })).not.toBeInTheDocument();
   });
@@ -1545,7 +1814,9 @@ describe('Agent Callable Workbench editable UI', () => {
     await user.click(within(navigation).getAllByRole('button')[0]);
     await loadWorkspaceDemo(user);
     const container = await screen.findByTestId('workflow-container-Research_Flow');
-    fireEvent.drop(container, {
+    const internalDropZone = container.querySelector('[data-drop-scope="workflow-internal"]');
+    expect(internalDropZone).toBeTruthy();
+    fireEvent.drop(internalDropZone as Element, {
       clientX: 180,
       clientY: 240,
       dataTransfer: {
@@ -1589,7 +1860,7 @@ describe('Agent Callable Workbench editable UI', () => {
     expect(dropped.position.y).toBeGreaterThanOrEqual(0);
   });
 
-  test('Palette add targets the newly created selected workflow container', async () => {
+  test('Palette double-click targets the newly created selected workflow container', async () => {
     const user = userEvent.setup();
     render(<App />);
 
@@ -1600,11 +1871,7 @@ describe('Agent Callable Workbench editable UI', () => {
 
     const fakeAgentCard = screen.getByText('Fake Agent').closest('article');
     expect(fakeAgentCard).toBeTruthy();
-    await user.click(
-      within(fakeAgentCard as HTMLElement).getByRole('button', {
-        name: /加入到选中 Workflow/,
-      }),
-    );
+    await user.dblClick(fakeAgentCard as HTMLElement);
     await user.click(within(toolbar).getByRole('button', { name: /\u4fdd\u5b58/i }));
 
     const calls = vi.mocked(fetch).mock.calls;
@@ -1628,7 +1895,7 @@ describe('Agent Callable Workbench editable UI', () => {
     ).toBe(false);
   });
 
-  test('Palette can add a root node while a workflow container is selected', async () => {
+  test('Palette hides root add shortcut while a workflow container is selected', async () => {
     const user = userEvent.setup();
     render(<App />);
 
@@ -1639,42 +1906,12 @@ describe('Agent Callable Workbench editable UI', () => {
 
     const fakeAgentCard = screen.getByText('Fake Agent').closest('article');
     expect(fakeAgentCard).toBeTruthy();
-    await user.click(
-      within(fakeAgentCard as HTMLElement).getByRole('button', {
+    expect(within(fakeAgentCard as HTMLElement).queryByRole('button', { name: '根画布' })).not.toBeInTheDocument();
+    expect(
+      within(fakeAgentCard as HTMLElement).queryByRole('button', {
         name: /加入到选中 Workflow/,
       }),
-    );
-    await user.click(
-      within(fakeAgentCard as HTMLElement).getByRole('button', {
-        name: '根画布',
-      }),
-    );
-    await user.click(within(toolbar).getByRole('button', { name: /\u4fdd\u5b58/i }));
-
-    const calls = vi.mocked(fetch).mock.calls;
-    const saveCall = calls
-      .filter(([url, init]) => url === '/api/workflows' && init?.method === 'POST')
-      .at(-1);
-    expect(saveCall).toBeTruthy();
-    const savedPayload = JSON.parse(String(saveCall?.[1]?.body));
-    const workflow = savedPayload.graph.nodes.find((node: { id: string }) => node.id === 'New_Workflow');
-    expect(workflow.ui.internal_nodes).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          callableId: 'fake-agent.generic',
-          name: 'Fake Agent',
-        }),
-      ]),
-    );
-    expect(savedPayload.graph.nodes).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          id: 'fake_agent_generic',
-          callable_ref: expect.objectContaining({ id: 'fake-agent.generic' }),
-          label: 'Fake Agent',
-        }),
-      ]),
-    );
+    ).not.toBeInTheDocument();
   });
 
   test('Workflow Builder drops palette callable on root as plain executable node', async () => {
@@ -1714,6 +1951,54 @@ describe('Agent Callable Workbench editable UI', () => {
     expect(rootAgent.ui).toBeUndefined();
   });
 
+  test('Workflow Builder drops palette callable on workflow shell header as root node', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const navigation = await screen.findByLabelText('Workbench navigation');
+    await user.click(within(navigation).getAllByRole('button')[0]);
+    await loadWorkspaceDemo(user);
+    const container = await screen.findByTestId('workflow-container-Research_Flow');
+    const header = container.querySelector('.workflow-container-header');
+    expect(header).toBeTruthy();
+    fireEvent.drop(header as Element, {
+      clientX: 760,
+      clientY: 220,
+      dataTransfer: {
+        getData: (key: string) =>
+          key === 'application/x-acc-palette'
+            ? JSON.stringify({
+                kind: 'agent',
+                callableId: 'fake-agent.generic',
+                label: 'Header Drop Agent',
+              })
+            : '',
+      },
+    });
+    await user.click(screen.getAllByRole('button', { name: /\u4fdd\u5b58/i })[0]);
+
+    const calls = vi.mocked(fetch).mock.calls;
+    const saveCall = calls
+      .filter(([url, init]) => url === '/api/workflows' && init?.method === 'POST')
+      .at(-1);
+    expect(saveCall).toBeTruthy();
+    const savedPayload = JSON.parse(String(saveCall?.[1]?.body));
+    const rootAgent = savedPayload.graph.nodes.find(
+      (node: { label: string }) => node.label === 'Header Drop Agent',
+    );
+    expect(rootAgent.kind).toBe('agent_session');
+    const researchFlow = savedPayload.graph.nodes.find(
+      (node: { id: string }) => node.id === 'Research_Flow',
+    );
+    expect(researchFlow.ui.internal_nodes).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'Header Drop Agent',
+        }),
+      ]),
+    );
+  });
+
   test('Workflow Builder expands workflow container to fit dropped child node', async () => {
     const user = userEvent.setup();
     render(<App />);
@@ -1722,7 +2007,9 @@ describe('Agent Callable Workbench editable UI', () => {
     await user.click(within(navigation).getAllByRole('button')[0]);
     await loadWorkspaceDemo(user);
     const container = await screen.findByTestId('workflow-container-Research_Flow');
-    fireEvent.drop(container, {
+    const internalDropZone = container.querySelector('[data-drop-scope="workflow-internal"]');
+    expect(internalDropZone).toBeTruthy();
+    fireEvent.drop(internalDropZone as Element, {
       clientX: 720,
       clientY: 520,
       dataTransfer: {
@@ -1802,9 +2089,9 @@ describe('Agent Callable Workbench editable UI', () => {
     const workspaceCanvas = await screen.findByLabelText('任务画布');
     expect(workspaceCanvas).toBeInTheDocument();
     expect(await screen.findByLabelText('Canvas Toolbar')).toBeInTheDocument();
-    await user.click(within(toolbar).getByRole('button', { name: /^属性$/i }));
-    expect(await screen.findByLabelText('属性面板')).toBeInTheDocument();
-    expect(screen.getByRole('separator', { name: '调整属性面板宽度' })).toBeInTheDocument();
+    await user.click(within(toolbar).getByRole('button', { name: /^节点设置$/i }));
+    expect(await screen.findByLabelText('任务设置面板')).toBeInTheDocument();
+    expect(screen.getByRole('separator', { name: '调整节点设置面板宽度' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Connect Last Two/i })).not.toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: /\u4fdd\u5b58/i }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole('button', { name: /校验/i }).length).toBeGreaterThan(0);
@@ -1814,7 +2101,9 @@ describe('Agent Callable Workbench editable UI', () => {
     expect(screen.getByRole('button', { name: /显示控制边/i })).toBeInTheDocument();
     fireEvent.pointerDown(workspaceCanvas);
     fireEvent.click(workspaceCanvas);
-    await waitFor(() => expect(screen.queryByLabelText('属性面板')).not.toBeInTheDocument());
+    expect(screen.getByLabelText('任务设置面板')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '收起' }));
+    await waitFor(() => expect(screen.queryByLabelText('任务设置面板')).not.toBeInTheDocument());
   });
 
   test('Workflow Builder saves, validates, and runs workspace canvas', async () => {
@@ -1868,32 +2157,37 @@ describe('Agent Callable Workbench editable UI', () => {
     await user.click(within(toolbar).getByRole('button', { name: /^运行$/i }));
     await screen.findByText(/ui_workflow_acc_workspace_canvas_fixture: 成功/i);
 
-    const inspector = await screen.findByLabelText('属性面板');
+    const inspector = await screen.findByLabelText('节点设置面板');
 
-    expect(inspector).toHaveTextContent(/系统提示词.*资源库/);
+    expect(inspector).toHaveTextContent('系统提示词');
     expect(within(inspector).queryByRole('textbox', { name: /系统提示词/ })).not.toBeInTheDocument();
-    expect(await within(inspector).findByLabelText(/output\.json/)).toHaveTextContent(
-      'Codex agent output fixture',
-    );
+    expect(inspector).toHaveTextContent('运行证据');
+    expect(inspector).toHaveTextContent('控制线 main 传输');
+    expect(inspector).toHaveTextContent('Codex agent output fixture');
+    expect(within(inspector).getByRole('button', { name: /真实输出.*output\.json/i })).toBeEnabled();
 
-    await user.click(within(inspector).getByRole('button', { name: '产物' }));
-    const inputEvidence = await within(inspector).findByRole('button', { name: /输入/i });
+    const inputEvidence = await within(inspector).findByRole('button', { name: /真实输入/i });
     await user.click(inputEvidence);
-    expect(await screen.findByLabelText(/input\.json/)).toHaveTextContent('Codex CLI');
-    expect(screen.getByLabelText(/input\.json/)).toHaveTextContent('真实上游输入');
+    const evidencePane = await screen.findByLabelText('当前证据详情');
+    expect(evidencePane).toHaveTextContent('input.json');
+    expect(evidencePane).toHaveTextContent('Codex CLI');
+    expect(evidencePane).toHaveTextContent('真实上游输入');
+
+    await user.click(within(inspector).getByRole('button', { name: /真实输出/i }));
+    expect(await screen.findByLabelText('当前证据详情')).toHaveTextContent('Codex agent output fixture');
   });
 
-  test('Run Inspector exposes debugger actions and diff results', async () => {
+  test('Run Inspector exposes implemented debugger replay action', async () => {
     const user = userEvent.setup();
     render(<App />);
 
     await openNavigation(user, /运行记录/i);
     await screen.findAllByText('ui_acceptance_fake');
     await user.click(await screen.findByRole('button', { name: /\u4e8b\u4ef6\u56de\u653e/i }));
-    await user.click(await screen.findByRole('button', { name: /\u91cd\u8dd1\u8282\u70b9/i }));
 
     expect(await screen.findByLabelText('replay.json')).toHaveTextContent('node_completed');
-    expect(await screen.findByLabelText('run_diff.json')).toHaveTextContent('"changed_nodes": []');
+    expect(screen.queryByRole('button', { name: /\u91cd\u8dd1\u8282\u70b9/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Fork/i })).not.toBeInTheDocument();
   });
 
   test('Control Plane renders GraphOps safety flow', async () => {
@@ -1905,9 +2199,9 @@ describe('Agent Callable Workbench editable UI', () => {
     await user.click(await screen.findByRole('button', { name: /dry-run patch/i }));
 
     expect(await screen.findByLabelText('graphops.dry-run.json')).toHaveTextContent(
-      'apply_requires_human_approval',
+      'not_implemented',
     );
-    expect(screen.getByText(/\u5371\u9669 apply \u9ed8\u8ba4\u5173\u95ed/)).toBeInTheDocument();
+    expect(screen.getByText(/proposal \/ validate \/ dry-run only/)).toBeInTheDocument();
   });
 
   test('Run Inspector renders pending interaction approval card', async () => {

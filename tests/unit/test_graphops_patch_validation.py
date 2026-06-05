@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from acc.graphops import dry_run_patch, validate_patch
+from acc.graphops import apply_patch_request, dry_run_patch, validate_patch
 from acc.utils import AccError, load_json
 
 
@@ -83,6 +83,8 @@ def test_dry_run_reports_target_and_operations() -> None:
 
     assert preview["status"] == "dry_run"
     assert preview["mutated"] is False
+    assert preview["dry_run_only"] is True
+    assert preview["apply_status"] == "not_implemented"
     assert preview["target_path"] == "examples/workflows/control_plane_demo.accflow.json"
     assert len(preview["operations"]) == 2
 
@@ -119,3 +121,13 @@ def test_workflow_patch_rejects_legacy_node_fields() -> None:
 
     with pytest.raises(AccError, match="legacy field"):
         validate_patch(patch)
+
+
+def test_real_apply_with_human_approval_is_not_implemented() -> None:
+    with pytest.raises(AccError, match="not implemented in Option A"):
+        apply_patch_request(
+            Path("examples/graphops/add-review-node.patch.json"),
+            dry_run=False,
+            apply=True,
+            human_approved=True,
+        )

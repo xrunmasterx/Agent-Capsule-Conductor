@@ -56,3 +56,77 @@ def test_get_node_includes_projection_fields(client, project_root) -> None:
     assert payload["steps"]
     assert payload["log_excerpt"]
     assert payload["log_ref"]
+
+
+def test_run_events_include_recursive_nested_workflow_scope(client, project_root) -> None:
+    run_dir = project_root / "runs" / "recursive_nested_events_run"
+    workflow_a_nested = run_dir / "nodes" / "workflow_a" / "nested_workflow"
+    workflow_b_nested = workflow_a_nested / "nodes" / "workflow_b" / "nested_workflow"
+    workflow_b_node_dir = workflow_a_nested / "nodes" / "workflow_b"
+    agent_node_dir = workflow_b_nested / "nodes" / "agent_1"
+    agent_node_dir.mkdir(parents=True, exist_ok=True)
+    workflow_b_node_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "events.jsonl").parent.mkdir(parents=True, exist_ok=True)
+    (run_dir / "events.jsonl").write_text(
+        json.dumps(
+            {
+                "type": "node_started",
+                "timestamp": "2026-06-05T00:00:00Z",
+                "node_id": "workflow_a",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (workflow_a_nested / "events.jsonl").write_text(
+        json.dumps(
+            {
+                "type": "node_started",
+                "timestamp": "2026-06-05T00:00:01Z",
+                "node_id": "workflow_b",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (workflow_b_nested / "events.jsonl").write_text(
+        json.dumps(
+            {
+                "type": "node_started",
+                "timestamp": "2026-06-05T00:00:02Z",
+                "node_id": "agent_1",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    response = client.get("/api/runs/recursive_nested_events_run/events")
+
+    assert response.status_code == 200, response.text
+    events = response.json()["events"]
+    assert events == [
+        {
+            "type": "node_started",
+            "timestamp": "2026-06-05T00:00:00Z",
+            "node_id": "workflow_a",
+        },
+        {
+            "type": "node_started",
+            "timestamp": "2026-06-05T00:00:01Z",
+            "node_id": "workflow_b",
+            "nested": True,
+            "parent_node_id": "workflow_a",
+            "ui_node_id": "workflow_a__internal__workflow_b",
+            "node_run_dir": str(workflow_b_node_dir.resolve()),
+        },
+        {
+            "type": "node_started",
+            "timestamp": "2026-06-05T00:00:02Z",
+            "node_id": "agent_1",
+            "nested": True,
+            "parent_node_id": "workflow_a__internal__workflow_b",
+            "ui_node_id": "workflow_a__internal__workflow_b__internal__agent_1",
+            "node_run_dir": str(agent_node_dir.resolve()),
+        },
+    ]

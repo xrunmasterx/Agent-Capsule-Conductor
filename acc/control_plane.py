@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import copy
 import os
+import re
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import yaml
 
 from acc.app.core_v2_loader import LEGACY_GRAPH_SUFFIX, reject_legacy_graph_path
 from acc.callable_registry import CallableAsset, CallableRegistry, template_kind
+from acc.callable_runner import DEFAULT_AGENT_OUTPUT_SCHEMA
 from acc.run_index import load_run_summary, load_run_summary_by_id
 from acc.store import is_clean_workflow_path
 from acc.utils import AccError, load_json, repo_root
@@ -34,6 +38,31 @@ SECRET_SUBSTRINGS = {
     "token",
 }
 MAX_ARTIFACT_READ_BYTES = 1_000_000
+CALLABLE_ID_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+
+
+class CallableAlreadyExistsError(AccError):
+    pass
+
+
+class CallableNotFoundError(AccError):
+    pass
+
+
+class ArtifactNotFoundError(AccError):
+    pass
+
+
+class ArtifactTooLargeError(AccError):
+    pass
+
+
+class ArtifactEncodingError(AccError):
+    pass
+
+
+class SecretLikePathError(AccError):
+    pass
 
 
 def list_callables_payload(project_root: Path | None = None) -> dict[str, Any]:
@@ -47,6 +76,101 @@ def show_callable_payload(callable_id: str, project_root: Path | None = None) ->
     registry = CallableRegistry.from_project_root(root)
     asset = registry.resolve_class_id(callable_id)
     return {"callable": callable_detail(asset, root)}
+
+
+def save_agent_callable_payload(
+    project_root: Path,
+    callable_id: str,
+    payload: dict[str, Any],
+    *,
+    overwrite: bool,
+) -> dict[str, Any]:
+    root = project_root.resolve()
+    validate_callable_id(callable_id)
+    if payload.get("id") != callable_id:
+        raise AccError("Callable id in path and body must match")
+
+    path = agent_callable_path(root, callable_id)
+    if path.exists() and not overwrite:
+        raise CallableAlreadyExistsError(f"Agent callable already exists: {callable_id}")
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    previous = path.read_text(encoding="utf-8") if path.exists() else None
+    temp_path = path.with_name(f"{path.stem}.{uuid4().hex}.tmp")
+    temp_path.write_text(
+        yaml.safe_dump(agent_payload_to_yaml(payload), sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+    try:
+        temp_path.replace(path)
+        CallableRegistry.from_project_root(root).resolve_class_id(callable_id)
+    except Exception as exc:
+        temp_path.unlink(missing_ok=True)
+        if previous is None:
+            path.unlink(missing_ok=True)
+        else:
+            path.write_text(previous, encoding="utf-8")
+        raise AccError(str(exc)) from exc
+
+    return {
+        "status": "saved",
+        "callable": show_callable_payload(callable_id, root)["callable"],
+    }
+
+
+def delete_agent_callable_payload(project_root: Path, callable_id: str) -> dict[str, Any]:
+    root = project_root.resolve()
+    validate_callable_id(callable_id)
+    path = agent_callable_path(root, callable_id)
+    if not path.exists():
+        raise CallableNotFoundError(f"Agent callable not found: {callable_id}")
+    path.unlink()
+    return {"status": "deleted", "id": callable_id}
+
+
+def agent_payload_to_yaml(payload: dict[str, Any]) -> dict[str, Any]:
+    metadata = dict(payload.get("metadata") or {})
+    name = payload.get("name")
+    description = payload.get("description")
+    if name:
+        metadata["name"] = name
+    if description:
+        metadata["description"] = description
+
+    data: dict[str, Any] = {
+        "id": payload["id"],
+        "version": payload.get("version") or "0.1.0",
+        "runtime": payload.get("runtime") or "codex_cli",
+    }
+    if payload.get("default_prompt"):
+        data["default_prompt"] = payload["default_prompt"]
+    if payload.get("default_permissions"):
+        data["default_permissions"] = payload["default_permissions"]
+    data["input_ports"] = payload.get("input_ports") or {
+        "main": {"type": "artifact", "required": False}
+    }
+    data["output_ports"] = payload.get("output_ports") or {
+        "main": {"type": "artifact", "required": True}
+    }
+    artifact_contract = dict(payload.get("artifact_contract") or {})
+    artifact_contract.setdefault("output_schema", copy.deepcopy(DEFAULT_AGENT_OUTPUT_SCHEMA))
+    data["artifact_contract"] = artifact_contract
+    if metadata:
+        data["metadata"] = metadata
+    return data
+
+
+def validate_callable_id(callable_id: str) -> None:
+    if not CALLABLE_ID_RE.fullmatch(callable_id):
+        raise AccError("Callable id must match ^[A-Za-z0-9_.-]+$")
+
+
+def agent_callable_path(project_root: Path, callable_id: str) -> Path:
+    agents_dir = (project_root / "callables" / "agents").resolve()
+    path = (agents_dir / f"{callable_id}.yaml").resolve()
+    if not path.is_relative_to(agents_dir):
+        raise AccError("Callable path is outside agents directory")
+    return path
 
 
 def list_workflows_payload(
@@ -94,19 +218,22 @@ def show_run_payload(run_ref: str, runs_root: Path = Path("runs")) -> dict[str, 
     return load_run_summary_by_id(run_ref, runs_root).model_dump()
 
 
-def read_artifact_payload(artifact_ref: str) -> dict[str, Any]:
-    project_root = repo_root().resolve()
+def read_artifact_payload(
+    artifact_ref: str,
+    project_root: Path | None = None,
+) -> dict[str, Any]:
+    project_root = (project_root or repo_root()).resolve()
     path = resolve_artifact_reference(project_root, artifact_ref)
     reject_secret_like_path(path)
     if not path.exists() or not path.is_file():
-        raise AccError(f"Artifact not found: {artifact_ref}")
+        raise ArtifactNotFoundError(f"Artifact not found: {artifact_ref}")
     size = path.stat().st_size
     if size > MAX_ARTIFACT_READ_BYTES:
-        raise AccError(f"Artifact is too large to read: {artifact_ref}")
+        raise ArtifactTooLargeError(f"Artifact is too large to read: {artifact_ref}")
     try:
         content = path.read_text(encoding="utf-8")
     except UnicodeDecodeError as exc:
-        raise AccError(f"Artifact is not UTF-8 text: {artifact_ref}") from exc
+        raise ArtifactEncodingError(f"Artifact is not UTF-8 text: {artifact_ref}") from exc
     return {
         "artifact_ref": artifact_ref,
         "path": relative_project_path(project_root, path),
@@ -135,6 +262,13 @@ def callable_summary(asset: CallableAsset, project_root: Path) -> dict[str, Any]
         payload["description"] = description
     if asset.source_path is not None:
         payload["source_path"] = relative_project_path(project_root, asset.source_path)
+    payload["input_ports"] = {
+        key: value.__dict__ for key, value in template.input_ports.items()
+    }
+    payload["output_ports"] = {
+        key: value.__dict__ for key, value in template.output_ports.items()
+    }
+    payload["artifact_contract"] = template.artifact_contract
     return payload
 
 
@@ -339,9 +473,9 @@ def reject_secret_like_path(path: Path) -> None:
     lower_parts = [part.lower() for part in path.parts]
     name = path.name.lower()
     if name in SECRET_EXACT_NAMES or any(part in SECRET_EXACT_NAMES for part in lower_parts):
-        raise AccError("Secret-like files are not exposed")
+        raise SecretLikePathError("Secret-like files are not exposed")
     if any(marker in name for marker in SECRET_SUBSTRINGS):
-        raise AccError("Secret-like files are not exposed")
+        raise SecretLikePathError("Secret-like files are not exposed")
 
 
 def infer_artifact_type(path: Path) -> str:

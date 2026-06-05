@@ -19,6 +19,20 @@ FORBIDDEN_OPERATIONS = {
     "remove_schema_validation",
     "add_artifact_requirement",
 }
+GRAPHOPS_PATCH_SCHEMA_PATH = (
+    Path(__file__).resolve().parent.parent / "schemas" / "graphops_patch_schema.json"
+)
+GRAPHOPS_GOVERNANCE_MODE = "proposal_dry_run_only"
+GRAPHOPS_APPLY_STATUS = "not_implemented"
+
+
+def graphops_governance_payload() -> dict[str, Any]:
+    return {
+        "governance_mode": GRAPHOPS_GOVERNANCE_MODE,
+        "dry_run_only": True,
+        "apply_status": GRAPHOPS_APPLY_STATUS,
+        "apply_requires_human_approval": True,
+    }
 
 
 def validate_patch_file(patch_path: Path) -> dict[str, Any]:
@@ -30,7 +44,7 @@ def validate_patch_file(patch_path: Path) -> dict[str, Any]:
 
 
 def validate_patch(patch: dict[str, Any]) -> None:
-    schema = load_json(Path("schemas/graphops_patch_schema.json"))
+    schema = load_json(GRAPHOPS_PATCH_SCHEMA_PATH)
     try:
         Draft202012Validator(schema).validate(patch)
     except JsonSchemaValidationError as exc:
@@ -132,10 +146,10 @@ def contains_legacy_workflow_field(value: Any) -> bool:
         "metadata",
     }
     legacy_fields = {
-        "input" + "_mapping",
-        "legacy" + "_value_edges",
-        "binding" + "_mode",
-        "upstream" + "_context",
+        "input_mapping",
+        "legacy_value_edges",
+        "binding_mode",
+        "upstream_context",
         "runtime",
         "kind",
         "tool",
@@ -168,6 +182,7 @@ def dry_run_patch(patch: dict[str, Any], *, semantic: bool = False) -> dict[str,
         "target_exists": target_path.exists(),
         "operations": [preview_operation(operation) for operation in patch["operations"]],
         "mutated": False,
+        **graphops_governance_payload(),
     }
     if semantic:
         result["semantic_diff"] = semantic_diff_for_patch(patch)
@@ -200,8 +215,11 @@ def apply_patch_request(
     if dry_run:
         return dry_run_patch(patch, semantic=semantic)
     if not (apply and human_approved):
-        raise AccError("Real GraphOps apply requires --apply --human-approved")
-    raise AccError("Real GraphOps apply is not implemented in the MVP")
+        raise AccError(
+            "GraphOps apply is unavailable in Option A: use --dry-run. "
+            "Real apply requires --apply --human-approved and is not implemented."
+        )
+    raise AccError("Real GraphOps apply is not implemented in Option A; use --dry-run.")
 
 
 def preview_operation(operation: dict[str, Any]) -> dict[str, Any]:

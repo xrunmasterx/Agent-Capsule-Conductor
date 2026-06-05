@@ -52,6 +52,20 @@ class _FailingService:
         raise RuntimeError("boom")
 
 
+class _WaitingService:
+    async def run(
+        self,
+        graph_path: Path,
+        run_dir: Path,
+        *,
+        workspace: Path | None,
+        binding_path: Path | None,
+        input_payload: dict[str, Any] | None,
+        should_cancel: Any,
+    ) -> dict[str, Any]:
+        return {"status": "waiting_interaction"}
+
+
 def _job(
     tmp_path: Path,
     *,
@@ -84,6 +98,17 @@ async def _wait_for_terminal(run_dir: Path) -> dict[str, Any]:
     raise AssertionError("run did not reach terminal state")
 
 
+async def _wait_for_status(run_dir: Path, expected_status: str) -> dict[str, Any]:
+    for _ in range(100):
+        summary_path = run_dir / "run_summary.json"
+        if summary_path.exists():
+            payload = json.loads(summary_path.read_text(encoding="utf-8"))
+            if payload.get("status") == expected_status:
+                return payload
+        await asyncio.sleep(0.01)
+    raise AssertionError(f"run did not reach {expected_status}")
+
+
 def test_workbench_run_manager_rewrites_terminal_success_summary(tmp_path: Path) -> None:
     async def scenario() -> dict[str, Any]:
         manager = WorkbenchRunManager(tmp_path, max_active_runs=1)
@@ -103,6 +128,28 @@ def test_workbench_run_manager_rewrites_terminal_success_summary(tmp_path: Path)
     assert payload["task_id"] == "task-stock"
     summary = load_run_summary_by_id("run-success", tmp_path / "runs")
     assert summary.status == "success"
+
+
+def test_workbench_run_manager_preserves_waiting_status_as_non_terminal(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> dict[str, Any]:
+        manager = WorkbenchRunManager(tmp_path, max_active_runs=1)
+        job = _job(
+            tmp_path,
+            run_id="run-waiting",
+            task_id="task-stock",
+            service=_WaitingService(),
+        )
+        submit_result = await manager.submit(job)
+        assert submit_result["status"] == "running"
+        return await _wait_for_status(job.run_dir, "waiting_interaction")
+
+    payload = asyncio.run(scenario())
+
+    assert payload["status"] == "waiting_interaction"
+    assert payload["task_id"] == "task-stock"
+    assert payload.get("ended_at") is None
 
 
 def test_workbench_run_manager_writes_failed_summary_on_background_exception(
@@ -126,3 +173,45 @@ def test_workbench_run_manager_writes_failed_summary_on_background_exception(
     assert payload["task_id"] == "task-stock"
     assert payload["failed_nodes"] == ["stock-flow"]
     assert payload["nodes"][0]["summary"] == "boom"
+
+
+def test_workbench_run_manager_reconcile_preserves_waiting_but_crashes_interrupted(
+    tmp_path: Path,
+) -> None:
+    runs_root = tmp_path / "runs"
+    _write_existing_summary(runs_root / "run-waiting", "waiting_interaction")
+    _write_existing_summary(runs_root / "run-running", "running")
+    _write_existing_summary(runs_root / "run-resuming", "resuming")
+
+    WorkbenchRunManager(tmp_path, max_active_runs=1)
+
+    waiting = json.loads(
+        (runs_root / "run-waiting" / "run_summary.json").read_text(encoding="utf-8")
+    )
+    running = json.loads(
+        (runs_root / "run-running" / "run_summary.json").read_text(encoding="utf-8")
+    )
+    resuming = json.loads(
+        (runs_root / "run-resuming" / "run_summary.json").read_text(encoding="utf-8")
+    )
+    assert waiting["status"] == "waiting_interaction"
+    assert running["status"] == "crashed"
+    assert resuming["status"] == "crashed"
+
+
+def _write_existing_summary(run_dir: Path, status: str) -> None:
+    run_dir.mkdir(parents=True)
+    (run_dir / "run_summary.json").write_text(
+        json.dumps(
+            {
+                "run_id": run_dir.name,
+                "workflow_id": "stock-flow",
+                "status": status,
+                "run_dir": str(run_dir.resolve()),
+                "node_count": 0,
+                "failed_nodes": [],
+                "nodes": [],
+            }
+        ),
+        encoding="utf-8",
+    )

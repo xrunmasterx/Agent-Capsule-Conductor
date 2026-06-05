@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import shutil
 from pathlib import Path
 
-from acc.adapters.base import AgentRunRequest, AgentRunResult, ResumeRequest
+from acc.adapters.base import (
+    AgentRunRequest,
+    AgentRunResult,
+    ResumeRequest,
+    build_shared_acc_env,
+    write_jsonl,
+)
 from acc.adapters.capabilities import default_adapter_capabilities
 from acc.domain import AccError, AgentCapabilities
 
@@ -27,17 +32,7 @@ class CodexCliAdapter:
         env.update(request.env)
         if "CODEX_HOME" not in request.env:
             env["CODEX_HOME"] = str(prepare_isolated_codex_home(request))
-        if request.inbox_dir is not None:
-            env["ACC_INBOX_DIR"] = str(request.inbox_dir)
-        if request.outbox_dir is not None:
-            env["ACC_OUTBOX_DIR"] = str(request.outbox_dir)
-        if request.environment_id is not None:
-            env["ACC_ENVIRONMENT_ID"] = request.environment_id
-        if request.node_id is not None:
-            env["ACC_NODE_ID"] = request.node_id
-        if request.run_id is not None:
-            env["ACC_RUN_ID"] = request.run_id
-        env["ACC_RUN_DIR"] = str(request.run_dir)
+        env.update(build_shared_acc_env(request))
         prompt_bytes = request.prompt_path.read_bytes()
 
         try:
@@ -220,11 +215,6 @@ def failed(
         exit_code=exit_code,
         error=error,
     )
-
-
-def write_jsonl(path, payload: dict) -> None:
-    with path.open("a", encoding="utf-8") as file:
-        file.write(json.dumps(payload, sort_keys=True) + "\n")
 
 
 async def stream_process(

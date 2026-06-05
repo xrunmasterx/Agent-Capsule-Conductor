@@ -61,6 +61,46 @@ def test_parse_workflow_function_template_directly_builds_core_v2_model() -> Non
     assert template.node_invocations["consumer"].input_bindings[0].source.node == "producer"
 
 
+def test_parse_workflow_function_template_allows_noop_workflow() -> None:
+    template = parse_workflow_function_template(
+        {
+            "schema_version": CORE_V2_SCHEMA_VERSION,
+            "id": "noop_workflow",
+            "version": "1.0.0",
+            "nodes": [],
+            "control_edges": [],
+            "data_edges": [],
+            "exposed_inputs": {"main": {"direction": "input", "required": False}},
+            "exposed_outputs": {"main": {"direction": "output", "required": False}},
+        }
+    )
+
+    assert template.node_invocations == {}
+    validate_core_v2_workflow_function_template(template)
+
+
+def test_parse_workflow_function_template_reads_typed_node_control_policy() -> None:
+    payload = v2_payload()
+    payload["nodes"][1]["control"] = {
+        "require_human_approval": True,
+        "approval_prompt": "Approve consumer?",
+        "forward_main_output_on_control": False,
+    }
+    payload["nodes"][1]["output_schema"] = {
+        "type": "object",
+        "properties": {"summary": {"type": "string"}},
+        "required": ["summary"],
+    }
+
+    template = parse_workflow_function_template(payload)
+
+    control = template.node_invocations["consumer"].control
+    assert control.require_human_approval is True
+    assert control.approval_prompt == "Approve consumer?"
+    assert control.forward_main_output_on_control is False
+    assert template.node_invocations["consumer"].output_schema["required"] == ["summary"]
+
+
 def test_load_workflow_function_template_reads_accflow_json(tmp_path: Path) -> None:
     path = tmp_path / "demo.accflow.json"
     write_json(path, v2_payload())

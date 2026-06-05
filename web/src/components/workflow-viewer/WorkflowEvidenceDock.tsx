@@ -41,19 +41,30 @@ export function WorkflowEvidenceDock({
     selectedRunId,
     hasWorkflowRun: Boolean(workflowRun),
   });
+  const currentEvidenceTitle = content?.name || state.title || '运行证据';
+
   return (
     <footer className={state.open ? 'evidence-dock open' : 'evidence-dock'} aria-label="Workflow Evidence Dock">
       <button type="button" className="evidence-dock-toggle" onClick={onToggle}>
+        <span className={`evidence-dock-status status-${workflowRun?.status || 'not_run'}`}>
+          {workflowRun ? statusLabel(workflowRun.status) : '未运行'}
+        </span>
+        <span className="evidence-dock-message">{message}</span>
+        <span className="evidence-dock-current">{currentEvidenceTitle}</span>
         {state.open ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
-        <strong>{workflowRun ? statusLabel(workflowRun.status) : '未运行'}</strong>
-        <span>{message}</span>
       </button>
       {state.open ? (
         <div className="evidence-dock-body">
-          <section>
-            <h3>{state.title}</h3>
+          <section className="evidence-artifact-pane" aria-label="当前证据详情">
+            <header className="evidence-pane-header">
+              <div>
+                <span>当前证据</span>
+                <h3>{state.title}</h3>
+              </div>
+              {content ? <small>{content.path}</small> : null}
+            </header>
             {failure ? <FailureSummaryCard failure={failure} /> : null}
-            {content ? <ReadableArtifact content={content} /> : <p>暂无打开的证据。</p>}
+            {content ? <ReadableArtifact content={content} /> : <p className="empty-state">暂无打开的证据。</p>}
           </section>
           <EventTimeline events={workflowEvents} title="最近事件" />
         </div>
@@ -146,13 +157,15 @@ function latestEventError(events: RunEvent[]): string {
 }
 
 function EventTimeline({ events, title }: { events: RunEvent[]; title: string }) {
+  const visibleEvents = events.slice(-12).reverse();
   return (
-    <section className="event-timeline">
+    <section className="event-timeline" aria-label={title}>
       <h3>{title}</h3>
-      {events.slice(-12).map((event, index) => (
-        <article key={`${event.timestamp || index}-${event.type || event.event}`}>
+      {visibleEvents.map((event, index) => (
+        <article className="event-row compact" key={`${event.timestamp || index}-${event.type || event.event}`}>
           <strong>{String(event.type || event.event || 'event')}</strong>
           <span>{event.node_id || event.workflow_run_id || ''}</span>
+          <small>{String(event.status || '')}</small>
           <small>{event.timestamp || ''}</small>
         </article>
       ))}

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from acc.session import utc_now_iso
+from acc.store import write_json
 from acc.utils import AccError, load_json
 
 BEHAVIOR_PATHS = (
@@ -65,14 +65,6 @@ class WorkflowExecutionContext:
     outbox_dir: Path
     behavior_snapshot_dir: Path
     extra_env: dict[str, str] = field(default_factory=dict)
-
-
-def write_json(path: Path, payload: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True),
-        encoding="utf-8",
-    )
 
 
 def create_workspace_binding(workflow_path: Path, workspace: Path, out: Path) -> dict[str, Any]:

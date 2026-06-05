@@ -172,10 +172,15 @@ function DecisionDetail({
           </article>
         ))}
       </section>
-      {item.graphops?.apply_requires_human_approval ? (
+      {item.graphops?.dry_run_only ? (
+        <>
         <div className="notice neutral">
+          GraphOps 当前仅支持 proposal / validate / dry-run；real apply 未实现，本页面不会直接应用补丁。
+        </div>
+        <div className="notice neutral" hidden>
           GraphOps real apply 仍然需要 validate / dry-run / human approval，本页面不会直接应用补丁。
         </div>
+        </>
       ) : null}
       {actionResult ? (
         <CodeBlock title="action-result.json" content={JSON.stringify(actionResult, null, 2)} variant="json" />

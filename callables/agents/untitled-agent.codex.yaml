@@ -1,0 +1,20 @@
+id: untitled-agent.codex
+version: 0.1.0
+runtime: codex_cli
+default_prompt: 输出1
+input_ports:
+  main:
+    type: artifact
+    required: false
+output_ports:
+  main:
+    type: artifact
+    required: true
+artifact_contract: {}
+metadata:
+  agent_provider: codex
+  model: 默认模型
+  reasoning_effort: medium
+  skills: []
+  name: 测试智能体
+  description: 测试

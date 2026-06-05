@@ -12,9 +12,10 @@ from acc.domain import (
     EnvironmentFrame,
     NodeInvocationSpec,
 )
+from acc.hermetic_callables import HERMETIC_AGENT_CLASS_IDS
 from acc.store import load_json
 
-IN_PROCESS_FAKE_AGENTS: frozenset[str] = frozenset({"generic_fake_agent"})
+IN_PROCESS_FAKE_AGENTS: frozenset[str] = HERMETIC_AGENT_CLASS_IDS
 
 
 class CallableInvocationService:

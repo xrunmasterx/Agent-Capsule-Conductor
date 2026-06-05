@@ -32,22 +32,39 @@ class FakeCodexProcess:
         output_path.write_text(
             json.dumps(
                 {
+                    "schema_version": "acc.agent.output.v1",
                     "status": "success",
                     "summary": summary,
+                    "report_markdown": analysis,
                     "findings": [
                         {
+                            "id": "F1",
+                            "severity": "info",
                             "title": "sentinel",
                             "detail": "A_SENTINEL_123",
-                            "evidence": ["test evidence"],
-                            "sources": [],
-                            "confidence": "test",
+                            "recommendation": "Keep propagating the sentinel.",
+                            "evidence_ids": ["E1"],
+                            "confidence": "high",
                         }
                     ],
-                    "analysis": analysis,
-                    "sources": [],
-                    "confidence": "test",
-                    "uncertainties": [],
+                    "evidence": [
+                        {
+                            "id": "E1",
+                            "kind": "observation",
+                            "ref": "test",
+                            "note": "test evidence",
+                            "quote": "A_SENTINEL_123",
+                        }
+                    ],
                     "artifacts": [],
+                    "quality": {
+                        "confidence": "high",
+                        "assumptions": [],
+                        "uncertainties": [],
+                        "limitations": [],
+                    },
+                    "next_actions": [],
+                    "outputs": {},
                 },
                 indent=2,
                 sort_keys=True,
@@ -103,6 +120,36 @@ def test_core_v2_single_node_success(tmp_path: Path) -> None:
     assert (tmp_path / "run" / "function_invocation.json").exists()
     assert (tmp_path / "run" / "scope_frame.json").exists()
     assert (tmp_path / "run" / "nodes" / "produce" / "session_instance_manifest.json").exists()
+
+
+def test_core_v2_noop_workflow_success(tmp_path: Path) -> None:
+    workflow_path = tmp_path / "noop.accflow.json"
+    write_v2(
+        workflow_path,
+        {
+            "schema_version": CORE_V2_SCHEMA_VERSION,
+            "id": "noop",
+            "version": "0.1.0",
+            "nodes": [],
+            "control_edges": [],
+            "data_edges": [],
+            "exposed_inputs": {"main": {"direction": "input", "required": False}},
+            "exposed_outputs": {"main": {"direction": "output", "required": False}},
+            "workflow_input_bindings": [],
+            "workflow_output_bindings": [],
+        },
+    )
+
+    record = asyncio.run(run_core_v2_workflow_path(workflow_path, tmp_path / "noop_run"))
+
+    summary = json.loads((tmp_path / "noop_run" / "run_summary.json").read_text(encoding="utf-8"))
+    run_plan = json.loads((tmp_path / "noop_run" / "run_plan.json").read_text(encoding="utf-8"))
+    events = (tmp_path / "noop_run" / "events.jsonl").read_text(encoding="utf-8")
+    assert record.status == "success"
+    assert summary["status"] == "success"
+    assert run_plan["step_count"] == 0
+    assert "workflow_completed" in events
+    assert not (tmp_path / "noop_run" / "workflow_outputs" / "main" / "output.json").exists()
 
 
 def test_workflow_app_service_routes_core_v2_schema_to_core_runtime(tmp_path: Path) -> None:
@@ -375,7 +422,7 @@ output_ports:
     assert all("--dangerously-bypass-approvals-and-sandbox" not in command for command in captured)
     assert all("--search" not in command for command in captured)
     assert cleaner_input["evidence"]["findings"][0]["detail"] == "A_SENTINEL_123"
-    assert "A_SENTINEL_123" in cleaner_output["analysis"]
+    assert "A_SENTINEL_123" in cleaner_output["report_markdown"]
     assert cleaner_bindings["bindings"][0]["binding_kind"] == "data_edge"
     assert cleaner_bindings["bindings"][0]["source_node"] == "research"
     assert cleaner_bindings["bindings"][0]["target_port"] == "evidence"
@@ -618,3 +665,228 @@ def test_core_v2_multi_node_dag_success(tmp_path: Path) -> None:
 
     assert record.status == "success"
     assert consume_output["input"]["main"]["producer_node_id"] == "produce"
+
+
+def test_control_edge_forwards_main_output_by_default(tmp_path: Path) -> None:
+    workflow_path = tmp_path / "control_forwards_main.accflow.json"
+    write_v2(
+        workflow_path,
+        {
+            "schema_version": CORE_V2_SCHEMA_VERSION,
+            "id": "control_forwards_main",
+            "version": "0.1.0",
+            "nodes": [
+                {
+                    "id": "produce",
+                    "callable_ref": {"kind": "tool_class", "id": "fake_producer"},
+                    "ports": {"outputs": {"main": {"type": "json"}}},
+                },
+                {
+                    "id": "consume",
+                    "callable_ref": {"kind": "agent_class", "id": "generic_fake_agent"},
+                    "ports": {"inputs": {"main": {"type": "json"}}},
+                },
+            ],
+            "control_edges": [{"from": "produce", "to": "consume"}],
+        },
+    )
+
+    record = asyncio.run(run_core_v2_workflow_path(workflow_path, tmp_path / "run"))
+    consume_output = json.loads(
+        (tmp_path / "run" / "nodes" / "consume" / "output.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    bindings = json.loads(
+        (tmp_path / "run" / "nodes" / "consume" / "binding_manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert record.status == "success"
+    assert consume_output["input"]["main"]["producer_node_id"] == "produce"
+    assert bindings["bindings"][0]["binding_kind"] == "control_main_default"
+
+
+def test_control_edge_can_disable_main_output_forwarding(tmp_path: Path) -> None:
+    workflow_path = tmp_path / "control_only.accflow.json"
+    write_v2(
+        workflow_path,
+        {
+            "schema_version": CORE_V2_SCHEMA_VERSION,
+            "id": "control_only",
+            "version": "0.1.0",
+            "nodes": [
+                {
+                    "id": "produce",
+                    "callable_ref": {"kind": "tool_class", "id": "fake_producer"},
+                    "control": {"forward_main_output_on_control": False},
+                    "ports": {"outputs": {"main": {"type": "json"}}},
+                },
+                {
+                    "id": "consume",
+                    "callable_ref": {"kind": "agent_class", "id": "generic_fake_agent"},
+                    "ports": {"inputs": {"main": {"type": "json"}}},
+                },
+            ],
+            "control_edges": [{"from": "produce", "to": "consume"}],
+        },
+    )
+
+    record = asyncio.run(run_core_v2_workflow_path(workflow_path, tmp_path / "run"))
+    consume_output = json.loads(
+        (tmp_path / "run" / "nodes" / "consume" / "output.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    bindings = json.loads(
+        (tmp_path / "run" / "nodes" / "consume" / "binding_manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert record.status == "success"
+    assert "main" not in consume_output["input"]
+    assert bindings["bindings"] == []
+
+
+def test_non_main_data_edge_uses_outputs_container_port_value(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ACC_RUN_MODE", "production")
+    monkeypatch.setenv("ACC_ENABLE_EXTERNAL_AGENT_EXECUTION", "1")
+
+    class RiskTableCodexProcess:
+        def __init__(self, command: tuple[str, ...]) -> None:
+            self.command = command
+            self.returncode = 0
+
+        async def communicate(self, input: bytes | None = None) -> tuple[bytes, bytes]:
+            output_path = Path(self.command[self.command.index("-o") + 1])
+            output_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": "acc.agent.output.v1",
+                        "status": "success",
+                        "summary": "risk table produced",
+                        "report_markdown": "full report",
+                        "findings": [],
+                        "evidence": [],
+                        "artifacts": [],
+                        "quality": {
+                            "confidence": "high",
+                            "assumptions": [],
+                            "uncertainties": [],
+                            "limitations": [],
+                        },
+                        "next_actions": [],
+                        "outputs": {"risk_table": [{"risk": "structured"}]},
+                        "risk_table": [{"risk": "legacy"}],
+                    },
+                    indent=2,
+                    sort_keys=True,
+                ),
+                encoding="utf-8",
+            )
+            _ = input
+            return b'{"event":"codex"}\n', b""
+
+        def kill(self) -> None:
+            self.returncode = -9
+
+        async def wait(self) -> None:
+            return None
+
+    async def fake_create(*args: str, **kwargs: object) -> RiskTableCodexProcess:
+        _ = kwargs
+        return RiskTableCodexProcess(args)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create)
+    agents_dir = tmp_path / "callables" / "agents"
+    agents_dir.mkdir(parents=True)
+    (agents_dir / "stock.codex.yaml").write_text(
+        """
+id: stock.codex
+version: 0.1.0
+runtime: codex_cli
+input_ports:
+  main:
+    type: artifact
+output_ports:
+  main:
+    type: artifact
+  risk_table:
+    type: json
+artifact_contract:
+  output_schema:
+    type: object
+    properties:
+      outputs:
+        type: object
+        properties:
+          risk_table:
+            type: array
+""".strip(),
+        encoding="utf-8",
+    )
+    workflow_path = tmp_path / "non_main_port.accflow.json"
+    write_v2(
+        workflow_path,
+        {
+            "schema_version": CORE_V2_SCHEMA_VERSION,
+            "id": "non_main_port",
+            "version": "0.1.0",
+            "nodes": [
+                {
+                    "id": "produce",
+                    "callable_ref": {"kind": "agent_class", "id": "stock.codex"},
+                    "prompt_policy": {"user_prompt": "Produce risk table"},
+                    "ports": {
+                        "outputs": {
+                            "main": {"type": "artifact"},
+                            "risk_table": {"type": "json"},
+                        }
+                    },
+                    "output_schema": {
+                        "type": "object",
+                        "properties": {
+                            "outputs": {
+                                "type": "object",
+                                "properties": {"risk_table": {"type": "array"}},
+                            }
+                        },
+                    },
+                },
+                {
+                    "id": "consume",
+                    "callable_ref": {"kind": "agent_class", "id": "generic_fake_agent"},
+                    "ports": {"inputs": {"risk_table": {"type": "json"}}},
+                },
+            ],
+            "control_edges": [{"from": "produce", "to": "consume"}],
+            "data_edges": [
+                {
+                    "source": {"node": "produce", "port": "risk_table"},
+                    "target": {"node": "consume", "port": "risk_table"},
+                    "materialization": "copy",
+                }
+            ],
+        },
+    )
+
+    record = asyncio.run(
+        run_core_v2_workflow_path(
+            workflow_path,
+            tmp_path / "run",
+            callable_registry=WorkflowAppService(project_root=tmp_path).callable_registry,
+        )
+    )
+    consume_output = json.loads(
+        (tmp_path / "run" / "nodes" / "consume" / "output.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert record.status == "success"
+    assert consume_output["input"]["risk_table"] == [{"risk": "structured"}]

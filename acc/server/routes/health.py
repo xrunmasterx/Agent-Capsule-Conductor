@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from acc import __version__
-from acc.callable_runner import acc_run_mode, external_agent_execution_enabled
+from acc.runtime.policy import acc_run_mode, external_agent_execution_enabled
 
 router = APIRouter(tags=["health"])
 

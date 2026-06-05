@@ -2,12 +2,18 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from acc.app.workflow_normalization import (
+    aggregate_normalization_summaries,
+    normalize_workflow_payload_contracts,
+)
+from acc.callable_registry import CallableRegistry
 from acc.domain import CORE_V2_SCHEMA_VERSION
 from acc.engine import is_clean_workflow_payload, parse_workflow_function_template
+from acc.engine.workflow_validation import collect_callable_validation_issues
 from acc.store import is_clean_workflow_path
 from acc.utils import AccError
 
@@ -41,7 +47,9 @@ CANONICAL_NODE_KEYS = {
     "invocation_policy",
     "runtime_policy",
     "prompt_policy",
+    "control",
     "artifact_contract",
+    "output_schema",
     "metadata",
 }
 
@@ -66,6 +74,7 @@ class CompiledWorkbenchWorkflowBundle:
     children: dict[str, dict[str, Any]]
     validation_preview: dict[str, Any]
     ref_resolution_preview: list[dict[str, Any]] | None = None
+    normalization: dict[str, Any] = field(default_factory=dict)
 
 
 def canonicalize_workbench_workflow_payload(
@@ -80,7 +89,7 @@ def canonicalize_workbench_workflow_payload(
         canonical = normalize_core_v2_payload(copied, source_path=source_path)
     else:
         canonical = workbench_draft_to_core_v2_payload(copied, source_path=source_path)
-    parse_workflow_function_template(canonical, source_path=source_path)
+    validate_canonical_workflow_payload(canonical, source_path=source_path)
     return canonical
 
 
@@ -88,6 +97,9 @@ def compile_workbench_workflow_bundle(
     payload: dict[str, Any],
     *,
     source_path: Path,
+    callable_registry: CallableRegistry | None = None,
+    force_main_data_edge_migration: bool = False,
+    allow_normalization_conflicts: bool = False,
 ) -> CompiledWorkbenchWorkflowBundle:
     """Compile a Workbench draft into root + child Core v2 templates.
 
@@ -104,9 +116,33 @@ def compile_workbench_workflow_bundle(
         rewritten = rewrite_inline_workflow_containers(copied, source_path=source_path)
         children = rewritten.pop("__compiled_children__", {})
         root = workbench_draft_to_core_v2_payload(rewritten, source_path=source_path)
-    parse_workflow_function_template(root, source_path=source_path)
+    root, root_normalization = normalize_workflow_payload_contracts(
+        root,
+        callable_registry=callable_registry,
+        force=force_main_data_edge_migration,
+        allow_conflicts=allow_normalization_conflicts,
+    )
+    child_normalizations = {}
+    for child_name, child_payload in list(children.items()):
+        normalized_child, child_summary = normalize_workflow_payload_contracts(
+            child_payload,
+            callable_registry=callable_registry,
+            force=force_main_data_edge_migration,
+            allow_conflicts=allow_normalization_conflicts,
+        )
+        children[child_name] = normalized_child
+        child_normalizations[child_name] = child_summary
+    normalization = aggregate_normalization_summaries(
+        root_normalization,
+        child_normalizations,
+        root_id=str(root.get("id") or ""),
+    ).as_dict()
+    validate_canonical_workflow_payload(root, source_path=source_path)
     for child_name, child_payload in children.items():
-        parse_workflow_function_template(child_payload, source_path=source_path.parent / child_name)
+        validate_canonical_workflow_payload(
+            child_payload,
+            source_path=source_path.parent / child_name,
+        )
     return CompiledWorkbenchWorkflowBundle(
         root=root,
         children=children,
@@ -116,7 +152,25 @@ def compile_workbench_workflow_bundle(
             "format": "accflow_bundle",
         },
         ref_resolution_preview=None,
+        normalization=normalization,
     )
+
+
+def validate_canonical_workflow_payload(
+    payload: dict[str, Any],
+    *,
+    source_path: Path | None,
+) -> None:
+    template = parse_workflow_function_template(payload, source_path=source_path)
+    errors = [
+        issue
+        for issue in collect_callable_validation_issues(template)
+        if issue.severity == "error"
+    ]
+    if not errors:
+        return
+    details = "; ".join(f"{issue.code}: {issue.message}" for issue in errors)
+    raise AccError(details)
 
 
 def normalize_core_v2_payload(
@@ -156,10 +210,11 @@ def workbench_draft_to_core_v2_payload(
             "Convert them to Core v2 .accflow.json first."
         )
     nodes = draft.get("nodes")
-    if not isinstance(nodes, list) or not nodes:
+    metadata = safe_metadata(draft.get("metadata"))
+    allow_empty_nodes = bool(metadata.get("compiled_from_workbench_container"))
+    if not isinstance(nodes, list) or (not nodes and not allow_empty_nodes):
         raise AccError("Workbench workflow draft requires a non-empty nodes array")
 
-    metadata = safe_metadata(draft.get("metadata"))
     metadata["canonical_format"] = "accflow"
     metadata["workbench_draft"] = True
     metadata["ui_layout"] = {
@@ -229,8 +284,7 @@ def rewrite_inline_workflow_containers(
         if not isinstance(node, dict):
             rewritten_nodes.append(node)
             continue
-        internal_nodes = workflow_container_internal_nodes(node)
-        if not internal_nodes:
+        if not is_inline_workflow_container_node(node):
             rewritten_nodes.append(node)
             continue
         child_id = unique_child_workflow_id(parent_id, str(node.get("id") or "workflow"), children)
@@ -245,6 +299,16 @@ def rewrite_inline_workflow_containers(
     if children:
         next_draft["__compiled_children__"] = children
     return next_draft
+
+
+def is_inline_workflow_container_node(node: dict[str, Any]) -> bool:
+    ui = node.get("ui")
+    if not isinstance(ui, dict):
+        return False
+    return ui.get("semantic_kind") == "workflow_container" or isinstance(
+        ui.get("internal_nodes"),
+        list,
+    )
 
 
 def workflow_container_internal_nodes(node: dict[str, Any]) -> list[dict[str, Any]]:
@@ -311,7 +375,7 @@ def internal_ui_node_to_workbench_node(node: dict[str, Any]) -> dict[str, Any]:
     if not input_payload:
         task = str(node.get("task") or label)
         input_payload = {"topic": task, "prompt": task}
-    return {
+    result = {
         "id": node_id,
         "callable_ref": {
             "kind": "tool_class" if is_tool else "agent_class",
@@ -325,6 +389,18 @@ def internal_ui_node_to_workbench_node(node: dict[str, Any]) -> dict[str, Any]:
         "output_ports": normalize_ui_ports(node.get("outputPorts") or node.get("output_ports")),
         "position": safe_position(node.get("position")),
     }
+    output_schema = node.get("outputSchema") or node.get("output_schema")
+    if isinstance(output_schema, dict):
+        result["output_schema"] = output_schema
+    control_payload = dict(node.get("control")) if isinstance(node.get("control"), dict) else {}
+    forward_main = node.get("forwardMainOutputOnControl")
+    if forward_main is None:
+        forward_main = control_payload.get("forward_main_output_on_control")
+    if isinstance(forward_main, bool):
+        control_payload["forward_main_output_on_control"] = forward_main
+    if control_payload:
+        result["control"] = control_payload
+    return result
 
 
 def normalize_ui_ports(value: Any) -> list[dict[str, Any]]:
@@ -352,6 +428,8 @@ def split_internal_edges_for_child_workflow(
     data_edges: list[dict[str, Any]] = []
     workflow_input_bindings: list[dict[str, Any]] = []
     workflow_output_bindings: list[dict[str, Any]] = []
+    workflow_input_binding_keys: set[tuple[str, str, str]] = set()
+    workflow_output_binding_keys: set[tuple[str, str, str]] = set()
     input_boundary = f"{workflow_id}__workflow_inputs"
     output_boundary = f"{workflow_id}__workflow_outputs"
     for edge in edges:
@@ -362,15 +440,23 @@ def split_internal_edges_for_child_workflow(
                 continue
             materialization = edge.get("materialization") or "copy"
             if source["node"] == input_boundary:
+                binding_key = (source["port"], target["node"], target["port"])
+                if binding_key in workflow_input_binding_keys:
+                    continue
+                workflow_input_binding_keys.add(binding_key)
                 workflow_input_bindings.append(
                     {
                         "source_port": source["port"],
                         "target": {"node": target["node"], "port": target["port"]},
                         "materialization": materialization,
-                        "required": bool(edge.get("required", True)),
+                        "required": bool(edge.get("required", False)),
                     }
                 )
             elif target["node"] == output_boundary:
+                binding_key = (source["node"], source["port"], target["port"])
+                if binding_key in workflow_output_binding_keys:
+                    continue
+                workflow_output_binding_keys.add(binding_key)
                 workflow_output_bindings.append(
                     {
                         "source": {"node": source["node"], "port": source["port"]},
@@ -470,11 +556,24 @@ def parent_workflow_call_node(node: dict[str, Any], child_name: str) -> dict[str
         **node,
         "callable_ref": {"kind": "workflow_function", "id": child_name},
         "workflow_ref": child_name,
+        "workflow_call_output_bindings": optional_workflow_call_output_bindings(node),
         "ui": clean_ui,
     }
     if not clean_ui:
         rewritten.pop("ui", None)
     return rewritten
+
+
+def optional_workflow_call_output_bindings(node: dict[str, Any]) -> list[dict[str, Any]]:
+    ports = normalize_ui_ports(node.get("output_ports"))
+    return [
+        {
+            "workflow_output": str(port.get("id") or "main"),
+            "parent_port": str(port.get("id") or "main"),
+            "required": False,
+        }
+        for port in ports
+    ]
 
 
 def unique_child_workflow_id(
@@ -555,6 +654,8 @@ def workbench_node_to_core_v2_node(
         "invocation_policy",
         "runtime_policy",
         "artifact_contract",
+        "control",
+        "output_schema",
     ):
         if key in node:
             canonical[key] = node[key]
@@ -562,7 +663,12 @@ def workbench_node_to_core_v2_node(
         "workflow_call_output_bindings"
     ):
         canonical["workflow_call_output_bindings"] = [
-            {"workflow_output": "main", "parent_port": "main", "materialization": "copy"}
+            {
+                "workflow_output": "main",
+                "parent_port": "main",
+                "materialization": "copy",
+                "required": False,
+            }
         ]
     return prune_none(canonical)
 
@@ -728,4 +834,15 @@ def safe_position(value: Any) -> dict[str, float] | None:
 
 
 def prune_none(value: dict[str, Any]) -> dict[str, Any]:
-    return {key: item for key, item in value.items() if item not in (None, {}, [])}
+    keep_empty_lists = {
+        "nodes",
+        "control_edges",
+        "data_edges",
+        "workflow_input_bindings",
+        "workflow_output_bindings",
+    }
+    return {
+        key: item
+        for key, item in value.items()
+        if item is not None and item != {} and (item != [] or key in keep_empty_lists)
+    }

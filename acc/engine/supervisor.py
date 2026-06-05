@@ -2,17 +2,31 @@
 
 from __future__ import annotations
 
+import re
+from dataclasses import dataclass
 from typing import Any
 
 from acc.domain import (
     AccError,
     CallableRef,
+    ControlPolicy,
+    DecisionRecord,
     DynamicInvocationIntent,
     DynamicInvocationProposal,
+    PlanStep,
+    RunPlan,
     SupervisorDecision,
     SupervisorPlan,
     SupervisorRoster,
 )
+
+NODE_ID_SANITIZE_RE = re.compile(r"[^A-Za-z0-9_.-]+")
+
+
+@dataclass(frozen=True)
+class SupervisorPlanCompilation:
+    decision: DecisionRecord
+    steps: tuple[PlanStep, ...]
 
 
 def parse_callable_ref(raw: dict[str, Any]) -> CallableRef:
@@ -92,6 +106,182 @@ def validate_supervisor_plan(plan: SupervisorPlan, roster: SupervisorRoster) -> 
         raise AccError("SupervisorPlan must contain at least one intent")
     for intent in plan.intents:
         validate_intent_against_roster(intent, roster)
+
+
+def compile_supervisor_plan_to_steps(
+    plan: SupervisorPlan,
+    roster: SupervisorRoster,
+    control_policy: ControlPolicy,
+    run_plan: RunPlan,
+    *,
+    existing_steps: tuple[PlanStep, ...] = (),
+    timestamp: str,
+) -> SupervisorPlanCompilation:
+    if plan.status != "approved":
+        raise AccError(f"SupervisorPlan {plan.plan_id} is not approved")
+    if control_policy.mode != "supervisor":
+        raise AccError("ControlPolicy.mode must be supervisor")
+    if control_policy.actor != f"supervisor:{plan.supervisor_node_id}":
+        raise AccError("ControlPolicy.actor must match supervisor node")
+    validate_supervisor_plan(plan, roster)
+    _validate_plan_limits(plan, control_policy, existing_steps)
+    known_step_ids = {step.plan_step_id for step in existing_steps}
+    supervisor_step_id = _supervisor_step_id(plan, existing_steps)
+    used_node_ids = {step.node_id for step in existing_steps}
+    steps: list[PlanStep] = []
+    for index, intent in enumerate(plan.intents):
+        _validate_intent_allowed_by_policy(intent, control_policy)
+        node_id = _unique_node_id(
+            intent.node_id_suggestion or f"{plan.supervisor_node_id}_worker_{index + 1}",
+            used_node_ids,
+        )
+        used_node_ids.add(node_id)
+        step = PlanStep(
+            plan_step_id=f"step_{node_id}",
+            run_plan_id=run_plan.run_plan_id,
+            run_id=run_plan.run_id,
+            node_id=node_id,
+            callable_ref=intent.target_callable_ref,
+            depends_on=(supervisor_step_id,) if supervisor_step_id else (),
+            source="supervisor",
+            status="ready",
+            dependency_node_ids=(plan.supervisor_node_id,) if supervisor_step_id else (),
+            input_snapshot_refs=(
+                f"supervisor_plans/{plan.plan_id}/intents/{intent.correlation_id}.json",
+            ),
+            created_at=timestamp,
+            updated_at=timestamp,
+        )
+        if step.plan_step_id in known_step_ids:
+            raise AccError(f"Supervisor PlanStep id already exists: {step.plan_step_id}")
+        known_step_ids.add(step.plan_step_id)
+        steps.append(step)
+    decision = DecisionRecord(
+        decision_id=f"decision_{run_plan.run_id}_supervisor_plan_{plan.plan_id}",
+        run_id=run_plan.run_id,
+        run_plan_id=run_plan.run_plan_id,
+        actor=f"supervisor:{plan.supervisor_node_id}",
+        kind="supervisor_plan",
+        timestamp=timestamp,
+        policy_snapshot=_control_policy_snapshot(control_policy),
+        candidates=(
+            {
+                "plan_id": plan.plan_id,
+                "intent_count": len(plan.intents),
+            },
+        ),
+        selected={
+            "plan_id": plan.plan_id,
+            "step_ids": [step.plan_step_id for step in steps],
+            "node_ids": [step.node_id for step in steps],
+            "intents": [
+                {
+                    "correlation_id": intent.correlation_id,
+                    "target_callable_ref": _callable_ref_payload(intent.target_callable_ref),
+                }
+                for intent in plan.intents
+            ],
+        },
+        rationale=f"Approved SupervisorPlan {plan.plan_id} compiled to dynamic PlanStep records.",
+        input_evidence_refs=("run_plan.json", f"supervisor_plans/{plan.plan_id}.json"),
+        result_refs=("plan_steps.jsonl", "decisions.jsonl"),
+        replay_binding={"mode": "reuse_recorded_decisions"},
+        correlation_id=plan.plan_id,
+    )
+    return SupervisorPlanCompilation(decision=decision, steps=tuple(steps))
+
+
+def _validate_plan_limits(
+    plan: SupervisorPlan,
+    control_policy: ControlPolicy,
+    existing_steps: tuple[PlanStep, ...],
+) -> None:
+    if (
+        control_policy.max_concurrency is not None
+        and len(plan.intents) > control_policy.max_concurrency
+    ):
+        raise AccError("SupervisorPlan intent count exceeds policy limit")
+    existing_supervisor_steps = tuple(
+        step for step in existing_steps if step.source == "supervisor"
+    )
+    if (
+        control_policy.max_dispatch_depth is not None
+        and len(existing_supervisor_steps) + len(plan.intents) > control_policy.max_dispatch_depth
+    ):
+        raise AccError("Supervisor max dispatch depth exceeded")
+    if control_policy.max_repeat_per_target is None:
+        return
+    for intent in plan.intents:
+        existing_count = sum(
+            1
+            for step in existing_supervisor_steps
+            if _callable_ref_key(step.callable_ref) == _callable_ref_key(intent.target_callable_ref)
+        )
+        requested_count = sum(
+            1
+            for item in plan.intents
+            if _callable_ref_key(item.target_callable_ref)
+            == _callable_ref_key(intent.target_callable_ref)
+        )
+        if existing_count + requested_count > control_policy.max_repeat_per_target:
+            raise AccError("Supervisor repeat limit exceeded")
+
+
+def _validate_intent_allowed_by_policy(
+    intent: DynamicInvocationIntent,
+    control_policy: ControlPolicy,
+) -> None:
+    if not control_policy.allowed_targets:
+        return
+    target_key = _callable_ref_key(intent.target_callable_ref)
+    for target in control_policy.allowed_targets:
+        if isinstance(target, CallableRef) and _callable_ref_key(target) == target_key:
+            return
+        if isinstance(target, str) and target == intent.target_callable_ref.id:
+            return
+    raise AccError(f"Intent target {target_key!r} is not allowed by supervisor policy")
+
+
+def _supervisor_step_id(plan: SupervisorPlan, existing_steps: tuple[PlanStep, ...]) -> str | None:
+    for step in existing_steps:
+        if step.node_id == plan.supervisor_node_id:
+            return step.plan_step_id
+    return None
+
+
+def _unique_node_id(raw: str, used_node_ids: set[str]) -> str:
+    base = NODE_ID_SANITIZE_RE.sub("_", raw).strip("_.-")
+    if not base:
+        base = "supervisor_worker"
+    candidate = base
+    suffix = 2
+    while candidate in used_node_ids:
+        candidate = f"{base}_{suffix}"
+        suffix += 1
+    return candidate
+
+
+def _callable_ref_key(ref: CallableRef) -> tuple[str, str]:
+    return (ref.kind, ref.id)
+
+
+def _callable_ref_payload(ref: CallableRef) -> dict[str, str | None]:
+    return {"kind": ref.kind, "id": ref.id, "version": ref.version}
+
+
+def _control_policy_snapshot(policy: ControlPolicy) -> dict[str, Any]:
+    return {
+        "policy_id": policy.policy_id,
+        "mode": policy.mode,
+        "actor": policy.actor,
+        "allowed_targets": [
+            _callable_ref_payload(target) if isinstance(target, CallableRef) else target
+            for target in policy.allowed_targets
+        ],
+        "max_dispatch_depth": policy.max_dispatch_depth,
+        "max_repeat_per_target": policy.max_repeat_per_target,
+        "max_concurrency": policy.max_concurrency,
+    }
 
 
 def parse_supervisor_decision(raw: dict[str, Any]) -> SupervisorDecision:

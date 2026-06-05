@@ -9,7 +9,15 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
+from acc.app.control_projection import (
+    load_control_ledger_projection,
+    load_decisions_projection,
+    load_dispatches_projection,
+    load_plan_steps_projection,
+    load_run_plan_projection,
+)
 from acc.app.run_projection import build_node_run_projection
+from acc.control_plane import SecretLikePathError, reject_secret_like_path
 from acc.result_store.filesystem import FilesystemResultStore
 from acc.result_store.types import NodeId, RunId
 from acc.run_index import NodeRunSummary, load_or_rebuild_run_index, load_run_summary_by_id
@@ -17,7 +25,6 @@ from acc.server.context import (
     get_project_root,
     get_workbench_run_manager,
     is_relative_to,
-    reject_secret_like_path,
     relative_project_path,
 )
 from acc.server.run_projection import RunProjection
@@ -37,6 +44,36 @@ def list_runs(request: Request) -> dict[str, Any]:
 @router.get("/{run_id}")
 def get_run(run_id: str, request: Request) -> dict[str, Any]:
     return load_run_or_404(run_id, request).model_dump()
+
+
+@router.get("/{run_id}/plan")
+def get_run_plan(run_id: str, request: Request) -> dict[str, Any]:
+    run_dir = resolve_run_dir_or_404(run_id, request)
+    return project_events_ref(load_run_plan_projection(run_dir), request)
+
+
+@router.get("/{run_id}/steps")
+def get_run_plan_steps(run_id: str, request: Request) -> dict[str, Any]:
+    run_dir = resolve_run_dir_or_404(run_id, request)
+    return project_events_ref(load_plan_steps_projection(run_dir), request)
+
+
+@router.get("/{run_id}/dispatches")
+def get_run_dispatches(run_id: str, request: Request) -> dict[str, Any]:
+    run_dir = resolve_run_dir_or_404(run_id, request)
+    return project_events_ref(load_dispatches_projection(run_dir), request)
+
+
+@router.get("/{run_id}/decisions")
+def get_run_decision_records(run_id: str, request: Request) -> dict[str, Any]:
+    run_dir = resolve_run_dir_or_404(run_id, request)
+    return project_events_ref(load_decisions_projection(run_dir), request)
+
+
+@router.get("/{run_id}/control-ledger")
+def get_run_control_ledger(run_id: str, request: Request) -> dict[str, Any]:
+    run_dir = resolve_run_dir_or_404(run_id, request)
+    return project_events_ref(load_control_ledger_projection(run_dir), request)
 
 
 @router.post("/{run_id}/cancel")
@@ -71,7 +108,7 @@ def list_node_artifacts(run_id: str, node_id: str, request: Request) -> dict[str
     for path in sorted(item for item in artifact_dir.rglob("*") if item.is_file()):
         try:
             reject_secret_like_path(path)
-        except HTTPException:
+        except SecretLikePathError:
             continue
         rel_path = relative_project_path(project_root, path)
         artifacts.append(
@@ -296,6 +333,14 @@ def _build_run_projection(run_dir: Path) -> RunProjection:
     )
 
 
+def project_events_ref(payload: dict[str, Any], request: Request) -> dict[str, Any]:
+    events_ref = payload.get("events_ref")
+    if isinstance(events_ref, str) and events_ref:
+        payload = dict(payload)
+        payload["events_ref"] = relative_project_path(get_project_root(request), Path(events_ref))
+    return payload
+
+
 def load_run_or_404(run_id: str, request: Request):
     try:
         return load_run_summary_by_id(run_id, get_project_root(request) / "runs")
@@ -346,26 +391,52 @@ def read_run_events_with_nested(run_dir: Path, limit: int = 200) -> list[dict[st
         ordered_events.append((event_sort_key(event), sequence, event))
         sequence += 1
 
-    nodes_dir = run_dir / "nodes"
-    if nodes_dir.exists() and nodes_dir.is_dir():
-        for node_dir in sorted(item for item in nodes_dir.iterdir() if item.is_dir()):
-            nested_event_log = node_dir / "nested_workflow" / "events.jsonl"
-            for event in read_jsonl_tolerant(nested_event_log, limit=limit):
-                nested_event = annotate_nested_event(event, node_dir.name)
-                ordered_events.append((event_sort_key(nested_event), sequence, nested_event))
-                sequence += 1
+    for nested_event in read_nested_workflow_events(run_dir, parent_ui_node_id=None, limit=limit):
+        ordered_events.append((event_sort_key(nested_event), sequence, nested_event))
+        sequence += 1
 
     ordered_events.sort(key=lambda item: (item[0], item[1]))
     return [event for _, _, event in ordered_events[-limit:]]
 
 
-def annotate_nested_event(event: dict[str, Any], parent_node_id: str) -> dict[str, Any]:
+def read_nested_workflow_events(
+    run_dir: Path,
+    parent_ui_node_id: str | None,
+    limit: int,
+) -> list[dict[str, Any]]:
+    nested_events: list[dict[str, Any]] = []
+    nodes_dir = run_dir / "nodes"
+    if not nodes_dir.exists() or not nodes_dir.is_dir():
+        return nested_events
+    for node_dir in sorted(item for item in nodes_dir.iterdir() if item.is_dir()):
+        nested_run_dir = node_dir / "nested_workflow"
+        if not nested_run_dir.exists() or not nested_run_dir.is_dir():
+            continue
+        nested_parent_ui_node_id = (
+            f"{parent_ui_node_id}__internal__{node_dir.name}"
+            if parent_ui_node_id
+            else node_dir.name
+        )
+        for event in read_jsonl_tolerant(nested_run_dir / "events.jsonl", limit=limit):
+            nested_events.append(annotate_nested_event(event, nested_parent_ui_node_id, nested_run_dir))
+        nested_events.extend(
+            read_nested_workflow_events(
+                nested_run_dir,
+                parent_ui_node_id=nested_parent_ui_node_id,
+                limit=limit,
+            )
+        )
+    return nested_events
+
+
+def annotate_nested_event(event: dict[str, Any], parent_node_id: str, nested_run_dir: Path) -> dict[str, Any]:
     nested_event = dict(event)
     nested_event["nested"] = True
     nested_event["parent_node_id"] = parent_node_id
     node_id = nested_event.get("node_id")
     if isinstance(node_id, str) and node_id:
         nested_event.setdefault("ui_node_id", f"{parent_node_id}__internal__{node_id}")
+        nested_event.setdefault("node_run_dir", str((nested_run_dir / "nodes" / node_id).resolve()))
     return nested_event
 
 

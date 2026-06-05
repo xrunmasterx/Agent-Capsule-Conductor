@@ -22,7 +22,7 @@ export const zhCN = {
   nodeType: '节点类型',
   runtime: '运行时',
   description: '描述',
-  nodeProperties: '节点属性',
+  nodeProperties: '节点设置',
   edgeProperties: '连接属性',
   workflowProperties: '工作流属性',
   input: '输入',
@@ -55,11 +55,7 @@ export const zhCN = {
   replay: '事件回放',
   debugger: '调试',
   graphOps: 'GraphOps',
-  rerunNode: '重跑节点',
-  rerunFrom: '从此节点重跑',
-  forkRun: 'Fork 运行',
-  compareRuns: '对比运行',
-  approvalRequired: '危险 apply 默认关闭，必须经过人工审批。',
+  approvalRequired: 'GraphOps 当前为 proposal / validate / dry-run only；real apply 未实现。',
 };
 
 export type ZhKey = keyof typeof zhCN;

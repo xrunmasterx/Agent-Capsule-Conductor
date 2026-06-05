@@ -12,6 +12,8 @@ from acc.app import (
     load_cli_input,
 )
 from acc.app.core_v2_loader import LEGACY_GRAPH_SUFFIX
+from acc.app.workbench_adapter import compile_workbench_workflow_bundle
+from acc.callable_registry import CallableRegistry
 from acc.control_plane import (
     list_callables_payload,
     list_workflows_payload,
@@ -23,13 +25,15 @@ from acc.control_plane import (
 from acc.debugger import (
     artifact_diff,
     diff_runs,
-    fork_run,
     replay_workflow_events,
-    rerun_from_node,
-    rerun_single_node,
 )
 from acc.environment import create_workspace_binding, inspect_environment_run
-from acc.graphops import apply_patch_request, dry_run_patch, validate_patch_file
+from acc.graphops import (
+    apply_patch_request,
+    dry_run_patch,
+    graphops_governance_payload,
+    validate_patch_file,
+)
 from acc.migration.graph_importer import (
     accflow_path_from_legacy_graph_path,
     legacy_graph_to_accflow_payload,
@@ -201,6 +205,7 @@ def graphops_validate_patch(
         "patch_id": patch["patch_id"],
         "target_path": patch["target_path"],
         "operations": len(patch["operations"]),
+        **graphops_governance_payload(),
     }
     if semantic_diff is not None:
         payload["semantic_diff"] = semantic_diff
@@ -227,6 +232,7 @@ def graphops_validate(
             "target_type": patch["target_type"],
             "target_path": patch["target_path"],
             "operations": len(patch["operations"]),
+            **graphops_governance_payload(),
         }
         if semantic:
             from acc.graphops import semantic_diff_for_patch
@@ -284,29 +290,6 @@ def graphops_apply_patch(
         log_stderr(str(exc))
         raise typer.Exit(1) from exc
     typer.echo(dump_json(result))
-
-
-@app.command("batch-run")
-def batch_run_command(
-    spec: Annotated[Path, typer.Option("--spec", help="Batch spec JSON path.")],
-    run_dir: Annotated[Path, typer.Option("--run-dir", help="Batch run directory.")],
-    max_concurrency: Annotated[int, typer.Option("--max-concurrency", help="Task concurrency.")],
-    emit_conductor_json: Annotated[
-        bool,
-        typer.Option("--emit-conductor-json", help="Print exactly one Conductor JSON object."),
-    ] = False,
-) -> None:
-    try:
-        _ = spec, run_dir, max_concurrency
-        raise AccError(
-            "Legacy batch-run specs are no longer executable. "
-            "Use a canonical Core v2 workflow with explicit callable refs and bindings."
-        )
-    except AccError as exc:
-        log_stderr(str(exc))
-        raise typer.Exit(1) from exc
-    finally:
-        _ = emit_conductor_json
 
 
 @app.command("server")
@@ -395,6 +378,58 @@ def workflow_validate(
             ),
         }
     typer.echo(dump_json(result))
+
+
+@workflow_app.command("normalize")
+def workflow_normalize(
+    graph_path: Path,
+    write: Annotated[
+        bool,
+        typer.Option("--write", help="Write normalized workflow files."),
+    ] = False,
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="Allow mixed fan-out main forwarding migration."),
+    ] = False,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
+) -> None:
+    try:
+        payload = load_json(graph_path)
+        if not isinstance(payload, dict):
+            raise AccError(f"Workflow JSON must be an object: {graph_path}")
+        bundle = compile_workbench_workflow_bundle(
+            payload,
+            source_path=graph_path,
+            callable_registry=CallableRegistry.from_project_root(Path(".").resolve()),
+            force_main_data_edge_migration=force,
+            allow_normalization_conflicts=not write,
+        )
+        result: dict[str, Any] = {
+            "status": "preview",
+            "path": str(graph_path.resolve()),
+            "workflow_id": bundle.root.get("id"),
+            "normalization": bundle.normalization,
+        }
+        if write:
+            if bundle.normalization.get("conflicts") and not force:
+                raise AccError(
+                    "Workflow normalization has conflicts; rerun with --force after review"
+                )
+            write_json(graph_path, bundle.root)
+            for child_name, child_payload in bundle.children.items():
+                write_json(graph_path.parent / child_name, child_payload)
+            validation = WorkflowAppService().validate(
+                graph_path,
+                workflows_dir=graph_path.parent,
+            )
+            result["status"] = "written"
+            result["validation"] = validation
+            if validation.get("status") == "invalid":
+                raise AccError(f"Workflow validation failed after normalize: {validation}")
+    except AccError as exc:
+        log_stderr(str(exc))
+        raise typer.Exit(1) from exc
+    typer.echo(dump_json(result) if json_output else dump_json(result))
 
 
 @workflow_app.command("import-graph")
@@ -596,68 +631,6 @@ def workflow_inspect(
     typer.echo(dump_json(payload) if json_output else dump_json(payload))
 
 
-@workflow_app.command("rerun-node")
-def workflow_rerun_node(
-    run_dir: Path,
-    node_id: str,
-    out: Annotated[Path, typer.Option("--out", help="New run directory for the rerun.")],
-) -> None:
-    try:
-        payload = rerun_single_node(
-            run_dir,
-            node_id,
-            out,
-        )
-    except AccError as exc:
-        log_stderr(str(exc))
-        raise typer.Exit(1) from exc
-    typer.echo(dump_json(payload))
-    if payload["status"] != "success":
-        raise typer.Exit(1)
-
-
-@workflow_app.command("rerun-from")
-def workflow_rerun_from(
-    run_dir: Path,
-    node_id: str,
-    out: Annotated[Path, typer.Option("--out", help="New run directory for the rerun.")],
-) -> None:
-    try:
-        payload = rerun_from_node(
-            run_dir,
-            node_id,
-            out,
-        )
-    except AccError as exc:
-        log_stderr(str(exc))
-        raise typer.Exit(1) from exc
-    typer.echo(dump_json(payload))
-    if payload["status"] != "success":
-        raise typer.Exit(1)
-
-
-@workflow_app.command("fork")
-def workflow_fork(
-    run_dir: Path,
-    from_node: Annotated[str, typer.Option("--from-node", help="Node to fork from.")],
-    input_path: Annotated[Path, typer.Option("--input", help="Fork override JSON path.")],
-    out: Annotated[Path, typer.Option("--out", help="New run directory for the fork.")],
-) -> None:
-    try:
-        payload = fork_run(
-            run_dir,
-            from_node,
-            input_path,
-            out,
-        )
-    except AccError as exc:
-        log_stderr(str(exc))
-        raise typer.Exit(1) from exc
-    typer.echo(dump_json(payload))
-    if payload["status"] != "success":
-        raise typer.Exit(1)
-
-
 @events_app.command("replay")
 def events_replay(
     run_dir: Path,
@@ -742,7 +715,7 @@ def inspect_session(run_dir: Path) -> dict:
         "event_log": str((run_dir / "events.jsonl").resolve()),
         "events": str((run_dir / "events.jsonl").resolve()),
         "run_summary": run_summary.model_dump() if run_summary is not None else None,
-        "conductor_output": load_json(conductor_path) if conductor_path.exists() else None,
+        "conductor_output": conductor_output,
         "session_manifest": session_manifest,
         "run_manifest": run_manifest,
     }

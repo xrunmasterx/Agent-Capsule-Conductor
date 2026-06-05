@@ -5,7 +5,7 @@ import json
 from collections.abc import AsyncIterable, Callable
 from typing import Any
 
-from acc.adapters.base import AgentRunRequest, AgentRunResult, ResumeRequest
+from acc.adapters.base import AgentRunRequest, AgentRunResult, ResumeRequest, write_jsonl
 from acc.adapters.capabilities import default_adapter_capabilities
 from acc.domain import AccError, AgentCapabilities
 
@@ -78,8 +78,3 @@ class ClaudeSdkAdapter:
 
     async def resume(self, request: ResumeRequest) -> AgentRunResult:
         raise AccError("claude_sdk adapter does not support resume")
-
-
-def write_jsonl(path, payload: dict[str, Any]) -> None:
-    with path.open("a", encoding="utf-8") as file:
-        file.write(json.dumps(payload, sort_keys=True) + "\n")

@@ -201,7 +201,21 @@ def test_workbench_container_compiles_to_child_workflow_bundle(tmp_path: Path) -
                         },
                     ],
                     "internal_edges": [
-                        {"id": "news_sentiment", "from": "market_news", "to": "market_sentiment"}
+                        {
+                            "id": "workflow_input_market_news",
+                            "kind": "data",
+                            "from": {"node": "New_Workflow__workflow_inputs", "port": "main"},
+                            "to": {"node": "market_news", "port": "main"},
+                            "materialization": "copy",
+                        },
+                        {"id": "news_sentiment", "from": "market_news", "to": "market_sentiment"},
+                        {
+                            "id": "market_sentiment_workflow_output",
+                            "kind": "data",
+                            "from": {"node": "market_sentiment", "port": "main"},
+                            "to": {"node": "New_Workflow__workflow_outputs", "port": "main"},
+                            "materialization": "copy",
+                        },
                     ],
                 },
             }
@@ -222,8 +236,228 @@ def test_workbench_container_compiles_to_child_workflow_bundle(tmp_path: Path) -
     child = bundle.children["stock_info_collection__New_Workflow.accflow.json"]
     assert [node["id"] for node in child["nodes"]] == ["market_news", "market_sentiment"]
     assert child["control_edges"][0]["context"] == "none"
+    assert child.get("data_edges", []) == []
+    assert child["workflow_input_bindings"] == [
+        {
+            "source_port": "main",
+            "target": {"node": "market_news", "port": "main"},
+            "materialization": "copy",
+            "required": False,
+        }
+    ]
+    assert child["workflow_output_bindings"] == [
+        {
+            "source": {"node": "market_sentiment", "port": "main"},
+            "target_port": "main",
+            "materialization": "copy",
+            "required": True,
+        }
+    ]
     parse_workflow_function_template(bundle.root, source_path=path)
     parse_workflow_function_template(
         child,
         source_path=path.parent / "stock_info_collection__New_Workflow.accflow.json",
     )
+
+
+def test_workbench_container_preserves_root_caller_and_child_boundary_bindings(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "workflows" / "root_with_container.accflow.json"
+    path.parent.mkdir()
+    draft = {
+        "id": "root_with_container",
+        "version": "0.4.0",
+        "name": "Root With Container",
+        "nodes": [
+            _agent_node("external_agent", "stock-market-research.codex", "Seed workflow."),
+            {
+                "id": "New_Workflow",
+                "kind": "workflow",
+                "label": "New Workflow",
+                "callable_ref": {"kind": "workflow_function", "id": "New_Workflow"},
+                "input_ports": [{"id": "main"}],
+                "output_ports": [{"id": "main"}],
+                "ui": {
+                    "semantic_kind": "workflow_container",
+                    "internal_nodes": [
+                        {
+                            "id": "agent2",
+                            "name": "Agent 2",
+                            "task": "Use workflow input.",
+                            "kind": "Agent",
+                            "callableId": "stock-market-research.codex",
+                            "inputPorts": [{"id": "main"}],
+                            "outputPorts": [{"id": "main"}],
+                        },
+                        {
+                            "id": "agent1",
+                            "name": "Agent 1",
+                            "task": "Use agent 2 output.",
+                            "kind": "Agent",
+                            "callableId": "stock-market-research.codex",
+                            "inputPorts": [{"id": "main"}],
+                            "outputPorts": [{"id": "main"}],
+                        },
+                    ],
+                    "internal_edges": [
+                        {
+                            "id": "workflow_input_agent2",
+                            "kind": "data",
+                            "from": {"node": "New_Workflow__workflow_inputs", "port": "main"},
+                            "to": {"node": "agent2", "port": "main"},
+                            "materialization": "copy",
+                        },
+                        {"id": "agent2_agent1", "from": "agent2", "to": "agent1"},
+                        {
+                            "id": "agent1_workflow_output",
+                            "kind": "data",
+                            "from": {"node": "agent1", "port": "main"},
+                            "to": {"node": "New_Workflow__workflow_outputs", "port": "main"},
+                            "materialization": "copy",
+                        },
+                    ],
+                },
+            },
+        ],
+        "control_edges": [
+            {"id": "external_workflow", "from": "external_agent", "to": "New_Workflow"}
+        ],
+        "data_edges": [],
+    }
+
+    bundle = compile_workbench_workflow_bundle(draft, source_path=path)
+
+    assert [node["id"] for node in bundle.root["nodes"]] == ["external_agent", "New_Workflow"]
+    assert bundle.root["control_edges"] == [
+        {"context": "none", "from": "external_agent", "to": "New_Workflow"}
+    ]
+    child = bundle.children["root_with_container__New_Workflow.accflow.json"]
+    assert child["workflow_input_bindings"] == [
+        {
+            "source_port": "main",
+            "target": {"node": "agent2", "port": "main"},
+            "materialization": "copy",
+            "required": False,
+        }
+    ]
+    assert child["control_edges"] == [
+        {"context": "none", "from": "agent2", "to": "agent1"}
+    ]
+    assert child["workflow_output_bindings"] == [
+        {
+            "source": {"node": "agent1", "port": "main"},
+            "target_port": "main",
+            "materialization": "copy",
+            "required": True,
+        }
+    ]
+
+
+def test_empty_workbench_container_compiles_to_noop_child_workflow(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "workflows" / "root_with_empty_container.accflow.json"
+    path.parent.mkdir()
+    draft = {
+        "id": "root_with_empty_container",
+        "version": "0.4.0",
+        "name": "Root With Empty Container",
+        "nodes": [
+            {
+                "id": "New_Workflow_2",
+                "kind": "workflow",
+                "label": "New Workflow #2",
+                "callable_ref": {"kind": "workflow_function", "id": "New_Workflow_2"},
+                "input_ports": [{"id": "main"}],
+                "output_ports": [{"id": "main"}],
+                "ui": {
+                    "semantic_kind": "workflow_container",
+                    "internal_nodes": [],
+                    "internal_edges": [],
+                },
+            }
+        ],
+        "control_edges": [],
+        "data_edges": [],
+    }
+
+    bundle = compile_workbench_workflow_bundle(draft, source_path=path)
+
+    child_name = "root_with_empty_container__New_Workflow_2.accflow.json"
+    assert set(bundle.children) == {child_name}
+    root_node = bundle.root["nodes"][0]
+    assert root_node["callable_ref"] == {
+        "kind": "workflow_function",
+        "id": child_name,
+    }
+    assert root_node["workflow_call_output_bindings"] == [
+        {"workflow_output": "main", "parent_port": "main", "required": False}
+    ]
+    child = bundle.children[child_name]
+    assert child["nodes"] == []
+    assert child["control_edges"] == []
+    assert child["data_edges"] == []
+    assert child["workflow_input_bindings"] == []
+    assert child["workflow_output_bindings"] == []
+    parse_workflow_function_template(child, source_path=path.parent / child_name)
+
+
+def test_workbench_container_deduplicates_identical_boundary_output_edges(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "workflows" / "dedupe_container.accflow.json"
+    path.parent.mkdir()
+    output_edge = {
+        "id": "agent_workflow_output",
+        "kind": "data",
+        "from": {"node": "agent1", "port": "main"},
+        "to": {"node": "New_Workflow__workflow_outputs", "port": "main"},
+        "materialization": "copy",
+    }
+    draft = {
+        "id": "dedupe_container",
+        "version": "0.4.0",
+        "nodes": [
+            {
+                "id": "New_Workflow",
+                "kind": "workflow",
+                "label": "New Workflow",
+                "callable_ref": {"kind": "workflow_function", "id": "New_Workflow"},
+                "input_ports": [{"id": "main"}],
+                "output_ports": [{"id": "main"}],
+                "ui": {
+                    "semantic_kind": "workflow_container",
+                    "internal_nodes": [
+                        {
+                            "id": "agent1",
+                            "name": "Agent 1",
+                            "task": "Return output.",
+                            "kind": "Agent",
+                            "callableId": "stock-market-research.codex",
+                            "inputPorts": [{"id": "main"}],
+                            "outputPorts": [{"id": "main"}],
+                        }
+                    ],
+                    "internal_edges": [
+                        output_edge,
+                        {**output_edge, "id": "agent_workflow_output_2"},
+                    ],
+                },
+            }
+        ],
+        "control_edges": [],
+        "data_edges": [],
+    }
+
+    bundle = compile_workbench_workflow_bundle(draft, source_path=path)
+    child = bundle.children["dedupe_container__New_Workflow.accflow.json"]
+
+    assert child["workflow_output_bindings"] == [
+        {
+            "source": {"node": "agent1", "port": "main"},
+            "target_port": "main",
+            "materialization": "copy",
+            "required": True,
+        }
+    ]

@@ -9,7 +9,6 @@ import type {
   ArtifactLink,
   NodeRunSummary,
   ReplayPayload,
-  RunDiffPayload,
   RunSummary,
 } from '../types';
 import { CodeBlock } from './CodeBlock';
@@ -30,10 +29,7 @@ export function RunInspectorCore({ runId }: Props) {
   const [content, setContent] = useState<ArtifactContent | null>(null);
   const [error, setError] = useState<string>('');
   const [debugMessage, setDebugMessage] = useState('');
-  const [forkOverrideText, setForkOverrideText] = useState('{}');
   const [replayPayload, setReplayPayload] = useState<ReplayPayload | null>(null);
-  const [diffPayload, setDiffPayload] = useState<RunDiffPayload | null>(null);
-  const [lastDerivedRunDir, setLastDerivedRunDir] = useState('');
   const [isBusy, setIsBusy] = useState(false);
 
   useEffect(() => {
@@ -83,29 +79,6 @@ export function RunInspectorCore({ runId }: Props) {
     };
   }, [run?.run_id, selectedNode?.node_id]);
 
-  useEffect(() => {
-    if (!selectedNode?.input_path) {
-      setForkOverrideText('{}');
-      return;
-    }
-    let ignore = false;
-    api
-      .artifact(selectedNode.input_path)
-      .then((result) => {
-        if (!ignore) {
-          setForkOverrideText(result.content || '{}');
-        }
-      })
-      .catch(() => {
-        if (!ignore) {
-          setForkOverrideText('{}');
-        }
-      });
-    return () => {
-      ignore = true;
-    };
-  }, [selectedNode?.input_path]);
-
   async function readPath(path: string | null | undefined) {
     if (!path) {
       return;
@@ -154,67 +127,15 @@ export function RunInspectorCore({ runId }: Props) {
               <RunDebuggerPanel
                 run={run}
                 node={selectedNode}
-                forkOverrideText={forkOverrideText}
                 replayPayload={replayPayload}
-                diffPayload={diffPayload}
                 debugMessage={debugMessage}
                 isBusy={isBusy}
-                onForkOverrideText={setForkOverrideText}
                 onReplay={async () => {
                   setIsBusy(true);
                   try {
                     const payload = await api.replayRun(run.run_id, selectedNode.node_id);
                     setReplayPayload(payload);
                     setDebugMessage(`已回放 ${selectedNode.node_id}`);
-                  } finally {
-                    setIsBusy(false);
-                  }
-                }}
-                onRerunNode={async () => {
-                  setIsBusy(true);
-                  try {
-                    const outDir = nextDerivedRunDir('rerun_node', run.run_id, selectedNode.node_id);
-                    const payload = await api.rerunNode(run.run_id, selectedNode.node_id, outDir);
-                    setLastDerivedRunDir(payload.run_dir);
-                    setDiffPayload(await api.diffRuns(run.run_dir, payload.run_dir));
-                    setDebugMessage(`已重跑节点 ${selectedNode.node_id}`);
-                  } finally {
-                    setIsBusy(false);
-                  }
-                }}
-                onRerunFrom={async () => {
-                  setIsBusy(true);
-                  try {
-                    const outDir = nextDerivedRunDir('rerun_from', run.run_id, selectedNode.node_id);
-                    const payload = await api.rerunFrom(run.run_id, selectedNode.node_id, outDir);
-                    setLastDerivedRunDir(payload.run_dir);
-                    setDiffPayload(await api.diffRuns(run.run_dir, payload.run_dir));
-                    setDebugMessage(`已从节点 ${selectedNode.node_id} 重跑下游`);
-                  } finally {
-                    setIsBusy(false);
-                  }
-                }}
-                onFork={async () => {
-                  setIsBusy(true);
-                  try {
-                    const override = JSON.parse(forkOverrideText || '{}') as Record<string, unknown>;
-                    const outDir = nextDerivedRunDir('fork', run.run_id, selectedNode.node_id);
-                    const payload = await api.forkRun(run.run_id, selectedNode.node_id, outDir, override);
-                    setLastDerivedRunDir(payload.run_dir);
-                    setDiffPayload(await api.diffRuns(run.run_dir, payload.run_dir));
-                    setDebugMessage(`已 Fork ${selectedNode.node_id}`);
-                  } finally {
-                    setIsBusy(false);
-                  }
-                }}
-                onCompare={async () => {
-                  if (!lastDerivedRunDir) {
-                    return;
-                  }
-                  setIsBusy(true);
-                  try {
-                    setDiffPayload(await api.diffRuns(run.run_dir, lastDerivedRunDir));
-                    setDebugMessage('已刷新运行对比');
                   } finally {
                     setIsBusy(false);
                   }
@@ -233,33 +154,19 @@ export function RunInspectorCore({ runId }: Props) {
 type RunDebuggerPanelProps = {
   run: RunSummary;
   node: NodeRunSummary;
-  forkOverrideText: string;
   replayPayload: ReplayPayload | null;
-  diffPayload: RunDiffPayload | null;
   debugMessage: string;
   isBusy: boolean;
-  onForkOverrideText: (value: string) => void;
   onReplay: () => Promise<void>;
-  onRerunNode: () => Promise<void>;
-  onRerunFrom: () => Promise<void>;
-  onFork: () => Promise<void>;
-  onCompare: () => Promise<void>;
 };
 
 function RunDebuggerPanel({
   run,
   node,
-  forkOverrideText,
   replayPayload,
-  diffPayload,
   debugMessage,
   isBusy,
-  onForkOverrideText,
   onReplay,
-  onRerunNode,
-  onRerunFrom,
-  onFork,
-  onCompare,
 }: RunDebuggerPanelProps) {
   return (
     <section className="detail-surface debugger-panel" aria-label="调试面板">
@@ -275,26 +182,7 @@ function RunDebuggerPanel({
         <button type="button" onClick={() => void onReplay()} disabled={isBusy}>
           {t.replay}
         </button>
-        <button type="button" onClick={() => void onRerunNode()} disabled={isBusy}>
-          {t.rerunNode}
-        </button>
-        <button type="button" onClick={() => void onRerunFrom()} disabled={isBusy}>
-          {t.rerunFrom}
-        </button>
-        <button type="button" onClick={() => void onFork()} disabled={isBusy}>
-          {t.forkRun}
-        </button>
-        <button type="button" onClick={() => void onCompare()} disabled={isBusy || !diffPayload}>
-          {t.compareRuns}
-        </button>
       </div>
-      <label className="inspector-label">
-        Fork override JSON
-        <textarea
-          value={forkOverrideText}
-          onChange={(event) => onForkOverrideText(event.target.value)}
-        />
-      </label>
       {debugMessage ? <div className="notice neutral">{debugMessage}</div> : null}
       {replayPayload ? (
         <CodeBlock
@@ -303,19 +191,8 @@ function RunDebuggerPanel({
           variant="json"
         />
       ) : null}
-      {diffPayload ? (
-        <CodeBlock
-          title="run_diff.json"
-          content={JSON.stringify(diffPayload, null, 2)}
-          variant="json"
-        />
-      ) : null}
     </section>
   );
-}
-
-function nextDerivedRunDir(kind: string, runId: string, nodeId: string): string {
-  return `runs/ui_${kind}_${runId}_${nodeId}_${Date.now()}`;
 }
 
 type NodeDetailProps = {

@@ -21,7 +21,7 @@ from acc.app.workbench_adapter import (
     compile_workbench_workflow_bundle,
 )
 from acc.app.workflow_refs import WorkflowCatalog, WorkflowRefMode, rewrite_workflow_function_refs
-from acc.migration.graph_importer import accflow_path_from_legacy_graph_path
+from acc.callable_registry import CallableRegistry
 from acc.server.context import (
     configured_project_dir,
     get_project_root,
@@ -167,7 +167,11 @@ def prepare_runtime_graph(
     graph_dir.mkdir(parents=True, exist_ok=True)
     accflow_path = graph_dir / f"{workflow_id}.accflow.json"
     workflows_dir = configured_project_dir(project_root, "ACC_WORKFLOWS_DIR", "workflows")
-    bundle = graph_bundle_for_accflow_save(graph, source_path=accflow_path)
+    bundle = graph_bundle_for_accflow_save(
+        graph,
+        source_path=accflow_path,
+        callable_registry=CallableRegistry.from_project_root(project_root),
+    )
     try:
         bundle = resolve_bundle_workflow_refs(
             bundle,
@@ -197,6 +201,18 @@ def get_workflow(workflow_id: str, request: Request) -> dict[str, Any]:
     workflows_dir = configured_project_dir(project_root, "ACC_WORKFLOWS_DIR", "workflows")
     if not workflows_dir.exists():
         raise HTTPException(status_code=404, detail=f"Workflow not found: {workflow_id}")
+    direct_path = direct_accflow_path(workflows_dir, workflow_id)
+    if direct_path is not None:
+        payload = load_json_or_500(direct_path)
+        return {
+            "workflow_id": str(payload.get("id") or workflow_id),
+            "file_id": workflow_id,
+            "path": relative_project_path(project_root, direct_path),
+            "workflow": payload,
+            "graph": payload,
+            "type": "graph",
+            "format": "accflow",
+        }
     for path in sorted(workflows_dir.glob("*.yaml")):
         payload = load_yaml(path)
         candidate_ids = {path.stem, str(payload.get("name") or "")}
@@ -234,7 +250,12 @@ def create_workflow(payload: WorkflowSaveRequest, request: Request) -> dict[str,
     path = workflow_storage_path(workflows_dir, payload.path or f"{workflow_id}.accflow.json")
     if path.exists() and not payload.force:
         raise HTTPException(status_code=409, detail=f"Workflow already exists: {path.name}")
-    return save_graph(path, payload.graph, request)
+    return save_graph(
+        path,
+        payload.graph,
+        request,
+        force_main_data_edge_migration=payload.force,
+    )
 
 
 @router.put("/{workflow_id}")
@@ -246,7 +267,12 @@ def update_workflow(
     project_root = get_project_root(request)
     workflows_dir = configured_project_dir(project_root, "ACC_WORKFLOWS_DIR", "workflows")
     path = workflow_storage_path(workflows_dir, payload.path or f"{workflow_id}.accflow.json")
-    return save_graph(path, payload.graph, request)
+    return save_graph(
+        path,
+        payload.graph,
+        request,
+        force_main_data_edge_migration=payload.force,
+    )
 
 
 @router.post("/{workflow_id}/validate")
@@ -474,11 +500,31 @@ def workflow_function_path(workflows_dir: Path, path_value: str) -> Path:
     return workflow_storage_path(workflows_dir, path_value)
 
 
-def save_graph(path: Path, graph: dict[str, Any], request: Request) -> dict[str, Any]:
-    accflow_path = accflow_path_from_legacy_graph_path(path)
+def direct_accflow_path(workflows_dir: Path, workflow_id: str) -> Path | None:
+    if "/" in workflow_id or "\\" in workflow_id:
+        return None
+    candidate = (workflows_dir / f"{workflow_id}.accflow.json").resolve()
+    if not candidate.is_relative_to(workflows_dir.resolve()) or not candidate.exists():
+        return None
+    return candidate
+
+
+def save_graph(
+    path: Path,
+    graph: dict[str, Any],
+    request: Request,
+    *,
+    force_main_data_edge_migration: bool = False,
+) -> dict[str, Any]:
+    accflow_path = path
     project_root = get_project_root(request)
     workflows_dir = configured_project_dir(project_root, "ACC_WORKFLOWS_DIR", "workflows")
-    bundle = graph_bundle_for_accflow_save(graph, source_path=accflow_path)
+    bundle = graph_bundle_for_accflow_save(
+        graph,
+        source_path=accflow_path,
+        callable_registry=CallableRegistry.from_project_root(project_root),
+        force_main_data_edge_migration=force_main_data_edge_migration,
+    )
     try:
         bundle = resolve_bundle_workflow_refs(
             bundle,
@@ -506,6 +552,7 @@ def save_graph(path: Path, graph: dict[str, Any], request: Request) -> dict[str,
             "validation": bundle.validation_preview,
             "ref_resolution": bundle.ref_resolution_preview or [],
         },
+        "normalization": bundle.normalization,
         "validation": validation,
     }
 
@@ -536,9 +583,16 @@ def graph_bundle_for_accflow_save(
     graph: dict[str, Any],
     *,
     source_path: Path,
+    callable_registry: CallableRegistry | None = None,
+    force_main_data_edge_migration: bool = False,
 ) -> CompiledWorkbenchWorkflowBundle:
     try:
-        return compile_workbench_workflow_bundle(graph, source_path=source_path)
+        return compile_workbench_workflow_bundle(
+            graph,
+            source_path=source_path,
+            callable_registry=callable_registry,
+            force_main_data_edge_migration=force_main_data_edge_migration,
+        )
     except AccError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -629,6 +683,7 @@ def resolve_bundle_workflow_refs(
             "ref_resolution_count": len(resolutions),
         },
         ref_resolution_preview=resolutions,
+        normalization=bundle.normalization,
     )
 
 
@@ -697,6 +752,9 @@ def find_graph_path(workflow_id: str, request: Request) -> Path:
     workflows_dir = configured_project_dir(project_root, "ACC_WORKFLOWS_DIR", "workflows")
     if not workflows_dir.exists():
         raise HTTPException(status_code=404, detail=f"Workflow not found: {workflow_id}")
+    direct_path = direct_accflow_path(workflows_dir, workflow_id)
+    if direct_path is not None:
+        return direct_path
     for path in sorted(workflows_dir.glob("*.accflow.json")):
         payload = load_json_or_500(path)
         file_id = path.name.removesuffix(".accflow.json")

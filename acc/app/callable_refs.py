@@ -6,15 +6,8 @@ from pathlib import Path
 
 from acc.callable_registry import CallableRegistry
 from acc.domain import AccError, WorkflowFunctionTemplate
+from acc.hermetic_callables import HERMETIC_CALLABLE_REFS
 from acc.utils import load_json
-
-HERMETIC_CALLABLE_REFS: set[tuple[str, str]] = {
-    ("tool_class", "fake_producer"),
-    ("tool_class", "merge"),
-    ("tool_class", "fake"),
-    ("agent_class", "generic_fake_agent"),
-    ("agent_class", "generic_cli"),
-}
 
 
 def discover_known_callable_refs(

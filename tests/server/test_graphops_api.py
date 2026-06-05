@@ -79,6 +79,8 @@ def test_graphops_example_validate_and_dry_run(client, project_root: Path) -> No
     validate_payload = validate_response.json()
     assert validate_payload["status"] == "valid"
     assert validate_payload["apply_requires_human_approval"] is True
+    assert validate_payload["apply_status"] == "not_implemented"
+    assert validate_payload["dry_run_only"] is True
 
     dry_run_response = client.post(
         "/api/graphops/dry-run",
@@ -88,3 +90,15 @@ def test_graphops_example_validate_and_dry_run(client, project_root: Path) -> No
     dry_run_payload = dry_run_response.json()
     assert dry_run_payload["status"] == "dry_run"
     assert dry_run_payload["mutated"] is False
+    assert dry_run_payload["apply_status"] == "not_implemented"
+
+    apply_response = client.post(
+        "/api/graphops/apply",
+        json={
+            "patch_path": "examples/graphops/add-review-node.patch.json",
+            "apply": True,
+            "human_approved": True,
+        },
+    )
+    assert apply_response.status_code == 400
+    assert "not implemented in Option A" in apply_response.json()["detail"]

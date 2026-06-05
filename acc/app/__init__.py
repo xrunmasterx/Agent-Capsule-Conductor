@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -20,6 +19,11 @@ from acc.engine.workflow_validation import (
     build_workflow_dry_run_report,
     validate_callable_workflow_function_report,
 )
+from acc.runtime.policy import (
+    external_agent_execution_enabled as external_agent_execution_enabled,
+)
+from acc.runtime.policy import use_submit_validate as use_submit_validate
+from acc.runtime.policy import use_supervisor as use_supervisor
 from acc.session import utc_now_iso
 from acc.store import is_clean_workflow_path, load_json, write_json
 
@@ -322,26 +326,6 @@ def run_clean_workflow_template_sync(
             input_payload=input_payload,
         )
     )
-
-
-def external_agent_execution_enabled() -> bool:
-    return os.getenv("ACC_ENABLE_EXTERNAL_AGENT_EXECUTION", "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-    }
-
-
-def use_submit_validate() -> bool:
-    return os.getenv("ACC_ENABLE_SUBMIT_VALIDATE", "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-    }
-
-
-def use_supervisor() -> bool:
-    return os.getenv("ACC_ENABLE_SUPERVISOR", "").strip().lower() in {"1", "true", "yes"}
 
 
 def workflow_events_payload(run_dir: Path) -> dict[str, Any]:

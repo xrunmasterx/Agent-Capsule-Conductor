@@ -17,13 +17,13 @@ from acc.domain import (
     ExecutionNode,
     ExecutionPlan,
     InvocationPolicy,
+    NodeControlPolicy,
     NodeInputBinding,
     NodeInvocationSpec,
     NodeOutputBinding,
     PermissionProfile,
     PortContract,
     PromptPolicy,
-    RecursionPolicy,
     RetryPolicy,
     RuntimePolicy,
     TimeoutPolicy,
@@ -75,7 +75,9 @@ CORE_V2_NODE_FIELDS = {
     "invocation_policy",
     "runtime_policy",
     "prompt_policy",
+    "control",
     "artifact_contract",
+    "output_schema",
     "metadata",
 }
 
@@ -92,8 +94,8 @@ def parse_workflow_function_template(
     workflow_id = require_string(payload, "id", "WorkflowFunctionTemplate")
     version = require_string(payload, "version", workflow_id)
     nodes_payload = payload.get("nodes")
-    if not isinstance(nodes_payload, list) or not nodes_payload:
-        raise AccError("WorkflowFunctionTemplate nodes must be a non-empty array")
+    if not isinstance(nodes_payload, list):
+        raise AccError("WorkflowFunctionTemplate nodes must be an array")
 
     node_invocations: dict[str, NodeInvocationSpec] = {}
     for node_payload in nodes_payload:
@@ -203,7 +205,9 @@ def parse_core_v2_node_invocation(payload: dict[str, Any]) -> NodeInvocationSpec
         invocation_policy=parse_core_v2_invocation_policy(payload.get("invocation_policy")),
         runtime_policy=parse_core_v2_runtime_policy(payload.get("runtime_policy")),
         prompt_policy=parse_core_v2_prompt_policy(payload.get("prompt_policy")),
+        control=parse_core_v2_node_control_policy(payload.get("control")),
         artifact_contract=parse_core_v2_artifact_contract(payload.get("artifact_contract")),
+        output_schema=parse_optional_output_schema(payload.get("output_schema"), node_id),
         input_ports=input_ports,
         output_ports=output_ports,
         metadata=parse_optional_mapping(payload.get("metadata"), f"node {node_id} metadata"),
@@ -228,6 +232,26 @@ def parse_core_v2_callable_override(value: Any) -> CallableOverride:
         behavior_overlay=parse_optional_mapping(
             payload.get("behavior_overlay"),
             "overrides.behavior_overlay",
+        ),
+    )
+
+
+def parse_core_v2_node_control_policy(value: Any) -> NodeControlPolicy:
+    if value is None:
+        return NodeControlPolicy()
+    payload = require_mapping(value, "control")
+    reject_status = str(payload.get("approval_reject_status") or "failed")
+    if reject_status not in {"failed", "skipped"}:
+        raise AccError(f"Unsupported approval_reject_status: {reject_status}")
+    approval_prompt = payload.get("approval_prompt")
+    return NodeControlPolicy(
+        require_human_approval=bool(payload.get("require_human_approval", False)),
+        approval_prompt=approval_prompt if isinstance(approval_prompt, str) else None,
+        approval_reject_status=reject_status,  # type: ignore[arg-type]
+        forward_main_output_on_control=(
+            bool(payload["forward_main_output_on_control"])
+            if isinstance(payload.get("forward_main_output_on_control"), bool)
+            else None
         ),
     )
 
@@ -301,6 +325,12 @@ def parse_core_v2_artifact_contract(value: Any) -> ArtifactContract:
         required_paths=tuple(str(item) for item in payload.get("required_paths") or ()),
         optional_paths=tuple(str(item) for item in payload.get("optional_paths") or ()),
     )
+
+
+def parse_optional_output_schema(value: Any, node_id: str) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    return dict(require_mapping(value, f"node {node_id}.output_schema"))
 
 
 def parse_core_v2_node_input_binding(payload: Any, index: int) -> NodeInputBinding:
@@ -564,7 +594,6 @@ def validate_callable_workflow_function(
             template,
             node,
             known_callable_refs=known_callable_refs,
-            recursion_policy=RecursionPolicy(),
             parent_stateful=parent_stateful,
         )
 
@@ -574,10 +603,9 @@ def validate_node_invocation_spec(
     node: NodeInvocationSpec,
     *,
     known_callable_refs: set[tuple[str, str]] | None = None,
-    recursion_policy: RecursionPolicy | None = None,
     parent_stateful: bool = False,
 ) -> None:
-    _ = template, recursion_policy, parent_stateful
+    _ = template, parent_stateful
     validate_callable_ref(node.callable_ref, known_callable_refs=known_callable_refs)
     for binding in node.input_bindings:
         if binding.source is None and binding.static_value is None and binding.required:

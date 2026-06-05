@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import enum
 from dataclasses import dataclass, field, fields, is_dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -35,7 +34,6 @@ RuntimeStatus = Literal[
     "scheduled",
     "running",
     "success",
-    "succeeded",
     "failed",
     "cancelled",
     "timeout",
@@ -47,15 +45,16 @@ RuntimeStatus = Literal[
 ]
 
 CORE_V2_SCHEMA_VERSION = "acc.core.v2"
+CONTROL_LEDGER_SCHEMA_VERSION = "acc.control.v1"
 CORE_CALLABLE_KINDS: frozenset[str] = frozenset(
     {"agent_class", "tool_class", "workflow_function"}
 )
 EXECUTABLE_METADATA_KEYS: frozenset[str] = frozenset(
     {
-        "input" + "_mapping",
-        "legacy" + "_value_edges",
-        "legacy" + "_passthrough",
-        "upstream" + "_context",
+        "input_mapping",
+        "legacy_value_edges",
+        "legacy_passthrough",
+        "upstream_context",
         "permissions",
         "permission_profile",
         "retry",
@@ -75,6 +74,11 @@ EXECUTABLE_METADATA_KEYS: frozenset[str] = frozenset(
         "conversation_memory",
         "workspace_root",
         "local_workspace_binding",
+        "control",
+        "require_human_approval",
+        "requires_human_approval",
+        "approval_prompt",
+        "approval_reject_status",
     }
 )
 
@@ -311,17 +315,15 @@ class InvocationPolicy:
     permission_profile: PermissionProfile | None = None
 
 
-@dataclass(frozen=True)
-class CallDepthPolicy:
-    default_max_depth: int = 2
-    allow_deeper_with_explicit_flag: bool = False
-    recursion_guard: bool = True
+ApprovalRejectStatus = Literal["failed", "skipped"]
 
 
 @dataclass(frozen=True)
-class RecursionPolicy:
-    allow_recursive: bool = False
-    max_depth: int = 2
+class NodeControlPolicy:
+    require_human_approval: bool = False
+    approval_prompt: str | None = None
+    approval_reject_status: ApprovalRejectStatus = "failed"
+    forward_main_output_on_control: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -337,7 +339,9 @@ class NodeInvocationSpec:
     invocation_policy: InvocationPolicy = field(default_factory=InvocationPolicy)
     runtime_policy: RuntimePolicy = field(default_factory=RuntimePolicy)
     prompt_policy: PromptPolicy = field(default_factory=PromptPolicy)
+    control: NodeControlPolicy = field(default_factory=NodeControlPolicy)
     artifact_contract: ArtifactContract = field(default_factory=ArtifactContract)
+    output_schema: dict[str, Any] | None = None
     input_ports: dict[str, PortContract] = field(default_factory=dict)
     output_ports: dict[str, PortContract] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -461,6 +465,235 @@ class EventRecord:
     type: str
     timestamp: str
     node_id: str | None = None
+    payload: dict[str, Any] = field(default_factory=dict)
+
+
+ControlPolicyMode = Literal["fixed", "supervisor", "handoff"]
+RunPlanSource = Literal["fixed", "supervisor", "handoff", "replay"]
+RunPlanStatus = Literal["proposed", "active", "completed", "failed", "cancelled"]
+PlanStepSource = Literal["fixed", "supervisor", "handoff", "replay"]
+PlanStepStatus = Literal[
+    "pending",
+    "ready",
+    "waiting_interaction",
+    "dispatching",
+    "running",
+    "success",
+    "failed",
+    "skipped",
+    "cancelled",
+]
+DispatchStatus = Literal["pending", "started", "completed", "failed", "cancelled"]
+DecisionKind = Literal[
+    "compile_plan",
+    "dispatch",
+    "approval",
+    "supervisor_plan",
+    "handoff",
+    "retry",
+    "cancel",
+    "no_action",
+]
+ReplayMode = Literal[
+    "deterministic_recompile",
+    "reuse_recorded_decisions",
+    "require_reapproval",
+    "disabled",
+]
+HandoffMode = Literal["new_session", "resume_session", "route_only"]
+HandoffAcceptanceStatus = Literal[
+    "pending",
+    "accepted",
+    "rejected",
+    "timed_out",
+    "not_required",
+]
+
+
+@dataclass(frozen=True)
+class HandoffControlPolicy:
+    policy_id: str
+    actor: str
+    source_node_id: str
+    allowed_target_node_ids: tuple[str, ...] = ()
+    allowed_target_callable_refs: tuple[CallableRef, ...] = ()
+    allowed_modes: tuple[HandoffMode, ...] = ("new_session", "route_only")
+    requires_acceptance: bool = False
+    requires_human_approval: bool = False
+    timeout_seconds: int | None = None
+    fallback_target_node_id: str | None = None
+    max_handoff_depth: int | None = None
+    max_repeat_per_target: int | None = None
+    replay_mode: ReplayMode = "reuse_recorded_decisions"
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class HandoffRequest:
+    handoff_id: str
+    run_id: str
+    run_plan_id: str
+    source_plan_step_id: str
+    source_node_id: str
+    target_node_id: str
+    target_callable_ref: CallableRef
+    mode: HandoffMode
+    input_payload: dict[str, Any] = field(default_factory=dict)
+    payload_ref: str | None = None
+    artifact_refs: tuple[str, ...] = ()
+    acceptance_refs: tuple[str, ...] = ()
+    scope_ref: str | None = None
+    created_at: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ControlPolicy:
+    policy_id: str
+    mode: ControlPolicyMode
+    actor: str
+    allowed_targets: tuple[str | CallableRef, ...] = ()
+    requires_human_approval: bool = False
+    allow_dynamic_dispatch: bool = False
+    allow_handoff: bool = False
+    max_dispatch_depth: int | None = None
+    max_repeat_per_target: int | None = None
+    max_concurrency: int | None = None
+    replay_policy_ref: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class RunPlan:
+    run_plan_id: str
+    run_id: str
+    workflow_function_id: str
+    invocation_id: str
+    source: RunPlanSource
+    schema_version: str
+    template_snapshot_ref: str
+    control_policy_id: str
+    created_at: str
+    status: RunPlanStatus
+    step_count: int
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class PlanStep:
+    plan_step_id: str
+    run_plan_id: str
+    run_id: str
+    node_id: str
+    callable_ref: CallableRef
+    depends_on: tuple[str, ...]
+    source: PlanStepSource
+    status: PlanStepStatus
+    dependency_node_ids: tuple[str, ...] = ()
+    input_snapshot_refs: tuple[str, ...] = ()
+    required_interaction_id: str | None = None
+    dispatch_id: str | None = None
+    decision_id: str | None = None
+    session_id: str | None = None
+    artifact_bundle_id: str | None = None
+    failure_id: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class DispatchEnvelope:
+    dispatch_id: str
+    run_id: str
+    run_plan_id: str
+    plan_step_id: str
+    node_id: str
+    callable_ref: CallableRef
+    scope_frame_id: str
+    invocation_id: str
+    idempotency_key: str
+    correlation_id: str
+    input_ref: str
+    policy_snapshot_ref: str
+    created_by_decision_id: str
+    attempt: int
+    created_at: str
+    status: DispatchStatus
+    result_refs: tuple[str, ...] = ()
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class DecisionRecord:
+    decision_id: str
+    run_id: str
+    actor: str
+    kind: DecisionKind
+    timestamp: str
+    input_evidence_refs: tuple[str, ...]
+    run_plan_id: str | None = None
+    policy_snapshot: dict[str, Any] = field(default_factory=dict)
+    candidates: tuple[dict[str, Any], ...] = ()
+    selected: dict[str, Any] = field(default_factory=dict)
+    rejected: tuple[dict[str, Any], ...] = ()
+    rationale: str | None = None
+    result_refs: tuple[str, ...] = ()
+    replay_binding: dict[str, Any] = field(default_factory=dict)
+    correlation_id: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ReplayPolicy:
+    replay_policy_id: str
+    mode: ReplayMode
+    template_snapshot_required: bool
+    reuse_human_answers: bool = True
+    reuse_supervisor_decisions: bool = True
+    reuse_handoff_decisions: bool = True
+    graphops_apply_allowed: bool = False
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class PlanStepTransitionRecord:
+    sequence: int
+    recorded_at: str
+    plan_step_id: str
+    previous_status: PlanStepStatus | None
+    next_status: PlanStepStatus
+    snapshot: PlanStep
+    reason: str
+    decision_id: str | None = None
+    dispatch_id: str | None = None
+
+
+@dataclass(frozen=True)
+class DispatchTransitionRecord:
+    sequence: int
+    recorded_at: str
+    dispatch_id: str
+    previous_status: DispatchStatus | None
+    next_status: DispatchStatus
+    snapshot: DispatchEnvelope
+    reason: str
+    decision_id: str | None = None
+    plan_step_id: str | None = None
+
+
+@dataclass(frozen=True)
+class ControlEventRecord:
+    event_id: str
+    type: str
+    timestamp: str
+    run_id: str
+    scope_frame_id: str | None = None
+    node_id: str | None = None
+    session_id: str | None = None
+    plan_step_id: str | None = None
+    dispatch_id: str | None = None
+    decision_id: str | None = None
     payload: dict[str, Any] = field(default_factory=dict)
 
 
@@ -610,7 +843,7 @@ class InteractionRequest:
 # preserved verbatim for backward compatibility with the current
 # .accflow.json runtime (node_invocation.py, workflow_call.py); the new
 # variants are exported under a "V2" suffix to avoid silently shadowing
-# them. BindingResolver dispatches by the ``kind`` discriminator.
+# them. No current product runtime resolver consumes these V2 shapes.
 # ---------------------------------------------------------------------------
 
 
@@ -653,11 +886,6 @@ class WorkflowCallInputBindingV2:
 InputBinding = NodeInputBindingV2
 
 
-class PromptAppendixPolicy(enum.StrEnum):
-    TASK_ONLY = "task_only"
-    NONE = "none"
-
-
 def workflow_function_template_to_dict(template: WorkflowFunctionTemplate) -> dict[str, Any]:
     return {
         "schema_version": CORE_V2_SCHEMA_VERSION,
@@ -692,6 +920,8 @@ def node_invocation_to_wire_dict(node: NodeInvocationSpec) -> dict[str, Any]:
         "inputs": payload.pop("input_ports", {}),
         "outputs": payload.pop("output_ports", {}),
     }
+    if payload.get("output_schema") is None:
+        payload.pop("output_schema", None)
     return payload
 
 
@@ -700,17 +930,13 @@ def workflow_function_template_from_dict(payload: dict[str, Any]) -> WorkflowFun
     if schema_version != CORE_V2_SCHEMA_VERSION:
         raise AccError(f"Unsupported schema_version: {schema_version}")
     nodes_payload = payload.get("nodes")
-    if isinstance(nodes_payload, list):
-        node_items = {
-            str(item.get("id") or ""): item
-            for item in nodes_payload
-            if isinstance(item, dict)
-        }
-    else:
-        legacy_nodes_payload = payload.get("node_invocations")
-        if not isinstance(legacy_nodes_payload, dict):
-            raise AccError("WorkflowFunctionTemplate nodes must be an array")
-        node_items = legacy_nodes_payload
+    if not isinstance(nodes_payload, list):
+        raise AccError("WorkflowFunctionTemplate nodes must be an array")
+    node_items = {
+        str(item.get("id") or ""): item
+        for item in nodes_payload
+        if isinstance(item, dict)
+    }
     return WorkflowFunctionTemplate(
         id=_required_string(payload, "id"),
         version=_required_string(payload, "version"),
@@ -761,8 +987,6 @@ def validate_core_v2_workflow_function_template(template: WorkflowFunctionTempla
     _reject_executable_metadata(template.metadata, "workflow metadata")
     _reject_executable_metadata(template.policies, "workflow policies")
     node_ids = set(template.node_invocations)
-    if not node_ids:
-        raise AccError("WorkflowFunctionTemplate requires at least one node invocation")
     for node_id, node in template.node_invocations.items():
         if node.id != node_id:
             raise AccError(f"node key {node_id!r} does not match node id {node.id!r}")
@@ -854,6 +1078,10 @@ def _to_jsonable(value: Any) -> Any:
     return value
 
 
+def control_ledger_to_dict(value: Any) -> Any:
+    return _to_jsonable(value)
+
+
 def _node_invocation_from_dict(payload: dict[str, Any]) -> NodeInvocationSpec:
     input_ports, output_ports = _node_ports_from_dict(payload)
     return NodeInvocationSpec(
@@ -888,7 +1116,9 @@ def _node_invocation_from_dict(payload: dict[str, Any]) -> NodeInvocationSpec:
         invocation_policy=_invocation_policy_from_dict(payload.get("invocation_policy")),
         runtime_policy=_runtime_policy_from_dict(payload.get("runtime_policy")),
         prompt_policy=_prompt_policy_from_dict(payload.get("prompt_policy")),
+        control=_node_control_policy_from_dict(payload.get("control")),
         artifact_contract=_artifact_contract_from_dict(payload.get("artifact_contract")),
+        output_schema=_optional_dict(payload.get("output_schema"), "output_schema"),
         input_ports=input_ports,
         output_ports=output_ports,
         metadata=_dict_or_empty(payload.get("metadata"), "metadata"),
@@ -915,6 +1145,24 @@ def _callable_override_from_dict(value: Any) -> CallableOverride:
         retry=_dict_or_empty(payload.get("retry"), "retry"),
         static_input=_dict_or_empty(payload.get("static_input"), "static_input"),
         behavior_overlay=_dict_or_empty(payload.get("behavior_overlay"), "behavior_overlay"),
+    )
+
+
+def _node_control_policy_from_dict(value: Any) -> NodeControlPolicy:
+    payload = _dict_or_empty(value, "control")
+    reject_status = payload.get("approval_reject_status") or "failed"
+    if reject_status not in {"failed", "skipped"}:
+        raise AccError(f"Unsupported approval_reject_status: {reject_status}")
+    approval_prompt = payload.get("approval_prompt")
+    return NodeControlPolicy(
+        require_human_approval=bool(payload.get("require_human_approval", False)),
+        approval_prompt=approval_prompt if isinstance(approval_prompt, str) else None,
+        approval_reject_status=reject_status,  # type: ignore[arg-type]
+        forward_main_output_on_control=(
+            bool(payload["forward_main_output_on_control"])
+            if isinstance(payload.get("forward_main_output_on_control"), bool)
+            else None
+        ),
     )
 
 
@@ -1049,12 +1297,8 @@ def _workflow_call_output_binding_from_dict(payload: dict[str, Any]) -> Workflow
 
 def _control_edge_from_dict(payload: dict[str, Any]) -> ControlEdge:
     return ControlEdge(
-        source=_required_string(payload, "source")
-        if isinstance(payload.get("source"), str)
-        else _required_string(payload, "from"),
-        target=_required_string(payload, "target")
-        if isinstance(payload.get("target"), str)
-        else _required_string(payload, "to"),
+        source=_required_string(payload, "from"),
+        target=_required_string(payload, "to"),
         condition=payload.get("condition") if isinstance(payload.get("condition"), str) else None,
         context=str(payload.get("context") or "none"),  # type: ignore[arg-type]
     )
@@ -1094,14 +1338,13 @@ def _node_ports_from_dict(
     payload: dict[str, Any],
 ) -> tuple[dict[str, PortContract], dict[str, PortContract]]:
     ports = payload.get("ports")
-    if isinstance(ports, dict):
-        return (
-            _port_map_from_dict(ports.get("inputs"), "input"),
-            _port_map_from_dict(ports.get("outputs"), "output"),
-        )
+    if ports is None:
+        return {}, {}
+    if not isinstance(ports, dict):
+        raise AccError("Node ports must be an object")
     return (
-        _port_map_from_dict(payload.get("input_ports"), "input"),
-        _port_map_from_dict(payload.get("output_ports"), "output"),
+        _port_map_from_dict(ports.get("inputs"), "input"),
+        _port_map_from_dict(ports.get("outputs"), "output"),
     )
 
 
@@ -1147,6 +1390,14 @@ def _required_dict(value: Any, label: str) -> dict[str, Any]:
 def _dict_or_empty(value: Any, label: str) -> dict[str, Any]:
     if value is None:
         return {}
+    if not isinstance(value, dict):
+        raise AccError(f"{label} must be an object")
+    return value
+
+
+def _optional_dict(value: Any, label: str) -> dict[str, Any] | None:
+    if value is None:
+        return None
     if not isinstance(value, dict):
         raise AccError(f"{label} must be an object")
     return value

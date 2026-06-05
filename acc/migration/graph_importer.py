@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from acc.domain import CORE_V2_SCHEMA_VERSION, AccError
+from acc.hermetic_callables import HERMETIC_AGENT_CLASS_IDS, HERMETIC_TOOL_CLASS_IDS
 
 
 def accflow_path_from_legacy_graph_path(path: Path) -> Path:
@@ -182,13 +183,13 @@ def _data_edge_to_core_v2(edge: Any) -> dict[str, Any]:
 
 
 def _known_agent_id(value: str) -> str:
-    if value in {"generic_fake_agent", "fake-agent.generic"}:
+    if value in HERMETIC_AGENT_CLASS_IDS:
         return value
     return "generic_fake_agent"
 
 
 def _known_tool_id(value: str) -> str:
-    if value in {"fake_producer", "fake", "merge", "fail"}:
+    if value in HERMETIC_TOOL_CLASS_IDS:
         return value
     return "fake"
 

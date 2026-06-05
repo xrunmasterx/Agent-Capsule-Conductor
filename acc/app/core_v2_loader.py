@@ -6,15 +6,15 @@ from acc.domain import WorkflowFunctionTemplate
 from acc.engine import parse_workflow_function_template, validate_workflow_function_template
 from acc.utils import AccError, load_json
 
-LEGACY_GRAPH_SUFFIX = ".graph" + ".json"
+LEGACY_GRAPH_SUFFIX = ".graph.json"
 
 
 def legacy_graph_migration_hint(path: Path) -> str:
     return (
         f"{LEGACY_GRAPH_SUFFIX} is not runnable in Core v2: {path}. "
-        "Migrate it with `acc migrate graph <path.graph" + ".json> "
+        "Migrate it with `acc migrate graph <path.graph.json> "
         "--out <workflow.accflow.json>` or "
-        "`acc workflow import-graph <path.graph" + ".json>`."
+        "`acc workflow import-graph <path.graph.json>`."
     )
 
 

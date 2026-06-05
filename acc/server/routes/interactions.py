@@ -5,17 +5,15 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict
 
+from acc.app.human_gate_service import answer_human_gate
 from acc.app.interactions import (
-    answer_interaction,
     create_interaction,
     get_interaction,
     interaction_payload,
     list_interactions,
 )
-from acc.app.scheduler import enqueue_wakeup, new_wakeup_request
 from acc.domain import AccError, InteractionKind
 from acc.server.context import get_project_root
-from acc.store import emit_event
 
 router = APIRouter(prefix="/runs", tags=["interactions"])
 
@@ -69,26 +67,14 @@ def answer_run_interaction(
 ) -> dict[str, Any]:
     run_dir = _run_dir(request, run_id)
     try:
-        updated = answer_interaction(run_dir, interaction_id, body.answer)
+        return answer_human_gate(
+            run_dir,
+            run_id=run_id,
+            interaction_id=interaction_id,
+            answer=body.answer,
+        )
     except AccError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    emit_event(
-        run_dir / "workflow_events.jsonl",
-        "interaction_answered",
-        f"workflow_{run_id}",
-        status="answered",
-        payload={"interaction_id": interaction_id, "answer": body.answer},
-    )
-    enqueue_wakeup(
-        run_dir,
-        new_wakeup_request(
-            run_id=run_id,
-            reason="human",
-            coalesce_key=f"interaction:{interaction_id}",
-            payload={"interaction_id": interaction_id},
-        ),
-    )
-    return interaction_payload(updated)
 
 
 @router.post("/{run_id}/interactions")

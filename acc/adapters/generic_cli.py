@@ -5,7 +5,13 @@ import json
 import os
 import sys
 
-from acc.adapters.base import AgentRunRequest, AgentRunResult, ResumeRequest
+from acc.adapters.base import (
+    AgentRunRequest,
+    AgentRunResult,
+    ResumeRequest,
+    build_shared_acc_env,
+    write_jsonl,
+)
 from acc.adapters.capabilities import default_adapter_capabilities
 from acc.domain import AccError, AgentCapabilities
 
@@ -32,16 +38,7 @@ class GenericCliAdapter:
                 "ACC_EVENTS_JSONL": str(request.events_log_path),
             }
         )
-        if request.inbox_dir is not None:
-            env["ACC_INBOX_DIR"] = str(request.inbox_dir)
-        if request.outbox_dir is not None:
-            env["ACC_OUTBOX_DIR"] = str(request.outbox_dir)
-        if request.environment_id is not None:
-            env["ACC_ENVIRONMENT_ID"] = request.environment_id
-        if request.node_id is not None:
-            env["ACC_NODE_ID"] = request.node_id
-        if request.run_id is not None:
-            env["ACC_RUN_ID"] = request.run_id
+        env.update(build_shared_acc_env(request))
 
         prompt_bytes = request.prompt_path.read_bytes()
         try:
@@ -143,5 +140,4 @@ def maybe_write_json_stdout(stdout: bytes, output_path) -> None:
 
 
 def write_event(request: AgentRunRequest, payload: dict) -> None:
-    with request.events_log_path.open("a", encoding="utf-8") as file:
-        file.write(json.dumps(payload, sort_keys=True) + "\n")
+    write_jsonl(request.events_log_path, payload)

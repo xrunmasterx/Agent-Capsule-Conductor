@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
@@ -85,3 +86,23 @@ class AgentAdapter(Protocol):
     async def run(self, request: AgentRunRequest) -> AgentRunResult: ...
 
     async def resume(self, request: ResumeRequest) -> AgentRunResult: ...
+
+
+def build_shared_acc_env(request: AgentRunRequest) -> dict[str, str]:
+    env = {"ACC_RUN_DIR": str(request.run_dir)}
+    if request.inbox_dir is not None:
+        env["ACC_INBOX_DIR"] = str(request.inbox_dir)
+    if request.outbox_dir is not None:
+        env["ACC_OUTBOX_DIR"] = str(request.outbox_dir)
+    if request.environment_id is not None:
+        env["ACC_ENVIRONMENT_ID"] = request.environment_id
+    if request.node_id is not None:
+        env["ACC_NODE_ID"] = request.node_id
+    if request.run_id is not None:
+        env["ACC_RUN_ID"] = request.run_id
+    return env
+
+
+def write_jsonl(path: Path, payload: dict[str, Any]) -> None:
+    with path.open("a", encoding="utf-8") as file:
+        file.write(json.dumps(payload, sort_keys=True) + "\n")

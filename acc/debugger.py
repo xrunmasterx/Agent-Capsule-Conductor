@@ -40,33 +40,6 @@ def replay_workflow_events(run_dir: Path, node_id: str | None = None) -> dict[st
     return payload
 
 
-def rerun_single_node(run_dir: Path, node_id: str, out_dir: Path) -> dict[str, Any]:
-    _ = run_dir, node_id, out_dir
-    raise AccError(
-        "Debugger rerun is disabled until it is rebuilt on RunRecord, EventLog, and ResultStore."
-    )
-
-
-def rerun_from_node(run_dir: Path, node_id: str, out_dir: Path) -> dict[str, Any]:
-    _ = run_dir, node_id, out_dir
-    raise AccError(
-        "Debugger rerun-from is disabled until it is rebuilt on RunRecord, "
-        "EventLog, and ResultStore."
-    )
-
-
-def fork_run(
-    run_dir: Path,
-    node_id: str,
-    override_path: Path,
-    out_dir: Path,
-) -> dict[str, Any]:
-    _ = run_dir, node_id, override_path, out_dir
-    raise AccError(
-        "Debugger fork is disabled until it is rebuilt on RunRecord, EventLog, and ResultStore."
-    )
-
-
 def diff_runs(run_a: Path, run_b: Path) -> dict[str, Any]:
     run_a_dir = resolve_run_dir(run_a)
     run_b_dir = resolve_run_dir(run_b)

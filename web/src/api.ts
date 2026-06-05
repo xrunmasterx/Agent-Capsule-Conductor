@@ -260,24 +260,6 @@ export const api = {
     sendJson<ReplayPayload>('POST', `/api/debugger/runs/${encodeURIComponent(runId)}/replay`, {
       node_id: nodeId,
     }),
-  rerunNode: (runId: string, nodeId: string, outDir: string) =>
-    sendJson<WorkflowRunResult>(
-      'POST',
-      `/api/debugger/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/rerun`,
-      { out_dir: outDir },
-    ),
-  rerunFrom: (runId: string, nodeId: string, outDir: string) =>
-    sendJson<WorkflowRunResult>(
-      'POST',
-      `/api/debugger/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/rerun-from`,
-      { out_dir: outDir },
-    ),
-  forkRun: (runId: string, nodeId: string, outDir: string, override: Record<string, unknown>) =>
-    sendJson<WorkflowRunResult>(
-      'POST',
-      `/api/debugger/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/fork`,
-      { out_dir: outDir, override },
-    ),
   diffRuns: (runA: string, runB: string) =>
     sendJson<RunDiffPayload>('POST', '/api/debugger/diff', { run_a: runA, run_b: runB }),
   graphopsExamples: () => getJson<{ patches: GraphOpsExample[] }>('/api/graphops/examples'),
