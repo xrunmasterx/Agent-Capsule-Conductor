@@ -19,7 +19,6 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import {
-  Boxes,
   ChevronDown,
   ChevronUp,
   CircleDot,
@@ -32,7 +31,6 @@ import {
   Bot,
   Play,
   Save,
-  Search,
   TestTube,
   Trash2,
 } from 'lucide-react';
@@ -79,6 +77,13 @@ import type {
   WorkflowSummary,
 } from '../types';
 import { CodeBlock } from './CodeBlock';
+import {
+  outputSchemaFromArtifactContract,
+  parsePaletteItem,
+  type PaletteItem,
+  type PortDirection,
+  type WorkflowPortView,
+} from './workflow-viewer/palette';
 import { WorkflowEvidenceDock } from './workflow-viewer/WorkflowEvidenceDock';
 import {
   edgeAddressEquals,
@@ -116,17 +121,7 @@ type Props = {
   onChanged?: () => void;
 };
 
-type PortDirection = 'input' | 'output';
 type ConnectionMode = 'data' | 'control';
-
-type WorkflowPortView = {
-  id: string;
-  label: string;
-  direction: PortDirection;
-  required?: boolean;
-  cardinality?: string;
-  artifactTypes?: string[];
-};
 
 type InternalNodeView = {
   id: string;
@@ -200,30 +195,6 @@ type WorkspaceCanvasModel = {
   edges: WorkflowCanvasEdge[];
 };
 
-type PaletteItem =
-  | { kind: 'workflow'; workflowRef?: string; label: string }
-  | {
-      kind: 'agent';
-      callableId: string;
-      label: string;
-      inputPorts?: WorkflowPortView[];
-      outputPorts?: WorkflowPortView[];
-      outputSchema?: Record<string, unknown>;
-    }
-  | {
-      kind: 'tool';
-      callableId: string;
-      label: string;
-      inputPorts?: WorkflowPortView[];
-      outputPorts?: WorkflowPortView[];
-      outputSchema?: Record<string, unknown>;
-    }
-  | { kind: 'file_source'; callableId: 'file-source.local'; label: string };
-
-type PaletteAddOptions = {
-  forceRoot?: boolean;
-};
-
 type PaletteDropTarget =
   | { kind: 'root_canvas'; position: { x: number; y: number } }
   | { kind: 'workflow_internal'; workflowId: string; position: { x: number; y: number } }
@@ -267,6 +238,18 @@ type CanvasSelection =
   | { type: 'port'; workflowId: string; portId: string; direction: PortDirection }
   | { type: 'edge'; id: string; scopeWorkflowId?: string | null }
   | { type: 'internal'; workflowId: string; nodeId: string };
+
+type SelectionIntent =
+  | { kind: 'react-flow-node'; flowNodeId: string }
+  | { kind: 'workflow-shell'; workflowId: string }
+  | { kind: 'internal-node'; workflowId: string; nodeId: string }
+  | { kind: 'edge'; address: EdgeAddress };
+
+type CanvasInteractionCommand =
+  | { type: 'select'; intent: SelectionIntent }
+  | { type: 'port-click'; workflowId: string; portId: string; direction: PortDirection }
+  | { type: 'edge-click'; address: EdgeAddress; altKey: boolean }
+  | { type: 'blank-pane-click' };
 
 type DataConnectionDraft = {
   scopeWorkflowId: string | null;
@@ -446,6 +429,7 @@ type NodeLiveLogs = {
 };
 
 type EdgeViewMode = 'all' | 'control' | 'data';
+type TaskWorkspaceView = 'overview' | 'blueprint';
 
 type WorkflowNodeData = {
   workflow: WorkflowContainerModel;
@@ -455,7 +439,7 @@ type WorkflowNodeData = {
   edgeViewMode: EdgeViewMode;
   selected: boolean;
   showDataPorts: boolean;
-  onSelectEdge: (address: EdgeAddress) => void;
+  onSelectEdge: (address: EdgeAddress, altKey?: boolean) => void;
   onSelectPort: (workflowId: string, port: WorkflowPortView) => void;
   onSelectInternal: (workflowId: string, nodeId: string) => void;
   onOpenFocus: (workflowId: string) => void;
@@ -584,6 +568,7 @@ export function WorkflowViewer({
     inspectorWidth: INSPECTOR_DEFAULT_WIDTH,
   });
   const [edgeViewMode, setEdgeViewMode] = useState<EdgeViewMode>('all');
+  const [taskWorkspaceView, setTaskWorkspaceView] = useState<TaskWorkspaceView>('blueprint');
   const [selectedResource, setSelectedResource] = useState<ResourceTemplate | null>(null);
   const [workflowBindings, setWorkflowBindings] = useState<Record<string, WorkflowBindingView>>({});
   const [bindingEditorWorkflowId, setBindingEditorWorkflowId] = useState<string | null>(null);
@@ -602,7 +587,6 @@ export function WorkflowViewer({
   const workflowEvents = selectedRunProjection?.events || [];
   const runOverlay = selectedRunProjection?.overlay || null;
   const isRunning = currentTask ? isActiveTaskStatus(currentTask.status) : false;
-  const paletteOpen = chrome.leftPanel === 'resources';
   const inspectorOpen = chrome.rightPanel === 'inspector';
   const resourceDetailOpen = chrome.rightPanel === 'resourceDetail';
   const inspectorWidth = chrome.inspectorWidth;
@@ -1623,14 +1607,7 @@ export function WorkflowViewer({
         onValidate={validateGraph}
         onRun={runGraph}
         onAutoLayout={autoLayout}
-        paletteOpen={paletteOpen}
         inspectorOpen={inspectorOpen}
-        onTogglePalette={() =>
-          setChrome((current) => ({
-            ...current,
-            leftPanel: current.leftPanel === 'resources' ? 'none' : 'resources',
-          }))
-        }
         onToggleInspector={() =>
           setChrome((current) => ({
             ...current,
@@ -1641,7 +1618,6 @@ export function WorkflowViewer({
       <div
         className={[
           'workspace-canvas-layout',
-          paletteOpen ? 'palette-open' : '',
           chrome.rightPanel !== 'none' ? 'inspector-open' : '',
         ]
           .filter(Boolean)
@@ -1649,114 +1625,52 @@ export function WorkflowViewer({
         onPointerDownCapture={handleCanvasLayoutPointerDown}
         onClickCapture={handleCanvasLayoutClick}
       >
-        <TaskRail
-          tasks={tasks}
-          activeTaskId={activeTaskId}
-          onSelectTask={switchTask}
-          onNewTask={newTask}
-          onDeleteTask={deleteTask}
-        />
-        {paletteOpen ? (
-          <div className="canvas-drawer canvas-drawer-left">
-            <div className="drawer-title-row">
-              <strong>资源</strong>
-              <button
-                type="button"
-                onClick={() => setChrome((current) => ({ ...current, leftPanel: 'none' }))}
-              >
-                关闭
-              </button>
-            </div>
-            <LeftNavigator
-              workflows={workflows}
-              callables={callables}
-              resourceErrors={resourceErrors}
-              selectedWorkflowId={selectedWorkflowId}
-              onOpenWorkflow={(workflowId) => openWorkflow(workflowId)}
-              onSelectResource={(resource) => {
-                setSelectedResource(resource);
-                setChrome((current) => ({ ...current, rightPanel: 'resourceDetail' }));
-              }}
+        <TaskWorkspaceSwitcher value={taskWorkspaceView} onChange={setTaskWorkspaceView} />
+        {taskWorkspaceView === 'overview' ? (
+          <TaskOverviewPage
+            tasks={tasks}
+            activeTaskId={activeTaskId}
+            onSelectTask={switchTask}
+            onOpenBlueprint={() => setTaskWorkspaceView('blueprint')}
+            onNewTask={newTask}
+            onDeleteTask={deleteTask}
+          />
+        ) : (
+          <>
+            <WorkspaceCanvas
+              canvas={displayCanvas}
+              selection={selection}
+              connectionMode={connectionMode}
+              workflowRun={workflowRun}
               focusedWorkflowId={focusedWorkflowId}
-              addTargetLabel={paletteTargetWorkflow?.title}
-              onAddPaletteItem={(item, options) => {
-                const selectedContainerId =
-                  selectedWorkflow &&
-                  !isExecutableNodeWorkflow(selectedWorkflow)
-                    ? selectedWorkflow.id
-                    : null;
-                const requestedTargetWorkflowId = options?.forceRoot
-                  ? null
-                  : focusedWorkflowId || selectedContainerId;
-                if (item.kind === 'workflow') {
-                  const nextWorkflowId = uniqueId(
-                    slugId(item.workflowRef || item.label || 'workflow') || 'workflow',
-                    new Set(canvas.workflows.map((workflow) => workflow.id)),
-                  );
-                  updateCanvas((current) =>
-                    addWorkflowFromPalette(current, item, nextRootPalettePosition(current)),
-                  );
-                  setSelection({ type: 'workflow', id: nextWorkflowId });
-                  setChrome((current) => ({ ...current, rightPanel: 'inspector' }));
-                  setMessage(`已加入 Root canvas: ${item.label}`);
-                  return;
-                }
-                const nextSelection = nextPaletteSelection(canvas, item, requestedTargetWorkflowId);
-                updateCanvas((current) => {
-                  const targetWorkflowId = requestedTargetWorkflowId;
-                  if (!targetWorkflowId) {
-                    return addCallableNodeFromPalette(current, item, nextRootPalettePosition(current));
-                  }
-                  const workflow = current.workflows.find((candidate) => candidate.id === targetWorkflowId);
-                  const nodeCount = workflow?.internalNodes.length || 0;
-                  return addInternalNodeFromPalette(current, targetWorkflowId, item, {
-                    x: 120 + (nodeCount % 4) * (AGENT_TOOL_NODE_SIZE.width + 80),
-                    y: 130 + Math.floor(nodeCount / 4) * 170,
-                  });
-                });
-                setSelection(nextSelection);
+              callables={callables}
+              workflows={workflows}
+              bindings={workflowBindings}
+              onFocusedWorkflow={setFocusedWorkflowId}
+              onCanvasChange={updateCanvas}
+              onSelect={selectCanvasObject}
+              onDeleteSelection={deleteSelectedCanvasObject}
+              edgeViewMode={edgeViewMode}
+              onEdgeViewMode={setEdgeViewMode}
+              onBlankCanvas={() => undefined}
+              onNotice={setMessage}
+              onConfigureWorkflow={(workflowId) => {
+                setSelection({ type: 'workflow', id: workflowId });
                 setChrome((current) => ({ ...current, rightPanel: 'inspector' }));
-                if (!requestedTargetWorkflowId) {
-                  setMessage(`已加入 Root canvas: ${item.label}`);
-                } else {
-                  setMessage(`已加入 Workflow: ${requestedTargetWorkflowId} / ${item.label}`);
-                }
+                setBindingEditorWorkflowId(workflowId);
               }}
             />
-          </div>
-        ) : null}
-        <WorkspaceCanvas
-          canvas={displayCanvas}
-          selection={selection}
-          connectionMode={connectionMode}
-          workflowRun={workflowRun}
-          focusedWorkflowId={focusedWorkflowId}
-          callables={callables}
-          workflows={workflows}
-          bindings={workflowBindings}
-          onFocusedWorkflow={setFocusedWorkflowId}
-          onCanvasChange={updateCanvas}
-          onSelect={selectCanvasObject}
-          onDeleteSelection={deleteSelectedCanvasObject}
-          edgeViewMode={edgeViewMode}
-          onEdgeViewMode={setEdgeViewMode}
-          onBlankCanvas={() => undefined}
-          onNotice={setMessage}
-          onConfigureWorkflow={(workflowId) => {
-            setSelection({ type: 'workflow', id: workflowId });
-            setChrome((current) => ({ ...current, rightPanel: 'inspector' }));
-            setBindingEditorWorkflowId(workflowId);
-          }}
-        />
-        <ExecutionDock
-          isRunning={isRunning}
-          runtimeConfig={runtimeConfig}
-          canRunWorkflow={canRunSelectedWorkflow}
-          canRunNode={canRunSelectedNode}
-          onRunTask={runGraph}
-          onRunWorkflow={runSelectedWorkflow}
-          onRunNode={runSelectedNode}
-        />
+            <ExecutionDock
+              isRunning={isRunning}
+              runtimeConfig={runtimeConfig}
+              canRunWorkflow={canRunSelectedWorkflow}
+              canRunNode={canRunSelectedNode}
+              onRunTask={runGraph}
+              onRunWorkflow={runSelectedWorkflow}
+              onRunNode={runSelectedNode}
+            />
+          </>
+        )}
         {inspectorOpen || resourceDetailOpen ? (
           <div
             className="canvas-drawer canvas-drawer-right"
@@ -1958,6 +1872,127 @@ function ExecutionDock({
   );
 }
 
+function TaskWorkspaceSwitcher({
+  value,
+  onChange,
+}: {
+  value: TaskWorkspaceView;
+  onChange: (value: TaskWorkspaceView) => void;
+}) {
+  return (
+    <div className="task-workspace-switcher" aria-label="任务工作区视图">
+      <button
+        type="button"
+        className={value === 'overview' ? 'active' : ''}
+        onClick={() => onChange('overview')}
+      >
+        <LayoutDashboard aria-hidden="true" size={15} />
+        任务总览
+      </button>
+      <button
+        type="button"
+        className={value === 'blueprint' ? 'active' : ''}
+        onClick={() => onChange('blueprint')}
+      >
+        <GitBranch aria-hidden="true" size={15} />
+        任务蓝图
+      </button>
+    </div>
+  );
+}
+
+function TaskOverviewPage({
+  tasks,
+  activeTaskId,
+  onSelectTask,
+  onOpenBlueprint,
+  onNewTask,
+  onDeleteTask,
+}: {
+  tasks: WorkbenchTask[];
+  activeTaskId: string;
+  onSelectTask: (taskId: string) => void;
+  onOpenBlueprint: () => void;
+  onNewTask: () => void;
+  onDeleteTask: (taskId: string) => void;
+}) {
+  const activeTask = tasks.find((task) => task.taskId === activeTaskId) || tasks[0];
+  const openTaskBlueprint = (taskId: string) => {
+    onSelectTask(taskId);
+    onOpenBlueprint();
+  };
+  return (
+    <section className="task-overview-page" aria-label="任务总览">
+      <aside className="task-overview-list" aria-label="任务列表">
+        <div className="task-overview-header">
+          <span>MISSION QUEUE</span>
+          <button type="button" onClick={onNewTask}>
+            新建任务
+          </button>
+        </div>
+        <div className="task-overview-items">
+          {tasks.map((task) => (
+            <article
+              key={task.taskId}
+              className={[
+                'task-overview-item',
+                task.taskId === activeTaskId ? 'active' : '',
+                `status-${task.status}`,
+              ]
+                .filter(Boolean)
+                .join(' ')}
+              onDoubleClick={() => openTaskBlueprint(task.taskId)}
+            >
+              <button
+                type="button"
+                className="task-overview-select"
+                aria-label={`选择任务 ${task.title}`}
+                onClick={() => onSelectTask(task.taskId)}
+                onDoubleClick={(event) => {
+                  event.stopPropagation();
+                  openTaskBlueprint(task.taskId);
+                }}
+              >
+                <strong>{task.title}</strong>
+                <small>{task.activeRunId || task.latestRunId || '未运行'}</small>
+              </button>
+              <button
+                type="button"
+                className="task-overview-delete"
+                aria-label={`删除任务 ${task.title}`}
+                title="删除任务"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onDeleteTask(task.taskId);
+                }}
+              >
+                <Trash2 aria-hidden="true" size={15} />
+              </button>
+            </article>
+          ))}
+        </div>
+      </aside>
+      <TaskArtifactsPane task={activeTask} />
+    </section>
+  );
+}
+
+function TaskArtifactsPane({ task }: { task?: WorkbenchTask }) {
+  return (
+    <section className="task-artifacts-pane" aria-label="任务产物">
+      <header>
+        <span>ARTIFACT CHANNEL</span>
+        <strong>{task?.title || '未选择任务'}</strong>
+      </header>
+      <div className="task-artifacts-empty">
+        <FileText aria-hidden="true" size={28} />
+        <p>产物视图待接入</p>
+        <small>这里将显示当前任务的输出、报告和可审计文件。</small>
+      </div>
+    </section>
+  );
+}
+
 function TaskRail({
   tasks,
   activeTaskId,
@@ -2019,9 +2054,7 @@ function TopBar({
   onValidate,
   onRun,
   onAutoLayout,
-  paletteOpen,
   inspectorOpen,
-  onTogglePalette,
   onToggleInspector,
 }: {
   title: string;
@@ -2033,9 +2066,7 @@ function TopBar({
   onValidate: () => void;
   onRun: () => void;
   onAutoLayout: () => void;
-  paletteOpen: boolean;
   inspectorOpen: boolean;
-  onTogglePalette: () => void;
   onToggleInspector: () => void;
 }) {
   return (
@@ -2048,21 +2079,13 @@ function TopBar({
       <div className="toolbar-actions" aria-label="工作流工具栏">
         <button
           type="button"
-          className={paletteOpen ? 'toggle-action active' : 'toggle-action'}
-          onClick={onTogglePalette}
-        >
-          <Boxes aria-hidden="true" size={16} />
-          资源
-        </button>
-        <button
-          type="button"
           className={inspectorOpen ? 'toggle-action active' : 'toggle-action'}
           onClick={onToggleInspector}
         >
           <Database aria-hidden="true" size={16} />
           节点设置
         </button>
-        <button type="button" aria-label="新建任务（工具栏）" onClick={onNew}>
+        <button type="button" onClick={onNew}>
           <GitBranch aria-hidden="true" size={16} />
           新建任务
         </button>
@@ -2088,254 +2111,6 @@ function TopBar({
         </button>
       </div>
     </header>
-  );
-}
-
-function LeftNavigator({
-  workflows,
-  callables,
-  resourceErrors,
-  selectedWorkflowId,
-  onOpenWorkflow,
-  onSelectResource,
-  focusedWorkflowId,
-  addTargetLabel,
-  onAddPaletteItem,
-}: {
-  workflows: WorkflowSummary[];
-  callables: CallableSummary[];
-  resourceErrors?: {
-    callables?: string;
-    workflows?: string;
-  };
-  selectedWorkflowId: string;
-  onOpenWorkflow: (workflowId: string) => void;
-  onSelectResource: (resource: ResourceTemplate) => void;
-  focusedWorkflowId: string | null;
-  addTargetLabel?: string;
-  onAddPaletteItem: (item: PaletteItem, options?: PaletteAddOptions) => void;
-}) {
-  const [workflowSearch, setWorkflowSearch] = useState('');
-  const paletteCallables = callables.filter((callable) => callable.id !== 'file-source.local').slice(0, 40);
-  const workflowCallableCount = callables.filter((callable) =>
-    /workflow|subworkflow|agent-workflow/u.test(callable.id),
-  );
-  const normalizedWorkflowSearch = workflowSearch.trim().toLowerCase();
-  const visibleWorkflows = workflows.filter((workflow) => {
-    if (!normalizedWorkflowSearch) {
-      return true;
-    }
-    return workflowSearchHaystack(workflow).includes(normalizedWorkflowSearch);
-  });
-  const rootWorkflows = visibleWorkflows.filter((workflow) => !isChildWorkflowSummary(workflow));
-  const childWorkflows = visibleWorkflows.filter(isChildWorkflowSummary);
-  const addHint = addTargetLabel
-    ? `拖入 ${addTargetLabel}，或双击快速添加`
-    : focusedWorkflowId
-      ? '拖入当前 Workflow，或双击快速添加'
-      : '拖入画布或任务流，双击快速添加';
-  return (
-    <aside className="left-navigator" aria-label="Workspace Navigator">
-      <section className="navigator-section">
-        <header>
-          <h3>工作区</h3>
-          <span>{workflows.length}</span>
-        </header>
-        <div className="search-box">
-          <Search aria-hidden="true" size={15} />
-          <input
-            type="search"
-            value={workflowSearch}
-            onChange={(event) => setWorkflowSearch(event.target.value)}
-            placeholder="搜索 workflow id / path"
-            aria-label="搜索 Workflow Template"
-          />
-        </div>
-        {resourceErrors?.workflows ? (
-          <div className="notice compact-notice">Workflow 模板加载失败：{resourceErrors.workflows}</div>
-        ) : null}
-        <button
-          type="button"
-          className="palette-drag-item"
-          draggable
-          onClick={() => onAddPaletteItem({ kind: 'workflow', label: 'New Workflow' })}
-          onDragStart={(event) =>
-            setPaletteDragData(event, { kind: 'workflow', label: 'New Workflow' })
-          }
-        >
-          <GitBranch aria-hidden="true" size={15} />
-          <span>拖入 Workflow</span>
-        </button>
-        <div className="workflow-list">
-          <WorkflowResourceGroup
-            title="Root workflows"
-            workflows={rootWorkflows}
-            selectedWorkflowId={selectedWorkflowId}
-            onSelectResource={onSelectResource}
-            onAddPaletteItem={onAddPaletteItem}
-          />
-          {childWorkflows.length ? (
-            <WorkflowResourceGroup
-              title="依赖 workflows"
-              workflows={childWorkflows}
-              selectedWorkflowId={selectedWorkflowId}
-              onSelectResource={onSelectResource}
-              onAddPaletteItem={onAddPaletteItem}
-              dependency
-            />
-          ) : null}
-          {visibleWorkflows.length === 0 ? <p className="empty-state">未找到匹配的 workflow。</p> : null}
-        </div>
-      </section>
-      <section className="navigator-section">
-        <header>
-          <h3>Agent / Tool Callable</h3>
-          <span>{paletteCallables.length}</span>
-        </header>
-        {addTargetLabel ? <div className="scope-target-banner">当前拖入目标：{addTargetLabel}</div> : null}
-        {resourceErrors?.callables ? (
-          <div className="notice compact-notice">Callable 模板加载失败：{resourceErrors.callables}</div>
-        ) : null}
-        {paletteCallables.map((callable) => {
-          const item: Exclude<PaletteItem, { kind: 'workflow' }> = {
-            kind: callable.kind === 'tool_class' ? 'tool' : 'agent',
-            callableId: callable.id,
-            label: callable.name || callable.id,
-            inputPorts: workflowPortsFromPortContracts(callable.input_ports, 'input'),
-            outputPorts: workflowPortsFromPortContracts(callable.output_ports, 'output'),
-            outputSchema: outputSchemaFromArtifactContract(callable.artifact_contract),
-          };
-          return (
-          <article
-            key={callable.id}
-            className={`callable-palette-item resource-kind-${item.kind}`}
-            draggable
-            title={addHint}
-            onClick={() =>
-              onSelectResource({
-                kind: item.kind === 'tool' ? 'tool_class' : 'agent_class',
-                callableId: callable.id,
-                name: callable.name || callable.id,
-              })
-            }
-            onDoubleClick={() => onAddPaletteItem(item)}
-            onDragStart={(event) => setPaletteDragData(event, item)}
-          >
-            <Boxes aria-hidden="true" size={16} />
-            <div>
-              <strong>{callable.name || callable.id}</strong>
-              <small>{callable.id}</small>
-            </div>
-          </article>
-          );
-        })}
-        {workflowCallableCount.length > 0 ? (
-          <small className="navigator-hint">
-            Workflow callables: {workflowCallableCount.length}
-          </small>
-        ) : null}
-        <article
-          className="callable-palette-item resource-kind-file-source"
-          draggable
-          title={addHint}
-          onClick={() =>
-            onSelectResource({
-              kind: 'tool_class',
-              callableId: 'file-source.local',
-              name: 'File Source',
-            })
-          }
-          onDoubleClick={() =>
-            onAddPaletteItem({
-              kind: 'file_source',
-              callableId: 'file-source.local',
-              label: 'File Source',
-            })
-          }
-          onDragStart={(event) =>
-            setPaletteDragData(event, {
-              kind: 'file_source',
-              callableId: 'file-source.local',
-              label: 'File Source',
-            })
-          }
-        >
-          <FileText aria-hidden="true" size={16} />
-          <div>
-            <strong>File Source</strong>
-            <small>file-source.local</small>
-          </div>
-        </article>
-      </section>
-    </aside>
-  );
-}
-
-function WorkflowResourceGroup({
-  title,
-  workflows,
-  selectedWorkflowId,
-  onSelectResource,
-  onAddPaletteItem,
-  dependency = false,
-}: {
-  title: string;
-  workflows: WorkflowSummary[];
-  selectedWorkflowId: string;
-  onSelectResource: (resource: ResourceTemplate) => void;
-  onAddPaletteItem: (item: PaletteItem, options?: PaletteAddOptions) => void;
-  dependency?: boolean;
-}) {
-  if (workflows.length === 0) {
-    return null;
-  }
-  return (
-    <>
-      <h4>{title}</h4>
-      {workflows.map((workflow) => {
-        const item: Extract<PaletteItem, { kind: 'workflow' }> = {
-          kind: 'workflow',
-          workflowRef: workflow.path,
-          label: workflow.name || workflow.workflow_id,
-        };
-        const stableKey = workflow.path || workflow.file_id || workflow.workflow_id;
-        return (
-          <article key={stableKey} className="workflow-resource-entry resource-kind-workflow">
-            <button
-              type="button"
-              className={selectedWorkflowId === workflow.workflow_id ? 'list-item selected' : 'list-item'}
-              onClick={() =>
-                onSelectResource({
-                  kind: 'workflow_class',
-                  workflowId: workflow.workflow_id,
-                  path: workflow.path,
-                  name: workflow.name || workflow.workflow_id,
-                })
-              }
-              onDoubleClick={() => onAddPaletteItem(item)}
-              draggable
-              onDragStart={(event) => setPaletteDragData(event, item)}
-            >
-              <strong>{workflow.name || workflow.workflow_id}</strong>
-              <span>{workflow.workflow_id}</span>
-              <span>{workflow.path}</span>
-              <small>
-                {workflow.task_count} nodes {dependency ? 'dependency' : 'root'}
-              </small>
-            </button>
-            <div className="palette-add-actions">
-              <button
-                type="button"
-                className="palette-add-action"
-                onClick={() => onAddPaletteItem(item, { forceRoot: true })}
-              >
-                加入到画布
-              </button>
-            </div>
-          </article>
-        );
-      })}
-    </>
   );
 }
 
@@ -2482,18 +2257,57 @@ function WorkspaceCanvas({
     },
     [connectionMode, onCanvasChange, onNotice, onSelect, selection, visibleCanvas],
   );
-  const handleSelectInternal = useCallback((workflowId: string, nodeId: string) => {
-    if (isWorkflowBoundaryId(workflowId)) {
-      onSelect({ type: 'workflow', id: workflowId });
-      return;
-    }
-    if (suppressInternalClickConnectRef.current) {
-      internalClickConnectRef.current = null;
-      onSelect({ type: 'internal', workflowId, nodeId });
-      return;
-    }
-    onSelect({ type: 'internal', workflowId, nodeId });
-  }, [onSelect]);
+  const clearTransientInteractionState = useCallback(() => {
+    setNodeCreateMenu(null);
+    connectStartRef.current = null;
+    internalClickConnectRef.current = null;
+    setConnectStart(null);
+    setConnectPreview(null);
+  }, []);
+  const dispatchCanvasInteraction = useCallback(
+    (command: CanvasInteractionCommand) => {
+      setNodeCreateMenu(null);
+      if (command.type === 'blank-pane-click') {
+        clearTransientInteractionState();
+        onSelect({ type: 'task_canvas', taskId: canvas.id });
+        return;
+      }
+      if (command.type === 'port-click') {
+        const workflow = visibleCanvas.workflows.find((item) => item.id === command.workflowId);
+        const ports = command.direction === 'input' ? workflow?.inputPorts : workflow?.outputPorts;
+        const portValue = ports?.find((item) => item.id === command.portId);
+        if (workflow && portValue) {
+          handleSelectPort(command.workflowId, portValue);
+        }
+        return;
+      }
+      if (command.type === 'edge-click') {
+        const edgeSelection = selectionForEdgeAddress(command.address);
+        if (command.altKey) {
+          onDeleteSelection(edgeSelection);
+          return;
+        }
+        onSelect(edgeSelection);
+        return;
+      }
+      if (command.intent.kind === 'internal-node' && suppressInternalClickConnectRef.current) {
+        internalClickConnectRef.current = null;
+      }
+      const nextSelection = normalizeSelectionIntent(visibleCanvas, canvas, command.intent, focusedWorkflowId);
+      if (nextSelection) {
+        onSelect(nextSelection);
+      }
+    },
+    [
+      canvas,
+      clearTransientInteractionState,
+      focusedWorkflowId,
+      handleSelectPort,
+      onDeleteSelection,
+      onSelect,
+      visibleCanvas,
+    ],
+  );
   const handleResizeWorkflow = useCallback(
     (workflowId: string, size: { width: number; height: number }) =>
       onCanvasChange((current) => resizeWorkflowContainer(current, workflowId, size)),
@@ -2534,9 +2348,16 @@ function WorkspaceCanvas({
         visibleCanvas,
         selection,
         bindings,
-        (workflowId) => onSelect({ type: 'workflow', id: workflowId }),
-        handleSelectPort,
-        handleSelectInternal,
+        (workflowId) => dispatchCanvasInteraction({ type: 'select', intent: { kind: 'workflow-shell', workflowId } }),
+        (workflowId, portValue) =>
+          dispatchCanvasInteraction({
+            type: 'port-click',
+            workflowId,
+            portId: portValue.id,
+            direction: portValue.direction,
+          }),
+        (workflowId, nodeId) =>
+          dispatchCanvasInteraction({ type: 'select', intent: { kind: 'internal-node', workflowId, nodeId } }),
         onFocusedWorkflow,
         onConfigureWorkflow,
         connectionMode === 'data',
@@ -2545,15 +2366,13 @@ function WorkspaceCanvas({
         handleControlHandleMouseDown,
         connectionMode,
         edgeViewMode,
-        (address) => onSelect(selectionForEdgeAddress(address)),
+        (address, altKey = false) => dispatchCanvasInteraction({ type: 'edge-click', address, altKey }),
       ),
     [
       visibleCanvas,
       selection,
       bindings,
-      onSelect,
-      handleSelectPort,
-      handleSelectInternal,
+      dispatchCanvasInteraction,
       onFocusedWorkflow,
       onConfigureWorkflow,
       connectionMode,
@@ -3121,44 +2940,30 @@ function WorkspaceCanvas({
 
   const handleNodeClick = useCallback(
     (_: unknown, node: CanvasFlowNode) => {
-      setNodeCreateMenu(null);
-      const endpoint = flowEndpointForCanvas(visibleCanvas, node.id);
-      if (endpoint.internal && endpoint.workflowId) {
-        handleSelectInternal(endpoint.workflowId, endpoint.nodeId);
-        return;
-      }
-      onSelect({ type: 'workflow', id: node.id });
+      dispatchCanvasInteraction({ type: 'select', intent: { kind: 'react-flow-node', flowNodeId: node.id } });
     },
-    [handleSelectInternal, onSelect, visibleCanvas],
+    [dispatchCanvasInteraction],
   );
 
   const handleEdgeClick = useCallback(
     (event: ReactMouseEvent, edge: Edge) => {
-      setNodeCreateMenu(null);
       const address = edgeAddressFromFlowEdge(edge);
       if (!address) {
         return;
       }
-      const edgeSelection = selectionForEdgeAddress(address);
       if (shouldDisconnectEdgeOnClick(event)) {
         event.preventDefault();
         event.stopPropagation();
-        onDeleteSelection(edgeSelection);
-        return;
       }
-      onSelect(edgeSelection);
+      dispatchCanvasInteraction({ type: 'edge-click', address, altKey: shouldDisconnectEdgeOnClick(event) });
     },
-    [onDeleteSelection, onSelect],
+    [dispatchCanvasInteraction],
   );
 
   const handlePaneClick = useCallback(() => {
-    setNodeCreateMenu(null);
-    connectStartRef.current = null;
-    internalClickConnectRef.current = null;
-    setConnectStart(null);
-    setConnectPreview(null);
+    dispatchCanvasInteraction({ type: 'blank-pane-click' });
     onBlankCanvas();
-  }, [onBlankCanvas]);
+  }, [dispatchCanvasInteraction, onBlankCanvas]);
 
   const defaultEdgeOptions = useMemo(
     () => ({ markerEnd: { type: MarkerType.ArrowClosed } }),
@@ -3571,7 +3376,7 @@ function WorkflowInternalEdgeLayer({
   selection: CanvasSelection;
   connectionMode: ConnectionMode;
   edgeViewMode: EdgeViewMode;
-  onSelectEdge: (address: EdgeAddress) => void;
+  onSelectEdge: (address: EdgeAddress, altKey?: boolean) => void;
 }) {
   const liveFlowNodes = useContext(FlowNodeLayoutContext);
   const layoutOverlay = useMemo(
@@ -3614,7 +3419,7 @@ function WorkflowInternalEdgeLayer({
           orient="auto"
           markerUnits="strokeWidth"
         >
-          <path d="M 0 0 L 10 5 L 0 10 z" fill="#fbbf24" />
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#16b89e" />
         </marker>
       </defs>
       {paths.map((item) => (
@@ -3638,7 +3443,7 @@ function WorkflowInternalEdgeLayer({
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
-              onSelectEdge(item.address);
+              onSelectEdge(item.address, event.altKey);
             }}
           />
           <path
@@ -6310,8 +6115,16 @@ function transferRowsFromRun(nodeRun?: NodeRunSummary): EvidenceFlowRow[] {
     if (bindingKind === 'control_main_default') {
       return {
         key: `${bindingKind}-${sourceNode}-${targetPort}-${index}`,
-        label: '控制线 main 传输',
+        label: '\u63a7\u5236\u7ebf main \u4f20\u8f93',
         detail: `${sourceNode}.${sourcePort} -> ${targetPort}`,
+      };
+    }
+    if (bindingKind === 'control_main_aggregate') {
+      const order = arrayOfStrings(binding.aggregate_order);
+      return {
+        key: `${bindingKind}-${targetPort}-${index}`,
+        label: '\u63a7\u5236\u7ebf main \u805a\u5408',
+        detail: order.length > 0 ? `${order.join(' + ')} -> ${targetPort}` : `multiple sources -> ${targetPort}`,
       };
     }
     return {
@@ -6666,7 +6479,7 @@ function toFlowNodes(
   ) => void,
   connectionMode: ConnectionMode,
   edgeViewMode: EdgeViewMode,
-  onSelectEdge: (address: EdgeAddress) => void,
+  onSelectEdge: (address: EdgeAddress, altKey?: boolean) => void,
 ): CanvasFlowNode[] {
   return canvas.workflows.flatMap((workflow) => {
     if (isExecutableNodeWorkflow(workflow)) {
@@ -6857,12 +6670,12 @@ function canvasEdgeToFlowEdge(
         sourceHandle: portHandleId(sourceId, 'output', edge.source.portId),
         targetHandle: portHandleId(targetId, 'input', edge.target.portId),
         selected: isSelected,
-        markerEnd: { type: MarkerType.ArrowClosed, color: isSelected ? '#fbbf24' : '#f8fafc' },
+        markerEnd: { type: MarkerType.ArrowClosed, color: isSelected ? '#16b89e' : '#f8fafc' },
         className: 'workflow-edge-data',
         style: {
-          stroke: isSelected ? '#fbbf24' : '#f8fafc',
+          stroke: isSelected ? '#16b89e' : '#f8fafc',
           strokeWidth: isSelected ? 4 : 3,
-          strokeDasharray: '8 6',
+          strokeDasharray: isSelected ? '14 8' : '8 6',
         },
       }];
     }
@@ -6874,10 +6687,10 @@ function canvasEdgeToFlowEdge(
       sourceHandle: controlSourceHandleForFlowNode(sourceId, canvasWorkflowId(sourceId, parentWorkflowId), workflowContainerIds, parentWorkflowId),
       targetHandle: controlTargetHandleForFlowNode(targetId, canvasWorkflowId(targetId, parentWorkflowId), workflowContainerIds, parentWorkflowId),
       selected: isSelected,
-      markerEnd: { type: MarkerType.ArrowClosed, color: isSelected ? '#fbbf24' : '#f8fafc' },
+      markerEnd: { type: MarkerType.ArrowClosed, color: isSelected ? '#16b89e' : '#f8fafc' },
       className: 'workflow-edge-control',
       style: {
-        stroke: isSelected ? '#fbbf24' : connectionMode === 'control' ? '#f8fafc' : '#94a3b8',
+        stroke: isSelected ? '#16b89e' : connectionMode === 'control' ? '#f8fafc' : '#94a3b8',
         strokeWidth: isSelected ? 4 : 2.6,
       },
     }];
@@ -6945,10 +6758,10 @@ function shellBoundaryFlowEdge(
     sourceHandle: sourceIsWorkflowInput ? workflowInputInnerSourceHandleId(workflowId) : controlSourceHandleId(sourceId),
     targetHandle: targetIsWorkflowOutput ? workflowOutputInnerTargetHandleId(workflowId) : controlTargetHandleId(targetId),
     selected: isSelected,
-    markerEnd: { type: MarkerType.ArrowClosed, color: isSelected ? '#fbbf24' : '#f8fafc' },
+    markerEnd: { type: MarkerType.ArrowClosed, color: isSelected ? '#16b89e' : '#f8fafc' },
     className: 'workflow-edge-control workflow-edge-boundary-main',
     style: {
-      stroke: isSelected ? '#fbbf24' : '#f8fafc',
+      stroke: isSelected ? '#16b89e' : '#f8fafc',
       strokeWidth: isSelected ? 4 : 2.8,
     },
   };
@@ -8878,32 +8691,6 @@ function workflowPortsFromGraph(
   );
 }
 
-function workflowPortsFromPortContracts(
-  ports: Record<string, unknown> | undefined,
-  direction: PortDirection,
-): WorkflowPortView[] {
-  if (!ports || Object.keys(ports).length === 0) {
-    return direction === 'input' ? [port('main', '输入', 'input')] : [port('main', '输出', 'output')];
-  }
-  return Object.entries(ports).map(([id, value]) => {
-    const payload = isPlainRecord(value) ? value : {};
-    return port(
-      id,
-      id,
-      direction,
-      Boolean(payload.required),
-      typeof payload.cardinality === 'string' ? payload.cardinality : 'one',
-    );
-  });
-}
-
-function outputSchemaFromArtifactContract(contract: unknown): Record<string, unknown> | undefined {
-  if (!isPlainRecord(contract) || !isPlainRecord(contract.output_schema)) {
-    return undefined;
-  }
-  return contract.output_schema;
-}
-
 function outputSchemaFromGraphNode(node: WorkflowGraphNode): Record<string, unknown> | undefined {
   return isPlainRecord(node.output_schema) ? node.output_schema : undefined;
 }
@@ -9893,33 +9680,6 @@ function bindingDirectory(
   return workflow.directory || '未绑定工作目录';
 }
 
-function setPaletteDragData(event: DragEvent<HTMLElement>, item: PaletteItem) {
-  event.dataTransfer.effectAllowed = 'copy';
-  event.dataTransfer.setData('application/x-acc-palette', JSON.stringify(item));
-}
-
-function parsePaletteItem(raw: string): PaletteItem | null {
-  if (!raw) {
-    return null;
-  }
-  try {
-    const item = JSON.parse(raw) as PaletteItem;
-    if (item.kind === 'workflow' && item.label) {
-      return item;
-    }
-    if (
-      (item.kind === 'agent' || item.kind === 'tool' || item.kind === 'file_source') &&
-      item.callableId &&
-      item.label
-    ) {
-      return item;
-    }
-  } catch {
-    return null;
-  }
-  return null;
-}
-
 function edgeConnectsRemainingNodes(edge: WorkflowCanvasEdge, remainingIds: Set<string>): boolean {
   return (
     (remainingIds.has(edge.source.workflowId) || isWorkflowBoundaryId(edge.source.workflowId)) &&
@@ -10180,6 +9940,7 @@ function commitDraggedNodeToCanvas(
   if (!targetWorkflow) {
     return moveRootWorkflow(canvas, workflow.id, node.position);
   }
+  const targetNodeId = uniqueId(workflow.id, new Set(targetWorkflow.internalNodes.map((item) => item.id)));
   const internalNode = internalNodeFromExecutableWorkflow(workflow, {
     x: node.position.x - targetWorkflow.position.x,
     y: node.position.y - targetWorkflow.position.y,
@@ -10192,7 +9953,7 @@ function commitDraggedNodeToCanvas(
         item.id === targetWorkflow.id
           ? expandWorkflowToFitChildrenCenterLocked({
               ...item,
-              internalNodes: [...item.internalNodes, internalNode],
+              internalNodes: [...item.internalNodes, { ...internalNode, id: targetNodeId }],
             })
           : item,
       ),
@@ -10240,7 +10001,11 @@ function selectionForDraggedNodeCommit(
       internal.workflowId,
     );
     if (targetWorkflow) {
-      return { type: 'internal', workflowId: targetWorkflow.id, nodeId: internal.nodeId };
+      return {
+        type: 'internal',
+        workflowId: targetWorkflow.id,
+        nodeId: uniqueId(internal.nodeId, new Set(targetWorkflow.internalNodes.map((item) => item.id))),
+      };
     }
     const sourceWorkflow = canvas.workflows.find((workflow) => workflow.id === internal.workflowId);
     if (!sourceWorkflow) {
@@ -10259,7 +10024,10 @@ function selectionForDraggedNodeCommit(
       height: AGENT_TOOL_NODE_SIZE.height,
     };
     return rectIntersectionArea(sourceRect, draggedRect) === 0
-      ? { type: 'workflow', id: internal.nodeId }
+      ? {
+          type: 'workflow',
+          id: uniqueId(internal.nodeId, new Set(canvas.workflows.map((workflow) => workflow.id))),
+        }
       : null;
   }
   if (selection.type !== 'workflow' || selection.id !== node.id) {
@@ -10276,7 +10044,11 @@ function selectionForDraggedNodeCommit(
     height: AGENT_TOOL_NODE_SIZE.height,
   });
   return targetWorkflow
-    ? { type: 'internal', workflowId: targetWorkflow.id, nodeId: workflow.id }
+    ? {
+        type: 'internal',
+        workflowId: targetWorkflow.id,
+        nodeId: uniqueId(workflow.id, new Set(targetWorkflow.internalNodes.map((item) => item.id))),
+      }
     : null;
 }
 
@@ -10335,6 +10107,7 @@ function reparentInternalNodeAtAbsolutePosition(
     sourceWorkflowId,
   );
   if (targetWorkflow) {
+    const targetNodeId = uniqueId(nodeId, new Set(targetWorkflow.internalNodes.map((item) => item.id)));
     return {
       ...canvas,
       workflows: canvas.workflows.map((workflow) => {
@@ -10352,6 +10125,7 @@ function reparentInternalNodeAtAbsolutePosition(
               ...workflow.internalNodes,
               {
                 ...node,
+                id: targetNodeId,
                 position: {
                   x: absolutePosition.x - workflow.position.x,
                   y: absolutePosition.y - workflow.position.y,
@@ -10651,21 +10425,6 @@ function workflowSummaryForRef(
   });
 }
 
-function workflowSearchHaystack(workflow: WorkflowSummary): string {
-  const workflowType = (workflow as WorkflowSummary & { type?: string }).type;
-  return [
-    workflow.workflow_id,
-    workflow.file_id,
-    workflow.name,
-    workflow.description,
-    workflow.path,
-    workflowType,
-  ]
-    .filter(Boolean)
-    .join(' ')
-    .toLowerCase();
-}
-
 function isChildWorkflowSummary(workflow: WorkflowSummary): boolean {
   const id = workflow.workflow_id || workflow.file_id || '';
   const path = workflow.path || '';
@@ -10731,6 +10490,52 @@ function normalizeWorkbenchSelection(
   return workflow.internalNodes.some((node) => node.id === selection.nodeId)
     ? selection
     : { type: 'task_canvas', taskId: canvas.id };
+}
+
+function normalizeSelectionIntent(
+  visibleCanvas: WorkspaceCanvasModel,
+  baseCanvas: WorkspaceCanvasModel,
+  intent: SelectionIntent,
+  focusedWorkflowId: string | null,
+): CanvasSelection | null {
+  if (intent.kind === 'edge') {
+    return findCanvasEdgeByAddress(baseCanvas, intent.address) ? selectionForEdgeAddress(intent.address) : null;
+  }
+  if (intent.kind === 'workflow-shell') {
+    return baseCanvas.workflows.some((workflow) => workflow.id === intent.workflowId)
+      ? { type: 'workflow', id: intent.workflowId }
+      : null;
+  }
+  if (intent.kind === 'internal-node') {
+    if (isWorkflowBoundaryId(intent.workflowId)) {
+      return baseCanvas.workflows.some((workflow) => workflow.id === intent.workflowId)
+        ? { type: 'workflow', id: intent.workflowId }
+        : null;
+    }
+    const workflow = baseCanvas.workflows.find((item) => item.id === intent.workflowId);
+    if (!workflow || !workflow.internalNodes.some((node) => node.id === intent.nodeId)) {
+      return null;
+    }
+    return { type: 'internal', workflowId: intent.workflowId, nodeId: intent.nodeId };
+  }
+  const endpoint = flowEndpointForCanvas(visibleCanvas, intent.flowNodeId);
+  if (endpoint.internal && endpoint.workflowId) {
+    return normalizeSelectionIntent(
+      visibleCanvas,
+      baseCanvas,
+      { kind: 'internal-node', workflowId: endpoint.workflowId, nodeId: endpoint.nodeId },
+      focusedWorkflowId,
+    );
+  }
+  if (focusedWorkflowId && intent.flowNodeId !== focusedWorkflowId) {
+    const focusedWorkflow = baseCanvas.workflows.find((workflow) => workflow.id === focusedWorkflowId);
+    if (focusedWorkflow?.internalNodes.some((node) => node.id === intent.flowNodeId)) {
+      return { type: 'internal', workflowId: focusedWorkflowId, nodeId: intent.flowNodeId };
+    }
+  }
+  return baseCanvas.workflows.some((workflow) => workflow.id === intent.flowNodeId)
+    ? { type: 'workflow', id: intent.flowNodeId }
+    : null;
 }
 
 function selectionCanBeDeleted(
@@ -11380,6 +11185,7 @@ export const __workflowViewerTestables = {
   reusableWorkflowClassGraph,
   layoutWorkspaceCanvas,
   nextRootPalettePosition,
+  normalizeSelectionIntent,
   normalizeWorkbenchSelection,
   deleteSelectionFromCanvas,
   selectionCanBeDeleted,

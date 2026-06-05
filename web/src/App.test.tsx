@@ -635,6 +635,24 @@ describe('Agent Callable Workbench editable UI', () => {
     await user.click(within(toolbar).getByRole('button', { name: '加载示例' }));
   }
 
+  async function dropFakeAgentOnCanvas(label = 'Fake Agent') {
+    const canvas = await screen.findByLabelText('任务画布');
+    fireEvent.drop(canvas, {
+      clientX: 980,
+      clientY: 180,
+      dataTransfer: {
+        getData: (key: string) =>
+          key === 'application/x-acc-palette'
+            ? JSON.stringify({
+                kind: 'tool',
+                callableId: 'fake-agent.generic',
+                label,
+              })
+            : '',
+      },
+    });
+  }
+
   test('Run List and Run Inspector render fixture run from acc-server APIs', async () => {
     const user = userEvent.setup();
     render(<App />);
@@ -726,15 +744,14 @@ describe('Agent Callable Workbench editable UI', () => {
 
     expect(await screen.findByText('API 部分可用')).toBeInTheDocument();
 
-    const toolbar = await screen.findByLabelText('工作流工具栏');
-    await user.click(within(toolbar).getByRole('button', { name: /^资源$/i }));
-    expect(await screen.findByText('Fake Agent')).toBeInTheDocument();
-    expect((await screen.findByText('Demo Workflow')).closest('article')).toHaveClass(
+    const resourceRail = await screen.findByLabelText('Workbench 资源栏');
+    expect(await within(resourceRail).findByText('Fake Agent')).toBeInTheDocument();
+    expect((await within(resourceRail).findByText('Demo Workflow')).closest('button')).toHaveClass(
       'resource-kind-workflow',
     );
-    expect(screen.getByText('Echo Test').closest('article')).toHaveClass('resource-kind-agent');
-    expect(screen.getByText('Fake Agent').closest('article')).toHaveClass('resource-kind-tool');
-    expect(screen.getByText('File Source').closest('article')).toHaveClass('resource-kind-file-source');
+    expect(within(resourceRail).getByText('Echo Test').closest('button')).toHaveClass('resource-kind-agent');
+    expect(within(resourceRail).getByText('Fake Agent').closest('button')).toHaveClass('resource-kind-tool');
+    expect(within(resourceRail).getByText('File Source').closest('button')).toHaveClass('resource-kind-file-source');
 
     await openNavIndex(user, 2);
     expect(await screen.findByText(/运行记录加载失败：/)).toHaveTextContent('Run index exploded');
@@ -765,9 +782,8 @@ describe('Agent Callable Workbench editable UI', () => {
     expect((await screen.findAllByText('echo-test.generic')).length).toBeGreaterThan(0);
 
     await openNavIndex(user, 0);
-    const toolbar = await screen.findByLabelText('工作流工具栏');
-    await user.click(within(toolbar).getByRole('button', { name: /^资源$/i }));
-    expect(await screen.findByText(/Workflow 模板加载失败：/)).toHaveTextContent(
+    const resourceRail = await screen.findByLabelText('Workbench 资源栏');
+    expect(await within(resourceRail).findByText(/Workflow 模板加载失败：/)).toHaveTextContent(
       'Workflow index exploded',
     );
   });
@@ -787,6 +803,9 @@ describe('Agent Callable Workbench editable UI', () => {
     await openNavIndex(user, 0);
     expect((await screen.findAllByText('任务 2')).length).toBeGreaterThan(0);
 
+    const restoredWorkbench = await screen.findByLabelText('ACC Workbench');
+    await user.click(within(restoredWorkbench).getByRole('button', { name: '任务总览' }));
+    await screen.findByLabelText('任务列表');
     await user.click(screen.getByRole('button', { name: '删除任务 任务 2' }));
     await waitFor(() => expect(screen.queryByText('任务 2')).not.toBeInTheDocument());
   });
@@ -812,8 +831,10 @@ describe('Agent Callable Workbench editable UI', () => {
       expect(screen.queryByTestId('workflow-container-Research_Flow')).not.toBeInTheDocument(),
     );
 
-    const taskRail = await screen.findByLabelText('任务列表');
-    await user.click(taskRail.querySelector('.task-rail-select') as HTMLButtonElement);
+    await user.click(within(workbench).getByRole('button', { name: '任务总览' }));
+    const taskList = await screen.findByLabelText('任务列表');
+    await user.click(within(taskList).getByRole('button', { name: /选择任务 ACC Workspace Canvas/ }));
+    await user.click(within(workbench).getByRole('button', { name: '任务蓝图' }));
 
     const restoredWorkflow = await screen.findByTestId('workflow-container-Research_Flow');
     await waitFor(() => expect(restoredWorkflow).toHaveClass('status-success'));
@@ -829,7 +850,7 @@ describe('Agent Callable Workbench editable UI', () => {
     expect(runCallsAfterSwitch).toBe(runCallsBeforeSwitch);
   });
 
-  test('Resource drawer creates workflows without exposing selected-workflow add buttons', async () => {
+  test('Workbench resource rail is permanent and does not expose canvas mutation shortcuts', async () => {
     const user = userEvent.setup();
     render(<App />);
 
@@ -837,13 +858,10 @@ describe('Agent Callable Workbench editable UI', () => {
 
     const workbench = await screen.findByLabelText('ACC Workbench');
     await user.click(within(workbench).getByRole('button', { name: '新建任务' }));
-    await user.click(within(workbench).getByRole('button', { name: '资源' }));
-    const navigator = await screen.findByLabelText('Workspace Navigator');
-    await user.click(within(navigator).getByRole('button', { name: '拖入 Workflow' }));
-
-    const workflowNode = await screen.findByTestId('workflow-container-New_Workflow');
-    expect(workflowNode).toHaveTextContent('New Workflow');
-    const fakeAgentResource = within(navigator).getByText('Fake Agent').closest('article');
+    const toolbar = await screen.findByLabelText('工作流工具栏');
+    expect(within(toolbar).queryByRole('button', { name: /^资源$/i })).not.toBeInTheDocument();
+    const resourceRail = await screen.findByLabelText('Workbench 资源栏');
+    const fakeAgentResource = within(resourceRail).getByText('Fake Agent').closest('button');
     expect(fakeAgentResource).toBeTruthy();
     expect(
       within(fakeAgentResource as HTMLElement).queryByRole('button', {
@@ -855,31 +873,27 @@ describe('Agent Callable Workbench editable UI', () => {
         name: '根画布',
       }),
     ).not.toBeInTheDocument();
-    expect(navigator).toHaveTextContent('当前拖入目标：New Workflow');
+    expect(resourceRail).toHaveTextContent('New Workflow');
   });
 
-  test('Blank canvas click keeps the last selected agent node settings visible', async () => {
+  test('Blank canvas click selects the task canvas without rendering a canvas selection frame', async () => {
     const user = userEvent.setup();
     render(<App />);
 
     await openNavIndex(user, 0);
-    const workbench = await screen.findByLabelText('ACC Workbench');
-    await user.click(within(workbench).getByRole('button', { name: '新建任务' }));
-    await user.click(within(workbench).getByRole('button', { name: '资源' }));
-    const navigator = await screen.findByLabelText('Workspace Navigator');
-    const fakeAgentCard = within(navigator).getByText('Fake Agent').closest('article');
-    expect(fakeAgentCard).toBeTruthy();
-    await user.dblClick(fakeAgentCard as HTMLElement);
+    await dropFakeAgentOnCanvas();
 
     const agentNode = await screen.findByTestId('agent-tool-node-fake_agent_generic');
     fireEvent.click(agentNode);
     expect(await screen.findByLabelText('节点设置面板')).toHaveTextContent('Fake Agent');
 
     const workspaceCanvas = await screen.findByLabelText('任务画布');
-    fireEvent.pointerDown(workspaceCanvas);
-    fireEvent.click(workspaceCanvas);
-    expect(screen.getByLabelText('节点设置面板')).toHaveTextContent('Fake Agent');
-    expect(screen.queryByLabelText('任务设置面板')).not.toBeInTheDocument();
+    const pane = workspaceCanvas.querySelector('.react-flow__pane');
+    expect(pane).toBeInTheDocument();
+    fireEvent.pointerDown(pane as Element);
+    fireEvent.click(pane as Element);
+    expect(screen.queryByLabelText('节点设置面板')).not.toBeInTheDocument();
+    expect(workspaceCanvas.querySelector('.canvas-selection-frame')).not.toBeInTheDocument();
   });
 
   test('Backspace deletes the selected root agent but not focused prompt text', async () => {
@@ -887,13 +901,7 @@ describe('Agent Callable Workbench editable UI', () => {
     render(<App />);
 
     await openNavIndex(user, 0);
-    const workbench = await screen.findByLabelText('ACC Workbench');
-    await user.click(within(workbench).getByRole('button', { name: '新建任务' }));
-    await user.click(within(workbench).getByRole('button', { name: '资源' }));
-    const navigator = await screen.findByLabelText('Workspace Navigator');
-    const fakeAgentCard = within(navigator).getByText('Fake Agent').closest('article');
-    expect(fakeAgentCard).toBeTruthy();
-    await user.dblClick(fakeAgentCard as HTMLElement);
+    await dropFakeAgentOnCanvas();
 
     const agentNode = await screen.findByTestId('agent-tool-node-fake_agent_generic');
     fireEvent.click(agentNode);
@@ -1711,7 +1719,7 @@ describe('Agent Callable Workbench editable UI', () => {
 
     await openNavIndex(user, 0);
     const toolbar = await screen.findByLabelText('工作流工具栏');
-    await user.click(within(toolbar).getByRole('button', { name: '新建任务（工具栏）' }));
+    await user.click(within(toolbar).getByRole('button', { name: '新建任务' }));
     await user.click(within(toolbar).getByRole('button', { name: /\u4fdd\u5b58/i }));
 
     const calls = vi.mocked(fetch).mock.calls;
@@ -1860,58 +1868,33 @@ describe('Agent Callable Workbench editable UI', () => {
     expect(dropped.position.y).toBeGreaterThanOrEqual(0);
   });
 
-  test('Palette double-click targets the newly created selected workflow container', async () => {
+  test('Task overview switches active task and opens the selected blueprint on double click', async () => {
     const user = userEvent.setup();
     render(<App />);
 
     await openNavIndex(user, 0);
-    const toolbar = await screen.findByLabelText('工作流工具栏');
-    await user.click(within(toolbar).getByRole('button', { name: '资源' }));
-    await user.click(await screen.findByRole('button', { name: '拖入 Workflow' }));
+    const workbench = await screen.findByLabelText('ACC Workbench');
+    await user.click(within(workbench).getByRole('button', { name: '新建任务' }));
+    await user.click(within(workbench).getByRole('button', { name: '任务总览' }));
 
-    const fakeAgentCard = screen.getByText('Fake Agent').closest('article');
-    expect(fakeAgentCard).toBeTruthy();
-    await user.dblClick(fakeAgentCard as HTMLElement);
-    await user.click(within(toolbar).getByRole('button', { name: /\u4fdd\u5b58/i }));
+    const taskList = await screen.findByLabelText('任务列表');
+    await user.dblClick(within(taskList).getByRole('button', { name: '选择任务 任务 2' }));
 
-    const calls = vi.mocked(fetch).mock.calls;
-    const saveCall = calls
-      .filter(([url, init]) => url === '/api/workflows' && init?.method === 'POST')
-      .at(-1);
-    expect(saveCall).toBeTruthy();
-    const savedPayload = JSON.parse(String(saveCall?.[1]?.body));
-    const workflow = savedPayload.graph.nodes.find((node: { id: string }) => node.id === 'New_Workflow');
-    expect(workflow).toBeTruthy();
-    expect(workflow.ui.internal_nodes).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          callableId: 'fake-agent.generic',
-          name: 'Fake Agent',
-        }),
-      ]),
-    );
-    expect(
-      savedPayload.graph.nodes.some((node: { id: string }) => node.id === 'fake_agent_generic'),
-    ).toBe(false);
+    expect(await screen.findByText('任务 2')).toBeInTheDocument();
+    expect(await screen.findByLabelText('任务画布')).toBeInTheDocument();
+    expect(within(workbench).getByRole('button', { name: '任务蓝图' })).toHaveClass('active');
   });
 
-  test('Palette hides root add shortcut while a workflow container is selected', async () => {
+  test('Workbench resource rail stays visible on task view and hides on resource management view', async () => {
     const user = userEvent.setup();
     render(<App />);
 
     await openNavIndex(user, 0);
-    const toolbar = await screen.findByLabelText('工作流工具栏');
-    await user.click(within(toolbar).getByRole('button', { name: '资源' }));
-    await user.click(await screen.findByRole('button', { name: '拖入 Workflow' }));
+    expect(await screen.findByLabelText('Workbench 资源栏')).toHaveTextContent('Fake Agent');
 
-    const fakeAgentCard = screen.getByText('Fake Agent').closest('article');
-    expect(fakeAgentCard).toBeTruthy();
-    expect(within(fakeAgentCard as HTMLElement).queryByRole('button', { name: '根画布' })).not.toBeInTheDocument();
-    expect(
-      within(fakeAgentCard as HTMLElement).queryByRole('button', {
-        name: /加入到选中 Workflow/,
-      }),
-    ).not.toBeInTheDocument();
+    await openNavIndex(user, 1);
+    expect(screen.queryByLabelText('Workbench 资源栏')).not.toBeInTheDocument();
+    expect(await screen.findByLabelText('智能体工具资源库')).toBeInTheDocument();
   });
 
   test('Workflow Builder drops palette callable on root as plain executable node', async () => {
@@ -2080,15 +2063,16 @@ describe('Agent Callable Workbench editable UI', () => {
 
     await openNavIndex(user, 0);
 
-    const toolbar = await screen.findByLabelText('工作流工具栏');
-    await user.click(within(toolbar).getByRole('button', { name: /^资源$/i }));
-    const navigator = await screen.findByLabelText('Workspace Navigator');
-    expect(navigator).toBeInTheDocument();
-    expect(navigator).toHaveTextContent('Fake Agent');
-    expect(navigator).toHaveTextContent('file-source.local');
+    const resourceRail = await screen.findByLabelText('Workbench 资源栏');
+    expect(resourceRail).toBeInTheDocument();
+    expect(resourceRail).toHaveTextContent('Fake Agent');
+    expect(resourceRail).toHaveTextContent('file-source.local');
     const workspaceCanvas = await screen.findByLabelText('任务画布');
     expect(workspaceCanvas).toBeInTheDocument();
     expect(await screen.findByLabelText('Canvas Toolbar')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '任务总览' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '任务蓝图' })).toBeInTheDocument();
+    const toolbar = await screen.findByLabelText('工作流工具栏');
     await user.click(within(toolbar).getByRole('button', { name: /^节点设置$/i }));
     expect(await screen.findByLabelText('任务设置面板')).toBeInTheDocument();
     expect(screen.getByRole('separator', { name: '调整节点设置面板宽度' })).toBeInTheDocument();

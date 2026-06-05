@@ -1454,35 +1454,72 @@ def resolve_node_payload(
                 run_dir=run_dir,
             )
         )
-    for edge in template.control_edges:
-        if edge.target != node.id:
-            continue
-        if "main" in payload:
-            continue
-        source_node = template.node_invocations.get(edge.source)
-        if source_node is None or not should_forward_main_output_on_control(source_node):
-            continue
-        key = (edge.source, "main")
-        if key not in outputs:
-            continue
-        payload["main"] = outputs[key]
-        records.append(
-            binding_record(
-                binding_kind="control_main_default",
-                source_node=edge.source,
-                source_port="main",
-                target_node=node.id,
-                target_port="main",
-                materialization="copy",
-                value=outputs[key],
-                run_dir=run_dir,
+    if "main" not in payload:
+        control_main_sources: list[tuple[str, Any]] = []
+        for edge in template.control_edges:
+            if edge.target != node.id:
+                continue
+            source_node = template.node_invocations.get(edge.source)
+            if source_node is None or not should_forward_main_output_on_control(source_node):
+                continue
+            key = (edge.source, "main")
+            if key not in outputs:
+                continue
+            control_main_sources.append((edge.source, outputs[key]))
+        if len(control_main_sources) == 1:
+            source_node_id, value = control_main_sources[0]
+            payload["main"] = value
+            records.append(
+                binding_record(
+                    binding_kind="control_main_default",
+                    source_node=source_node_id,
+                    source_port="main",
+                    target_node=node.id,
+                    target_port="main",
+                    materialization="copy",
+                    value=value,
+                    run_dir=run_dir,
+                )
             )
-        )
+        elif len(control_main_sources) > 1:
+            aggregate = control_main_aggregate_payload(control_main_sources)
+            payload["main"] = aggregate
+            for source_node_id, value in control_main_sources:
+                records.append(
+                    binding_record(
+                        binding_kind="control_main_default",
+                        source_node=source_node_id,
+                        source_port="main",
+                        target_node=node.id,
+                        target_port="main",
+                        materialization="copy",
+                        value=value,
+                        run_dir=run_dir,
+                    )
+                )
+            records.append(
+                control_main_aggregate_record(
+                    source_values=control_main_sources,
+                    target_node=node.id,
+                    target_port="main",
+                    aggregate=aggregate,
+                    run_dir=run_dir,
+                )
+            )
     return ResolvedNodePayload(payload=payload, binding_records=records)
 
 
 def should_forward_main_output_on_control(node: NodeInvocationSpec) -> bool:
     return node.control.forward_main_output_on_control is not False
+
+
+def control_main_aggregate_payload(source_values: list[tuple[str, Any]]) -> dict[str, Any]:
+    return {
+        "schema_version": "acc.control_main.aggregate.v1",
+        "kind": "control_main_aggregate",
+        "order": [source_node for source_node, _ in source_values],
+        "sources": {source_node: value for source_node, value in source_values},
+    }
 
 
 def output_value_for_port(output: Any, port_id: str) -> Any:
@@ -1518,6 +1555,35 @@ def binding_record(
         "materialization": materialization,
         "source_output_path": str((run_dir / "nodes" / source_node / "output.json").resolve()),
         "source_result_sha256": sha256_json(value),
+    }
+
+
+def control_main_aggregate_record(
+    *,
+    source_values: list[tuple[str, Any]],
+    target_node: str,
+    target_port: str,
+    aggregate: dict[str, Any],
+    run_dir: Path,
+) -> dict[str, Any]:
+    return {
+        "binding_kind": "control_main_aggregate",
+        "target_node": target_node,
+        "target_port": target_port,
+        "materialization": "copy",
+        "aggregate_order": [source_node for source_node, _ in source_values],
+        "aggregate_sha256": sha256_json(aggregate),
+        "sources": [
+            {
+                "source_node": source_node,
+                "source_port": "main",
+                "source_output_path": str(
+                    (run_dir / "nodes" / source_node / "output.json").resolve()
+                ),
+                "source_result_sha256": sha256_json(value),
+            }
+            for source_node, value in source_values
+        ],
     }
 
 

@@ -7,6 +7,7 @@ import { CallableBrowser } from './components/CallableBrowser';
 import { ControlPlanePanel } from './components/ControlPlanePanel';
 import { DecisionInboxPanel } from './components/DecisionInboxPanel';
 import { RunMonitorPage } from './components/RunMonitorPage';
+import { WorkbenchResourceRail } from './components/WorkbenchResourceRail';
 import { WorkflowViewer } from './components/WorkflowViewer';
 import { zhCN as t } from './i18n/zh-CN';
 import type { CallableSummary, RunSummary, ViewKey, WorkflowSummary } from './types';
@@ -149,33 +150,45 @@ export function App() {
   return (
     <main className="shell">
       <aside className="sidebar" aria-label="Workbench navigation">
-        <div className="brand">
-          <Workflow aria-hidden="true" size={22} />
-          <div>
-            <h1>{t.appTitle}</h1>
-            <p>{t.appSubtitle}</p>
+        <div className="sidebar-fixed">
+          <div className="brand">
+            <Workflow aria-hidden="true" size={22} />
+            <div>
+              <h1>{t.appTitle}</h1>
+              <p>{t.appSubtitle}</p>
+            </div>
+          </div>
+          <nav className="nav">
+            {navigation.map((item) => {
+              const Icon = item.icon;
+              return (
+                <button
+                  key={item.key}
+                  className={view === item.key ? 'nav-button active' : 'nav-button'}
+                  type="button"
+                  onClick={() => setView(item.key)}
+                  title={item.label}
+                >
+                  <Icon aria-hidden="true" size={18} />
+                  <span>{item.label}</span>
+                </button>
+              );
+            })}
+          </nav>
+          <div className={`server-state ${apiState}`}>
+            <span>{serverStateLabel(apiState)}</span>
           </div>
         </div>
-        <nav className="nav">
-          {navigation.map((item) => {
-            const Icon = item.icon;
-            return (
-              <button
-                key={item.key}
-                className={view === item.key ? 'nav-button active' : 'nav-button'}
-                type="button"
-                onClick={() => setView(item.key)}
-                title={item.label}
-              >
-                <Icon aria-hidden="true" size={18} />
-                <span>{item.label}</span>
-              </button>
-            );
-          })}
-        </nav>
-        <div className={`server-state ${apiState}`}>
-          <span>{serverStateLabel(apiState)}</span>
-        </div>
+        {view === 'tasks' ? (
+          <WorkbenchResourceRail
+            callables={callables}
+            workflows={workflows}
+            resourceErrors={{
+              callables: callablesResource.error,
+              workflows: workflowsResource.error,
+            }}
+          />
+        ) : null}
       </aside>
 
       <section className="workspace">

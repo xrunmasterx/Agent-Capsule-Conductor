@@ -8,6 +8,7 @@ from acc.domain import (
     ControlEdge,
     DataEdge,
     DataEndpoint,
+    NodeControlPolicy,
     NodeInvocationSpec,
     PortContract,
     WorkflowCallOutputBinding,
@@ -431,7 +432,7 @@ def test_data_edge_source_output_port_must_exist() -> None:
     )
 
 
-def test_multiple_control_main_sources_are_ambiguous_without_explicit_main_binding() -> None:
+def test_multiple_control_main_sources_can_satisfy_required_main() -> None:
     template = WorkflowFunctionTemplate(
         id="flow",
         version="0.1.0",
@@ -449,7 +450,47 @@ def test_multiple_control_main_sources_are_ambiguous_without_explicit_main_bindi
             "target": NodeInvocationSpec(
                 id="target",
                 callable_ref=CallableRef(kind="agent_class", id="target.codex"),
-                input_ports={"main": PortContract(id="main", direction="input")},
+                input_ports={"main": PortContract(id="main", direction="input", required=True)},
+            ),
+        },
+        control_edges=[
+            ControlEdge(source="left", target="target"),
+            ControlEdge(source="right", target="target"),
+        ],
+        data_edges=[],
+    )
+
+    issues = collect_callable_validation_issues(template)
+
+    assert not [
+        issue
+        for issue in issues
+        if issue.code in {"ambiguous_control_main_input", "unbound_input_port"}
+        and issue.node_id == "target"
+    ]
+
+
+def test_disabled_control_main_sources_do_not_satisfy_required_main() -> None:
+    template = WorkflowFunctionTemplate(
+        id="flow",
+        version="0.1.0",
+        node_invocations={
+            "left": NodeInvocationSpec(
+                id="left",
+                callable_ref=CallableRef(kind="agent_class", id="left.codex"),
+                output_ports={"main": PortContract(id="main", direction="output")},
+                control=NodeControlPolicy(forward_main_output_on_control=False),
+            ),
+            "right": NodeInvocationSpec(
+                id="right",
+                callable_ref=CallableRef(kind="agent_class", id="right.codex"),
+                output_ports={"main": PortContract(id="main", direction="output")},
+                control=NodeControlPolicy(forward_main_output_on_control=False),
+            ),
+            "target": NodeInvocationSpec(
+                id="target",
+                callable_ref=CallableRef(kind="agent_class", id="target.codex"),
+                input_ports={"main": PortContract(id="main", direction="input", required=True)},
             ),
         },
         control_edges=[
@@ -462,6 +503,6 @@ def test_multiple_control_main_sources_are_ambiguous_without_explicit_main_bindi
     issues = collect_callable_validation_issues(template)
 
     assert any(
-        issue.code == "ambiguous_control_main_input" and issue.node_id == "target"
+        issue.code == "unbound_input_port" and issue.node_id == "target" and issue.port == "main"
         for issue in issues
     )

@@ -708,6 +708,115 @@ def test_control_edge_forwards_main_output_by_default(tmp_path: Path) -> None:
     assert bindings["bindings"][0]["binding_kind"] == "control_main_default"
 
 
+def test_multiple_control_edges_aggregate_main_outputs(tmp_path: Path) -> None:
+    workflow_path = tmp_path / "control_aggregates_main.accflow.json"
+    write_v2(
+        workflow_path,
+        {
+            "schema_version": CORE_V2_SCHEMA_VERSION,
+            "id": "control_aggregates_main",
+            "version": "0.1.0",
+            "nodes": [
+                {
+                    "id": "left",
+                    "callable_ref": {"kind": "tool_class", "id": "fake_producer"},
+                    "ports": {"outputs": {"main": {"type": "json"}}},
+                },
+                {
+                    "id": "right",
+                    "callable_ref": {"kind": "tool_class", "id": "fake_producer"},
+                    "ports": {"outputs": {"main": {"type": "json"}}},
+                },
+                {
+                    "id": "consume",
+                    "callable_ref": {"kind": "agent_class", "id": "generic_fake_agent"},
+                    "ports": {"inputs": {"main": {"type": "json"}}},
+                },
+            ],
+            "control_edges": [
+                {"from": "left", "to": "consume"},
+                {"from": "right", "to": "consume"},
+            ],
+        },
+    )
+
+    record = asyncio.run(run_core_v2_workflow_path(workflow_path, tmp_path / "run"))
+    agent_payload = json.loads(
+        (tmp_path / "run" / "nodes" / "consume" / "agent_payload.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    bindings = json.loads(
+        (tmp_path / "run" / "nodes" / "consume" / "binding_manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    aggregate = agent_payload["main"]
+    assert record.status == "success"
+    assert aggregate["schema_version"] == "acc.control_main.aggregate.v1"
+    assert aggregate["kind"] == "control_main_aggregate"
+    assert aggregate["order"] == ["left", "right"]
+    assert aggregate["sources"]["left"]["producer_node_id"] == "left"
+    assert aggregate["sources"]["right"]["producer_node_id"] == "right"
+    assert [binding["binding_kind"] for binding in bindings["bindings"]] == [
+        "control_main_default",
+        "control_main_default",
+        "control_main_aggregate",
+    ]
+    assert bindings["bindings"][2]["aggregate_order"] == ["left", "right"]
+
+
+def test_multiple_control_edges_do_not_override_explicit_main(tmp_path: Path) -> None:
+    workflow_path = tmp_path / "control_main_explicit_priority.accflow.json"
+    write_v2(
+        workflow_path,
+        {
+            "schema_version": CORE_V2_SCHEMA_VERSION,
+            "id": "control_main_explicit_priority",
+            "version": "0.1.0",
+            "nodes": [
+                {
+                    "id": "left",
+                    "callable_ref": {"kind": "tool_class", "id": "fake_producer"},
+                    "ports": {"outputs": {"main": {"type": "json"}}},
+                },
+                {
+                    "id": "right",
+                    "callable_ref": {"kind": "tool_class", "id": "fake_producer"},
+                    "ports": {"outputs": {"main": {"type": "json"}}},
+                },
+                {
+                    "id": "consume",
+                    "callable_ref": {"kind": "agent_class", "id": "generic_fake_agent"},
+                    "overrides": {"static_input": {"main": {"explicit": True}}},
+                    "ports": {"inputs": {"main": {"type": "json"}}},
+                },
+            ],
+            "control_edges": [
+                {"from": "left", "to": "consume"},
+                {"from": "right", "to": "consume"},
+            ],
+        },
+    )
+
+    record = asyncio.run(run_core_v2_workflow_path(workflow_path, tmp_path / "run"))
+    agent_payload = json.loads(
+        (tmp_path / "run" / "nodes" / "consume" / "agent_payload.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    bindings = json.loads(
+        (tmp_path / "run" / "nodes" / "consume" / "binding_manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert record.status == "success"
+    assert agent_payload["main"] == {"explicit": True}
+    assert [binding["binding_kind"] for binding in bindings["bindings"]] == ["static_input"]
+
+
 def test_control_edge_can_disable_main_output_forwarding(tmp_path: Path) -> None:
     workflow_path = tmp_path / "control_only.accflow.json"
     write_v2(

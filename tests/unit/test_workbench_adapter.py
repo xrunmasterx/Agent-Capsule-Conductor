@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from acc.app import WorkflowAppService
 from acc.app.workbench_adapter import (
     canonicalize_workbench_workflow_payload,
@@ -10,6 +12,7 @@ from acc.app.workbench_adapter import (
 )
 from acc.callable_registry import CallableRegistry
 from acc.engine import parse_workflow_function_template
+from acc.utils import AccError
 
 
 def stock_workbench_draft() -> dict:
@@ -461,3 +464,51 @@ def test_workbench_container_deduplicates_identical_boundary_output_edges(
             "required": True,
         }
     ]
+
+
+def test_workbench_container_rejects_duplicate_internal_node_ids(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "workflows" / "duplicate_internal.accflow.json"
+    path.parent.mkdir()
+    draft = {
+        "id": "duplicate_internal",
+        "version": "0.4.0",
+        "nodes": [
+            {
+                "id": "New_Workflow",
+                "kind": "workflow",
+                "label": "New Workflow",
+                "callable_ref": {"kind": "workflow_function", "id": "New_Workflow"},
+                "input_ports": [{"id": "main"}],
+                "output_ports": [{"id": "main"}],
+                "ui": {
+                    "semantic_kind": "workflow_container",
+                    "internal_nodes": [
+                        {
+                            "id": "agent1",
+                            "name": "Agent 1",
+                            "kind": "Agent",
+                            "callableId": "stock-market-research.codex",
+                            "inputPorts": [{"id": "main"}],
+                            "outputPorts": [{"id": "main"}],
+                        },
+                        {
+                            "id": "agent1",
+                            "name": "Agent 1 Duplicate",
+                            "kind": "Agent",
+                            "callableId": "stock-market-research.codex",
+                            "inputPorts": [{"id": "main"}],
+                            "outputPorts": [{"id": "main"}],
+                        },
+                    ],
+                    "internal_edges": [],
+                },
+            }
+        ],
+        "control_edges": [],
+        "data_edges": [],
+    }
+
+    with pytest.raises(AccError, match="duplicate_workflow_internal_node_id.*New_Workflow.*agent1"):
+        compile_workbench_workflow_bundle(draft, source_path=path)

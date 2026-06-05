@@ -331,12 +331,36 @@ def workflow_container_internal_edges(node: dict[str, Any]) -> list[dict[str, An
     return [item for item in internal_edges if isinstance(item, dict)]
 
 
+def validate_unique_workflow_container_internal_node_ids(
+    container_node: dict[str, Any],
+    internal_nodes: list[dict[str, Any]],
+) -> None:
+    seen: set[str] = set()
+    duplicates: set[str] = set()
+    for internal_node in internal_nodes:
+        node_id = str(internal_node.get("id") or "").strip()
+        if not node_id:
+            continue
+        if node_id in seen:
+            duplicates.add(node_id)
+        seen.add(node_id)
+    if duplicates:
+        container_id = str(container_node.get("id") or "<unknown>")
+        duplicate_ids = ", ".join(sorted(duplicates))
+        raise AccError(
+            "duplicate_workflow_internal_node_id: "
+            f"workflow container {container_id!r} contains duplicate internal node id(s): "
+            f"{duplicate_ids}"
+        )
+
+
 def workflow_container_child_draft(
     node: dict[str, Any],
     child_id: str,
     child_name: str,
 ) -> dict[str, Any]:
     internal_nodes = workflow_container_internal_nodes(node)
+    validate_unique_workflow_container_internal_node_ids(node, internal_nodes)
     child_nodes = [internal_ui_node_to_workbench_node(item) for item in internal_nodes]
     edges = workflow_container_internal_edges(node)
     control_edges, data_edges, workflow_input_bindings, workflow_output_bindings = (

@@ -73,6 +73,12 @@ const deleteSelectionFromCanvas = __workflowViewerTestables.deleteSelectionFromC
   canvas: ReturnType<typeof canvasFixture>,
   selection: Record<string, unknown>,
 ) => ReturnType<typeof canvasFixture>;
+const normalizeSelectionIntent = __workflowViewerTestables.normalizeSelectionIntent as unknown as (
+  visibleCanvas: Record<string, unknown>,
+  baseCanvas: Record<string, unknown>,
+  intent: Record<string, unknown>,
+  focusedWorkflowId: string | null,
+) => Record<string, unknown> | null;
 const isConnectionHandleForMode = __workflowViewerTestables.isConnectionHandleForMode as unknown as (
   handle: HTMLElement,
   mode: string,
@@ -195,6 +201,107 @@ afterEach(() => {
 });
 
 describe('WorkspaceCanvas data edges', () => {
+  test('normalizeSelectionIntent maps root and internal node clicks to scoped selection', () => {
+    const canvas = canvasFixture();
+
+    expect(
+      normalizeSelectionIntent(
+        canvas,
+        canvas,
+        { kind: 'react-flow-node', flowNodeId: 'source_agent' },
+        null,
+      ),
+    ).toEqual({ type: 'workflow', id: 'source_agent' });
+
+    expect(
+      normalizeSelectionIntent(
+        canvas,
+        canvas,
+        { kind: 'internal-node', workflowId: 'source_flow', nodeId: 'codex' },
+        null,
+      ),
+    ).toEqual({ type: 'internal', workflowId: 'source_flow', nodeId: 'codex' });
+  });
+
+  test('normalizeSelectionIntent preserves focused workflow internal node scope', () => {
+    const canvas = canvasFixture();
+    const focusedCanvas = {
+      ...canvas,
+      layout: 'workflow-focus',
+      focusedWorkflowId: 'source_flow',
+      workflows: [
+        agentWorkflow('codex', 40, 72),
+      ],
+      edges: [],
+    };
+
+    expect(
+      normalizeSelectionIntent(
+        focusedCanvas,
+        canvas,
+        { kind: 'react-flow-node', flowNodeId: 'codex' },
+        'source_flow',
+      ),
+    ).toEqual({ type: 'internal', workflowId: 'source_flow', nodeId: 'codex' });
+  });
+
+  test('normalizeSelectionIntent requires scoped edge addresses', () => {
+    const rootEdge = {
+      id: 'control_codex_target',
+      kind: 'control',
+      source: { workflowId: 'source_agent', portId: 'main' },
+      target: { workflowId: 'target_flow', portId: 'main' },
+    };
+    const childEdge = {
+      id: 'control_codex_target',
+      kind: 'control',
+      source: { workflowId: 'codex', portId: 'main' },
+      target: { workflowId: 'review', portId: 'main' },
+    };
+    const base = canvasFixture();
+    const canvas = {
+      ...base,
+      edges: [rootEdge],
+      workflows: base.workflows.map((item) =>
+        item.id === 'source_flow'
+          ? {
+              ...item,
+              internalNodes: [
+                ...item.internalNodes,
+                {
+                  id: 'review',
+                  name: 'Review',
+                  task: 'agent',
+                  kind: 'Agent',
+                  status: 'not_run',
+                  callableId: 'fake-agent.generic',
+                  position: { x: 260, y: 72 },
+                },
+              ],
+              internalEdges: [childEdge],
+            }
+          : item,
+      ),
+    };
+
+    expect(
+      normalizeSelectionIntent(
+        canvas,
+        canvas,
+        { kind: 'edge', address: { scopeWorkflowId: null, edgeId: 'control_codex_target' } },
+        null,
+      ),
+    ).toEqual({ type: 'edge', id: 'control_codex_target', scopeWorkflowId: null });
+    expect(
+      normalizeSelectionIntent(
+        canvas,
+        canvas,
+        { kind: 'edge', address: { scopeWorkflowId: 'source_flow', edgeId: 'control_codex_target' } },
+        null,
+      ),
+    ).toEqual({ type: 'edge', id: 'control_codex_target', scopeWorkflowId: 'source_flow' });
+  });
+
   test('createDataEdgeCommand rejects explicit main-to-main data edge', () => {
     const canvas = canvasWithTargetEvidencePort();
     expect(() =>
@@ -2323,6 +2430,63 @@ describe('WorkspaceCanvas drag buffer', () => {
     );
   });
 
+  test('internal node released inside another workflow is renamed when target scope already has the id', async () => {
+    const base = canvasFixture();
+    const canvas = {
+      ...base,
+      workflows: base.workflows.map((item) =>
+        item.id === 'target_flow'
+          ? {
+              ...item,
+              internalNodes: [
+                {
+                  id: 'codex',
+                  name: 'Existing Codex',
+                  task: 'existing',
+                  kind: 'Agent',
+                  status: 'not_run',
+                  callableId: 'fake-agent.generic',
+                  position: { x: 90, y: 90 },
+                },
+              ],
+            }
+          : item,
+      ),
+    };
+    const { onCanvasChange, onSelect } = renderCanvas(canvas, {
+      type: 'internal',
+      workflowId: 'source_flow',
+      nodeId: 'codex',
+    });
+    await waitForFlowNodes();
+
+    act(() => {
+      (flowMock.props?.onNodeDragStart as () => void)();
+      (flowMock.props?.onNodesChange as (changes: unknown[]) => void)([
+        {
+          id: 'source_flow__internal__codex',
+          type: 'position',
+          position: { x: 550, y: 50 },
+          dragging: false,
+        },
+      ]);
+    });
+
+    const updater = onCanvasChange.mock.calls[0][0] as (current: typeof canvas) => typeof canvas;
+    const nextCanvas = updater(canvas);
+    const sourceFlow = nextCanvas.workflows.find((item) => item.id === 'source_flow');
+    const targetFlow = nextCanvas.workflows.find((item) => item.id === 'target_flow');
+    const targetIds = targetFlow?.internalNodes.map((item) => (item as { id: string }).id);
+
+    expect(sourceFlow?.internalNodes.some((item) => (item as { id: string }).id === 'codex')).toBe(false);
+    expect(targetIds).toEqual(['codex', 'codex_2']);
+    expect(onSelect).toHaveBeenCalledWith({
+      type: 'internal',
+      workflowId: 'target_flow',
+      nodeId: 'codex_2',
+    });
+  });
+
   test('internal node drag through a partial-outside position does not move empty source workflow when reparenting', async () => {
     const { canvas, onCanvasChange } = renderCanvas();
     await waitForFlowNodes();
@@ -2408,6 +2572,42 @@ describe('WorkspaceCanvas drag buffer', () => {
     expect(rootNode?.callableId).toBe('fake-agent.generic');
   });
 
+  test('internal node released outside every workflow is renamed when root scope already has the id', async () => {
+    const base = canvasFixture();
+    const canvas = {
+      ...base,
+      workflows: [
+        ...base.workflows,
+        agentWorkflow('codex', 1100, 500),
+      ],
+    };
+    const { onCanvasChange, onSelect } = renderCanvas(canvas, {
+      type: 'internal',
+      workflowId: 'source_flow',
+      nodeId: 'codex',
+    });
+    await waitForFlowNodes();
+
+    act(() => {
+      (flowMock.props?.onNodeDragStart as () => void)();
+      (flowMock.props?.onNodesChange as (changes: unknown[]) => void)([
+        {
+          id: 'source_flow__internal__codex',
+          type: 'position',
+          position: { x: 920, y: 500 },
+          dragging: false,
+        },
+      ]);
+    });
+
+    const updater = onCanvasChange.mock.calls[0][0] as (current: typeof canvas) => typeof canvas;
+    const nextCanvas = updater(canvas);
+
+    expect(nextCanvas.workflows.filter((item) => item.id === 'codex')).toHaveLength(1);
+    expect(nextCanvas.workflows.some((item) => item.id === 'codex_2')).toBe(true);
+    expect(onSelect).toHaveBeenCalledWith({ type: 'workflow', id: 'codex_2' });
+  });
+
   test('root executable dragged into workflow is selected as an internal node', async () => {
     const { onCanvasChange, onSelect } = renderCanvas(canvasFixture(), {
       type: 'workflow',
@@ -2432,6 +2632,63 @@ describe('WorkspaceCanvas drag buffer', () => {
       type: 'internal',
       workflowId: 'target_flow',
       nodeId: 'source_agent',
+    });
+  });
+
+  test('root executable dragged into workflow is renamed when target internal scope already has the id', async () => {
+    const base = canvasFixture();
+    const canvas = {
+      ...base,
+      workflows: base.workflows.map((item) =>
+        item.id === 'target_flow'
+          ? {
+              ...item,
+              internalNodes: [
+                {
+                  id: 'source_agent',
+                  name: 'Existing Source Agent',
+                  task: 'existing',
+                  kind: 'Agent',
+                  status: 'not_run',
+                  callableId: 'fake-agent.generic',
+                  position: { x: 80, y: 80 },
+                },
+              ],
+            }
+          : item,
+      ),
+    };
+    const { onCanvasChange, onSelect } = renderCanvas(canvas, {
+      type: 'workflow',
+      id: 'source_agent',
+    });
+    await waitForFlowNodes();
+
+    act(() => {
+      (flowMock.props?.onNodeDragStart as () => void)();
+      (flowMock.props?.onNodesChange as (changes: unknown[]) => void)([
+        {
+          id: 'source_agent',
+          type: 'position',
+          position: { x: 650, y: 150 },
+          dragging: false,
+        },
+      ]);
+    });
+
+    const updater = onCanvasChange.mock.calls[0][0] as (current: typeof canvas) => typeof canvas;
+    const nextCanvas = updater(canvas);
+    const targetFlow = nextCanvas.workflows.find((item) => item.id === 'target_flow');
+
+    expect(nextCanvas.workflows.some((item) => item.id === 'source_agent')).toBe(false);
+    expect(targetFlow?.internalNodes.map((item) => (item as { id: string }).id)).toEqual([
+      'source_agent',
+      'source_agent_2',
+    ]);
+    expect(onSelect).toHaveBeenCalledWith({
+      type: 'internal',
+      workflowId: 'target_flow',
+      nodeId: 'source_agent_2',
     });
   });
 

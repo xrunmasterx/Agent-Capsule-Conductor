@@ -283,36 +283,6 @@ def _collect_port_binding_issues(
                 )
             )
 
-    control_main_sources_by_target: dict[str, list[str]] = {}
-    for edge in template.control_edges:
-        source_node = template.node_invocations.get(edge.source)
-        if source_node is None or not _control_main_can_satisfy_input(source_node):
-            continue
-        control_main_sources_by_target.setdefault(edge.target, []).append(edge.source)
-    for target_node, source_nodes in control_main_sources_by_target.items():
-        target_spec = template.node_invocations.get(target_node)
-        explicit_main = any(
-            edge.target.node == target_node and edge.target.port == "main"
-            for edge in template.data_edges
-        )
-        if target_spec is not None:
-            explicit_main = explicit_main or any(
-                binding.target_port == "main" for binding in target_spec.input_bindings
-            )
-            explicit_main = explicit_main or "main" in target_spec.overrides.static_input
-        if len(source_nodes) > 1 and not explicit_main:
-            issues.append(
-                ValidationIssue(
-                    code="ambiguous_control_main_input",
-                    message=(
-                        f"Multiple control predecessors can forward main into {target_node}: "
-                        f"{', '.join(sorted(source_nodes))}"
-                    ),
-                    node_id=target_node,
-                    port="main",
-                )
-            )
-
     for node_id, node in template.node_invocations.items():
         for port_id, port in node.input_ports.items():
             if not port.required:
