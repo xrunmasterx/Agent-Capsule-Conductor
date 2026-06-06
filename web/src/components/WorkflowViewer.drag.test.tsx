@@ -604,6 +604,49 @@ describe('WorkspaceCanvas data edges', () => {
     expect(sourceFlow?.internalEdges).toEqual([]);
   });
 
+  test('control mode rejects the eleventh new output slot but allows an existing equivalent edge', () => {
+    const base = canvasFixture();
+    const targets = Array.from({ length: 11 }, (_value, index) =>
+      agentWorkflow(`target_${index + 1}`, 420 + index * 20, 420),
+    );
+    const canvas = {
+      ...base,
+      workflows: [...base.workflows, ...targets],
+      edges: targets.slice(0, 10).map((target) => ({
+        id: `control_source_agent_${target.id}`,
+        kind: 'control',
+        source: { workflowId: 'source_agent' },
+        target: { workflowId: target.id },
+      })),
+    } as unknown as ReturnType<typeof canvasFixture>;
+
+    expect(
+      resolveScopedConnection(
+        canvas,
+        {
+          source: 'source_agent',
+          target: 'target_11',
+          sourceHandle: 'source_agent:control:source',
+          targetHandle: 'target_11:control:target',
+        },
+        'control',
+      ),
+    ).toEqual({ accepted: false, reason: expect.stringContaining('slot 已满') });
+
+    expect(
+      resolveScopedConnection(
+        canvas,
+        {
+          source: 'source_agent',
+          target: 'target_10',
+          sourceHandle: 'source_agent:control:source',
+          targetHandle: 'target_10:control:target',
+        },
+        'control',
+      ),
+    ).toEqual(expect.objectContaining({ accepted: true }));
+  });
+
   test('control mode maps workflow outer output to workflow outer input as root workflow control', async () => {
     const { canvas, onCanvasChange } = renderCanvas(canvasFixture(), { type: 'workflow', id: 'source_flow' }, 'control');
     await waitForFlowNodes();

@@ -65,7 +65,9 @@ button:disabled {
 .shell {
   display: grid;
   grid-template-columns: 300px minmax(0, 1fr);
-  min-height: 100vh;
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
   background: #080b0e;
 }
 
@@ -428,6 +430,8 @@ small {
   gap: 8px;
   padding: 12px;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   background: #080b0e;
 }
 
@@ -4935,6 +4939,7 @@ small {
 
 .graph-workbench-v2 .evidence-dock {
   min-height: 46px;
+  overflow: hidden;
   border-top: 1px solid #242b33;
   background: #090c0f;
   color: #eef4f8;
@@ -5010,6 +5015,458 @@ small {
   padding: 0 14px 14px;
   overflow: auto;
   background: #090c0f;
+}
+
+.graph-workbench-v2 .selection-details-dock {
+  min-height: 48px;
+  overflow: hidden;
+}
+
+.graph-workbench-v2 .selection-details-toggle {
+  grid-template-columns: auto minmax(220px, 0.45fr) minmax(0, 1fr) minmax(140px, 0.28fr) 22px;
+}
+
+.graph-workbench-v2 .selection-details-title {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.graph-workbench-v2 .selection-details-title strong,
+.graph-workbench-v2 .selection-details-title small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graph-workbench-v2 .selection-details-title strong {
+  color: #eef4f8;
+  font-size: 14px;
+  font-weight: 850;
+}
+
+.graph-workbench-v2 .selection-details-title small {
+  color: #9aa6b2;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.graph-workbench-v2 .selection-details-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(360px, 0.65fr);
+  gap: 12px;
+  height: min(38vh, 416px);
+  max-height: min(38vh, 416px);
+  min-height: 240px;
+  padding: 0 14px 14px;
+  overflow: hidden;
+  background: #090c0f;
+}
+
+.graph-workbench-v2 .selection-log-pane,
+.graph-workbench-v2 .selection-properties-pane {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+  padding: 12px;
+  border: 1px solid #242b33;
+  border-radius: 8px;
+  background: #0c1014;
+}
+
+.graph-workbench-v2 .selection-log-pane {
+  align-content: stretch;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+}
+
+.graph-workbench-v2 .selection-log-pane > .selection-pane-header {
+  display: contents;
+}
+
+.graph-workbench-v2 .selection-log-pane > .selection-pane-header > div:first-child {
+  display: none;
+}
+
+.graph-workbench-v2 .selection-properties-pane,
+.graph-workbench-v2 .selection-node-properties {
+  align-content: start;
+  overflow: auto;
+}
+
+.graph-workbench-v2 .selection-pane-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+}
+
+.graph-workbench-v2 .selection-pane-header.compact {
+  grid-template-columns: minmax(0, 0.6fr) minmax(0, 1fr);
+}
+
+.graph-workbench-v2 .selection-pane-header span {
+  color: #7f8a96;
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.graph-workbench-v2 .selection-pane-header h3 {
+  margin: 2px 0 0;
+  color: #eef4f8;
+  font-size: 14px;
+}
+
+.graph-workbench-v2 .selection-pane-header small {
+  min-width: 0;
+  overflow: hidden;
+  color: #9aa6b2;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graph-workbench-v2 .selection-view-tabs,
+.graph-workbench-v2 .selection-output-tabs,
+.graph-workbench-v2 .selection-log-tabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid #26303a;
+  border-radius: 6px;
+  background: #090d11;
+}
+
+.graph-workbench-v2 .selection-output-tabs,
+.graph-workbench-v2 .selection-log-tabs {
+  width: fit-content;
+}
+
+.graph-workbench-v2 .selection-output-tabs {
+  grid-row: 1;
+  grid-column: 2;
+  justify-self: start;
+}
+
+.graph-workbench-v2 .selection-log-tabs {
+  grid-row: 1;
+  grid-column: 4;
+  justify-self: end;
+}
+
+.graph-workbench-v2 .selection-log-pane > .selection-pane-header .selection-view-tabs {
+  grid-row: 1;
+  grid-column: 1;
+  justify-self: start;
+}
+
+.graph-workbench-v2 .selection-view-tabs button,
+.graph-workbench-v2 .selection-output-tabs button,
+.graph-workbench-v2 .selection-log-tabs button {
+  min-height: 26px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: #9aa6b2;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.graph-workbench-v2 .selection-view-tabs button.active,
+.graph-workbench-v2 .selection-output-tabs button.active,
+.graph-workbench-v2 .selection-log-tabs button.active {
+  border-color: #365f98;
+  background: #14243a;
+  color: #dceaff;
+}
+
+.graph-workbench-v2 .selection-view-tabs button:disabled,
+.graph-workbench-v2 .selection-output-tabs button:disabled,
+.graph-workbench-v2 .selection-log-tabs button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.graph-workbench-v2 .selection-evidence-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.graph-workbench-v2 .selection-log-output {
+  grid-row: 2;
+  grid-column: 1 / -1;
+  min-height: 0;
+  max-height: 100%;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  border: 1px solid #26303a;
+  border-radius: 8px;
+  background: #070a0e;
+}
+
+.graph-workbench-v2 .selection-log-output pre {
+  min-height: 100%;
+  margin: 0;
+  padding: 12px;
+  color: #dce5ec;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.graph-workbench-v2 .selection-log-output .empty-state {
+  margin: 0;
+  padding: 14px;
+}
+
+.graph-workbench-v2 .selection-open-artifact {
+  display: grid;
+  gap: 10px;
+  min-height: 0;
+  max-height: 260px;
+  overflow: auto;
+  padding-top: 2px;
+}
+
+.graph-workbench-v2 .selection-open-artifact.inline {
+  grid-row: 2;
+  grid-column: 1 / -1;
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 0;
+  max-height: none;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding-top: 0;
+}
+
+.graph-workbench-v2 .selection-open-artifact.inline > .selection-pane-header,
+.graph-workbench-v2 .selection-open-artifact.inline .readable-artifact > header,
+.graph-workbench-v2 .selection-open-artifact.inline .readable-artifact > .tab-strip {
+  display: none;
+}
+
+.graph-workbench-v2 .selection-open-artifact.inline .readable-artifact,
+.graph-workbench-v2 .selection-open-artifact.inline .readable-document,
+.graph-workbench-v2 .selection-open-artifact.inline .readable-artifact-body,
+.graph-workbench-v2 .selection-open-artifact.inline .json-summary {
+  min-height: 0;
+  overflow: visible;
+}
+
+.graph-workbench-v2 .selection-log-output.artifact-empty {
+  display: grid;
+  align-items: start;
+}
+
+.graph-workbench-v2 .selection-input-breakdown {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-height: 0;
+}
+
+.graph-workbench-v2 .selection-input-breakdown.empty {
+  min-height: 100%;
+  border: 1px solid #26303a;
+  border-radius: 8px;
+  background: #070a0e;
+}
+
+.graph-workbench-v2 .selection-input-source-card {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid #26303a;
+  border-radius: 8px;
+  background: #090d11;
+}
+
+.graph-workbench-v2 .selection-input-source-card header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.graph-workbench-v2 .selection-input-source-card header span {
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  border: 1px solid #2d4851;
+  border-radius: 999px;
+  background: #0d2226;
+  color: #a9f0e4;
+  font-size: 10px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.graph-workbench-v2 .selection-input-source-card header strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #eef4f8;
+  font-size: 12px;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graph-workbench-v2 .selection-input-source-card p {
+  margin: 0;
+  color: #dce5ec;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.graph-workbench-v2 .json-summary-conclusion {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+
+.graph-workbench-v2 .json-summary-conclusion .summary-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.graph-workbench-v2 .json-summary-conclusion .summary-meta-row span {
+  width: fit-content;
+  padding: 3px 8px;
+  border: 1px solid #2d4851;
+  border-radius: 999px;
+  background: #0d2226;
+  color: #a9f0e4;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.graph-workbench-v2 .json-summary-conclusion .summary-lead {
+  margin: 0;
+  color: #eef4f8;
+  font-size: 13px;
+  font-weight: 750;
+  line-height: 1.55;
+}
+
+.graph-workbench-v2 .json-summary-conclusion .summary-report {
+  max-height: none;
+  margin: 0;
+  overflow: visible;
+  padding: 10px;
+  border: 1px solid #26303a;
+  border-radius: 6px;
+  background: #070a0e;
+  color: #dce5ec;
+  white-space: pre-wrap;
+}
+
+.graph-workbench-v2 .selection-debug-details {
+  grid-row: 3;
+  grid-column: 1 / -1;
+  min-width: 0;
+  border-top: 1px solid #242b33;
+  padding-top: 6px;
+  color: #8f9aa6;
+  font-size: 11px;
+}
+
+.graph-workbench-v2 .selection-debug-details summary {
+  width: fit-content;
+  cursor: pointer;
+  color: #9aa6b2;
+  font-weight: 850;
+}
+
+.graph-workbench-v2 .selection-debug-details dl {
+  display: grid;
+  gap: 4px;
+  margin: 6px 0 0;
+}
+
+.graph-workbench-v2 .selection-debug-details div {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.graph-workbench-v2 .selection-debug-details dt {
+  color: #7f8a96;
+  font-weight: 850;
+}
+
+.graph-workbench-v2 .selection-debug-details dd {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: #c5d0d8;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graph-workbench-v2 .json-summary-conclusion .summary-section {
+  display: grid;
+  gap: 6px;
+}
+
+.graph-workbench-v2 .json-summary-conclusion h5 {
+  margin: 0;
+  color: #9aa6b2;
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.graph-workbench-v2 .json-summary-conclusion ul {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.graph-workbench-v2 .json-summary-conclusion li,
+.graph-workbench-v2 .json-summary-conclusion .summary-section p {
+  margin: 0;
+  color: #dce5ec;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.graph-workbench-v2 .selection-node-properties {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.graph-workbench-v2 .selection-property-groups {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.graph-workbench-v2 .selection-run-summary-card {
+  gap: 10px;
+}
+
+.graph-workbench-v2 .selection-output-summary {
+  margin: 0;
+  color: #cfd8df;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .graph-workbench-v2 .evidence-artifact-pane {

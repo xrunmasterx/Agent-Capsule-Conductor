@@ -5,7 +5,7 @@ import hashlib
 import json
 import shutil
 from collections.abc import Callable
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
@@ -31,6 +31,7 @@ from acc.domain import (
     PlanStepTransitionRecord,
     ResultStoreAddress,
     RunPlan,
+    RunPlanStatus,
     RunRecord,
     ScopeFrame,
     SessionInstance,
@@ -53,6 +54,7 @@ from acc.result_store.types import (
 )
 from acc.run_index import NodeRunSummary, RunSummary, rebuild_run_index
 from acc.runtime.policy import acc_run_mode
+from acc.scheduler.ready_set import DAGScheduler
 from acc.session import utc_now_iso
 from acc.store import load_json, write_json
 from acc.store.control_ledger import (
@@ -85,6 +87,7 @@ class FixedRunControlLedger:
     plan_step_sequence: int = 0
     dispatch_sequence: int = 0
     decision_sequence: int = 0
+    audit_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     def initialize(self, *, timestamp: str, invocation_path: Path, scope_path: Path) -> None:
         def write_initial() -> None:
@@ -302,6 +305,102 @@ class FixedRunControlLedger:
 
         self.write_audit(f"fail dispatch for node {node.id}", write_failed)
 
+    def skip_steps(self, node_ids: tuple[str, ...], *, blocked_by_node_id: str) -> None:
+        def write_skipped() -> None:
+            for node_id in node_ids:
+                current = self.steps_by_node_id[node_id]
+                if current.status not in {"pending", "ready", "waiting_interaction"}:
+                    continue
+                updated = replace(
+                    current,
+                    status="skipped",
+                    updated_at=utc_now_iso(),
+                    metadata={
+                        **current.metadata,
+                        "skip_reason": "dependency_failed",
+                        "blocked_by_step_ids": (
+                            self.steps_by_node_id[blocked_by_node_id].plan_step_id,
+                        ),
+                    },
+                )
+                append_plan_step_transition(
+                    self.run_dir,
+                    PlanStepTransitionRecord(
+                        sequence=self.next_plan_step_sequence(),
+                        recorded_at=updated.updated_at or utc_now_iso(),
+                        plan_step_id=updated.plan_step_id,
+                        previous_status=current.status,
+                        next_status="skipped",
+                        snapshot=updated,
+                        reason="control predecessor failed",
+                    ),
+                )
+                self.steps_by_node_id[node_id] = updated
+                append_control_event(
+                    self.run_dir,
+                    event_type="plan_step_skipped",
+                    run_id=self.run_id,
+                    node_id=node_id,
+                    plan_step_id=updated.plan_step_id,
+                    payload={
+                        "skip_reason": "dependency_failed",
+                        "blocked_by_node_id": blocked_by_node_id,
+                    },
+                )
+
+        if node_ids:
+            self.write_audit("skip dependency-blocked steps", write_skipped)
+
+    def cancel_steps(self, node_ids: tuple[str, ...]) -> None:
+        def write_cancelled() -> None:
+            for node_id in node_ids:
+                current = self.steps_by_node_id[node_id]
+                if current.status not in {"pending", "ready", "waiting_interaction"}:
+                    continue
+                updated = replace(
+                    current,
+                    status="cancelled",
+                    updated_at=utc_now_iso(),
+                    metadata={**current.metadata, "cancel_reason": "run cancellation requested"},
+                )
+                append_plan_step_transition(
+                    self.run_dir,
+                    PlanStepTransitionRecord(
+                        sequence=self.next_plan_step_sequence(),
+                        recorded_at=updated.updated_at or utc_now_iso(),
+                        plan_step_id=updated.plan_step_id,
+                        previous_status=current.status,
+                        next_status="cancelled",
+                        snapshot=updated,
+                        reason="run cancellation requested",
+                    ),
+                )
+                self.steps_by_node_id[node_id] = updated
+                append_control_event(
+                    self.run_dir,
+                    event_type="plan_step_cancelled",
+                    run_id=self.run_id,
+                    node_id=node_id,
+                    plan_step_id=updated.plan_step_id,
+                    payload={"cancel_reason": "run cancellation requested"},
+                )
+
+        if node_ids:
+            self.write_audit("cancel unstarted steps", write_cancelled)
+
+    def finalize_run_plan(self, status: RunPlanStatus) -> None:
+        def write_final() -> None:
+            self.run_plan = replace(self.run_plan, status=status)
+            write_run_plan(self.run_dir, self.run_plan)
+            append_control_event(
+                self.run_dir,
+                event_type="run_plan_finalized",
+                run_id=self.run_id,
+                payload={"status": status},
+            )
+
+        self.write_audit(f"finalize run_plan as {status}", write_final)
+
     def wait_for_human_approval(self, node: NodeInvocationSpec) -> None:
         def write_wait() -> None:
             self.ensure_step_ready(node.id)
@@ -440,7 +539,10 @@ class FixedRunControlLedger:
             candidates=({"action": "dispatch", "node_id": node.id},),
             selected={"action": "dispatch", "plan_step_id": step.plan_step_id},
             rejected=(),
-            rationale="Fixed DAG scheduler reached this node in ExecutionPlan.levels.",
+            rationale=(
+                "Ready-queue scheduler released this node after all control "
+                "predecessors succeeded."
+            ),
             input_evidence_refs=("run_plan.json", "plan_steps.jsonl"),
             result_refs=("dispatches.jsonl",),
             replay_binding={"mode": "deterministic_recompile"},
@@ -569,7 +671,6 @@ async def run_workflow_function_invocation(
     append_event(event_log_path, invocation.run_id, "workflow_started")
 
     outputs: dict[tuple[str, str], Any] = {}
-    node_by_id = {node.node_id: node.invocation for node in plan.nodes}
     terminal_status = "success"
     try:
         run_plan, plan_steps = build_fixed_run_plan(
@@ -591,35 +692,18 @@ async def run_workflow_function_invocation(
             invocation_path=invocation_path,
             scope_path=scope_path,
         )
-        for level in plan.levels:
-            if should_cancel is not None and should_cancel():
-                terminal_status = "cancelled"
-                append_event(event_log_path, invocation.run_id, "workflow_cancelled")
-                break
-            results = await asyncio.gather(
-                *[
-                    execute_core_v2_node_with_fixed_ledger(
-                        template,
-                        node_by_id[node_id],
-                        invocation,
-                        scope,
-                        result_store,
-                        outputs,
-                        event_log_path,
-                        callable_registry,
-                        control_ledger,
-                    )
-                    for node_id in level
-                ],
-                return_exceptions=True,
-            )
-            failures = [result for result in results if isinstance(result, Exception)]
-            if failures:
-                raise failures[0]
-            if any(result == "waiting_interaction" for result in results):
-                terminal_status = "waiting_interaction"
-                append_event(event_log_path, invocation.run_id, "workflow_waiting")
-                break
+        terminal_status = await run_ready_queue_execution(
+            template,
+            invocation,
+            scope,
+            plan,
+            result_store,
+            outputs,
+            event_log_path,
+            callable_registry,
+            control_ledger,
+            should_cancel=should_cancel,
+        )
         if terminal_status == "success":
             write_workflow_outputs(
                 template,
@@ -629,6 +713,21 @@ async def run_workflow_function_invocation(
                 outputs,
             )
             append_event(event_log_path, invocation.run_id, "workflow_completed")
+        elif terminal_status == "failed":
+            append_event(
+                event_log_path,
+                invocation.run_id,
+                "workflow_failed",
+                payload={"error": "one or more control branches failed"},
+            )
+        elif terminal_status == "waiting_interaction":
+            append_event(event_log_path, invocation.run_id, "workflow_waiting")
+        if terminal_status in {"success", "failed", "cancelled"}:
+            run_plan_status: RunPlanStatus = (
+                "completed" if terminal_status == "success" else terminal_status
+            )
+            async with control_ledger.audit_lock:
+                control_ledger.finalize_run_plan(run_plan_status)
     except Exception as exc:
         terminal_status = "crashed" if isinstance(exc, ControlLedgerAuditError) else "failed"
         append_event(
@@ -669,6 +768,111 @@ async def run_workflow_function_invocation(
     return final_record
 
 
+async def run_ready_queue_execution(
+    template: WorkflowFunctionTemplate,
+    invocation: FunctionInvocation,
+    scope: ScopeFrame,
+    plan: ExecutionPlan,
+    result_store: FilesystemResultStore,
+    outputs: dict[tuple[str, str], Any],
+    event_log_path: Path,
+    callable_registry: CallableRegistry | None,
+    control_ledger: FixedRunControlLedger,
+    *,
+    should_cancel: Callable[[], bool] | None,
+) -> str:
+    node_by_id = {node.node_id: node.invocation for node in plan.nodes}
+    scheduler = DAGScheduler(
+        node_order=tuple(node.node_id for node in plan.nodes),
+        dependencies={node.node_id: node.depends_on for node in plan.nodes},
+    )
+    max_concurrency = workflow_max_concurrency(template)
+    running: dict[asyncio.Task[str], str] = {}
+    terminal_status = "success"
+    stop_launching = False
+    cancellation_requested = False
+
+    while True:
+        if should_cancel is not None and should_cancel() and not cancellation_requested:
+            cancellation_requested = True
+            stop_launching = True
+            terminal_status = "cancelled"
+            cancelled = scheduler.cancel_unstarted()
+            async with control_ledger.audit_lock:
+                control_ledger.cancel_steps(cancelled)
+            append_event(event_log_path, invocation.run_id, "workflow_cancelled")
+
+        if not stop_launching:
+            capacity = (
+                len(node_by_id)
+                if max_concurrency is None
+                else max_concurrency - len(running)
+            )
+            if capacity > 0:
+                for node_id in scheduler.ready_nodes()[:capacity]:
+                    scheduler.mark_running(node_id)
+                    task = asyncio.create_task(
+                        execute_core_v2_node_with_fixed_ledger(
+                            template,
+                            node_by_id[node_id],
+                            invocation,
+                            scope,
+                            result_store,
+                            outputs,
+                            event_log_path,
+                            callable_registry,
+                            control_ledger,
+                        )
+                    )
+                    running[task] = node_id
+
+        if not running:
+            if terminal_status == "waiting_interaction":
+                return terminal_status
+            if cancellation_requested:
+                return "cancelled"
+            if scheduler.has_failures_or_skips():
+                return "failed"
+            if scheduler.has_pending_nodes():
+                raise AccError("Ready-queue scheduler stalled with pending nodes")
+            return "success"
+
+        done, _ = await asyncio.wait(
+            running.keys(),
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for task in done:
+            node_id = running.pop(task)
+            try:
+                result = task.result()
+            except ControlLedgerAuditError:
+                raise
+            except Exception:
+                skipped = scheduler.mark_failed_and_skip_descendants(node_id)
+                async with control_ledger.audit_lock:
+                    control_ledger.skip_steps(skipped, blocked_by_node_id=node_id)
+                terminal_status = "failed"
+                continue
+
+            if result == "waiting_interaction":
+                scheduler.mark_waiting(node_id)
+                terminal_status = "waiting_interaction"
+                stop_launching = True
+                continue
+            scheduler.mark_success(node_id)
+
+
+def workflow_max_concurrency(template: WorkflowFunctionTemplate) -> int | None:
+    raw = template.policies.get("max_concurrency")
+    if raw is None:
+        return None
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        raise AccError("Workflow policy max_concurrency must be a positive integer")
+    if raw <= 0:
+        raise AccError("Workflow policy max_concurrency must be a positive integer")
+    return raw
+
+
 async def execute_core_v2_node_with_fixed_ledger(
     template: WorkflowFunctionTemplate,
     node: NodeInvocationSpec,
@@ -683,9 +887,11 @@ async def execute_core_v2_node_with_fixed_ledger(
     if node_requires_human_approval(node) and not control_ledger.step_has_answered_human_gate(
         node.id
     ):
-        control_ledger.wait_for_human_approval(node)
+        async with control_ledger.audit_lock:
+            control_ledger.wait_for_human_approval(node)
         return "waiting_interaction"
-    dispatch = control_ledger.start_dispatch(node, invocation, scope)
+    async with control_ledger.audit_lock:
+        dispatch = control_ledger.start_dispatch(node, invocation, scope)
     try:
         await execute_core_v2_node(
             template,
@@ -698,9 +904,11 @@ async def execute_core_v2_node_with_fixed_ledger(
             callable_registry,
         )
     except Exception as exc:
-        control_ledger.fail_dispatch(node, dispatch, exc)
+        async with control_ledger.audit_lock:
+            control_ledger.fail_dispatch(node, dispatch, exc)
         raise
-    control_ledger.complete_dispatch(node, dispatch)
+    async with control_ledger.audit_lock:
+        control_ledger.complete_dispatch(node, dispatch)
     return "success"
 
 

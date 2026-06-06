@@ -718,7 +718,7 @@ describe('Agent Callable Workbench editable UI', () => {
     expect(canvas).toHaveTextContent('Paper_Digest_Pipeline');
     expect(canvas).toHaveTextContent('workflows/research');
     const toolbar = await screen.findByLabelText('工作流工具栏');
-    await user.click(within(toolbar).getByRole('button', { name: /^节点设置$/i }));
+    expect(within(toolbar).getByRole('button', { name: /^运行详情$/i })).toBeInTheDocument();
     await user.click(within(await screen.findByLabelText('连接模式')).getByRole('button', { name: '数据' }));
     expect(canvas).toHaveTextContent('in_requirements');
     expect(canvas).toHaveTextContent('out_report');
@@ -885,14 +885,14 @@ describe('Agent Callable Workbench editable UI', () => {
 
     const agentNode = await screen.findByTestId('agent-tool-node-fake_agent_generic');
     fireEvent.click(agentNode);
-    expect(await screen.findByLabelText('节点设置面板')).toHaveTextContent('Fake Agent');
+    expect(await screen.findByLabelText('选中对象详情')).toHaveTextContent('Fake Agent');
 
     const workspaceCanvas = await screen.findByLabelText('任务画布');
     const pane = workspaceCanvas.querySelector('.react-flow__pane');
     expect(pane).toBeInTheDocument();
     fireEvent.pointerDown(pane as Element);
     fireEvent.click(pane as Element);
-    expect(screen.queryByLabelText('节点设置面板')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('选中对象详情')).toHaveTextContent('任务画布');
     expect(workspaceCanvas.querySelector('.canvas-selection-frame')).not.toBeInTheDocument();
   });
 
@@ -1880,7 +1880,7 @@ describe('Agent Callable Workbench editable UI', () => {
     const taskList = await screen.findByLabelText('任务列表');
     await user.dblClick(within(taskList).getByRole('button', { name: '选择任务 任务 2' }));
 
-    expect(await screen.findByText('任务 2')).toBeInTheDocument();
+    expect((await screen.findAllByText('任务 2')).length).toBeGreaterThan(0);
     expect(await screen.findByLabelText('任务画布')).toBeInTheDocument();
     expect(within(workbench).getByRole('button', { name: '任务蓝图' })).toHaveClass('active');
   });
@@ -2073,9 +2073,11 @@ describe('Agent Callable Workbench editable UI', () => {
     expect(screen.getByRole('button', { name: '任务总览' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '任务蓝图' })).toBeInTheDocument();
     const toolbar = await screen.findByLabelText('工作流工具栏');
-    await user.click(within(toolbar).getByRole('button', { name: /^节点设置$/i }));
-    expect(await screen.findByLabelText('任务设置面板')).toBeInTheDocument();
-    expect(screen.getByRole('separator', { name: '调整节点设置面板宽度' })).toBeInTheDocument();
+    await user.click(within(toolbar).getByRole('button', { name: /^运行详情$/i }));
+    const detailsDock = await screen.findByLabelText('选中对象详情');
+    expect(detailsDock).toBeInTheDocument();
+    expect(detailsDock).toHaveTextContent('输入 / 输出');
+    expect(detailsDock).toHaveTextContent('节点属性');
     expect(screen.queryByRole('button', { name: /Connect Last Two/i })).not.toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: /\u4fdd\u5b58/i }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole('button', { name: /校验/i }).length).toBeGreaterThan(0);
@@ -2085,9 +2087,9 @@ describe('Agent Callable Workbench editable UI', () => {
     expect(screen.getByRole('button', { name: /显示控制边/i })).toBeInTheDocument();
     fireEvent.pointerDown(workspaceCanvas);
     fireEvent.click(workspaceCanvas);
-    expect(screen.getByLabelText('任务设置面板')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: '收起' }));
-    await waitFor(() => expect(screen.queryByLabelText('任务设置面板')).not.toBeInTheDocument());
+    expect(screen.getByLabelText('选中对象详情')).toHaveTextContent('任务画布');
+    await user.click(within(detailsDock).getAllByRole('button')[0]);
+    await waitFor(() => expect(within(detailsDock).queryByText('输入 / 输出')).not.toBeInTheDocument());
   });
 
   test('Workflow Builder saves, validates, and runs workspace canvas', async () => {
@@ -2141,24 +2143,24 @@ describe('Agent Callable Workbench editable UI', () => {
     await user.click(within(toolbar).getByRole('button', { name: /^运行$/i }));
     await screen.findByText(/ui_workflow_acc_workspace_canvas_fixture: 成功/i);
 
-    const inspector = await screen.findByLabelText('节点设置面板');
+    const detailsDock = await screen.findByLabelText('选中对象详情');
 
-    expect(inspector).toHaveTextContent('系统提示词');
-    expect(within(inspector).queryByRole('textbox', { name: /系统提示词/ })).not.toBeInTheDocument();
-    expect(inspector).toHaveTextContent('运行证据');
-    expect(inspector).toHaveTextContent('控制线 main 传输');
-    expect(inspector).toHaveTextContent('Codex agent output fixture');
-    expect(within(inspector).getByRole('button', { name: /真实输出.*output\.json/i })).toBeEnabled();
+    expect(detailsDock).toHaveTextContent('系统提示词');
+    expect(within(detailsDock).queryByRole('textbox', { name: /系统提示词/ })).not.toBeInTheDocument();
+    expect(detailsDock).toHaveTextContent('运行证据摘要');
+    expect(detailsDock).toHaveTextContent('控制线 main 传输');
+    expect(detailsDock).toHaveTextContent('Codex agent output fixture');
+    expect(within(detailsDock).getByRole('button', { name: /^output\.json$/i })).toBeEnabled();
 
-    const inputEvidence = await within(inspector).findByRole('button', { name: /真实输入/i });
-    await user.click(inputEvidence);
-    const evidencePane = await screen.findByLabelText('当前证据详情');
+    await user.click(within(detailsDock).getByRole('button', { name: /^输入$/i }));
+    const evidencePane = await screen.findByLabelText('输入内容');
     expect(evidencePane).toHaveTextContent('input.json');
     expect(evidencePane).toHaveTextContent('Codex CLI');
     expect(evidencePane).toHaveTextContent('真实上游输入');
 
-    await user.click(within(inspector).getByRole('button', { name: /真实输出/i }));
-    expect(await screen.findByLabelText('当前证据详情')).toHaveTextContent('Codex agent output fixture');
+    await user.click(within(detailsDock).getByRole('button', { name: /^输出$/i }));
+    await user.click(within(detailsDock).getByRole('button', { name: /^output\.json$/i }));
+    expect(await screen.findByLabelText('output.json 内容')).toHaveTextContent('Codex agent output fixture');
   });
 
   test('Run Inspector exposes implemented debugger replay action', async () => {

@@ -156,7 +156,11 @@ function JsonSummary({ content }: { content: string }) {
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
       return <TextPreview content={JSON.stringify(payload, null, 2)} />;
     }
-    const entries = Object.entries(payload as Record<string, unknown>);
+    const focusedSummary = renderFocusedJsonSummary(payload as Record<string, unknown>);
+    if (focusedSummary) {
+      return focusedSummary;
+    }
+    const entries = Object.entries(payload as Record<string, unknown>).filter(([, value]) => !isEmptyCollection(value));
     return (
       <article className="json-summary">
         <h4>摘要</h4>
@@ -174,6 +178,93 @@ function JsonSummary({ content }: { content: string }) {
   } catch {
     return <TextPreview content={content} />;
   }
+}
+
+function renderFocusedJsonSummary(payload: Record<string, unknown>) {
+  const knownOutputKeys = ['summary', 'report_markdown', 'status', 'findings', 'next_actions', 'quality', 'outputs'];
+  if (!knownOutputKeys.some((key) => Object.prototype.hasOwnProperty.call(payload, key))) {
+    return null;
+  }
+  const summary = textField(payload.summary) || textField(payload.report_markdown);
+  const report = textField(payload.report_markdown);
+  const findings = arrayTextItems(payload.findings);
+  const nextActions = arrayTextItems(payload.next_actions);
+  const quality = isRecord(payload.quality) ? payload.quality : null;
+  const outputs = isRecord(payload.outputs)
+    ? Object.entries(payload.outputs)
+        .filter(([, value]) => !isEmptyCollection(value))
+        .map(([key]) => key)
+    : [];
+  const confidence = quality ? textField(quality.confidence) : '';
+  const status = textField(payload.status);
+  const hasFocusedContent = Boolean(summary || status || findings.length || nextActions.length || confidence || outputs.length);
+  if (!hasFocusedContent) {
+    return null;
+  }
+  return (
+    <article className="json-summary json-summary-conclusion">
+      <h4>结论</h4>
+      {status || confidence ? (
+        <div className="summary-meta-row">
+          {status ? <span>状态：{status}</span> : null}
+          {confidence ? <span>置信度：{confidence}</span> : null}
+        </div>
+      ) : null}
+      {summary ? <p className="summary-lead">{summary}</p> : null}
+      {report && report !== summary ? <pre className="summary-report">{report}</pre> : null}
+      {renderSummaryList('发现', findings)}
+      {renderSummaryList('下一步', nextActions)}
+      {outputs.length ? (
+        <section className="summary-section">
+          <h5>命名输出</h5>
+          <p>{outputs.join(', ')}</p>
+        </section>
+      ) : null}
+    </article>
+  );
+}
+
+function renderSummaryList(title: string, items: string[]) {
+  if (items.length === 0) {
+    return null;
+  }
+  return (
+    <section className="summary-section">
+      <h5>{title}</h5>
+      <ul>
+        {items.slice(0, 6).map((item, index) => (
+          <li key={`${title}-${index}`}>{item}</li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function textField(value: unknown): string {
+  return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
+    ? String(value)
+    : '';
+}
+
+function arrayTextItems(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.map((item) => briefValue(item)).filter((item) => item && item !== '空');
+}
+
+function isEmptyCollection(value: unknown): boolean {
+  if (Array.isArray(value)) {
+    return value.length === 0;
+  }
+  if (isRecord(value)) {
+    return Object.keys(value).length === 0;
+  }
+  return false;
 }
 
 function LogPreview({ content }: { content: string }) {
@@ -223,6 +314,23 @@ function TextPreview({ content }: { content: string }) {
 }
 
 function briefValue(value: unknown): string {
+  if (value === null || value === undefined) {
+    return '空';
+  }
+  if (Array.isArray(value)) {
+    return value.length ? value.map((item) => briefValue(item)).filter(Boolean).join('；') : '空';
+  }
+  if (isRecord(value)) {
+    const entries = Object.entries(value).filter(([, item]) => !isEmptyCollection(item));
+    if (entries.length === 0) {
+      return '空';
+    }
+    const summary = entries
+      .slice(0, 3)
+      .map(([key, item]) => `${key}: ${briefValue(item)}`)
+      .join('；');
+    return entries.length > 3 ? `${summary}；...` : summary;
+  }
   if (value === null || value === undefined) {
     return '空';
   }

@@ -77,6 +77,7 @@ import type {
   WorkflowSummary,
 } from '../types';
 import { CodeBlock } from './CodeBlock';
+import { ReadableArtifact } from './ArtifactViewer';
 import {
   outputSchemaFromArtifactContract,
   parsePaletteItem,
@@ -84,7 +85,6 @@ import {
   type PortDirection,
   type WorkflowPortView,
 } from './workflow-viewer/palette';
-import { WorkflowEvidenceDock } from './workflow-viewer/WorkflowEvidenceDock';
 import {
   edgeAddressEquals,
   edgeAddressFromFlowEdgeId,
@@ -122,6 +122,7 @@ type Props = {
 };
 
 type ConnectionMode = 'data' | 'control';
+const CONTROL_SLOT_LIMIT = 10;
 
 type InternalNodeView = {
   id: string;
@@ -370,6 +371,41 @@ type EvidenceDockState = {
   };
 };
 
+type SelectedDetailsKind = 'canvas' | 'node' | 'workflow' | 'internal-node' | 'edge' | 'port' | 'empty';
+
+type SelectedDetailsPropertyGroup = {
+  title: string;
+  rows: Array<{ label: string; value: ReactNode }>;
+};
+
+type SelectedDetailsEvidenceAction = {
+  label: string;
+  title: string;
+  path?: string | null;
+};
+
+type SelectedEntityDetailsModel = {
+  key: string;
+  kind: SelectedDetailsKind;
+  title: string;
+  subtitle?: string;
+  status: WorkflowStatus | string;
+  scopeLabel?: string;
+  nodeRun?: NodeRunSummary;
+  logs?: NodeLiveLogs;
+  log: {
+    stdout: string;
+    stderr: string;
+    excerpt: string;
+    stdoutPath?: string | null;
+    stderrPath?: string | null;
+  };
+  properties: SelectedDetailsPropertyGroup[];
+  evidenceActions: SelectedDetailsEvidenceAction[];
+  events: RunEvent[];
+  nodeSettings?: AgentNodeSettingsModel;
+};
+
 type SaveWorkflowDialogState = {
   name: string;
   saving: boolean;
@@ -587,7 +623,6 @@ export function WorkflowViewer({
   const workflowEvents = selectedRunProjection?.events || [];
   const runOverlay = selectedRunProjection?.overlay || null;
   const isRunning = currentTask ? isActiveTaskStatus(currentTask.status) : false;
-  const inspectorOpen = chrome.rightPanel === 'inspector';
   const resourceDetailOpen = chrome.rightPanel === 'resourceDetail';
   const inspectorWidth = chrome.inspectorWidth;
   const workflowBindingKey = useMemo(
@@ -917,6 +952,52 @@ export function WorkflowViewer({
     selection.type === 'internal'
       ? selectedWorkflow?.internalNodes.find((node) => node.id === selection.nodeId)
       : undefined;
+  const selectedLiveLogs = selectedRunId ? runLogsById[selectedRunId] || {} : {};
+  const selectedNodeSettings = useMemo(
+    () =>
+      selectedNodeSettingsModel({
+        selection,
+        selectedWorkflow,
+        selectedInternalNode,
+        workflowRun,
+        liveLogs: selectedLiveLogs,
+      }),
+    [selection, selectedWorkflow, selectedInternalNode, workflowRun, selectedLiveLogs],
+  );
+  const selectedCallableDetailState = useCallableDetail(selectedNodeSettings?.callableId || '');
+  const selectedDetailsModel = useMemo(
+    () =>
+      selectedEntityDetailsModel({
+        canvas: displayCanvas,
+        selection,
+        selectedWorkflow,
+        selectedPort,
+        selectedEdge,
+        selectedInternalNode,
+        selectedNodeSettings,
+        workflowRun,
+        workflowEvents,
+        liveLogs: selectedLiveLogs,
+        runtimeConfig,
+        binding: selectedWorkflow ? workflowBindings[selectedWorkflow.id] : undefined,
+        currentTask,
+      }),
+    [
+      currentTask,
+      displayCanvas,
+      runtimeConfig,
+      selectedEdge,
+      selectedInternalNode,
+      selectedLiveLogs,
+      selectedNodeSettings,
+      selectedPort,
+      selectedWorkflow,
+      selection,
+      workflowBindings,
+      workflowEvents,
+      workflowRun,
+    ],
+  );
   const normalizedSelection = useMemo(
     () => normalizeWorkbenchSelection(displayCanvas, selection, focusedWorkflowId),
     [displayCanvas, focusedWorkflowId, selection],
@@ -1071,7 +1152,14 @@ export function WorkflowViewer({
   const selectCanvasObject = useCallback((nextSelection: CanvasSelection) => {
     setSelection(nextSelection);
     if (nextSelection.type !== 'task_canvas') {
-      setChrome((current) => ({ ...current, rightPanel: 'inspector' }));
+      setEvidenceDock((current) => ({ ...current, open: true }));
+      setChrome((current) => ({
+        ...current,
+        rightPanel:
+          current.rightPanel === 'resourceDetail' || current.rightPanel === 'inspector'
+            ? 'none'
+            : current.rightPanel,
+      }));
     }
   }, []);
 
@@ -1607,12 +1695,9 @@ export function WorkflowViewer({
         onValidate={validateGraph}
         onRun={runGraph}
         onAutoLayout={autoLayout}
-        inspectorOpen={inspectorOpen}
-        onToggleInspector={() =>
-          setChrome((current) => ({
-            ...current,
-            rightPanel: current.rightPanel === 'inspector' ? 'none' : 'inspector',
-          }))
+        detailsOpen={evidenceDock.open}
+        onToggleDetails={() =>
+          setEvidenceDock((current) => ({ ...current, open: !current.open }))
         }
       />
       <div
@@ -1651,12 +1736,12 @@ export function WorkflowViewer({
               onSelect={selectCanvasObject}
               onDeleteSelection={deleteSelectedCanvasObject}
               edgeViewMode={edgeViewMode}
+              onConnectionMode={setConnectionMode}
               onEdgeViewMode={setEdgeViewMode}
               onBlankCanvas={() => undefined}
               onNotice={setMessage}
               onConfigureWorkflow={(workflowId) => {
                 setSelection({ type: 'workflow', id: workflowId });
-                setChrome((current) => ({ ...current, rightPanel: 'inspector' }));
                 setBindingEditorWorkflowId(workflowId);
               }}
             />
@@ -1671,7 +1756,7 @@ export function WorkflowViewer({
             />
           </>
         )}
-        {inspectorOpen || resourceDetailOpen ? (
+        {resourceDetailOpen ? (
           <div
             className="canvas-drawer canvas-drawer-right"
             style={{ width: inspectorWidth }}
@@ -1692,49 +1777,9 @@ export function WorkflowViewer({
                 收起
               </button>
             </div>
-            {resourceDetailOpen && selectedResource ? (
+            {selectedResource ? (
               <ResourceInspector resource={selectedResource} />
-            ) : (
-              <RightInspector
-                canvas={displayCanvas}
-                selection={selection}
-                selectedWorkflow={selectedWorkflow}
-                selectedPort={selectedPort}
-                selectedEdge={selectedEdge}
-                selectedInternalNode={selectedInternalNode}
-                connectionMode={connectionMode}
-                dataConnectionDraft={dataConnectionDraft}
-                runtimeConfig={runtimeConfig}
-                liveLogs={selectedRunId ? runLogsById[selectedRunId] || {} : {}}
-                workflowRun={workflowRun}
-                workflowEvents={workflowEvents}
-                workflows={workflows}
-                binding={selectedWorkflow ? workflowBindings[selectedWorkflow.id] : undefined}
-                onConnectionMode={setConnectionMode}
-                onBeginDataConnection={beginDataConnection}
-                onCancelDataConnection={cancelDataConnection}
-                onUpdateDataConnectionMaterialization={updateDataConnectionMaterialization}
-                onCompleteDataConnection={completeDataConnection}
-                onCompleteDataConnectionWithNewInputPort={completeDataConnectionWithNewInputPort}
-                onAddDataConnectPort={addDataConnectPort}
-                onReadEvidence={readEvidence}
-                onConfigureBinding={(workflowId) => setBindingEditorWorkflowId(workflowId)}
-                onUpdateWorkflowInput={updateWorkflowInvocationInput}
-                onUpdateInternalInput={updateInternalInvocationInput}
-                onUpdateWorkflowLabel={updateWorkflowInvocationLabel}
-                onUpdateInternalLabel={updateInternalInvocationLabel}
-                onUpdateWorkflowForwardMainOutput={updateWorkflowForwardMainOutput}
-                onUpdateInternalForwardMainOutput={updateInternalForwardMainOutput}
-                onOpenCallableResource={(callableId, name, kind) => {
-                  setSelectedResource({
-                    kind: kind === 'tool_class' ? 'tool_class' : 'agent_class',
-                    callableId,
-                    name: name || callableId,
-                  });
-                  setChrome((current) => ({ ...current, rightPanel: 'resourceDetail' }));
-                }}
-              />
-            )}
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -1758,14 +1803,48 @@ export function WorkflowViewer({
           onConfirm={confirmSaveWorkflow}
         />
       ) : null}
-      <WorkflowEvidenceDock
+      <SelectionDetailsDock
         state={evidenceDock}
         message={message}
-        workflowRun={workflowRun}
-        workflowEvents={workflowEvents}
+        model={selectedDetailsModel}
+        callableState={selectedCallableDetailState}
+        runtimeConfig={runtimeConfig}
         currentTaskId={currentTask?.taskId}
         selectedRunId={selectedRunId}
+        onReadEvidence={readEvidence}
         onToggle={() => setEvidenceDock((current) => ({ ...current, open: !current.open }))}
+        onUpdateInput={(nextInput) => {
+          if (selection.type === 'workflow' && selectedWorkflow && isExecutableNodeWorkflow(selectedWorkflow)) {
+            updateWorkflowInvocationInput(selectedWorkflow.id, nextInput);
+          }
+          if (selection.type === 'internal' && selectedWorkflow && selectedInternalNode) {
+            updateInternalInvocationInput(selectedWorkflow.id, selectedInternalNode.id, nextInput);
+          }
+        }}
+        onUpdateLabel={(label) => {
+          if (selection.type === 'workflow' && selectedWorkflow && isExecutableNodeWorkflow(selectedWorkflow)) {
+            updateWorkflowInvocationLabel(selectedWorkflow.id, label);
+          }
+          if (selection.type === 'internal' && selectedWorkflow && selectedInternalNode) {
+            updateInternalInvocationLabel(selectedWorkflow.id, selectedInternalNode.id, label);
+          }
+        }}
+        onUpdateForwardMainOutput={(value) => {
+          if (selection.type === 'workflow' && selectedWorkflow && isExecutableNodeWorkflow(selectedWorkflow)) {
+            updateWorkflowForwardMainOutput(selectedWorkflow.id, value);
+          }
+          if (selection.type === 'internal' && selectedWorkflow && selectedInternalNode) {
+            updateInternalForwardMainOutput(selectedWorkflow.id, selectedInternalNode.id, value);
+          }
+        }}
+        onOpenCallableResource={(callableId, name, kind) => {
+          setSelectedResource({
+            kind: kind === 'tool_class' ? 'tool_class' : 'agent_class',
+            callableId,
+            name: name || callableId,
+          });
+          setChrome((current) => ({ ...current, rightPanel: 'resourceDetail' }));
+        }}
       />
     </WorkbenchShell>
   );
@@ -2054,8 +2133,8 @@ function TopBar({
   onValidate,
   onRun,
   onAutoLayout,
-  inspectorOpen,
-  onToggleInspector,
+  detailsOpen,
+  onToggleDetails,
 }: {
   title: string;
   subtitle: string;
@@ -2066,8 +2145,8 @@ function TopBar({
   onValidate: () => void;
   onRun: () => void;
   onAutoLayout: () => void;
-  inspectorOpen: boolean;
-  onToggleInspector: () => void;
+  detailsOpen: boolean;
+  onToggleDetails: () => void;
 }) {
   return (
     <header className="workbench-topbar">
@@ -2079,11 +2158,11 @@ function TopBar({
       <div className="toolbar-actions" aria-label="工作流工具栏">
         <button
           type="button"
-          className={inspectorOpen ? 'toggle-action active' : 'toggle-action'}
-          onClick={onToggleInspector}
+          className={detailsOpen ? 'toggle-action active' : 'toggle-action'}
+          onClick={onToggleDetails}
         >
           <Database aria-hidden="true" size={16} />
-          节点设置
+          运行详情
         </button>
         <button type="button" onClick={onNew}>
           <GitBranch aria-hidden="true" size={16} />
@@ -2128,6 +2207,7 @@ function WorkspaceCanvas({
   onCanvasChange,
   onSelect,
   onDeleteSelection,
+  onConnectionMode,
   onEdgeViewMode,
   onBlankCanvas,
   onNotice,
@@ -2146,6 +2226,7 @@ function WorkspaceCanvas({
   onCanvasChange: Dispatch<SetStateAction<WorkspaceCanvasModel>>;
   onSelect: (selection: CanvasSelection) => void;
   onDeleteSelection: (selection?: CanvasSelection) => void;
+  onConnectionMode: (mode: ConnectionMode) => void;
   onEdgeViewMode: (mode: EdgeViewMode) => void;
   onBlankCanvas: () => void;
   onNotice?: (message: string) => void;
@@ -2989,6 +3070,7 @@ function WorkspaceCanvas({
         edgeViewMode={edgeViewMode}
         focusedWorkflowId={focusedWorkflowId}
         workflowRun={workflowRun}
+        onConnectionMode={onConnectionMode}
         onEdgeViewMode={onEdgeViewMode}
         onExitFocus={() => onFocusedWorkflow(null)}
       />
@@ -3042,6 +3124,7 @@ function CanvasToolbar({
   edgeViewMode,
   focusedWorkflowId,
   workflowRun,
+  onConnectionMode,
   onEdgeViewMode,
   onExitFocus,
 }: {
@@ -3049,6 +3132,7 @@ function CanvasToolbar({
   edgeViewMode: EdgeViewMode;
   focusedWorkflowId: string | null;
   workflowRun: WorkflowRunResult | null;
+  onConnectionMode: (mode: ConnectionMode) => void;
   onEdgeViewMode: (mode: EdgeViewMode) => void;
   onExitFocus: () => void;
 }) {
@@ -3058,6 +3142,22 @@ function CanvasToolbar({
         {connectionMode === 'data' ? 'Data Edge: 浅灰虚线' : 'Control Edge: 灰黑实线'}
       </span>
       <span>状态：{workflowRun ? statusLabel(workflowRun.status) : '未运行'}</span>
+      <div className="segmented-control compact" aria-label="连接模式">
+        <button
+          type="button"
+          className={connectionMode === 'control' ? 'active' : ''}
+          onClick={() => onConnectionMode('control')}
+        >
+          控制
+        </button>
+        <button
+          type="button"
+          className={connectionMode === 'data' ? 'active' : ''}
+          onClick={() => onConnectionMode('data')}
+        >
+          数据
+        </button>
+      </div>
       <div className="segmented-control compact" aria-label="Edge display mode">
         {(['all', 'control', 'data'] as const).map((mode) => (
           <button
@@ -4426,6 +4526,649 @@ function AgentNodeSettings({
         runtimeConfig={runtimeConfig}
         callableDetail={detail}
       />
+    </div>
+  );
+}
+
+function SelectionDetailsDock({
+  state,
+  message,
+  model,
+  callableState,
+  runtimeConfig,
+  currentTaskId,
+  selectedRunId,
+  onToggle,
+  onReadEvidence,
+  onUpdateInput,
+  onUpdateLabel,
+  onUpdateForwardMainOutput,
+  onOpenCallableResource,
+}: {
+  state: EvidenceDockState;
+  message: string;
+  model: SelectedEntityDetailsModel;
+  callableState: CallableDetailLoadState;
+  runtimeConfig: RuntimeConfig | null;
+  currentTaskId?: string;
+  selectedRunId?: string | null;
+  onToggle: () => void;
+  onReadEvidence: (path: string | null | undefined, title?: string) => void;
+  onUpdateInput: (input: Record<string, unknown>) => void;
+  onUpdateLabel: (label: string) => void;
+  onUpdateForwardMainOutput: (value: boolean) => void;
+  onOpenCallableResource: (callableId: string, name: string, kind: 'agent_class' | 'tool_class') => void;
+}) {
+  const openedArtifact = evidenceContentForCurrentSelection(state, {
+    currentTaskId,
+    selectedRunId,
+  });
+  const currentEvidenceTitle = openedArtifact?.name || state.title || '未打开证据';
+  return (
+    <footer className={state.open ? 'evidence-dock selection-details-dock open' : 'evidence-dock selection-details-dock'} aria-label="选中对象详情">
+      <button type="button" className="evidence-dock-toggle selection-details-toggle" onClick={onToggle}>
+        <span className={`evidence-dock-status status-${model.status || 'not_run'}`}>
+          {statusLabel(model.status || 'not_run')}
+        </span>
+        <span className="selection-details-title">
+          <strong>{model.title}</strong>
+          {model.subtitle ? <small>{model.subtitle}</small> : null}
+        </span>
+        <span className="evidence-dock-message">{message}</span>
+        <span className="evidence-dock-current">{currentEvidenceTitle}</span>
+        {state.open ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+      </button>
+      {state.open ? (
+        <div className="selection-details-body">
+          <SelectionLogPane model={model} openedArtifact={openedArtifact} onReadEvidence={onReadEvidence} />
+          <SelectionPropertiesPane
+            model={model}
+            callableState={callableState}
+            runtimeConfig={runtimeConfig}
+            onReadEvidence={onReadEvidence}
+            onUpdateInput={onUpdateInput}
+            onUpdateLabel={onUpdateLabel}
+            onUpdateForwardMainOutput={onUpdateForwardMainOutput}
+            onOpenCallableResource={onOpenCallableResource}
+          />
+        </div>
+      ) : null}
+    </footer>
+  );
+}
+
+function SelectionLogPane({
+  model,
+  openedArtifact,
+  onReadEvidence,
+}: {
+  model: SelectedEntityDetailsModel;
+  openedArtifact: ArtifactContent | null;
+  onReadEvidence: (path: string | null | undefined, title?: string) => void;
+}) {
+  const inputAction = evidenceActionByLabel(model.evidenceActions, 'input.json');
+  const outputAction = evidenceActionByLabel(model.evidenceActions, 'output.json');
+  const defaultOutputView = model.status === 'success' ? 'final' : 'live';
+  const [primaryView, setPrimaryView] = useState<'input' | 'output'>('output');
+  const [outputView, setOutputView] = useState<'live' | 'final'>(defaultOutputView);
+  const [logStream, setLogStream] = useState<'all' | 'stdout' | 'stderr'>('all');
+  const lastArtifactRequestRef = useRef('');
+
+  useEffect(() => {
+    setOutputView(defaultOutputView);
+    setLogStream('all');
+    lastArtifactRequestRef.current = '';
+  }, [defaultOutputView, model.key]);
+
+  useEffect(() => {
+    const path =
+      primaryView === 'input'
+        ? inputAction?.path
+        : outputView === 'final'
+          ? outputAction?.path
+          : null;
+    const title =
+      primaryView === 'input'
+        ? '输入'
+        : outputView === 'final'
+          ? 'output.json'
+          : '';
+    if (!path || openedArtifact?.path === path) {
+      return;
+    }
+    const requestKey = `${model.key}:${path}`;
+    if (lastArtifactRequestRef.current === requestKey) {
+      return;
+    }
+    lastArtifactRequestRef.current = requestKey;
+    onReadEvidence(path, title);
+  }, [
+    inputAction?.path,
+    model.key,
+    onReadEvidence,
+    openedArtifact?.path,
+    outputAction?.path,
+    outputView,
+    primaryView,
+  ]);
+
+  const combinedLog = combinedLogText(model.log);
+  const visibleLog =
+    logStream === 'stdout'
+      ? model.log.stdout
+      : logStream === 'stderr'
+        ? model.log.stderr
+        : combinedLog || model.log.excerpt;
+  const selectedArtifactPath = primaryView === 'input' ? inputAction?.path : outputAction?.path;
+  const selectedArtifactNames = primaryView === 'input' ? ['input.json', 'agent_payload.json'] : ['output.json'];
+  const selectedArtifact = artifactMatchesEvidence(openedArtifact, selectedArtifactPath, selectedArtifactNames)
+    ? openedArtifact
+    : null;
+  const showLiveOutput = primaryView === 'output' && outputView === 'live';
+  const showArtifactOutput = primaryView === 'input' || (primaryView === 'output' && outputView === 'final');
+  const debugEvidencePath = selectedArtifactPath || '';
+  const debugRunDir = model.nodeRun?.run_dir || '';
+  const emptyArtifactText =
+    primaryView === 'input'
+      ? '该节点尚未产生输入。'
+      : '该节点尚未产生 output.json。';
+  return (
+    <section className="selection-log-pane" aria-label="输入输出">
+      <header className="selection-pane-header">
+        <div>
+          <span>输入 / 输出</span>
+          <h3>{model.nodeRun ? shortPath(model.nodeRun.run_dir) : '尚未运行'}</h3>
+        </div>
+        <div className="selection-view-tabs" role="tablist" aria-label="输入输出视图">
+          {(['input', 'output'] as const).map((view) => (
+            <button
+              key={view}
+              type="button"
+              className={primaryView === view ? 'active' : ''}
+              onClick={() => setPrimaryView(view)}
+            >
+              {view === 'input' ? '输入' : '输出'}
+            </button>
+          ))}
+        </div>
+      </header>
+
+      {primaryView === 'output' ? (
+        <div className="selection-output-tabs" role="tablist" aria-label="输出视图">
+          <button
+            type="button"
+            className={outputView === 'live' ? 'active' : ''}
+            onClick={() => setOutputView('live')}
+          >
+            实时输出
+          </button>
+          <button
+            type="button"
+            className={outputView === 'final' ? 'active' : ''}
+            onClick={() => setOutputView('final')}
+            disabled={!outputAction?.path}
+          >
+            output.json
+          </button>
+        </div>
+      ) : null}
+
+      {showLiveOutput ? (
+        <>
+          <div className="selection-log-tabs" role="tablist" aria-label="实时输出流">
+            {(['all', 'stdout', 'stderr'] as const).map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                className={logStream === tab ? 'active' : ''}
+                onClick={() => setLogStream(tab)}
+              >
+                {tab === 'all' ? '全部' : tab}
+              </button>
+            ))}
+          </div>
+          <div className="selection-log-output" role="log" aria-live="polite">
+            {visibleLog.trim() ? (
+              <pre>{visibleLog}</pre>
+            ) : (
+              <p className="empty-state">该节点尚未产生实时输出。</p>
+            )}
+          </div>
+        </>
+      ) : null}
+
+      {showArtifactOutput ? (
+        <section className="selection-open-artifact inline" aria-label={primaryView === 'input' ? '输入内容' : 'output.json 内容'}>
+          <header className="selection-pane-header compact">
+            <div>
+              <span>{primaryView === 'input' ? '输入' : '最终输出'}</span>
+              <h3>{primaryView === 'input' ? 'input.json' : 'output.json'}</h3>
+            </div>
+            <small>{selectedArtifactPath ? shortPath(selectedArtifactPath) : '无可用证据'}</small>
+          </header>
+          {selectedArtifact ? (
+            primaryView === 'input' ? (
+              <SelectionInputArtifact content={selectedArtifact} />
+            ) : (
+              <ReadableArtifact content={selectedArtifact} />
+            )
+          ) : (
+            <div className="selection-log-output artifact-empty">
+              <p className="empty-state">{emptyArtifactText}</p>
+            </div>
+          )}
+        </section>
+      ) : null}
+      <details className="selection-debug-details">
+        <summary>详细信息</summary>
+        <dl>
+          <div>
+            <dt>当前视图</dt>
+            <dd>{primaryView === 'input' ? '输入' : outputView === 'live' ? '实时输出' : 'output.json'}</dd>
+          </div>
+          {debugRunDir ? (
+            <div>
+              <dt>run dir</dt>
+              <dd>{debugRunDir}</dd>
+            </div>
+          ) : null}
+          {debugEvidencePath ? (
+            <div>
+              <dt>artifact</dt>
+              <dd>{debugEvidencePath}</dd>
+            </div>
+          ) : null}
+        </dl>
+      </details>
+    </section>
+  );
+}
+
+function SelectionInputArtifact({ content }: { content: ArtifactContent }) {
+  const blocks = inputBlocksFromArtifact(content);
+  if (blocks.length === 0) {
+    return (
+      <div className="selection-input-breakdown empty">
+        <p className="empty-state">当前节点没有可展示的输入内容。</p>
+      </div>
+    );
+  }
+  return (
+    <div className="selection-input-breakdown" aria-label="输入来源">
+      {blocks.map((block) => (
+        <article key={block.id} className="selection-input-source-card">
+          <header>
+            <span>{block.badge}</span>
+            <strong>{block.title}</strong>
+          </header>
+          <p>{block.summary}</p>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+type InputSourceBlock = {
+  id: string;
+  badge: string;
+  title: string;
+  summary: string;
+};
+
+function inputBlocksFromArtifact(content: ArtifactContent): InputSourceBlock[] {
+  let payload: unknown;
+  try {
+    payload = JSON.parse(content.content) as unknown;
+  } catch {
+    return [
+      {
+        id: content.path,
+        badge: 'text',
+        title: content.name || 'input',
+        summary: compactText(content.content),
+      },
+    ];
+  }
+  if (!isPlainRecord(payload)) {
+    return [{ id: 'input', badge: 'value', title: 'input', summary: compactValue(payload) }];
+  }
+  const blocks: InputSourceBlock[] = [];
+  for (const [portId, value] of Object.entries(payload)) {
+    if (isEmptyInputValue(value)) {
+      continue;
+    }
+    if (portId === 'main' && isControlMainAggregate(value)) {
+      const order = Array.isArray(value.order) ? value.order.map(String) : Object.keys(value.sources);
+      for (const sourceId of order) {
+        if (!Object.prototype.hasOwnProperty.call(value.sources, sourceId)) {
+          continue;
+        }
+        blocks.push({
+          id: `main:${sourceId}`,
+          badge: 'main',
+          title: sourceId,
+          summary: compactValue(value.sources[sourceId]),
+        });
+      }
+      continue;
+    }
+    blocks.push({
+      id: portId,
+      badge: portId,
+      title: portId === 'main' ? 'main 输入' : `${portId} 输入`,
+      summary: compactValue(value),
+    });
+  }
+  return blocks;
+}
+
+function isControlMainAggregate(
+  value: unknown,
+): value is { kind?: unknown; order?: unknown; sources: Record<string, unknown> } {
+  return (
+    isPlainRecord(value) &&
+    value.kind === 'control_main_aggregate' &&
+    isPlainRecord(value.sources)
+  );
+}
+
+function isEmptyInputValue(value: unknown): boolean {
+  if (value === null || value === undefined) {
+    return true;
+  }
+  if (Array.isArray(value)) {
+    return value.length === 0;
+  }
+  return isPlainRecord(value) && Object.keys(value).length === 0;
+}
+
+function compactValue(value: unknown): string {
+  if (typeof value === 'string') {
+    return compactText(value);
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    return value.length ? value.map((item) => compactValue(item)).join('；') : '空';
+  }
+  if (isPlainRecord(value)) {
+    const conclusion = value.summary || value.report_markdown;
+    if (typeof conclusion === 'string' || typeof conclusion === 'number' || typeof conclusion === 'boolean') {
+      return compactText(String(conclusion));
+    }
+    const status = value.status || value.kind;
+    if (typeof status === 'string' || typeof status === 'number' || typeof status === 'boolean') {
+      return compactText(String(status));
+    }
+    const entries = Object.entries(value).filter(([, item]) => !isEmptyInputValue(item));
+    return compactText(entries.slice(0, 4).map(([key, item]) => `${key}: ${compactValue(item)}`).join('；'));
+  }
+  return compactText(String(value ?? ''));
+}
+
+function compactText(value: string): string {
+  const text = value.replace(/\s+/gu, ' ').trim();
+  return text.length > 420 ? `${text.slice(0, 420)}...` : text || '空';
+}
+
+function SelectionPropertiesPane({
+  model,
+  callableState,
+  runtimeConfig,
+  onReadEvidence,
+  onUpdateInput,
+  onUpdateLabel,
+  onUpdateForwardMainOutput,
+  onOpenCallableResource,
+}: {
+  model: SelectedEntityDetailsModel;
+  callableState: CallableDetailLoadState;
+  runtimeConfig: RuntimeConfig | null;
+  onReadEvidence: (path: string | null | undefined, title?: string) => void;
+  onUpdateInput: (input: Record<string, unknown>) => void;
+  onUpdateLabel: (label: string) => void;
+  onUpdateForwardMainOutput: (value: boolean) => void;
+  onOpenCallableResource: (callableId: string, name: string, kind: 'agent_class' | 'tool_class') => void;
+}) {
+  return (
+    <section className="selection-properties-pane" aria-label="节点属性">
+      <header className="selection-pane-header">
+        <div>
+          <span>节点属性</span>
+          <h3>{model.scopeLabel || model.kind}</h3>
+        </div>
+      </header>
+      {model.nodeSettings ? (
+        <SelectionNodeProperties
+          node={model.nodeSettings}
+          callableState={callableState}
+          runtimeConfig={runtimeConfig}
+          onReadEvidence={onReadEvidence}
+          onUpdateInput={onUpdateInput}
+          onUpdateLabel={onUpdateLabel}
+          onUpdateForwardMainOutput={onUpdateForwardMainOutput}
+          onOpenCallableResource={onOpenCallableResource}
+        />
+      ) : (
+        <PropertyGroups groups={model.properties} />
+      )}
+    </section>
+  );
+}
+
+function SelectionNodeProperties({
+  node,
+  callableState,
+  runtimeConfig,
+  onUpdateInput,
+  onUpdateLabel,
+  onUpdateForwardMainOutput,
+  onReadEvidence,
+  onOpenCallableResource,
+}: {
+  node: AgentNodeSettingsModel;
+  callableState: CallableDetailLoadState;
+  runtimeConfig: RuntimeConfig | null;
+  onUpdateInput: (input: Record<string, unknown>) => void;
+  onUpdateLabel: (label: string) => void;
+  onUpdateForwardMainOutput: (value: boolean) => void;
+  onReadEvidence: (path: string | null | undefined, title?: string) => void;
+  onOpenCallableResource: (callableId: string, name: string, kind: 'agent_class' | 'tool_class') => void;
+}) {
+  const detail = callableState.detail;
+  const templateName = detail ? callableDisplayTitle(detail) : node.callableId || '未绑定模板';
+  const templateDescription = detail ? callableDescription(detail) : '';
+  const inputFields = schemaFieldsFromPorts(detail?.input_ports, node.inputPorts);
+  const outputFields = [
+    ...schemaFieldsFromPorts(detail?.output_ports, node.outputPorts),
+    ...schemaFieldsFromArtifactContract(detail?.artifact_contract),
+  ];
+  const provider = detail ? providerLabelFromCallable(detail) : node.kind === 'Tool' ? '工具' : '智能体';
+  const metadata = detail?.metadata || {};
+  const skills = skillsFromMetadata(metadata);
+  const templateKind = detail?.kind === 'tool_class' ? 'tool_class' : 'agent_class';
+  const runLabel = node.run?.run_dir ? shortPath(node.run.run_dir) : '尚未运行';
+  return (
+    <div className="selection-node-properties">
+      <section className="node-settings-card current-node-card">
+        <div className="node-settings-section-header">
+          <div>
+            <span className="panel-kicker">当前节点</span>
+            <h4>{node.label}</h4>
+          </div>
+          <span className={`node-settings-status status-${node.status}`}>{statusLabel(node.status)}</span>
+        </div>
+        <label className="node-settings-field">
+          <span>节点名称</span>
+          <input value={node.label} onChange={(event) => onUpdateLabel(event.target.value)} aria-label="节点名称" />
+        </label>
+        <dl className="node-settings-facts">
+          <dt>节点类型</dt>
+          <dd>{node.kind === 'Tool' ? '工具' : '智能体'}</dd>
+          <dt>使用模板</dt>
+          <dd>{templateName}</dd>
+          <dt>运行状态</dt>
+          <dd>{runLabel}</dd>
+          <dt>Scope</dt>
+          <dd>{node.scopeLabel}</dd>
+        </dl>
+        <label className="node-settings-checkbox">
+          <input
+            type="checkbox"
+            checked={node.forwardMainOutputOnControl !== false}
+            onChange={(event) => onUpdateForwardMainOutput(event.currentTarget.checked)}
+          />
+          <span>通过控制线传递 main 输出</span>
+        </label>
+      </section>
+
+      <NodePromptEditor nodeKey={node.nodeId} input={node.input} onChange={onUpdateInput} />
+
+      <SelectionRunEvidenceSummary nodeRun={node.run} runtimeConfig={runtimeConfig} />
+
+      <section className="node-settings-card">
+        <div className="node-settings-section-header">
+          <div>
+            <span className="panel-kicker">模板摘要</span>
+            <h4>{templateName}</h4>
+          </div>
+          {node.callableId ? (
+            <button
+              type="button"
+              className="secondary-action compact-action"
+              onClick={() => onOpenCallableResource(node.callableId, templateName, templateKind)}
+            >
+              编辑模板
+            </button>
+          ) : null}
+        </div>
+        {callableState.status === 'loading' ? <p className="muted">正在加载模板信息...</p> : null}
+        {callableState.status === 'error' ? (
+          <p className="notice compact-notice">模板信息暂时不可用：{callableState.error}</p>
+        ) : null}
+        <div className="template-summary-grid">
+          <div>
+            <span>Agent</span>
+            <strong>{provider}</strong>
+          </div>
+          <div>
+            <span>模型</span>
+            <strong>{String(metadata.model || '默认模型')}</strong>
+          </div>
+          <div>
+            <span>思考程度</span>
+            <strong>{thinkingLabel(String(metadata.reasoning_effort || 'medium'))}</strong>
+          </div>
+        </div>
+        {templateDescription ? <p className="template-description">{templateDescription}</p> : null}
+        <section className="template-readonly-block">
+          <h5>系统提示词</h5>
+          <p>{detail?.default_prompt || '未填写系统提示词'}</p>
+        </section>
+        <section className="template-readonly-block">
+          <h5>Skills</h5>
+          {skills.length > 0 ? (
+            <div className="skill-chip-row readonly">
+              {skills.map((skill) => (
+                <span key={skill}>{skill}</span>
+              ))}
+            </div>
+          ) : (
+            <p>未配置固定 skills</p>
+          )}
+        </section>
+      </section>
+
+      <section className="node-settings-card">
+        <div className="node-settings-section-header">
+          <div>
+            <span className="panel-kicker">输入与输出</span>
+            <h4>这个节点需要什么，会产出什么</h4>
+          </div>
+        </div>
+        <SchemaFieldCards title="输入" fields={inputFields} emptyText="未声明输入字段结构。" />
+        <SchemaFieldCards title="输出" fields={dedupeSchemaFields(outputFields)} emptyText="未声明输出字段结构。" />
+      </section>
+
+      <TechnicalDetailsDisclosure node={node} runtimeConfig={runtimeConfig} callableDetail={detail} />
+    </div>
+  );
+}
+
+function SelectionRunEvidenceSummary({
+  nodeRun,
+  runtimeConfig,
+}: {
+  nodeRun?: NodeRunSummary;
+  runtimeConfig: RuntimeConfig | null;
+}) {
+  if (!nodeRun) {
+    return (
+      <section className="node-settings-card">
+        <div className="node-settings-section-header">
+          <div>
+            <span className="panel-kicker">本次运行</span>
+            <h4>尚未运行</h4>
+          </div>
+        </div>
+        <p className="empty-state">运行后这里会显示输入来源、输出摘要和证据路径。</p>
+      </section>
+    );
+  }
+  const inputPorts = inputPortsFromRun(nodeRun);
+  const transferRows = transferRowsFromRun(nodeRun);
+  return (
+    <section className="node-settings-card selection-run-summary-card">
+      <div className="node-settings-section-header">
+        <div>
+          <span className="panel-kicker">本次运行</span>
+          <h4>运行证据摘要</h4>
+        </div>
+      </div>
+      <div className="run-evidence-facts">
+        <EvidenceFact label="状态" value={statusLabel(nodeRun.status)} tone={nodeRun.status} />
+        <EvidenceFact label="Run mode" value={runtimeLabel(runtimeConfig, nodeRun)} />
+        <EvidenceFact label="收到输入端口" value={inputPorts.length ? inputPorts.join(', ') : '未记录'} />
+      </div>
+      {transferRows.length > 0 ? (
+        <div className="evidence-flow-list">
+          {transferRows.map((row) => (
+            <article key={row.key} className="evidence-flow-row">
+              <strong>{row.label}</strong>
+              <span>{row.detail}</span>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className="empty-state">没有记录到输入绑定；该节点可能只按控制顺序运行。</p>
+      )}
+      <p className="selection-output-summary">{outputSummaryFromRun(nodeRun)}</p>
+    </section>
+  );
+}
+
+function PropertyGroups({ groups }: { groups: SelectedDetailsPropertyGroup[] }) {
+  return (
+    <div className="selection-property-groups">
+      {groups.map((group) => (
+        <section key={group.title} className="node-settings-card">
+          <div className="node-settings-section-header">
+            <div>
+              <span className="panel-kicker">属性</span>
+              <h4>{group.title}</h4>
+            </div>
+          </div>
+          <dl className="node-settings-facts">
+            {group.rows.map((row) => (
+              <Fragment key={`${group.title}-${row.label}`}>
+                <dt>{row.label}</dt>
+                <dd>{row.value}</dd>
+              </Fragment>
+            ))}
+          </dl>
+        </section>
+      ))}
     </div>
   );
 }
@@ -6906,6 +7649,12 @@ function resolveControlConnection(canvas: WorkspaceCanvasModel, connection: Conn
   if (transition.edge.kind === 'control' && wouldCreateControlCycle(canvas, transition.scopeWorkflowId, transition.edge)) {
     return { accepted: false, reason: '这条控制线会形成循环' };
   }
+  if (transition.edge.kind === 'control') {
+    const slotIssue = controlSlotLimitIssue(canvas, transition.scopeWorkflowId, transition.edge);
+    if (slotIssue) {
+      return { accepted: false, reason: slotIssue };
+    }
+  }
   return transition;
 }
 
@@ -9120,6 +9869,30 @@ function canvasEdgesAreEquivalent(left: WorkflowCanvasEdge, right: WorkflowCanva
   );
 }
 
+function controlSlotLimitIssue(
+  canvas: WorkspaceCanvasModel,
+  scopeWorkflowId: string | null,
+  edge: Extract<WorkflowCanvasEdge, { kind: 'control' }>,
+): string | null {
+  const edges =
+    scopeWorkflowId === null
+      ? canvas.edges
+      : canvas.workflows.find((workflow) => workflow.id === scopeWorkflowId)?.internalEdges || [];
+  const controlEdges = edges.filter((item): item is Extract<WorkflowCanvasEdge, { kind: 'control' }> => item.kind === 'control');
+  if (controlEdges.some((item) => canvasEdgesAreEquivalent(item, edge))) {
+    return null;
+  }
+  const outgoing = controlEdges.filter((item) => item.source.workflowId === edge.source.workflowId).length;
+  if (outgoing >= CONTROL_SLOT_LIMIT) {
+    return `控制线输出 slot 已满，当前节点最多支持 ${CONTROL_SLOT_LIMIT} 个输出`;
+  }
+  const incoming = controlEdges.filter((item) => item.target.workflowId === edge.target.workflowId).length;
+  if (incoming >= CONTROL_SLOT_LIMIT) {
+    return `控制线输入 slot 已满，当前节点最多支持 ${CONTROL_SLOT_LIMIT} 个输入`;
+  }
+  return null;
+}
+
 function normalizeCanvasEdges(canvas: WorkspaceCanvasModel): WorkspaceCanvasModel {
   return {
     ...canvas,
@@ -10947,6 +11720,339 @@ function isJsdomRuntime(): boolean {
     typeof window !== 'undefined' &&
     window.navigator?.userAgent?.toLowerCase().includes('jsdom')
   );
+}
+
+function selectedNodeSettingsModel({
+  selection,
+  selectedWorkflow,
+  selectedInternalNode,
+  workflowRun,
+  liveLogs,
+}: {
+  selection: CanvasSelection;
+  selectedWorkflow?: WorkflowContainerModel;
+  selectedInternalNode?: InternalNodeView;
+  workflowRun: WorkflowRunResult | null;
+  liveLogs: Record<string, NodeLiveLogs>;
+}): AgentNodeSettingsModel | undefined {
+  if (selection.type === 'workflow' && selectedWorkflow && isExecutableNodeWorkflow(selectedWorkflow)) {
+    const nodeRun = nodeRunForWorkflow(workflowRun, selectedWorkflow);
+    return {
+      scopeLabel: 'Root canvas',
+      nodeId: selectedWorkflow.id,
+      label: workflowInvocationLabel(selectedWorkflow),
+      task: workflowInvocationLabel(selectedWorkflow),
+      kind: selectedWorkflow.sourceKind === 'tool' ? 'Tool' : 'Agent',
+      status: (nodeRun?.status as WorkflowStatus | undefined) || selectedWorkflow.status,
+      callableId: selectedWorkflow.callableId || '',
+      input: selectedWorkflow.sourceInput || {},
+      inputPorts: selectedWorkflow.inputPorts,
+      outputPorts: selectedWorkflow.outputPorts,
+      forwardMainOutputOnControl: selectedWorkflow.forwardMainOutputOnControl,
+      run: nodeRun,
+      logs: nodeLiveLogsFor(liveLogs, nodeRun),
+      preview: workflowInvocationPreview(selectedWorkflow),
+      raw: selectedWorkflow,
+    };
+  }
+  if (selection.type === 'internal' && selectedWorkflow && selectedInternalNode) {
+    const nodeRun = nodeRunForInternalNode(workflowRun, selectedWorkflow.id, selectedInternalNode.id);
+    return {
+      scopeLabel: `Inside: ${workflowInvocationLabel(selectedWorkflow)}`,
+      nodeId: selectedInternalNode.id,
+      label: internalInvocationLabel(selectedInternalNode),
+      task: selectedInternalNode.task,
+      kind: selectedInternalNode.kind,
+      status: (nodeRun?.status as WorkflowStatus | undefined) || selectedInternalNode.status,
+      callableId: selectedInternalNode.callableId || selectedInternalNode.runtime || '',
+      input: selectedInternalNode.input || {},
+      inputPorts: selectedInternalNode.inputPorts || [port('main', 'input', 'input')],
+      outputPorts: selectedInternalNode.outputPorts || [port('main', 'output', 'output')],
+      forwardMainOutputOnControl: selectedInternalNode.forwardMainOutputOnControl,
+      run: nodeRun,
+      logs: nodeLiveLogsFor(liveLogs, nodeRun),
+      preview: internalNodeInvocationPreview(selectedInternalNode),
+      raw: { workflow: selectedWorkflow.id, node: selectedInternalNode },
+    };
+  }
+  return undefined;
+}
+
+function selectedEntityDetailsModel({
+  canvas,
+  selection,
+  selectedWorkflow,
+  selectedPort,
+  selectedEdge,
+  selectedInternalNode,
+  selectedNodeSettings,
+  workflowRun,
+  workflowEvents,
+  liveLogs,
+  runtimeConfig,
+  binding,
+  currentTask,
+}: {
+  canvas: WorkspaceCanvasModel;
+  selection: CanvasSelection;
+  selectedWorkflow?: WorkflowContainerModel;
+  selectedPort?: WorkflowPortView;
+  selectedEdge?: WorkflowCanvasEdge;
+  selectedInternalNode?: InternalNodeView;
+  selectedNodeSettings?: AgentNodeSettingsModel;
+  workflowRun: WorkflowRunResult | null;
+  workflowEvents: RunEvent[];
+  liveLogs: Record<string, NodeLiveLogs>;
+  runtimeConfig: RuntimeConfig | null;
+  binding?: WorkflowBindingView;
+  currentTask?: WorkbenchTask;
+}): SelectedEntityDetailsModel {
+  if (selectedNodeSettings) {
+    const nodeRun = selectedNodeSettings.run;
+    return {
+      key: `node:${selectedNodeSettings.scopeLabel}:${selectedNodeSettings.nodeId}`,
+      kind: selection.type === 'internal' ? 'internal-node' : 'node',
+      title: selectedNodeSettings.label,
+      subtitle: selectedNodeSettings.callableId || selectedNodeSettings.kind,
+      status: nodeRun?.status || selectedNodeSettings.status || 'not_run',
+      scopeLabel: selectedNodeSettings.scopeLabel,
+      nodeRun,
+      logs: selectedNodeSettings.logs,
+      log: logModelFromRun(nodeRun, selectedNodeSettings.logs),
+      properties: [],
+      evidenceActions: evidenceActionsFromNodeRun(nodeRun),
+      events: nodeEventsForRun(workflowEvents, nodeRun),
+      nodeSettings: selectedNodeSettings,
+    };
+  }
+
+  if (selection.type === 'workflow' && selectedWorkflow) {
+    const nodeRun = nodeRunForWorkflow(workflowRun, selectedWorkflow);
+    return {
+      key: `workflow:${selectedWorkflow.id}`,
+      kind: 'workflow',
+      title: workflowInvocationLabel(selectedWorkflow),
+      subtitle: selectedWorkflow.workflowRef || selectedWorkflow.workflowBodyKind || 'inline workflow',
+      status: nodeRun?.status || selectedWorkflow.status || 'not_run',
+      scopeLabel: 'Workflow container',
+      nodeRun,
+      logs: nodeLiveLogsFor(liveLogs, nodeRun),
+      log: logModelFromRun(nodeRun, nodeLiveLogsFor(liveLogs, nodeRun)),
+      properties: workflowContainerPropertyGroups(selectedWorkflow, binding, nodeRun),
+      evidenceActions: evidenceActionsFromNodeRun(nodeRun),
+      events: nodeEventsForRun(workflowEvents, nodeRun),
+    };
+  }
+
+  if (selection.type === 'edge' && selectedEdge) {
+    return {
+      key: `edge:${selection.scopeWorkflowId || 'root'}:${selectedEdge.id}`,
+      kind: 'edge',
+      title: selectedEdge.kind === 'control' ? '控制边' : '数据边',
+      subtitle: selectedEdge.id,
+      status: workflowRun?.status || 'not_run',
+      scopeLabel: selection.scopeWorkflowId ? `Workflow: ${selection.scopeWorkflowId}` : 'Root canvas',
+      log: emptyLogModel(),
+      properties: edgePropertyGroups(selectedEdge, selection.scopeWorkflowId || null),
+      evidenceActions: [],
+      events: workflowEvents,
+    };
+  }
+
+  if (selection.type === 'port' && selectedWorkflow && selectedPort) {
+    return {
+      key: `port:${selectedWorkflow.id}:${selectedPort.direction}:${selectedPort.id}`,
+      kind: 'port',
+      title: `${selectedWorkflow.title}.${selectedPort.id}`,
+      subtitle: selectedPort.direction === 'input' ? '输入端口' : '输出端口',
+      status: selectedWorkflow.status || 'not_run',
+      scopeLabel: workflowInvocationLabel(selectedWorkflow),
+      log: emptyLogModel(),
+      properties: portPropertyGroups(selectedWorkflow, selectedPort),
+      evidenceActions: [],
+      events: workflowEvents,
+    };
+  }
+
+  return {
+    key: `canvas:${canvas.id}:${currentTask?.taskId || 'task'}`,
+    kind: 'canvas',
+    title: currentTask?.title || canvas.name || '任务画布',
+    subtitle: currentTask?.activeRunId || currentTask?.latestRunId || '尚未运行',
+    status: currentTask?.status || workflowRun?.status || 'not_run',
+    scopeLabel: 'Root canvas',
+    log: emptyLogModel(),
+    properties: canvasPropertyGroups(canvas, currentTask, workflowRun, runtimeConfig),
+    evidenceActions: workflowRun
+      ? [
+          { label: 'run_summary.json', title: 'Run summary', path: `${workflowRun.run_dir}/run_summary.json` },
+        ]
+      : [],
+    events: workflowEvents,
+  };
+}
+
+function logModelFromRun(nodeRun?: NodeRunSummary, logs?: NodeLiveLogs): SelectedEntityDetailsModel['log'] {
+  return {
+    stdout: logs?.stdout || '',
+    stderr: logs?.stderr || '',
+    excerpt: latestLogExcerpt(logs, nodeRun),
+    stdoutPath: nodeRun?.stdout_log,
+    stderrPath: nodeRun?.stderr_log,
+  };
+}
+
+function emptyLogModel(): SelectedEntityDetailsModel['log'] {
+  return { stdout: '', stderr: '', excerpt: '' };
+}
+
+function evidenceActionByLabel(
+  actions: SelectedDetailsEvidenceAction[],
+  label: string,
+): SelectedDetailsEvidenceAction | undefined {
+  return actions.find((action) => action.label === label);
+}
+
+function artifactMatchesEvidence(
+  artifact: ArtifactContent | null,
+  expectedPath: string | null | undefined,
+  acceptedNames: string[],
+): artifact is ArtifactContent {
+  if (!artifact) {
+    return false;
+  }
+  if (expectedPath && artifact.path === expectedPath) {
+    return true;
+  }
+  const artifactName = artifact.name || artifact.path.split(/[\\/]/u).pop() || '';
+  return acceptedNames.includes(artifactName);
+}
+
+function combinedLogText(log: SelectedEntityDetailsModel['log']): string {
+  const parts = [
+    log.stderr ? `[stderr]\n${log.stderr.trimEnd()}` : '',
+    log.stdout ? `[stdout]\n${log.stdout.trimEnd()}` : '',
+  ].filter(Boolean);
+  return parts.join('\n\n');
+}
+
+function evidenceActionsFromNodeRun(nodeRun?: NodeRunSummary): SelectedDetailsEvidenceAction[] {
+  if (!nodeRun) {
+    return [];
+  }
+  return [
+    { label: 'input.json', title: '真实输入', path: nodeRun.input_path },
+    { label: 'output.json', title: '真实输出', path: nodeRun.output_path },
+    { label: 'stdout.log', title: 'stdout.log', path: nodeRun.stdout_log },
+    { label: 'stderr.log', title: 'stderr.log', path: nodeRun.stderr_log },
+    { label: 'event log', title: 'event log', path: nodeRun.event_log },
+  ].filter((action) => Boolean(action.path));
+}
+
+function nodeEventsForRun(events: RunEvent[], nodeRun?: NodeRunSummary): RunEvent[] {
+  if (!nodeRun) {
+    return [];
+  }
+  return events.filter((event) => {
+    const eventNodeId = typeof event.node_id === 'string' ? event.node_id : '';
+    return eventNodeId === nodeRun.node_id || eventNodeId === nodeRun.ui_node_id;
+  });
+}
+
+function workflowContainerPropertyGroups(
+  workflow: WorkflowContainerModel,
+  binding: WorkflowBindingView | undefined,
+  nodeRun?: NodeRunSummary,
+): SelectedDetailsPropertyGroup[] {
+  return [
+    {
+      title: 'Workflow',
+      rows: [
+        { label: 'id', value: workflow.id },
+        { label: '类型', value: isExecutableNodeWorkflow(workflow) ? 'Workflow 调用节点' : 'Inline workflow 容器' },
+        { label: 'workflow_ref', value: workflow.workflowRef || 'inline container' },
+        { label: '目录', value: bindingDirectory(workflow, binding) },
+        { label: '内部节点', value: String(workflow.internalNodes.length) },
+        { label: '内部边', value: String(workflow.internalEdges.length) },
+        { label: 'run', value: nodeRun?.run_dir ? shortPath(nodeRun.run_dir) : '尚未运行' },
+      ],
+    },
+  ];
+}
+
+function edgePropertyGroups(edge: WorkflowCanvasEdge, scopeWorkflowId: string | null): SelectedDetailsPropertyGroup[] {
+  const source = edge.kind === 'control' ? edge.source.workflowId : `${edge.source.workflowId}.${edge.source.portId}`;
+  const target = edge.kind === 'control' ? edge.target.workflowId : `${edge.target.workflowId}.${edge.target.portId}`;
+  return [
+    {
+      title: edge.kind === 'control' ? '控制边' : '数据边',
+      rows: [
+        { label: 'id', value: edge.id },
+        { label: 'scope', value: scopeWorkflowId || 'Root canvas' },
+        { label: 'source', value: source },
+        { label: 'target', value: target },
+        { label: 'kind', value: edge.kind },
+        { label: 'materialization', value: edge.kind === 'data' ? edge.materialization : edge.context || 'none' },
+      ],
+    },
+  ];
+}
+
+function portPropertyGroups(workflow: WorkflowContainerModel, portValue: WorkflowPortView): SelectedDetailsPropertyGroup[] {
+  return [
+    {
+      title: '端口',
+      rows: [
+        { label: 'workflow', value: workflowInvocationLabel(workflow) },
+        { label: 'port id', value: portValue.id },
+        { label: '方向', value: portValue.direction === 'input' ? '输入' : '输出' },
+        { label: '必填', value: portValue.required ? '是' : '否' },
+        { label: 'cardinality', value: portValue.cardinality || 'one' },
+        { label: 'artifact types', value: portValue.artifactTypes?.join(', ') || '未声明' },
+      ],
+    },
+  ];
+}
+
+function canvasPropertyGroups(
+  canvas: WorkspaceCanvasModel,
+  task: WorkbenchTask | undefined,
+  workflowRun: WorkflowRunResult | null,
+  runtimeConfig: RuntimeConfig | null,
+): SelectedDetailsPropertyGroup[] {
+  return [
+    {
+      title: '任务画布',
+      rows: [
+        { label: '任务', value: task?.title || canvas.name },
+        { label: '状态', value: statusLabel(task?.status || workflowRun?.status || 'not_run') },
+        { label: 'root workflow', value: canvas.rootWorkflowId },
+        { label: '节点数', value: String(canvas.workflows.length) },
+        { label: '边数', value: String(canvas.edges.length) },
+        { label: 'run mode', value: runtimeConfig?.real_external_agents_enabled ? 'production / real CLI' : 'hermetic or gated' },
+      ],
+    },
+  ];
+}
+
+function evidenceContentForCurrentSelection(
+  state: EvidenceDockState,
+  context: { currentTaskId?: string; selectedRunId?: string | null },
+): ArtifactContent | null {
+  if (!state.content) {
+    return null;
+  }
+  const owner = state.owner;
+  if (!owner) {
+    return state.content;
+  }
+  if (owner.taskId && context.currentTaskId && owner.taskId !== context.currentTaskId) {
+    return null;
+  }
+  if ((owner.kind === 'run' || owner.kind === 'node' || owner.kind === 'artifact') && owner.runId) {
+    return owner.runId === context.selectedRunId ? state.content : null;
+  }
+  return state.content;
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {

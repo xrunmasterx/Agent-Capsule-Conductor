@@ -99,11 +99,132 @@ def test_fixed_failure_writes_failed_step_and_dispatch(tmp_path: Path) -> None:
     assert record.status == "failed"
     assert steps["fail"].status == "failed"
     assert steps["fail"].failure_id == "failure_run_fail"
-    assert steps["after"].status == "pending"
+    assert steps["after"].status == "skipped"
+    assert steps["after"].metadata["skip_reason"] == "dependency_failed"
     assert len(dispatches) == 1
     assert dispatches[0].status == "failed"
     assert dispatches[0].result_refs == ("failures/failure_run_fail.json",)
     assert (tmp_path / "run" / "failures" / "failure_run_fail.json").exists()
+
+
+def test_ready_queue_does_not_wait_for_unrelated_slow_branch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    workflow_path = tmp_path / "independent.accflow.json"
+    write_v2(
+        workflow_path,
+        {
+            "schema_version": CORE_V2_SCHEMA_VERSION,
+            "id": "independent",
+            "version": "0.1.0",
+            "nodes": [
+                {"id": "fast_a", "callable_ref": {"kind": "tool_class", "id": "fake_producer"}},
+                {"id": "fast_c", "callable_ref": {"kind": "tool_class", "id": "fake_producer"}},
+                {"id": "slow_b", "callable_ref": {"kind": "tool_class", "id": "fake_producer"}},
+            ],
+            "control_edges": [{"from": "fast_a", "to": "fast_c"}],
+        },
+    )
+
+    async def fake_callable(*args, **kwargs):
+        _template, node, _payload, *_rest = args
+        _ = kwargs
+        if node.id == "slow_b":
+            await asyncio.sleep(0.05)
+        return {"status": "success", "producer_node_id": node.id}
+
+    monkeypatch.setattr(core_v2_runtime, "execute_core_v2_callable", fake_callable)
+
+    record = asyncio.run(run_core_v2_workflow_path(workflow_path, tmp_path / "run"))
+    events = read_jsonl(tmp_path / "run" / "events.jsonl")
+
+    assert record.status == "success"
+    assert event_index(events, "node_started", "fast_c") < event_index(
+        events,
+        "node_completed",
+        "slow_b",
+    )
+
+
+def test_failure_skips_only_descendants_and_allows_independent_chain(
+    tmp_path: Path,
+) -> None:
+    workflow_path = tmp_path / "branch_failure.accflow.json"
+    write_v2(
+        workflow_path,
+        {
+            "schema_version": CORE_V2_SCHEMA_VERSION,
+            "id": "branch_failure",
+            "version": "0.1.0",
+            "nodes": [
+                {"id": "fail", "callable_ref": {"kind": "tool_class", "id": "fail"}},
+                {"id": "blocked", "callable_ref": {"kind": "tool_class", "id": "fake_producer"}},
+                {"id": "ok_a", "callable_ref": {"kind": "tool_class", "id": "fake_producer"}},
+                {"id": "ok_b", "callable_ref": {"kind": "tool_class", "id": "fake_producer"}},
+            ],
+            "control_edges": [
+                {"from": "fail", "to": "blocked"},
+                {"from": "ok_a", "to": "ok_b"},
+            ],
+        },
+    )
+
+    record = asyncio.run(run_core_v2_workflow_path(workflow_path, tmp_path / "run"))
+    steps = {step.node_id: step for step in load_plan_steps(tmp_path / "run").value}
+    run_plan = load_run_plan(tmp_path / "run").value
+
+    assert record.status == "failed"
+    assert run_plan is not None
+    assert run_plan.status == "failed"
+    assert steps["fail"].status == "failed"
+    assert steps["blocked"].status == "skipped"
+    assert steps["ok_a"].status == "success"
+    assert steps["ok_b"].status == "success"
+    assert not (tmp_path / "run" / "nodes" / "blocked" / "output.json").exists()
+
+
+def test_ready_queue_respects_workflow_max_concurrency(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    workflow_path = tmp_path / "max_concurrency.accflow.json"
+    write_v2(
+        workflow_path,
+        {
+            "schema_version": CORE_V2_SCHEMA_VERSION,
+            "id": "max_concurrency",
+            "version": "0.1.0",
+            "policies": {"max_concurrency": 2},
+            "nodes": [
+                {"id": "one", "callable_ref": {"kind": "tool_class", "id": "fake_producer"}},
+                {"id": "two", "callable_ref": {"kind": "tool_class", "id": "fake_producer"}},
+                {"id": "three", "callable_ref": {"kind": "tool_class", "id": "fake_producer"}},
+            ],
+        },
+    )
+    active = 0
+    peak = 0
+    lock = asyncio.Lock()
+
+    async def fake_callable(*args, **kwargs):
+        nonlocal active, peak
+        _template, node, _payload, *_rest = args
+        _ = kwargs
+        async with lock:
+            active += 1
+            peak = max(peak, active)
+        await asyncio.sleep(0.02)
+        async with lock:
+            active -= 1
+        return {"status": "success", "producer_node_id": node.id}
+
+    monkeypatch.setattr(core_v2_runtime, "execute_core_v2_callable", fake_callable)
+
+    record = asyncio.run(run_core_v2_workflow_path(workflow_path, tmp_path / "run"))
+
+    assert record.status == "success"
+    assert peak == 2
 
 
 def test_nested_workflow_function_still_uses_core_v2_nested_path(tmp_path: Path) -> None:
@@ -325,3 +446,10 @@ def read_jsonl(path: Path) -> list[dict[str, object]]:
         for line in path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
+
+
+def event_index(events: list[dict[str, object]], event_type: str, node_id: str) -> int:
+    for index, event in enumerate(events):
+        if event.get("type") == event_type and event.get("node_id") == node_id:
+            return index
+    raise AssertionError(f"Missing event {event_type} for node {node_id}")
