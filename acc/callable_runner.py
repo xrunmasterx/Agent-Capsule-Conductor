@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError
 from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
 
 from acc.adapters.base import AgentAdapter, AgentRunRequest
@@ -30,6 +31,14 @@ from acc.runtime.policy import (
 )
 from acc.store import write_json
 
+CODEX_EXECUTION_MODE_METADATA_KEY = "codex_execution_mode"
+CODEX_LOCAL_READONLY_NO_SANDBOX = "local_readonly_no_sandbox"
+CODEX_DANGER_FULL_ACCESS = "danger_full_access"
+CODEX_EXECUTION_MODES = {
+    CODEX_LOCAL_READONLY_NO_SANDBOX,
+    CODEX_DANGER_FULL_ACCESS,
+}
+
 
 class CallableClassRunner:
     """Execute resolved class templates through Core v2 adapters."""
@@ -48,6 +57,13 @@ class CallableClassRunner:
         write_json(run_dir / "agent_payload.json", input_payload)
         write_json(run_dir / "input.json", input_payload)
         schema = output_schema_for_agent(template, context.node)
+        schema_errors = structured_output_schema_errors(schema)
+        if schema_errors:
+            first_error = schema_errors[0]
+            raise AccError(
+                first_error.get("message")
+                or "output_schema contains invalid JSON Schema for structured output"
+            )
         write_json(run_dir / "output_schema.json", schema)
         prompt = render_agent_prompt(template, context.node, input_payload)
         (run_dir / "resolved_prompt.md").write_text(prompt, encoding="utf-8")
@@ -200,6 +216,19 @@ def effective_permission_profile(
     node: NodeInvocationSpec,
 ) -> PermissionProfile:
     default_profile = PermissionProfile()
+    codex_mode = codex_execution_mode_for_node(node)
+    if codex_mode is not None:
+        base_profile = (
+            node.invocation_policy.permission_profile
+            or node.overrides.permission_profile
+            or (
+                node.runtime_policy.permission_profile
+                if node.runtime_policy.permission_profile != default_profile
+                else None
+            )
+            or template.default_permissions
+        )
+        return permission_profile_for_codex_execution_mode(codex_mode, base_profile)
     if node.invocation_policy.permission_profile is not None:
         return node.invocation_policy.permission_profile
     if node.overrides.permission_profile is not None:
@@ -215,6 +244,41 @@ def codex_sandbox_for_permissions(profile: PermissionProfile) -> str:
     if profile.workspace_access in {"writes_workspace", "writes_run_only"}:
         return "workspace-write"
     return "read-only"
+
+
+def codex_execution_mode_for_node(node: NodeInvocationSpec) -> str | None:
+    raw_mode = node.metadata.get(CODEX_EXECUTION_MODE_METADATA_KEY)
+    if not isinstance(raw_mode, str):
+        return None
+    mode = raw_mode.strip()
+    return mode if mode in CODEX_EXECUTION_MODES else None
+
+
+def permission_profile_for_codex_execution_mode(
+    mode: str,
+    base_profile: PermissionProfile,
+) -> PermissionProfile:
+    if mode == CODEX_LOCAL_READONLY_NO_SANDBOX:
+        return PermissionProfile(
+            workspace_access="read_only",
+            network=False,
+            shell=True,
+            dangerous=True,
+            env_policy=base_profile.env_policy,
+            allowed_env=base_profile.allowed_env,
+            timeout_seconds=base_profile.timeout_seconds,
+        )
+    if mode == CODEX_DANGER_FULL_ACCESS:
+        return PermissionProfile(
+            workspace_access="writes_workspace",
+            network=True,
+            shell=True,
+            dangerous=True,
+            env_policy=base_profile.env_policy,
+            allowed_env=base_profile.allowed_env,
+            timeout_seconds=base_profile.timeout_seconds,
+        )
+    return base_profile
 
 
 DEFAULT_AGENT_OUTPUT_SCHEMA: dict[str, Any] = {
@@ -386,10 +450,10 @@ def output_schema_for_agent(
     node: NodeInvocationSpec | None = None,
 ) -> dict[str, Any]:
     if node is not None and isinstance(node.output_schema, dict):
-        return copy.deepcopy(node.output_schema)
+        return normalize_output_schema_for_structured_output(node.output_schema)
     raw_schema = template.artifact_contract.get("output_schema")
     if isinstance(raw_schema, dict):
-        return copy.deepcopy(raw_schema)
+        return normalize_output_schema_for_structured_output(raw_schema)
     return copy.deepcopy(DEFAULT_AGENT_OUTPUT_SCHEMA)
 
 
@@ -400,11 +464,13 @@ def render_agent_prompt(
 ) -> str:
     user_prompt = node.prompt_policy.user_prompt or node.overrides.prompt or ""
     input_json = json.dumps(input_payload, ensure_ascii=False, indent=2, sort_keys=True)
+    local_readonly_contract = codex_local_readonly_prompt_contract(node)
     return "\n".join(
         [
             "# Agent Methodology",
             "",
             template.default_prompt or "",
+            *(["", local_readonly_contract] if local_readonly_contract else []),
             "",
             "# User Task",
             "",
@@ -420,6 +486,28 @@ def render_agent_prompt(
             "",
             "Return exactly one JSON object matching the provided output schema.",
             "",
+        ]
+    )
+
+
+def codex_local_readonly_prompt_contract(node: NodeInvocationSpec) -> str:
+    if codex_execution_mode_for_node(node) != CODEX_LOCAL_READONLY_NO_SANDBOX:
+        return ""
+    return "\n".join(
+        [
+            "# Local Read-Only No-Sandbox Contract",
+            "",
+            "You are running without an operating-system sandbox because the Codex read-only "
+            "sandbox cannot read this local workspace reliably on this host.",
+            "",
+            "Hard rule: inspect and reason about files only. Do not create, edit, delete, move, "
+            "rename, format, overwrite, stage, commit, or otherwise modify files or directories. "
+            "Do not run commands whose purpose is to write files, change repository state, install "
+            "packages, launch long-running services, or mutate the workspace.",
+            "",
+            "Allowed actions are read-only inspection commands such as listing files, searching "
+            "text, and reading source files. If a useful answer would require a write or a "
+            "state-changing command, explain the limitation instead of performing it.",
         ]
     )
 
@@ -474,8 +562,99 @@ def hermetic_stub_output(
 def validate_output_schema(output: dict[str, Any], schema: dict[str, Any]) -> None:
     try:
         Draft202012Validator(schema).validate(output)
-    except JsonSchemaValidationError as exc:
+    except (JsonSchemaValidationError, SchemaError) as exc:
         raise AccError(f"codex output.json failed schema validation: {exc.message}") from exc
+
+
+def normalize_output_schema_for_structured_output(schema: dict[str, Any]) -> dict[str, Any]:
+    normalized = strip_none_mapping_values(copy.deepcopy(schema))
+    add_object_schema_guards(normalized)
+    return normalized
+
+
+def strip_none_mapping_values(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: strip_none_mapping_values(item)
+            for key, item in value.items()
+            if item is not None
+        }
+    if isinstance(value, list):
+        return [strip_none_mapping_values(item) for item in value]
+    return value
+
+
+def add_object_schema_guards(value: Any) -> None:
+    if isinstance(value, dict):
+        schema_type = value.get("type")
+        if schema_type == "object" or (
+            isinstance(schema_type, list) and "object" in schema_type
+        ):
+            value.setdefault("additionalProperties", False)
+        for item in value.values():
+            add_object_schema_guards(item)
+    elif isinstance(value, list):
+        for item in value:
+            add_object_schema_guards(item)
+
+
+def structured_output_schema_errors(schema: dict[str, Any]) -> list[dict[str, Any]]:
+    errors: list[dict[str, Any]] = []
+    errors.extend(null_schema_keyword_errors(schema))
+    try:
+        Draft202012Validator.check_schema(schema)
+    except (JsonSchemaValidationError, SchemaError) as exc:
+        errors.append(
+            {
+                "code": "output_schema_invalid",
+                "message": f"output_schema contains invalid JSON Schema: {exc.message}",
+                "path": schema_error_path(exc),
+                "repair_hint": output_schema_repair_hint(),
+            }
+        )
+    return errors
+
+
+def null_schema_keyword_errors(value: Any, path: tuple[str, ...] = ()) -> list[dict[str, Any]]:
+    if isinstance(value, dict):
+        errors: list[dict[str, Any]] = []
+        for key, item in value.items():
+            next_path = (*path, str(key))
+            if item is None:
+                errors.append(
+                    {
+                        "code": "output_schema_invalid",
+                        "message": (
+                            "output_schema contains invalid JSON Schema at "
+                            f"{format_schema_path(next_path)}"
+                        ),
+                        "path": format_schema_path(next_path),
+                        "repair_hint": output_schema_repair_hint(),
+                    }
+                )
+            else:
+                errors.extend(null_schema_keyword_errors(item, next_path))
+        return errors
+    if isinstance(value, list):
+        errors = []
+        for index, item in enumerate(value):
+            if isinstance(item, (dict, list)):
+                errors.extend(null_schema_keyword_errors(item, (*path, str(index))))
+        return errors
+    return []
+
+
+def schema_error_path(exc: JsonSchemaValidationError) -> str:
+    path = [str(item) for item in exc.absolute_schema_path]
+    return format_schema_path(tuple(path))
+
+
+def format_schema_path(path: tuple[str, ...]) -> str:
+    return ".".join(path) if path else "$"
+
+
+def output_schema_repair_hint() -> str:
+    return "Remove items from non-array properties; use items only when type is array."
 
 
 def runtime_payload(
@@ -489,7 +668,7 @@ def runtime_payload(
     binding_materializations: list[dict[str, Any]],
 ) -> dict[str, Any]:
     run_dir = context.session.output_path.parent
-    return {
+    payload = {
         "execution_mode": mode,
         "adapter": template.runtime,
         "callable_id": template.id,
@@ -510,6 +689,10 @@ def runtime_payload(
         },
         "binding_materializations": binding_materializations,
     }
+    codex_mode = codex_execution_mode_for_node(context.node)
+    if codex_mode is not None:
+        payload["codex_execution_mode"] = codex_mode
+    return payload
 
 
 def update_runtime_json(path: Path, updates: dict[str, Any]) -> None:

@@ -47,6 +47,14 @@ export function DecisionInboxPanel({ onViewRun }: Props) {
       onViewRun?.(item.run.run_id);
       return;
     }
+    if (actionKind === 'validate_graphops_proposal' && item.graphops?.proposal_id) {
+      setActionResult(await api.validateGraphOpsProposal(item.graphops.proposal_id));
+      return;
+    }
+    if (actionKind === 'dry_run_graphops_proposal' && item.graphops?.proposal_id) {
+      setActionResult(await api.dryRunGraphOpsProposal(item.graphops.proposal_id));
+      return;
+    }
     if (!item.graphops?.patch_path) {
       return;
     }
@@ -62,7 +70,7 @@ export function DecisionInboxPanel({ onViewRun }: Props) {
       <header className="panel-header">
         <div>
           <h2>决策收件箱</h2>
-          <p>聚合失败、人工确认和 GraphOps 提案；v1 只读，不执行破坏性 apply。</p>
+          <p>聚合运行失败、人工确认和 GraphOps 提案；持久化写入必须经过 validate / dry-run / approval。</p>
         </div>
         <Inbox aria-hidden="true" size={20} />
       </header>
@@ -128,6 +136,7 @@ function DecisionDetail({
   actionResult: Record<string, unknown> | null;
   onAction: (kind: string) => void;
 }) {
+  const graphopsId = item.graphops?.proposal_id || item.graphops?.patch_id || 'n/a';
   return (
     <article className="decision-detail">
       <header>
@@ -145,11 +154,7 @@ function DecisionDetail({
         <dt>节点</dt>
         <dd>{item.node?.node_id || 'n/a'}</dd>
         <dt>GraphOps</dt>
-        <dd>
-          {item.graphops
-            ? `${item.graphops.patch_id} / ${item.graphops.operation_count} ops`
-            : 'n/a'}
-        </dd>
+        <dd>{item.graphops ? `${graphopsId} / ${item.graphops.operation_count} ops` : 'n/a'}</dd>
       </dl>
       <section className="decision-actions">
         {item.actions.map((action) => (
@@ -173,14 +178,14 @@ function DecisionDetail({
         ))}
       </section>
       {item.graphops?.dry_run_only ? (
-        <>
         <div className="notice neutral">
-          GraphOps 当前仅支持 proposal / validate / dry-run；real apply 未实现，本页面不会直接应用补丁。
+          GraphOps v2 patch 仍然是 proposal / validate / dry-run 优先，本页面不会直接应用补丁。
         </div>
-        <div className="notice neutral" hidden>
-          GraphOps real apply 仍然需要 validate / dry-run / human approval，本页面不会直接应用补丁。
+      ) : null}
+      {item.kind === 'graphops_persistence_proposal' ? (
+        <div className="notice neutral">
+          GraphOps v3 持久化提案必须先 validate / dry-run，再通过人工批准后 apply；本页面只执行非破坏性检查。
         </div>
-        </>
       ) : null}
       {actionResult ? (
         <CodeBlock title="action-result.json" content={JSON.stringify(actionResult, null, 2)} variant="json" />
@@ -190,7 +195,7 @@ function DecisionDetail({
 }
 
 function decisionIcon(item: DecisionInboxItem) {
-  if (item.kind === 'graphops_proposal') {
+  if (item.kind === 'graphops_proposal' || item.kind === 'graphops_persistence_proposal') {
     return <GitPullRequest aria-hidden="true" size={16} />;
   }
   if (item.kind === 'manual_review') {

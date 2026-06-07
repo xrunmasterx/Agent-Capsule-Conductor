@@ -56,7 +56,7 @@ from acc.run_index import NodeRunSummary, RunSummary, rebuild_run_index
 from acc.runtime.policy import acc_run_mode
 from acc.scheduler.ready_set import DAGScheduler
 from acc.session import utc_now_iso
-from acc.store import load_json, write_json
+from acc.store import load_clean_environment_binding, load_json, write_json
 from acc.store.control_ledger import (
     append_control_event,
     append_decision_record,
@@ -579,10 +579,17 @@ async def run_core_v2_workflow_path(
     input_payload: dict[str, Any] | None = None,
     callable_registry: CallableRegistry | None = None,
     workspace: Path | None = None,
+    binding_path: Path | None = None,
+    ephemeral: bool | None = None,
+    parent_invocation_id: str | None = None,
+    parent_scope_frame_id: str | None = None,
+    call_depth: int = 0,
     should_cancel: Callable[[], bool] | None = None,
 ) -> RunRecord:
     template = load_workflow_function_template(workflow_path)
     workflow_input = dict(input_payload or {})
+    workspace_root = (workspace or run_dir).resolve()
+    is_ephemeral = (workspace is None and binding_path is None) if ephemeral is None else ephemeral
     plan = compile_execution_plan(template, workflow_input=workflow_input)
     invocation = FunctionInvocation(
         invocation_id=f"invocation_{run_dir.name}",
@@ -591,21 +598,23 @@ async def run_core_v2_workflow_path(
         status="running",
         input_payload=workflow_input,
         root_scope_frame_id=f"scope_{run_dir.name}_root",
+        parent_invocation_id=parent_invocation_id,
         started_at=utc_now_iso(),
     )
     scope = ScopeFrame(
         frame_id=invocation.root_scope_frame_id,
         invocation_id=invocation.invocation_id,
-        parent_frame_id=None,
-        call_depth=0,
+        parent_frame_id=parent_scope_frame_id,
+        call_depth=call_depth,
         workflow_id=template.id,
-        workspace_root=(workspace or run_dir).resolve(),
+        workspace_root=workspace_root,
         environment_root=run_dir.resolve(),
         inbox_root=(run_dir / "inbox").resolve(),
         outbox_root=(run_dir / "outbox").resolve(),
         artifact_root=(run_dir / "artifacts").resolve(),
         behavior_snapshot_path=(run_dir / "behavior_snapshot").resolve(),
-        ephemeral=True,
+        ephemeral=is_ephemeral,
+        binding_path=binding_path.resolve() if binding_path else None,
     )
     return await run_workflow_function_invocation(
         template,
@@ -1816,6 +1825,8 @@ async def execute_core_v2_callable(
             node,
             payload,
             node_dir,
+            scope,
+            session,
             callable_registry,
         )
     if callable_registry is not None and node.callable_ref.kind == "agent_class":
@@ -1843,16 +1854,55 @@ async def execute_workflow_function_callable(
     node: NodeInvocationSpec,
     payload: dict[str, Any],
     node_dir: Path,
+    scope: ScopeFrame,
+    session: SessionInstance,
     callable_registry: CallableRegistry | None,
 ) -> dict[str, Any]:
     child_path = resolve_workflow_function_path(template, node.callable_ref.id)
     child_run_dir = node_dir / "nested_workflow"
     child_input_payload = resolve_workflow_call_input_payload(node, payload)
+    bound_workspace, bound_binding_path = resolve_node_workflow_binding(
+        node,
+        callable_registry=callable_registry,
+    )
+    child_workspace: Path | None
+    child_binding_path: Path | None
+    child_ephemeral: bool
+    if node.environment_policy == "inherit_parent":
+        child_workspace = bound_workspace or scope.workspace_root
+        child_binding_path = bound_binding_path or scope.binding_path
+        child_ephemeral = False if bound_workspace is not None else scope.ephemeral
+    elif node.environment_policy == "new_ephemeral":
+        child_workspace = None
+        child_binding_path = None
+        child_ephemeral = True
+    elif node.environment_policy == "forbidden":
+        raise AccError(f"Nested workflow execution is forbidden for node {node.id}")
+    elif node.environment_policy == "binding_required":
+        if bound_workspace is None or bound_binding_path is None:
+            raise AccError(
+                "Nested workflow binding_required is not satisfied for node "
+                f"{node.id}; configure an explicit child binding before running."
+            )
+        child_workspace = bound_workspace
+        child_binding_path = bound_binding_path
+        child_ephemeral = False
+    else:
+        raise AccError(
+            f"Unsupported environment_policy for nested workflow node {node.id}: "
+            f"{node.environment_policy}"
+        )
     child_record = await run_core_v2_workflow_path(
         child_path,
         child_run_dir,
         input_payload=child_input_payload,
         callable_registry=callable_registry,
+        workspace=child_workspace,
+        binding_path=child_binding_path,
+        ephemeral=child_ephemeral,
+        parent_invocation_id=session.invocation_id,
+        parent_scope_frame_id=scope.frame_id,
+        call_depth=scope.call_depth + 1,
     )
     if child_record.status != "success":
         raise AccError(
@@ -1868,6 +1918,27 @@ async def execute_workflow_function_callable(
         "workflow_outputs": workflow_outputs,
         **mapped_outputs,
     }
+
+
+def resolve_node_workflow_binding(
+    node: NodeInvocationSpec,
+    *,
+    callable_registry: CallableRegistry | None,
+) -> tuple[Path | None, Path | None]:
+    binding_ref = node.metadata.get("binding_ref")
+    if not isinstance(binding_ref, str) or not binding_ref.strip():
+        return None, None
+    project_root = callable_registry.project_root if callable_registry is not None else None
+    if project_root is None:
+        project_root = Path.cwd()
+    candidate = (project_root / binding_ref).resolve()
+    bindings_root = (project_root / "bindings").resolve()
+    if not candidate.is_relative_to(bindings_root):
+        raise AccError(
+            f"Workflow node {node.id} binding_ref must point inside bindings/: {binding_ref}"
+        )
+    binding = load_clean_environment_binding(candidate)
+    return binding.workspace_root, binding.binding_path
 
 
 def resolve_workflow_call_input_payload(

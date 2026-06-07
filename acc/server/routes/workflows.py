@@ -15,11 +15,14 @@ from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
 from pydantic import BaseModel, ConfigDict
 
 from acc.app import WorkflowAppService
+from acc.app.local_directory_picker import LocalDirectorySelection, select_local_directory
 from acc.app.workbench_adapter import (
     CompiledWorkbenchWorkflowBundle,
     canonicalize_workbench_workflow_payload,
     compile_workbench_workflow_bundle,
+    merge_workbench_codex_execution_modes,
 )
+from acc.app.workbench_snapshots import WorkbenchCanvasSnapshotService
 from acc.app.workflow_refs import WorkflowCatalog, WorkflowRefMode, rewrite_workflow_function_refs
 from acc.callable_registry import CallableRegistry
 from acc.server.context import (
@@ -60,6 +63,12 @@ class WorkflowBindingRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     workspace_root: str
+
+
+class WorkflowDirectorySelectionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    initial_dir: str | None = None
 
 
 @router.get("")
@@ -110,7 +119,7 @@ def list_workflows(request: Request) -> dict[str, Any]:
 def run_graph_endpoint(payload: WorkflowRunGraphRequest, request: Request) -> dict[str, Any]:
     project_root = get_project_root(request)
     run_dir = resolve_run_dir(project_root, payload.run_dir)
-    graph_path = prepare_runtime_graph(payload.graph, run_dir, request)
+    graph_path = prepare_runtime_graph(payload.graph, run_dir, request, task_id=payload.task_id)
     workspace, binding_path = resolve_run_environment(project_root, payload)
     try:
         result = WorkflowAppService(project_root=project_root).run_sync(
@@ -132,7 +141,7 @@ async def submit_run_graph_endpoint(
 ) -> dict[str, Any]:
     project_root = get_project_root(request)
     run_dir = resolve_run_dir(project_root, payload.run_dir)
-    graph_path = prepare_runtime_graph(payload.graph, run_dir, request)
+    graph_path = prepare_runtime_graph(payload.graph, run_dir, request, task_id=payload.task_id)
     workspace, binding_path = resolve_run_environment(project_root, payload)
     workflow_id = str(load_json_or_500(graph_path).get("id") or graph_path.stem)
     manager = get_workbench_run_manager(request)
@@ -157,9 +166,11 @@ def prepare_runtime_graph(
     graph_payload: dict[str, Any],
     run_dir: Path,
     request: Request,
+    *,
+    task_id: str | None = None,
 ) -> Path:
     project_root = get_project_root(request)
-    graph = graph_payload
+    graph = graph_with_latest_workbench_node_modes(graph_payload, project_root, task_id)
     workflow_id = str(graph.get("id") or "")
     if not workflow_id:
         raise HTTPException(status_code=400, detail="Workflow graph id is required")
@@ -189,6 +200,23 @@ def prepare_runtime_graph(
         workflows_dir=workflows_dir,
     )
     return accflow_path
+
+
+def graph_with_latest_workbench_node_modes(
+    graph_payload: dict[str, Any],
+    project_root: Path,
+    task_id: str | None,
+) -> dict[str, Any]:
+    if not task_id:
+        return graph_payload
+    try:
+        snapshot = WorkbenchCanvasSnapshotService(project_root).get(task_id)
+    except AccError:
+        return graph_payload
+    canvas_snapshot = snapshot.get("canvas_snapshot")
+    if not isinstance(canvas_snapshot, dict):
+        return graph_payload
+    return merge_workbench_codex_execution_modes(graph_payload, canvas_snapshot)
 
 
 def project_run_response(result: dict[str, Any]) -> dict[str, Any]:
@@ -333,6 +361,17 @@ def validate_workflow_binding(
         "status": "valid" if validation["valid"] else "missing",
         "error": validation.get("error"),
     }
+
+
+@router.post("/{workflow_id}/binding/select-directory")
+def select_workflow_binding_directory(
+    workflow_id: str,
+    payload: WorkflowDirectorySelectionRequest,
+    request: Request,
+) -> dict[str, Any]:
+    _ = request
+    selection = select_local_directory(payload.initial_dir)
+    return directory_selection_response(workflow_id, selection)
 
 
 @router.put("/{workflow_id}/binding")
@@ -745,6 +784,31 @@ def open_local_folder(path: Path) -> bool:
     except OSError:
         return False
     return True
+
+
+def directory_selection_response(
+    workflow_id: str,
+    selection: LocalDirectorySelection,
+) -> dict[str, Any]:
+    response: dict[str, Any] = {
+        "workflow_id": workflow_id,
+        "status": selection.status,
+        "workspace_root": None,
+        "valid": False,
+        "error": selection.error,
+    }
+    if selection.status != "selected":
+        return response
+
+    validation = validate_workspace_root(selection.path or "")
+    response["workspace_root"] = validation["workspace_root"]
+    response["valid"] = validation["valid"]
+    if validation["valid"]:
+        response["error"] = None
+    else:
+        response["status"] = "failed"
+        response["error"] = validation.get("error")
+    return response
 
 
 def find_graph_path(workflow_id: str, request: Request) -> Path:

@@ -1,10 +1,18 @@
 import type {
   ArtifactContent,
   ArtifactList,
+  AuthoringAgentSummary,
+  AuthoringMessageResponse,
+  AuthoringSessionPayload,
+  AuthoringValidation,
   AgentClassDraft,
   CallableDetail,
   CallableSummary,
+  GraphOpsApplyManifest,
+  GraphOpsDryRunPayload,
   GraphOpsExample,
+  GraphOpsProposalPayload,
+  GraphOpsTransactionProposal,
   DecisionInbox,
   NodeRunSummary,
   ReplayPayload,
@@ -14,6 +22,7 @@ import type {
   RunSummary,
   WorkflowDetail,
   WorkflowBindingView,
+  WorkflowDirectorySelection,
   WorkflowGraph,
   WorkflowRunResult,
   WorkflowRunSubmitResult,
@@ -112,6 +121,55 @@ function encodePath(path: string): string {
 export const api = {
   health: () => getJson<{ status: string }>('/api/health'),
   runtimeConfig: () => getJson<RuntimeConfig>('/api/runtime/config'),
+  authoringAgents: () => getJson<{ agents: AuthoringAgentSummary[] }>('/api/authoring/agents'),
+  createAuthoringSession: (payload: {
+    agent_id?: string | null;
+    task_id: string;
+    canvas_hash: string;
+    canvas_snapshot: Record<string, unknown>;
+    selection?: Record<string, unknown> | null;
+  }) => sendJson<AuthoringSessionPayload>('POST', '/api/authoring/sessions', payload),
+  getAuthoringSession: (sessionId: string) =>
+    getJson<AuthoringSessionPayload>(`/api/authoring/sessions/${encodeURIComponent(sessionId)}`),
+  sendAuthoringMessage: (
+    sessionId: string,
+    payload: {
+      message: string;
+      canvas_hash: string;
+      canvas_snapshot: Record<string, unknown>;
+      selection?: Record<string, unknown> | null;
+    },
+  ) =>
+    sendJson<AuthoringMessageResponse>(
+      'POST',
+      `/api/authoring/sessions/${encodeURIComponent(sessionId)}/messages`,
+      payload,
+    ),
+  validateAuthoringProposal: (payload: {
+    proposal?: Record<string, unknown> | null;
+    task_id: string;
+    canvas_hash: string;
+    canvas_snapshot: Record<string, unknown>;
+    temporary_resources?: Record<string, unknown>;
+  }) => sendJson<AuthoringValidation>('POST', '/api/authoring/proposals/validate', payload),
+  dryRunAuthoringProposal: (payload: {
+    proposal?: Record<string, unknown> | null;
+    task_id: string;
+    canvas_hash: string;
+    canvas_snapshot: Record<string, unknown>;
+    temporary_resources?: Record<string, unknown>;
+  }) => sendJson<Record<string, unknown>>('POST', '/api/authoring/proposals/dry-run', payload),
+  publishWorkbenchCanvasSnapshot: (payload: {
+    task_id: string;
+    canvas_hash: string;
+    canvas_snapshot: Record<string, unknown>;
+    selection?: Record<string, unknown>;
+    temporary_resources?: Record<string, unknown>;
+  }) => sendJson<Record<string, unknown>>('POST', '/api/workbench/canvas-snapshots', payload),
+  workbenchCanvasSnapshot: (taskId: string) =>
+    getJson<Record<string, unknown>>(
+      `/api/workbench/canvas-snapshots/${encodeURIComponent(taskId)}`,
+    ),
   runs: () => getJson<RunIndex>('/api/runs'),
   run: (runId: string) => getJson<RunSummary>(`/api/runs/${encodeURIComponent(runId)}`),
   cancelRun: (runId: string) =>
@@ -218,6 +276,15 @@ export const api = {
       `/api/workflows/${encodeURIComponent(workflowId)}/binding/open-folder`,
       {},
     ),
+  selectWorkflowBindingDirectory: (
+    workflowId: string,
+    options?: { initialDir?: string | null },
+  ) =>
+    sendJson<WorkflowDirectorySelection>(
+      'POST',
+      `/api/workflows/${encodeURIComponent(workflowId)}/binding/select-directory`,
+      { initial_dir: options?.initialDir || undefined },
+    ),
   runWorkflow: (
     workflowId: string,
     runDir: string,
@@ -273,4 +340,38 @@ export const api = {
       patch_path: patchPath,
       semantic,
     }),
+  createGraphOpsProposal: (proposal: GraphOpsTransactionProposal) =>
+    sendJson<GraphOpsProposalPayload>('POST', '/api/graphops/proposals', { proposal }),
+  validateGraphOpsProposal: (proposalId: string) =>
+    sendJson<Record<string, unknown>>(
+      'POST',
+      `/api/graphops/proposals/${encodeURIComponent(proposalId)}/validate`,
+      {},
+    ),
+  dryRunGraphOpsProposal: (proposalId: string) =>
+    sendJson<GraphOpsDryRunPayload>(
+      'POST',
+      `/api/graphops/proposals/${encodeURIComponent(proposalId)}/dry-run`,
+      {},
+    ),
+  approveGraphOpsProposal: (
+    proposalId: string,
+    payload: {
+      target_paths: string[];
+      base_hashes: Record<string, string>;
+      dry_run_digest: string;
+      approver?: string;
+    },
+  ) =>
+    sendJson<Record<string, unknown>>(
+      'POST',
+      `/api/graphops/proposals/${encodeURIComponent(proposalId)}/approve`,
+      { proposal_id: proposalId, approver: 'workbench_user', ...payload },
+    ),
+  applyGraphOpsProposal: (proposalId: string) =>
+    sendJson<GraphOpsApplyManifest>(
+      'POST',
+      `/api/graphops/proposals/${encodeURIComponent(proposalId)}/apply`,
+      {},
+    ),
 };

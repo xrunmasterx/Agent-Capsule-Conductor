@@ -15,6 +15,26 @@ def write_v2(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
+def read_json(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def write_binding(path: Path, workflow_id: str, workspace: Path) -> None:
+    path.write_text(
+        json.dumps(
+            {
+                "workflow_id": workflow_id,
+                "binding_name": path.stem,
+                "state_mode": "stateful",
+                "workspace_root": str(workspace),
+                "behavior_policy": {"mode": "workspace_native"},
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+
 class FakeCodexProcess:
     def __init__(self, command: tuple[str, ...]) -> None:
         self.command = command
@@ -152,6 +172,119 @@ def test_core_v2_noop_workflow_success(tmp_path: Path) -> None:
     assert not (tmp_path / "noop_run" / "workflow_outputs" / "main" / "output.json").exists()
 
 
+def test_workflow_run_uses_workspace_binding_for_root_scope(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    binding_path = tmp_path / "root.binding.local.json"
+    write_binding(binding_path, "bound_root", workspace)
+    workflow_path = tmp_path / "bound_root.accflow.json"
+    write_v2(
+        workflow_path,
+        {
+            "schema_version": CORE_V2_SCHEMA_VERSION,
+            "id": "bound_root",
+            "version": "0.1.0",
+            "nodes": [
+                {"id": "produce", "callable_ref": {"kind": "tool_class", "id": "fake_producer"}}
+            ],
+        },
+    )
+
+    result = WorkflowAppService(project_root=tmp_path).run_sync(
+        workflow_path,
+        tmp_path / "run",
+        binding_path=binding_path,
+    )
+
+    scope = read_json(tmp_path / "run" / "scope_frame.json")
+    output = read_json(tmp_path / "run" / "nodes" / "produce" / "output.json")
+    assert result["status"] == "success"
+    assert Path(scope["workspace_root"]) == workspace.resolve()
+    assert Path(scope["binding_path"]) == binding_path.resolve()
+    assert scope["ephemeral"] is False
+    assert output["cwd"] == str(workspace.resolve())
+
+
+def test_workflow_run_uses_explicit_workspace_for_root_scope(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    workflow_path = tmp_path / "workspace_root.accflow.json"
+    write_v2(
+        workflow_path,
+        {
+            "schema_version": CORE_V2_SCHEMA_VERSION,
+            "id": "workspace_root",
+            "version": "0.1.0",
+            "nodes": [
+                {"id": "produce", "callable_ref": {"kind": "tool_class", "id": "fake_producer"}}
+            ],
+        },
+    )
+
+    result = WorkflowAppService(project_root=tmp_path).run_sync(
+        workflow_path,
+        tmp_path / "run",
+        workspace=workspace,
+    )
+
+    scope = read_json(tmp_path / "run" / "scope_frame.json")
+    assert result["status"] == "success"
+    assert Path(scope["workspace_root"]) == workspace.resolve()
+    assert scope["binding_path"] is None
+    assert scope["ephemeral"] is False
+
+
+def test_workflow_run_defaults_to_ephemeral_run_workspace(tmp_path: Path) -> None:
+    workflow_path = tmp_path / "ephemeral_root.accflow.json"
+    run_dir = tmp_path / "run"
+    write_v2(
+        workflow_path,
+        {
+            "schema_version": CORE_V2_SCHEMA_VERSION,
+            "id": "ephemeral_root",
+            "version": "0.1.0",
+            "nodes": [
+                {"id": "produce", "callable_ref": {"kind": "tool_class", "id": "fake_producer"}}
+            ],
+        },
+    )
+
+    result = WorkflowAppService(project_root=tmp_path).run_sync(workflow_path, run_dir)
+
+    scope = read_json(run_dir / "scope_frame.json")
+    assert result["status"] == "success"
+    assert Path(scope["workspace_root"]) == run_dir.resolve()
+    assert scope["binding_path"] is None
+    assert scope["ephemeral"] is True
+
+
+def test_workflow_run_rejects_workspace_and_binding_together(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    binding_path = tmp_path / "root.binding.local.json"
+    write_binding(binding_path, "reject_both", workspace)
+    workflow_path = tmp_path / "reject_both.accflow.json"
+    write_v2(
+        workflow_path,
+        {
+            "schema_version": CORE_V2_SCHEMA_VERSION,
+            "id": "reject_both",
+            "version": "0.1.0",
+            "nodes": [
+                {"id": "produce", "callable_ref": {"kind": "tool_class", "id": "fake_producer"}}
+            ],
+        },
+    )
+
+    with pytest.raises(Exception, match="Provide workspace or binding_path, not both"):
+        WorkflowAppService(project_root=tmp_path).run_sync(
+            workflow_path,
+            tmp_path / "run",
+            workspace=workspace,
+            binding_path=binding_path,
+        )
+
+
 def test_workflow_app_service_routes_core_v2_schema_to_core_runtime(tmp_path: Path) -> None:
     workflow_path = tmp_path / "app_single.accflow.json"
     write_v2(
@@ -267,6 +400,150 @@ def test_core_v2_nested_workflow_function_call(tmp_path: Path) -> None:
     ).exists()
 
 
+def test_nested_workflow_inherits_bound_parent_workspace(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    binding_path = tmp_path / "parent.binding.local.json"
+    write_binding(binding_path, "parent", workspace)
+    child_path = tmp_path / "child.accflow.json"
+    write_v2(
+        child_path,
+        {
+            "schema_version": CORE_V2_SCHEMA_VERSION,
+            "id": "child",
+            "version": "0.1.0",
+            "nodes": [
+                {"id": "produce", "callable_ref": {"kind": "tool_class", "id": "fake_producer"}}
+            ],
+        },
+    )
+    parent_path = tmp_path / "parent.accflow.json"
+    write_v2(
+        parent_path,
+        {
+            "schema_version": CORE_V2_SCHEMA_VERSION,
+            "id": "parent",
+            "version": "0.1.0",
+            "nodes": [
+                {
+                    "id": "subflow",
+                    "callable_ref": {"kind": "workflow_function", "id": child_path.name},
+                }
+            ],
+        },
+    )
+
+    result = WorkflowAppService(project_root=tmp_path).run_sync(
+        parent_path,
+        tmp_path / "run",
+        binding_path=binding_path,
+    )
+
+    child_run_dir = tmp_path / "run" / "nodes" / "subflow" / "nested_workflow"
+    root_scope = read_json(tmp_path / "run" / "scope_frame.json")
+    child_scope = read_json(child_run_dir / "scope_frame.json")
+    child_output = read_json(child_run_dir / "nodes" / "produce" / "output.json")
+    assert result["status"] == "success"
+    assert Path(root_scope["workspace_root"]) == workspace.resolve()
+    assert Path(child_scope["workspace_root"]) == workspace.resolve()
+    assert Path(child_scope["binding_path"]) == binding_path.resolve()
+    assert child_scope["ephemeral"] is False
+    assert child_scope["parent_frame_id"] == root_scope["frame_id"]
+    assert child_scope["call_depth"] == 1
+    assert child_output["cwd"] == str(workspace.resolve())
+
+
+def test_nested_workflow_new_ephemeral_uses_child_run_workspace(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    binding_path = tmp_path / "parent.binding.local.json"
+    write_binding(binding_path, "parent", workspace)
+    child_path = tmp_path / "child.accflow.json"
+    write_v2(
+        child_path,
+        {
+            "schema_version": CORE_V2_SCHEMA_VERSION,
+            "id": "child",
+            "version": "0.1.0",
+            "nodes": [
+                {"id": "produce", "callable_ref": {"kind": "tool_class", "id": "fake_producer"}}
+            ],
+        },
+    )
+    parent_path = tmp_path / "parent.accflow.json"
+    write_v2(
+        parent_path,
+        {
+            "schema_version": CORE_V2_SCHEMA_VERSION,
+            "id": "parent",
+            "version": "0.1.0",
+            "nodes": [
+                {
+                    "id": "subflow",
+                    "callable_ref": {"kind": "workflow_function", "id": child_path.name},
+                    "environment_policy": "new_ephemeral",
+                }
+            ],
+        },
+    )
+
+    result = WorkflowAppService(project_root=tmp_path).run_sync(
+        parent_path,
+        tmp_path / "run",
+        binding_path=binding_path,
+    )
+
+    child_run_dir = tmp_path / "run" / "nodes" / "subflow" / "nested_workflow"
+    child_scope = read_json(child_run_dir / "scope_frame.json")
+    assert result["status"] == "success"
+    assert Path(child_scope["workspace_root"]) == child_run_dir.resolve()
+    assert child_scope["binding_path"] is None
+    assert child_scope["ephemeral"] is True
+
+
+@pytest.mark.parametrize("environment_policy", ["forbidden", "binding_required"])
+def test_nested_workflow_rejects_unsupported_environment_policy(
+    tmp_path: Path,
+    environment_policy: str,
+) -> None:
+    child_path = tmp_path / "child.accflow.json"
+    write_v2(
+        child_path,
+        {
+            "schema_version": CORE_V2_SCHEMA_VERSION,
+            "id": "child",
+            "version": "0.1.0",
+            "nodes": [
+                {"id": "produce", "callable_ref": {"kind": "tool_class", "id": "fake_producer"}}
+            ],
+        },
+    )
+    parent_path = tmp_path / "parent.accflow.json"
+    write_v2(
+        parent_path,
+        {
+            "schema_version": CORE_V2_SCHEMA_VERSION,
+            "id": "parent",
+            "version": "0.1.0",
+            "nodes": [
+                {
+                    "id": "subflow",
+                    "callable_ref": {"kind": "workflow_function", "id": child_path.name},
+                    "environment_policy": environment_policy,
+                }
+            ],
+        },
+    )
+
+    result = WorkflowAppService(project_root=tmp_path).run_sync(parent_path, tmp_path / "run")
+
+    assert result["status"] == "failed"
+    stderr = (tmp_path / "run" / "nodes" / "subflow" / "stderr.log").read_text(
+        encoding="utf-8"
+    )
+    assert environment_policy in stderr
+
+
 def test_core_v2_nested_workflow_inherits_callable_registry(tmp_path: Path) -> None:
     agents_dir = tmp_path / "callables" / "agents"
     agents_dir.mkdir(parents=True)
@@ -321,6 +598,92 @@ output_ports:
     result = WorkflowAppService(project_root=tmp_path).run_sync(parent_path, tmp_path / "run")
 
     assert result["status"] == "success"
+
+
+def test_nested_codex_agent_command_uses_inherited_bound_workspace(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("ACC_RUN_MODE", "production")
+    monkeypatch.setenv("ACC_ENABLE_EXTERNAL_AGENT_EXECUTION", "1")
+    captured: list[tuple[str, ...]] = []
+
+    async def fake_create(*args, **kwargs):
+        captured.append(args)
+        return FakeCodexProcess(args)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    binding_path = tmp_path / "parent.binding.local.json"
+    write_binding(binding_path, "parent", workspace)
+    agents_dir = tmp_path / "callables" / "agents"
+    agents_dir.mkdir(parents=True)
+    (agents_dir / "stock.codex.yaml").write_text(
+        """
+id: stock.codex
+version: 0.1.0
+runtime: codex_cli
+input_ports:
+  main:
+    type: artifact
+output_ports:
+  main:
+    type: artifact
+""".strip(),
+        encoding="utf-8",
+    )
+    child_path = tmp_path / "child.accflow.json"
+    write_v2(
+        child_path,
+        {
+            "schema_version": CORE_V2_SCHEMA_VERSION,
+            "id": "child",
+            "version": "0.1.0",
+            "nodes": [
+                {"id": "research", "callable_ref": {"kind": "agent_class", "id": "stock.codex"}}
+            ],
+        },
+    )
+    parent_path = tmp_path / "parent.accflow.json"
+    write_v2(
+        parent_path,
+        {
+            "schema_version": CORE_V2_SCHEMA_VERSION,
+            "id": "parent",
+            "version": "0.1.0",
+            "nodes": [
+                {
+                    "id": "subflow",
+                    "callable_ref": {"kind": "workflow_function", "id": child_path.name},
+                }
+            ],
+        },
+    )
+
+    result = WorkflowAppService(project_root=tmp_path).run_sync(
+        parent_path,
+        tmp_path / "run",
+        binding_path=binding_path,
+    )
+
+    child_runtime = read_json(
+        tmp_path
+        / "run"
+        / "nodes"
+        / "subflow"
+        / "nested_workflow"
+        / "nodes"
+        / "research"
+        / "runtime.json"
+    )
+    command = list(captured[0])
+    assert result["status"] == "success"
+    assert command[command.index("--cd") + 1] == str(workspace.resolve())
+    assert child_runtime["workspace_dir"] == str(workspace.resolve())
+    assert child_runtime["command_argv_redacted"][
+        child_runtime["command_argv_redacted"].index("--cd") + 1
+    ] == str(workspace.resolve())
 
 
 def test_core_v2_production_codex_agents_pass_data_edge_to_downstream(
@@ -440,6 +803,7 @@ def test_core_v2_production_requires_external_agent_gate(
     tmp_path: Path,
 ) -> None:
     monkeypatch.setenv("ACC_RUN_MODE", "production")
+    monkeypatch.setenv("ACC_ENABLE_EXTERNAL_AGENT_EXECUTION", "0")
 
     async def fail_if_spawned(*args, **kwargs):
         raise AssertionError("external process should not be spawned")
@@ -875,24 +1239,9 @@ def test_non_main_data_edge_uses_outputs_container_port_value(
             output_path = Path(self.command[self.command.index("-o") + 1])
             output_path.write_text(
                 json.dumps(
-                    {
-                        "schema_version": "acc.agent.output.v1",
-                        "status": "success",
-                        "summary": "risk table produced",
-                        "report_markdown": "full report",
-                        "findings": [],
-                        "evidence": [],
-                        "artifacts": [],
-                        "quality": {
-                            "confidence": "high",
-                            "assumptions": [],
-                            "uncertainties": [],
-                            "limitations": [],
+                        {
+                            "outputs": {"risk_table": [{"risk": "structured"}]},
                         },
-                        "next_actions": [],
-                        "outputs": {"risk_table": [{"risk": "structured"}]},
-                        "risk_table": [{"risk": "legacy"}],
-                    },
                     indent=2,
                     sort_keys=True,
                 ),

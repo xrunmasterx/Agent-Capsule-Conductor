@@ -261,6 +261,13 @@ const routes: Record<string, unknown> = {
     errors: [],
   },
   'POST /api/workflows/acc_workspace_canvas/validate': { status: 'valid', workflow_id: 'acc_workspace_canvas' },
+  'POST /api/workflows/Research_Flow/binding/select-directory': {
+    workflow_id: 'Research_Flow',
+    status: 'selected',
+    workspace_root: 'D:\\CFH\\EngineSource',
+    valid: true,
+    error: null,
+  },
   'POST /api/workflows/acc_workspace_canvas/run': {
     workflow_id: 'acc_workspace_canvas',
     status: 'success',
@@ -503,6 +510,202 @@ beforeEach(() => {
           status: failedRoute.status,
           headers: { 'Content-Type': 'application/json' },
         });
+      }
+      if (method === 'GET' && url === '/api/authoring/agents') {
+        return new Response(
+          JSON.stringify({
+            agents: [
+              {
+                id: 'echo-test.generic',
+                version: '0.1.0',
+                kind: 'agent_class',
+                runtime: 'generic_cli',
+                backend: 'native',
+                source_id: 'echo-test.generic',
+                source_path: 'callables/agents/echo-test.generic.yaml',
+                name: 'Echo Test',
+                default_permissions: {
+                  workspace_access: 'read_only',
+                  network: false,
+                  shell: false,
+                  dangerous: false,
+                  env_policy: 'acc_whitelist',
+                  allowed_env: [],
+                  timeout_seconds: 60,
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      if (method === 'POST' && url === '/api/authoring/sessions') {
+        const body = JSON.parse(String(init?.body || '{}'));
+        return new Response(
+          JSON.stringify({
+            session_id: 'authoring_test_session',
+            agent_id: body.agent_id || 'echo-test.generic',
+            task_id: body.task_id,
+            status: 'ready',
+            messages: [],
+            last_proposal: null,
+            validation: null,
+            required_actions: [],
+            evidence: {},
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      if (
+        method === 'POST' &&
+        /^\/api\/authoring\/sessions\/[^/]+\/messages$/u.test(url)
+      ) {
+        const body = JSON.parse(String(init?.body || '{}'));
+        const wantsTemp = String(body.message || '').toLowerCase().includes('new agent');
+        const proposal = wantsTemp
+          ? {
+              proposal_id: 'canvas_proposal_temp',
+              base_task_id: body.canvas_snapshot?.task_id || 'task_canvas_default',
+              base_canvas_hash: body.canvas_hash,
+              target: { kind: 'task_canvas', task_id: body.canvas_snapshot?.task_id || 'task_canvas_default' },
+              rationale: 'Draft temporary agent',
+              operations: [
+                {
+                  op: 'create_temporary_agent_template',
+                  scope_workflow_id: null,
+                  draft_id: 'tmp_agent_test',
+                  node_id: 'tmp_agent_test',
+                  label: 'Temporary Agent',
+                  position: { x: 120, y: 180 },
+                  agent_draft: {
+                    id: 'tmp_agent_test',
+                    version: '0.1.0',
+                    runtime: 'codex_cli',
+                    name: 'Temporary Agent',
+                    default_prompt: body.message,
+                    input_ports: { main: { type: 'artifact', required: false } },
+                    output_ports: { main: { type: 'artifact', required: true } },
+                    artifact_contract: { output_schema: { type: 'object', properties: { summary: { type: 'string' } } } },
+                    metadata: { temporary: true },
+                  },
+                  input: { user_prompt: body.message },
+                  output_schema: { type: 'object', properties: { summary: { type: 'string' } }, required: ['summary'] },
+                },
+              ],
+            }
+          : {
+              proposal_id: 'canvas_proposal_backend',
+              base_task_id: body.canvas_snapshot?.task_id || 'task_canvas_default',
+              base_canvas_hash: body.canvas_hash,
+              target: { kind: 'task_canvas', task_id: body.canvas_snapshot?.task_id || 'task_canvas_default' },
+              rationale: 'Backend authoring proposal',
+              operations: [
+                {
+                  op: 'add_existing_callable_node',
+                  scope_workflow_id: null,
+                  node_id: 'Echo_Test',
+                  callable_id: 'echo-test.generic',
+                  callable_kind: 'agent_class',
+                  label: 'Echo Test',
+                  position: { x: 120, y: 180 },
+                  input: { user_prompt: body.message },
+                  input_ports: [{ id: 'main', direction: 'input', required: false }],
+                  output_ports: [{ id: 'main', direction: 'output', required: true }],
+                  output_schema: { type: 'object', properties: { summary: { type: 'string' } }, required: ['summary'] },
+                },
+              ],
+            };
+        return new Response(
+          JSON.stringify({
+            session_id: 'authoring_test_session',
+            message_id: 'msg_test',
+            assistant_message: 'Backend generated a proposal.',
+            proposal,
+            validation: { status: 'valid', errors: [], warnings: [] },
+            required_actions: wantsTemp
+              ? [
+                  {
+                    kind: 'approve_resource_persistence',
+                    resource_draft_id: 'tmp_agent_test',
+                    reason: 'Temporary agent must be persisted before run/save',
+                  },
+                ]
+              : [{ kind: 'confirm_canvas_apply', reason: 'Review and apply proposal' }],
+            questions: [],
+            risk_notes: [],
+            confidence: 'medium',
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      if (method === 'POST' && url === '/api/workbench/canvas-snapshots') {
+        const body = JSON.parse(String(init?.body || '{}'));
+        return new Response(
+          JSON.stringify({
+            schema_version: 'acc.workbench.canvas_snapshot.v1',
+            task_id: body.task_id,
+            canvas_hash: body.canvas_hash,
+            canvas_snapshot: body.canvas_snapshot,
+            selection: body.selection || {},
+            temporary_resources: body.temporary_resources || {},
+            published_at: '2026-06-07T00:00:00Z',
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      if (method === 'POST' && url === '/api/graphops/proposals') {
+        const body = JSON.parse(String(init?.body || '{}'));
+        return new Response(
+          JSON.stringify({
+            proposal_id: body.proposal.proposal_id,
+            status: 'drafted',
+            proposal: body.proposal,
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      const graphopsProposalRoute = url.match(/^\/api\/graphops\/proposals\/([^/]+)\/([^/]+)$/u);
+      if (method === 'POST' && graphopsProposalRoute) {
+        const proposalId = decodeURIComponent(graphopsProposalRoute[1]);
+        const action = graphopsProposalRoute[2];
+        if (action === 'validate') {
+          return new Response(
+            JSON.stringify({ status: 'valid', errors: [], warnings: [] }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        if (action === 'dry-run') {
+          return new Response(
+            JSON.stringify({
+              status: 'dry_run_ready',
+              proposal_id: proposalId,
+              mutated: false,
+              target_paths: ['callables/agents/tmp_agent_test.yaml'],
+              dry_run_digest: 'sha256:test-dry-run',
+              semantic_diff: {
+                created_files: ['callables/agents/tmp_agent_test.yaml'],
+                created_callable_ids: ['tmp_agent_test'],
+              },
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        if (action === 'approve') {
+          return new Response(
+            JSON.stringify({ status: 'approved', proposal_id: proposalId }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        if (action === 'apply') {
+          return new Response(
+            JSON.stringify({
+              status: 'applied',
+              proposal_id: proposalId,
+              created_files: ['callables/agents/tmp_agent_test.yaml'],
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
       }
       if (method === 'POST' && url === '/api/workflows/run-graph/submit') {
         const body = JSON.parse(String(init?.body || '{}'));
@@ -946,6 +1149,80 @@ describe('Agent Callable Workbench editable UI', () => {
     expect(deleted.edges).toHaveLength(0);
   });
 
+  test('Internal node run lookup maps node-scoped single-node run evidence', () => {
+    const helpers = __workflowViewerTestables as any;
+    const singleNodeRun = {
+      workflow_id: 'Research_Flow_research_codex_single_node',
+      status: 'running',
+      run_dir: 'runs/ui_workflow_Research_Flow_research_codex_single_node',
+      nodes: [
+        {
+          node_id: 'research_codex',
+          callable_id: 'fake-agent.generic',
+          status: 'running',
+          run_dir: 'runs/ui_workflow_Research_Flow_research_codex_single_node/nodes/research_codex',
+        },
+      ],
+      edges: [],
+      errors: [],
+    };
+
+    const nodeRun = helpers.nodeRunForInternalNode(
+      singleNodeRun,
+      'Research_Flow',
+      'research_codex',
+      {
+        scope: 'node',
+        targetId: 'research_codex',
+        parentWorkflowId: 'Research_Flow',
+      },
+    );
+    expect(nodeRun?.node_id).toBe('research_codex');
+
+    expect(
+      helpers.nodeRunForInternalNode(singleNodeRun, 'Other_Flow', 'research_codex', {
+        scope: 'node',
+        targetId: 'research_codex',
+        parentWorkflowId: 'Research_Flow',
+      }),
+    ).toBeUndefined();
+    expect(
+      helpers.nodeRunForInternalNode(singleNodeRun, 'Research_Flow', 'research_codex', {
+        scope: 'workflow',
+        targetId: 'research_codex',
+        parentWorkflowId: 'Research_Flow',
+      }),
+    ).toBeUndefined();
+  });
+
+  test('Internal node run lookup keeps full workflow scoped identity matching', () => {
+    const helpers = __workflowViewerTestables as any;
+    const workflowRun = {
+      workflow_id: 'ui_workflow_acc_workspace_canvas_fixture',
+      status: 'success',
+      run_dir: 'runs/ui_workflow_acc_workspace_canvas_fixture',
+      nodes: [
+        {
+          node_id: 'research_codex',
+          ui_node_id: 'Research_Flow__internal__research_codex',
+          parent_node_id: 'Research_Flow',
+          callable_id: 'fake-agent.generic',
+          status: 'success',
+          run_dir: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_codex',
+        },
+      ],
+      edges: [],
+      errors: [],
+    };
+
+    const nodeRun = helpers.nodeRunForInternalNode(
+      workflowRun,
+      'Research_Flow',
+      'research_codex',
+    );
+    expect(nodeRun?.ui_node_id).toBe('Research_Flow__internal__research_codex');
+  });
+
   test('Node create menu is dismissed when switching to a new task', async () => {
     const user = userEvent.setup();
     render(<App />);
@@ -1371,6 +1648,205 @@ describe('Agent Callable Workbench editable UI', () => {
     expect(position('d').x).toBeGreaterThan(position('c').x);
   });
 
+  test('Workflow auto layout avoids overlap and reserves container safe area', () => {
+    const edge = (from: string, to: string) => ({
+      id: `control_${from}_${to}`,
+      kind: 'control',
+      source: { workflowId: from },
+      target: { workflowId: to },
+      condition: null,
+      context: 'none',
+    });
+    const workflow: any = {
+      id: 'review_flow',
+      title: 'Review Flow',
+      sourceKind: 'workflow',
+      directory: 'workspace',
+      status: 'not_run',
+      inputPorts: [],
+      outputPorts: [],
+      internalNodes: [
+        { id: 'intake', name: 'Intake', task: 'fake-agent.generic', kind: 'Agent', status: 'not_run', position: { x: 10, y: 10 } },
+        { id: 'architecture', name: 'Architecture', task: 'fake-agent.generic', kind: 'Agent', status: 'not_run', position: { x: 20, y: 20 } },
+        { id: 'risk', name: 'Risk', task: 'fake-agent.generic', kind: 'Agent', status: 'not_run', position: { x: 30, y: 30 } },
+        { id: 'test', name: 'Test', task: 'fake-agent.generic', kind: 'Agent', status: 'not_run', position: { x: 40, y: 40 } },
+        { id: 'synthesis', name: 'Synthesis', task: 'fake-agent.generic', kind: 'Agent', status: 'not_run', position: { x: 50, y: 50 } },
+        { id: 'review', name: 'Review', task: 'fake-agent.generic', kind: 'Agent', status: 'not_run', position: { x: 60, y: 60 } },
+      ],
+      internalEdges: [
+        edge('intake', 'architecture'),
+        edge('intake', 'risk'),
+        edge('intake', 'test'),
+        edge('architecture', 'synthesis'),
+        edge('risk', 'synthesis'),
+        edge('test', 'synthesis'),
+        edge('synthesis', 'review'),
+      ],
+      position: { x: 100, y: 100 },
+      size: { width: 430, height: 328 },
+      warnings: [],
+    };
+    const canvas: any = {
+      id: 'root_task',
+      name: 'Root Task',
+      rootWorkflowId: 'root_task',
+      layout: 'workspace-canvas',
+      workflows: [workflow],
+      edges: [],
+    };
+
+    const laidOut = __workflowViewerTestables.layoutCanvasForSelection(canvas, {
+      type: 'workflow',
+      id: workflow.id,
+    });
+    const nextWorkflow = laidOut.workflows[0];
+    const byId = new Map(nextWorkflow.internalNodes.map((node: any) => [node.id, node]));
+    const node = (id: string): any => {
+      const value = byId.get(id);
+      if (!value) {
+        throw new Error(`Missing layout node ${id}`);
+      }
+      return value;
+    };
+    const rects = nextWorkflow.internalNodes.map((item: any) => ({
+      id: item.id,
+      left: item.position.x,
+      top: item.position.y,
+      right: item.position.x + 276,
+      bottom: item.position.y + 132,
+    }));
+
+    for (let index = 0; index < rects.length; index += 1) {
+      for (let otherIndex = index + 1; otherIndex < rects.length; otherIndex += 1) {
+        const a = rects[index];
+        const b = rects[otherIndex];
+        const overlap = a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+        expect(overlap, `${a.id} overlaps ${b.id}`).toBe(false);
+      }
+    }
+    for (const item of nextWorkflow.internalNodes) {
+      if (!item.position) {
+        throw new Error(`Missing positioned node: ${item.id}`);
+      }
+      expect(item.position.x).toBeGreaterThanOrEqual(96);
+      expect(item.position.y).toBeGreaterThanOrEqual(154);
+    }
+    expect(node('intake').position.x).toBeLessThan(node('architecture').position.x);
+    expect(node('intake').position.x).toBeLessThan(node('risk').position.x);
+    expect(node('intake').position.x).toBeLessThan(node('test').position.x);
+    expect(Math.abs(node('architecture').position.x - node('risk').position.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(node('risk').position.x - node('test').position.x)).toBeLessThanOrEqual(1);
+    expect(node('synthesis').position.x).toBeGreaterThan(node('architecture').position.x);
+    expect(node('review').position.x).toBeGreaterThan(node('synthesis').position.x);
+    expect(nextWorkflow.size.width).toBeGreaterThanOrEqual(node('review').position.x + 276 + 96);
+  });
+
+  test('Workflow auto layout uses boundary edges to rank input and output nodes', () => {
+    const workflowId = 'boundary_flow';
+    const workflow: any = {
+      id: workflowId,
+      title: 'Boundary Flow',
+      sourceKind: 'workflow',
+      directory: 'workspace',
+      status: 'not_run',
+      inputPorts: [],
+      outputPorts: [],
+      internalNodes: [
+        { id: 'producer', name: 'Producer', task: 'fake-agent.generic', kind: 'Agent', status: 'not_run', position: { x: 300, y: 20 } },
+        { id: 'consumer', name: 'Consumer', task: 'fake-agent.generic', kind: 'Agent', status: 'not_run', position: { x: 20, y: 20 } },
+      ],
+      internalEdges: [
+        {
+          id: 'input_to_consumer',
+          kind: 'data',
+          source: { workflowId: `${workflowId}__workflow_inputs`, portId: 'main' },
+          target: { workflowId: 'consumer', portId: 'main' },
+          materialization: 'reference',
+        },
+        {
+          id: 'consumer_to_producer',
+          kind: 'control',
+          source: { workflowId: 'consumer' },
+          target: { workflowId: 'producer' },
+        },
+        {
+          id: 'producer_to_output',
+          kind: 'data',
+          source: { workflowId: 'producer', portId: 'main' },
+          target: { workflowId: `${workflowId}__workflow_outputs`, portId: 'main' },
+          materialization: 'reference',
+        },
+      ],
+      position: { x: 100, y: 100 },
+      size: { width: 430, height: 328 },
+      warnings: [],
+    };
+    const laidOut = __workflowViewerTestables.layoutCanvasForSelection(
+      {
+        id: 'root_task',
+        name: 'Root Task',
+        rootWorkflowId: 'root_task',
+        layout: 'workspace-canvas',
+        workflows: [workflow],
+        edges: [],
+      } as any,
+      { type: 'workflow', id: workflowId },
+    );
+    const nodes = new Map(laidOut.workflows[0].internalNodes.map((item: any) => [item.id, item.position]));
+
+    expect(nodes.get('producer')?.x).toBeGreaterThan(nodes.get('consumer')?.x || 0);
+  });
+
+  test('Workflow auto layout shrinks oversized container to fitted content', () => {
+    const workflow: any = {
+      id: 'oversized_flow',
+      title: 'Oversized Flow',
+      sourceKind: 'workflow',
+      directory: 'workspace',
+      status: 'not_run',
+      inputPorts: [],
+      outputPorts: [],
+      internalNodes: [
+        { id: 'first', name: 'First', task: 'fake-agent.generic', kind: 'Agent', status: 'not_run', position: { x: 120, y: 180 } },
+        { id: 'second', name: 'Second', task: 'fake-agent.generic', kind: 'Agent', status: 'not_run', position: { x: 520, y: 180 } },
+      ],
+      internalEdges: [
+        {
+          id: 'first_second',
+          kind: 'control',
+          source: { workflowId: 'first' },
+          target: { workflowId: 'second' },
+        },
+      ],
+      position: { x: 80, y: 80 },
+      size: { width: 1800, height: 920 },
+      warnings: [],
+    };
+    const laidOut = __workflowViewerTestables.layoutCanvasForSelection(
+      {
+        id: 'root_task',
+        name: 'Root Task',
+        rootWorkflowId: 'root_task',
+        layout: 'workspace-canvas',
+        workflows: [workflow],
+        edges: [],
+      } as any,
+      { type: 'workflow', id: workflow.id },
+    );
+    const nextWorkflow = laidOut.workflows[0];
+    const maxChildX = Math.max(
+      ...nextWorkflow.internalNodes.map((node: any) => node.position.x + 276),
+    );
+    const maxChildY = Math.max(
+      ...nextWorkflow.internalNodes.map((node: any) => node.position.y + 132),
+    );
+
+    expect(nextWorkflow.size.width).toBeLessThan(workflow.size.width);
+    expect(nextWorkflow.size.height).toBeLessThan(workflow.size.height);
+    expect(nextWorkflow.size.width).toBeGreaterThanOrEqual(maxChildX + 96);
+    expect(nextWorkflow.size.height).toBeGreaterThanOrEqual(maxChildY + 72);
+  });
+
   test('Workflow container expansion keeps child absolute position when expanding left or up', () => {
     const workflow: any = {
       id: 'Research_Flow',
@@ -1765,6 +2241,44 @@ describe('Agent Callable Workbench editable UI', () => {
     expect(JSON.stringify(savedPayload.graph)).not.toContain('"status"');
   });
 
+  test('Workflow binding dialog fills workspace root from native directory selection', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await openNavIndex(user, 0);
+    await loadWorkspaceDemo(user);
+    const workflow = await screen.findByTestId('workflow-container-Research_Flow');
+    const configureButton = workflow.querySelector<HTMLButtonElement>(
+      'button[aria-label="配置工作目录"]',
+    );
+    expect(configureButton).toBeTruthy();
+    fireEvent.click(configureButton as HTMLButtonElement);
+    const dialog = await screen.findByRole('dialog', { name: '配置工作目录' });
+
+    await user.click(within(dialog).getByRole('button', { name: '选择文件夹' }));
+
+    await waitFor(() => {
+      expect(within(dialog).getByLabelText('workspace_root')).toHaveValue(
+        'D:\\CFH\\EngineSource',
+      );
+    });
+    const calls = vi.mocked(fetch).mock.calls;
+    expect(
+      calls.some(
+        ([url, init]) =>
+          url === '/api/workflows/Research_Flow/binding/select-directory' &&
+          init?.method === 'POST',
+      ),
+    ).toBe(true);
+    expect(
+      calls.some(
+        ([url, init]) =>
+          url === '/api/workflows/Research_Flow/binding' &&
+          init?.method === 'PUT',
+      ),
+    ).toBe(false);
+  });
+
   /*
   test('Workflow Builder saves workflow internals without Focus Mode navigation', async () => {
     const user = userEvent.setup();
@@ -2092,6 +2606,133 @@ describe('Agent Callable Workbench editable UI', () => {
     await waitFor(() => expect(within(detailsDock).queryByText('输入 / 输出')).not.toBeInTheDocument());
   });
 
+  test('Workbench AI assistant generates and applies a canvas-local proposal', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await openNavIndex(user, 0);
+
+    await user.click(await screen.findByRole('button', { name: /AI 助手/i }));
+
+    const assistantMessages = await screen.findByLabelText('AI 助手消息');
+    expect(assistantMessages).toHaveTextContent('等待输入需求');
+
+    await user.type(
+      screen.getByPlaceholderText('描述要生成或调整的 workflow 草稿'),
+      'Create a research and review workflow',
+    );
+    await user.click(screen.getByRole('button', { name: '生成 Proposal' }));
+
+    expect(await screen.findByLabelText('CanvasAuthoringProposal')).toHaveTextContent('Proposal');
+    await user.click(screen.getByRole('button', { name: '应用到当前画布' }));
+
+    await waitFor(() => {
+      const nodes = screen.getAllByTestId(/agent-tool-node-/);
+      expect(nodes.length).toBeGreaterThanOrEqual(1);
+    });
+    expect(screen.queryByLabelText('CanvasAuthoringProposal')).not.toBeInTheDocument();
+  });
+
+  test('Workbench AI temporary agent blocks save validate and run after task reload', async () => {
+    const user = userEvent.setup();
+    const view = render(<App />);
+
+    await openNavIndex(user, 0);
+    await user.click(await screen.findByRole('button', { name: /AI 助手/i }));
+    await user.type(
+      screen.getByPlaceholderText('描述要生成或调整的 workflow 草稿'),
+      'create a new agent template for reporting',
+    );
+    await user.click(screen.getByRole('button', { name: '生成 Proposal' }));
+    await user.click(await screen.findByRole('button', { name: '应用到当前画布' }));
+    await waitFor(() => {
+      expect(window.localStorage.getItem('acc.workbench.tasks.v1') || '').toContain('tmp_agent_');
+    });
+
+    view.unmount();
+    vi.mocked(fetch).mockClear();
+    render(<App />);
+    const toolbar = await screen.findByLabelText('工作流工具栏');
+    vi.mocked(fetch).mockClear();
+
+    await user.click(within(toolbar).getByRole('button', { name: /保存/i }));
+    await user.click(within(toolbar).getByRole('button', { name: /^校验$/i }));
+    await user.click(within(toolbar).getByRole('button', { name: /^运行$/i }));
+
+    const calls = vi.mocked(fetch).mock.calls;
+    expect(calls.some(([url, init]) => url === '/api/workflows' && init?.method === 'POST')).toBe(false);
+    expect(
+      calls.some(
+        ([url, init]) =>
+          typeof url === 'string' &&
+          url.startsWith('/api/workflows/') &&
+          url.endsWith('/validate') &&
+          init?.method === 'POST',
+      ),
+    ).toBe(false);
+    expect(calls.some(([url, init]) => url === '/api/workflows/run-graph/submit' && init?.method === 'POST')).toBe(false);
+  });
+
+  test('Workbench AI temporary agent persists through GraphOps proposal approval', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await openNavIndex(user, 0);
+    await user.click(await screen.findByRole('button', { name: /AI \u52a9\u624b/i }));
+    await user.type(
+      screen.getByPlaceholderText('\u63cf\u8ff0\u8981\u751f\u6210\u6216\u8c03\u6574\u7684 workflow \u8349\u7a3f'),
+      'create a new agent template for reporting',
+    );
+    await user.click(screen.getByRole('button', { name: '\u751f\u6210 Proposal' }));
+    await user.click(await screen.findByRole('button', { name: '\u5e94\u7528\u5230\u5f53\u524d\u753b\u5e03' }));
+    vi.mocked(fetch).mockClear();
+
+    await user.click(await screen.findByRole('button', { name: '保存为资源' }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('GraphOps 持久化预览')).toHaveTextContent(
+        'callables/agents/tmp_agent_test.yaml',
+      );
+    });
+    let calls = vi.mocked(fetch).mock.calls;
+    expect(calls.some(([url, init]) => url === '/api/callables/agents' && init?.method === 'POST')).toBe(false);
+    expect(calls.some(([url, init]) => url === '/api/graphops/proposals' && init?.method === 'POST')).toBe(true);
+    expect(
+      calls.some(
+        ([url, init]) =>
+          typeof url === 'string' &&
+          /^\/api\/graphops\/proposals\/[^/]+\/dry-run$/u.test(url) &&
+          init?.method === 'POST',
+      ),
+    ).toBe(true);
+    expect(
+      calls.some(
+        ([url, init]) =>
+          typeof url === 'string' &&
+          /^\/api\/graphops\/proposals\/[^/]+\/apply$/u.test(url) &&
+          init?.method === 'POST',
+      ),
+    ).toBe(false);
+
+    await user.click(screen.getByRole('button', { name: '批准并写入' }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('AI \u52a9\u624b\u6d88\u606f')).toHaveTextContent('GraphOps');
+    });
+    calls = vi.mocked(fetch).mock.calls;
+    expect(
+      calls.some(
+        ([url, init]) =>
+          typeof url === 'string' &&
+          /^\/api\/graphops\/proposals\/[^/]+\/apply$/u.test(url) &&
+          init?.method === 'POST',
+      ),
+    ).toBe(true);
+    expect(window.localStorage.getItem('acc.workbench.tasks.v1') || '').not.toContain(
+      '"temporaryResourceId":"tmp_agent_test"',
+    );
+  });
+
   test('Workflow Builder saves, validates, and runs workspace canvas', async () => {
     const user = userEvent.setup();
     render(<App />);
@@ -2126,6 +2767,33 @@ describe('Agent Callable Workbench editable UI', () => {
       default_state_mode: 'stateful',
     });
     expect(await screen.findByText(/ui_workflow_acc_workspace_canvas_fixture: 成功/i)).toBeInTheDocument();
+  });
+
+  test('Selected node runtime input is submitted as that node invocation input', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await openNavIndex(user, 0);
+    await loadWorkspaceDemo(user);
+
+    fireEvent.click(await screen.findByTestId('agent-tool-node-Research_Flow__internal__research_codex'));
+    const runtimeInput = await screen.findByLabelText('运行时输入 main');
+    await user.clear(runtimeInput);
+    await user.type(runtimeInput, '请分析新的技术方案评审需求');
+
+    await user.click(await screen.findByRole('button', { name: '运行当前任务' }));
+
+    const runCall = vi.mocked(fetch).mock.calls.find(
+      ([url, init]) => url === '/api/workflows/run-graph/submit' && init?.method === 'POST',
+    );
+    expect(runCall).toBeTruthy();
+    const runPayload = JSON.parse(String(runCall?.[1]?.body));
+    expect(runPayload.input).toBeUndefined();
+    const containerNode = runPayload.graph.nodes.find((node: { id?: string }) => node.id === 'Research_Flow');
+    const targetNode = containerNode?.ui?.internal_nodes?.find(
+      (node: { id?: string }) => node.id === 'research_codex',
+    );
+    expect(targetNode?.input).toMatchObject({ main: '请分析新的技术方案评审需求' });
   });
 
   test('Workflow node inspector shows real input and output evidence after a run', async () => {

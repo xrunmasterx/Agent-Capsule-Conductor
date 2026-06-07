@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import re
 from dataclasses import dataclass, field
@@ -11,6 +12,7 @@ from acc.app.workflow_normalization import (
     normalize_workflow_payload_contracts,
 )
 from acc.callable_registry import CallableRegistry
+from acc.callable_runner import normalize_output_schema_for_structured_output
 from acc.domain import CORE_V2_SCHEMA_VERSION
 from acc.engine import is_clean_workflow_payload, parse_workflow_function_template
 from acc.engine.workflow_validation import collect_callable_validation_issues
@@ -67,6 +69,13 @@ EXECUTABLE_UI_NODE_KEYS = {
     "workflow_ref",
 }
 
+CODEX_LOCAL_READONLY_NO_SANDBOX = "local_readonly_no_sandbox"
+CODEX_DANGER_FULL_ACCESS = "danger_full_access"
+CODEX_EXECUTION_MODES = {
+    CODEX_LOCAL_READONLY_NO_SANDBOX,
+    CODEX_DANGER_FULL_ACCESS,
+}
+
 
 @dataclass(frozen=True)
 class CompiledWorkbenchWorkflowBundle:
@@ -91,6 +100,91 @@ def canonicalize_workbench_workflow_payload(
         canonical = workbench_draft_to_core_v2_payload(copied, source_path=source_path)
     validate_canonical_workflow_payload(canonical, source_path=source_path)
     return canonical
+
+
+def merge_workbench_codex_execution_modes(
+    graph: dict[str, Any],
+    canvas_snapshot: dict[str, Any],
+) -> dict[str, Any]:
+    """Fill missing Codex execution modes from the latest Workbench snapshot.
+
+    The browser owns interaction state. In practice a run request can race with
+    graph projection updates, while the snapshot has the latest node settings.
+    This merge is deliberately narrow: it only copies Codex execution mode onto
+    matching root or inline-container internal nodes when the submitted graph did
+    not already carry an explicit mode.
+    """
+
+    mode_index = codex_execution_mode_index(canvas_snapshot)
+    if not mode_index:
+        return graph
+    merged = copy.deepcopy(graph)
+    for node in merged.get("nodes") or []:
+        if not isinstance(node, dict):
+            continue
+        node_id = str(node.get("id") or "")
+        root_mode = mode_index.get((None, node_id))
+        if root_mode and not codex_execution_mode_from_ui_node(node):
+            metadata = safe_metadata(node.get("metadata"))
+            metadata["codex_execution_mode"] = root_mode
+            node["metadata"] = metadata
+        ui = node.get("ui")
+        if not isinstance(ui, dict):
+            continue
+        internal_nodes = ui.get("internal_nodes")
+        if not isinstance(internal_nodes, list):
+            continue
+        for internal_node in internal_nodes:
+            if not isinstance(internal_node, dict):
+                continue
+            internal_id = str(internal_node.get("id") or "")
+            internal_mode = mode_index.get((node_id, internal_id))
+            if internal_mode and not codex_execution_mode_from_ui_node(internal_node):
+                internal_node["codexExecutionMode"] = internal_mode
+    return merged
+
+
+def codex_execution_mode_index(
+    canvas_snapshot: dict[str, Any],
+) -> dict[tuple[str | None, str], str]:
+    graph = canvas_snapshot.get("canonical_graph")
+    if not isinstance(graph, dict):
+        graph = canvas_snapshot
+    modes: dict[tuple[str | None, str], str] = {}
+    for node in graph.get("nodes") or []:
+        if not isinstance(node, dict):
+            continue
+        node_id = str(node.get("id") or "")
+        root_mode = codex_execution_mode_from_ui_node(node)
+        if node_id and root_mode:
+            modes[(None, node_id)] = root_mode
+        ui = node.get("ui")
+        if not isinstance(ui, dict):
+            continue
+        for internal_node in ui.get("internal_nodes") or []:
+            if not isinstance(internal_node, dict):
+                continue
+            internal_id = str(internal_node.get("id") or "")
+            internal_mode = codex_execution_mode_from_ui_node(internal_node)
+            if node_id and internal_id and internal_mode:
+                modes[(node_id, internal_id)] = internal_mode
+    workflows = canvas_snapshot.get("workflows")
+    if isinstance(workflows, list):
+        for workflow in workflows:
+            if not isinstance(workflow, dict):
+                continue
+            workflow_id = str(workflow.get("id") or "")
+            root_mode = codex_execution_mode_from_ui_node(workflow)
+            if workflow_id and root_mode:
+                modes[(None, workflow_id)] = root_mode
+            for internal_node in workflow.get("internalNodes") or []:
+                if not isinstance(internal_node, dict):
+                    continue
+                internal_id = str(internal_node.get("id") or "")
+                internal_mode = codex_execution_mode_from_ui_node(internal_node)
+                if workflow_id and internal_id and internal_mode:
+                    modes[(workflow_id, internal_id)] = internal_mode
+    return modes
 
 
 def compile_workbench_workflow_bundle(
@@ -366,6 +460,14 @@ def workflow_container_child_draft(
     control_edges, data_edges, workflow_input_bindings, workflow_output_bindings = (
         split_internal_edges_for_child_workflow(str(node.get("id") or ""), edges)
     )
+    metadata = {
+        "canonical_format": "accflow",
+        "compiled_from_workbench_container": str(node.get("id") or ""),
+        "compiled_child_path": child_name,
+    }
+    binding_ref = workflow_container_binding_ref(node)
+    if binding_ref:
+        metadata["binding_ref"] = binding_ref
     return {
         "id": child_id,
         "version": str(node.get("version") or "0.1.0"),
@@ -379,11 +481,7 @@ def workflow_container_child_draft(
         "workflow_input_bindings": workflow_input_bindings,
         "workflow_output_bindings": workflow_output_bindings,
         "policy": {"failure_mode": "fail_fast", "max_concurrency": 4},
-        "metadata": {
-            "canonical_format": "accflow",
-            "compiled_from_workbench_container": str(node.get("id") or ""),
-            "compiled_child_path": child_name,
-        },
+        "metadata": metadata,
     }
 
 
@@ -413,9 +511,13 @@ def internal_ui_node_to_workbench_node(node: dict[str, Any]) -> dict[str, Any]:
         "output_ports": normalize_ui_ports(node.get("outputPorts") or node.get("output_ports")),
         "position": safe_position(node.get("position")),
     }
+    codex_mode = codex_execution_mode_from_ui_node(node)
+    if codex_mode:
+        result["metadata"] = {"codex_execution_mode": codex_mode}
+        result["invocation_policy"] = codex_invocation_policy_for_mode(codex_mode)
     output_schema = node.get("outputSchema") or node.get("output_schema")
     if isinstance(output_schema, dict):
-        result["output_schema"] = output_schema
+        result["output_schema"] = normalize_output_schema_for_structured_output(output_schema)
     control_payload = dict(node.get("control")) if isinstance(node.get("control"), dict) else {}
     forward_main = node.get("forwardMainOutputOnControl")
     if forward_main is None:
@@ -425,6 +527,41 @@ def internal_ui_node_to_workbench_node(node: dict[str, Any]) -> dict[str, Any]:
     if control_payload:
         result["control"] = control_payload
     return result
+
+
+def codex_execution_mode_from_ui_node(node: dict[str, Any]) -> str | None:
+    for value in (
+        node.get("codexExecutionMode"),
+        node.get("codex_execution_mode"),
+        (node.get("metadata") or {}).get("codex_execution_mode")
+        if isinstance(node.get("metadata"), dict)
+        else None,
+    ):
+        if isinstance(value, str) and value in CODEX_EXECUTION_MODES:
+            return value
+    return None
+
+
+def codex_invocation_policy_for_mode(mode: str) -> dict[str, Any]:
+    if mode == CODEX_LOCAL_READONLY_NO_SANDBOX:
+        return {
+            "permission_profile": {
+                "workspace_access": "read_only",
+                "network": False,
+                "shell": True,
+                "dangerous": True,
+            }
+        }
+    if mode == CODEX_DANGER_FULL_ACCESS:
+        return {
+            "permission_profile": {
+                "workspace_access": "writes_workspace",
+                "network": True,
+                "shell": True,
+                "dangerous": True,
+            }
+        }
+    return {}
 
 
 def normalize_ui_ports(value: Any) -> list[dict[str, Any]]:
@@ -576,16 +713,38 @@ def parent_workflow_call_node(node: dict[str, Any], child_name: str) -> dict[str
         for key, value in ui.items()
         if key not in {"internal_nodes", "internal_edges"}
     }
+    metadata = safe_metadata(node.get("metadata"))
+    binding_ref = workflow_container_binding_ref(node)
+    if binding_ref:
+        metadata["binding_ref"] = binding_ref
     rewritten = {
         **node,
         "callable_ref": {"kind": "workflow_function", "id": child_name},
         "workflow_ref": child_name,
         "workflow_call_output_bindings": optional_workflow_call_output_bindings(node),
+        "metadata": metadata,
         "ui": clean_ui,
     }
     if not clean_ui:
         rewritten.pop("ui", None)
     return rewritten
+
+
+def workflow_container_binding_ref(node: dict[str, Any]) -> str | None:
+    metadata = node.get("metadata") if isinstance(node.get("metadata"), dict) else {}
+    ui = node.get("ui") if isinstance(node.get("ui"), dict) else {}
+    for value in (
+        metadata.get("binding_ref"),
+        node.get("binding_ref"),
+        node.get("bindingPath"),
+        node.get("binding_path"),
+        ui.get("binding_ref"),
+        ui.get("bindingPath"),
+        ui.get("binding_path"),
+    ):
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
 
 
 def optional_workflow_call_output_bindings(node: dict[str, Any]) -> list[dict[str, Any]]:
@@ -657,6 +816,14 @@ def workbench_node_to_core_v2_node(
     if not user_prompt and isinstance(topic, str):
         user_prompt = topic
 
+    metadata = safe_metadata(node.get("metadata"))
+    metadata.update(
+        {
+            "label": str(node.get("label") or node_id),
+            "ui_label": ui_label_for_node(node, node_id),
+            "workbench_kind": str(node.get("kind") or ""),
+        }
+    )
     canonical: dict[str, Any] = {
         "id": node_id,
         "callable_ref": callable_ref,
@@ -664,11 +831,7 @@ def workbench_node_to_core_v2_node(
         "overrides": {"static_input": static_input},
         "prompt_policy": {"user_prompt": user_prompt} if isinstance(user_prompt, str) else {},
         "input_bindings": input_bindings_from_mapping(node),
-        "metadata": {
-            "label": str(node.get("label") or node_id),
-            "ui_label": ui_label_for_node(node, node_id),
-            "workbench_kind": str(node.get("kind") or ""),
-        },
+        "metadata": metadata,
     }
     for key in (
         "output_bindings",
@@ -679,10 +842,12 @@ def workbench_node_to_core_v2_node(
         "runtime_policy",
         "artifact_contract",
         "control",
-        "output_schema",
     ):
         if key in node:
             canonical[key] = node[key]
+    output_schema = node.get("output_schema") or node.get("outputSchema")
+    if isinstance(output_schema, dict):
+        canonical["output_schema"] = normalize_output_schema_for_structured_output(output_schema)
     if callable_ref["kind"] == "workflow_function" and not canonical.get(
         "workflow_call_output_bindings"
     ):

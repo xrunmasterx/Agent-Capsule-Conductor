@@ -9,6 +9,7 @@ from acc.app import WorkflowAppService
 from acc.app.workbench_adapter import (
     canonicalize_workbench_workflow_payload,
     compile_workbench_workflow_bundle,
+    merge_workbench_codex_execution_modes,
 )
 from acc.callable_registry import CallableRegistry
 from acc.engine import parse_workflow_function_template
@@ -261,6 +262,62 @@ def test_workbench_container_compiles_to_child_workflow_bundle(tmp_path: Path) -
         child,
         source_path=path.parent / "stock_info_collection__New_Workflow.accflow.json",
     )
+
+
+def test_workbench_snapshot_codex_mode_backfills_inline_internal_node() -> None:
+    submitted_graph = {
+        "id": "task_canvas",
+        "version": "0.4.0",
+        "name": "Task",
+        "nodes": [
+            {
+                "id": "research_flow",
+                "kind": "workflow",
+                "callable_ref": {"kind": "workflow_function", "id": "research_flow"},
+                "input_ports": [{"id": "main"}],
+                "output_ports": [{"id": "main"}],
+                "ui": {
+                    "semantic_kind": "workflow_container",
+                    "internal_nodes": [
+                        {
+                            "id": "research",
+                            "kind": "Agent",
+                            "callableId": "untitled-agent.codex",
+                            "input": {"user_prompt": "research"},
+                            "inputPorts": [{"id": "main"}],
+                            "outputPorts": [{"id": "main"}],
+                        }
+                    ],
+                    "internal_edges": [],
+                },
+            }
+        ],
+        "control_edges": [],
+        "data_edges": [],
+    }
+    canvas_snapshot = {
+        "canonical_graph": {
+            "nodes": [
+                {
+                    "id": "research_flow",
+                    "ui": {
+                        "internal_nodes": [
+                            {
+                                "id": "research",
+                                "codexExecutionMode": "local_readonly_no_sandbox",
+                            }
+                        ]
+                    },
+                }
+            ]
+        }
+    }
+
+    merged = merge_workbench_codex_execution_modes(submitted_graph, canvas_snapshot)
+    internal_node = merged["nodes"][0]["ui"]["internal_nodes"][0]
+
+    assert internal_node["codexExecutionMode"] == "local_readonly_no_sandbox"
+    assert "codexExecutionMode" not in submitted_graph["nodes"][0]["ui"]["internal_nodes"][0]
 
 
 def test_workbench_container_preserves_root_caller_and_child_boundary_bindings(

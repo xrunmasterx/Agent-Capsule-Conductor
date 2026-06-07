@@ -5,6 +5,9 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from acc.app.local_directory_picker import LocalDirectorySelection
+from acc.server.routes import workflows as workflow_routes
+
 
 def workbench_draft() -> dict:
     return {
@@ -169,6 +172,44 @@ def test_post_workflow_rejects_non_main_output_port_missing_schema(
     assert response.status_code == 400
     assert "output_port_schema_missing" in response.text
     assert not (project_root / "workflows" / "schema_port_mismatch.accflow.json").exists()
+
+
+def test_post_workflow_normalizes_output_schema_null_keywords(
+    client: TestClient,
+    project_root: Path,
+) -> None:
+    draft = workbench_draft()
+    draft["id"] = "schema_keyword_normalization"
+    draft["nodes"][0]["output_schema"] = {
+        "type": "object",
+        "properties": {
+            "summary": {
+                "type": "string",
+                "description": "Short answer.",
+                "items": None,
+            },
+            "artifacts": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+            "nullable_enum": {
+                "enum": ["ready", None],
+            },
+        },
+        "required": ["summary"],
+    }
+
+    response = client.post("/api/workflows", json={"graph": draft, "force": True})
+
+    assert response.status_code == 200, response.text
+    saved = json.loads(
+        (project_root / "workflows" / "schema_keyword_normalization.accflow.json").read_text()
+    )
+    output_schema = saved["nodes"][0]["output_schema"]
+    assert "items" not in output_schema["properties"]["summary"]
+    assert output_schema["properties"]["artifacts"]["items"] == {"type": "string"}
+    assert output_schema["properties"]["nullable_enum"]["enum"] == ["ready", None]
+    assert output_schema["additionalProperties"] is False
 
 
 def test_post_workflow_saves_compiled_child_for_workbench_container(
@@ -375,6 +416,275 @@ def test_submit_workbench_container_writes_run_local_child_specs(
     spec_dir = project_root / "runs" / "_workflow_function_specs" / "container_submit"
     assert (spec_dir / "workbench_container_flow.accflow.json").exists()
     assert (spec_dir / "workbench_container_flow__New_Workflow.accflow.json").exists()
+
+
+def test_select_workflow_binding_directory_returns_selected_path(
+    client: TestClient,
+    project_root: Path,
+    monkeypatch,
+) -> None:
+    workspace = project_root / "selected_workspace"
+    workspace.mkdir()
+    monkeypatch.setattr(
+        workflow_routes,
+        "select_local_directory",
+        lambda initial_dir=None: LocalDirectorySelection(status="selected", path=str(workspace)),
+    )
+
+    response = client.post(
+        "/api/workflows/workflow_picker/binding/select-directory",
+        json={"initial_dir": str(project_root)},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["workflow_id"] == "workflow_picker"
+    assert payload["status"] == "selected"
+    assert payload["valid"] is True
+    assert Path(payload["workspace_root"]) == workspace.resolve()
+    assert not (project_root / "bindings" / "workflow_picker.binding.local.json").exists()
+
+
+def test_select_workflow_binding_directory_cancelled_does_not_change_binding(
+    client: TestClient,
+    project_root: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        workflow_routes,
+        "select_local_directory",
+        lambda initial_dir=None: LocalDirectorySelection(status="cancelled"),
+    )
+
+    response = client.post(
+        "/api/workflows/workflow_picker/binding/select-directory",
+        json={"initial_dir": str(project_root)},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["status"] == "cancelled"
+    assert payload["valid"] is False
+    assert payload["workspace_root"] is None
+    assert not (project_root / "bindings" / "workflow_picker.binding.local.json").exists()
+
+
+def test_select_workflow_binding_directory_unsupported(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        workflow_routes,
+        "select_local_directory",
+        lambda initial_dir=None: LocalDirectorySelection(
+            status="unsupported",
+            error="native directory picker disabled",
+        ),
+    )
+
+    response = client.post(
+        "/api/workflows/workflow_picker/binding/select-directory",
+        json={},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["status"] == "unsupported"
+    assert payload["valid"] is False
+    assert payload["error"] == "native directory picker disabled"
+
+
+def test_select_workflow_binding_directory_invalid_selected_path(
+    client: TestClient,
+    project_root: Path,
+    monkeypatch,
+) -> None:
+    missing = project_root / "missing_workspace"
+    monkeypatch.setattr(
+        workflow_routes,
+        "select_local_directory",
+        lambda initial_dir=None: LocalDirectorySelection(status="selected", path=str(missing)),
+    )
+
+    response = client.post(
+        "/api/workflows/workflow_picker/binding/select-directory",
+        json={},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["status"] == "failed"
+    assert payload["valid"] is False
+    assert "Workspace directory not found" in payload["error"]
+    assert Path(payload["workspace_root"]) == missing.resolve()
+
+
+def test_select_workflow_binding_directory_reports_busy(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        workflow_routes,
+        "select_local_directory",
+        lambda initial_dir=None: LocalDirectorySelection(status="failed", error="picker_busy"),
+    )
+
+    response = client.post(
+        "/api/workflows/workflow_picker/binding/select-directory",
+        json={},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["status"] == "failed"
+    assert payload["error"] == "picker_busy"
+
+
+def test_run_graph_uses_binding_workspace(
+    client: TestClient,
+    project_root: Path,
+) -> None:
+    workspace = project_root / "external_workspace"
+    workspace.mkdir()
+    binding_path = project_root / "bindings" / "bound_api.binding.local.json"
+    binding_path.parent.mkdir(parents=True)
+    binding_path.write_text(
+        json.dumps(
+            {
+                "workflow_id": "bound_api",
+                "binding_name": "bound_api.local",
+                "state_mode": "stateful",
+                "workspace_root": str(workspace),
+                "behavior_policy": {"mode": "workspace_native"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    response = client.post(
+        "/api/workflows/run-graph",
+        json={
+            "graph": {
+                "schema_version": "acc.core.v2",
+                "id": "bound_api",
+                "version": "0.1.0",
+                "nodes": [
+                    {
+                        "id": "produce",
+                        "callable_ref": {"kind": "tool_class", "id": "fake_producer"},
+                    }
+                ],
+                "control_edges": [],
+                "data_edges": [],
+            },
+            "run_dir": "runs/bound_api_run",
+            "binding_path": "bindings/bound_api.binding.local.json",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    scope = json.loads((project_root / "runs" / "bound_api_run" / "scope_frame.json").read_text())
+    output = json.loads(
+        (project_root / "runs" / "bound_api_run" / "nodes" / "produce" / "output.json").read_text()
+    )
+    assert Path(scope["workspace_root"]) == workspace.resolve()
+    assert Path(scope["binding_path"]) == binding_path.resolve()
+    assert scope["ephemeral"] is False
+    assert output["cwd"] == str(workspace.resolve())
+
+
+def test_workbench_container_run_uses_container_binding(
+    client: TestClient,
+    project_root: Path,
+) -> None:
+    workspace = project_root / "container_workspace"
+    workspace.mkdir()
+    binding_path = project_root / "bindings" / "New_Workflow.binding.local.json"
+    binding_path.parent.mkdir(parents=True)
+    binding_path.write_text(
+        json.dumps(
+            {
+                "workflow_id": "New_Workflow",
+                "binding_name": "New_Workflow.local",
+                "state_mode": "stateful",
+                "workspace_root": str(workspace),
+                "behavior_policy": {"mode": "workspace_native"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    draft = workbench_container_draft()
+    draft["id"] = "container_bound_root"
+    container = draft["nodes"][0]
+    container["ui"]["binding_ref"] = "bindings/New_Workflow.binding.local.json"
+    container["ui"]["internal_nodes"][0]["kind"] = "Tool"
+    container["ui"]["internal_nodes"][0]["callableId"] = "fake_producer"
+
+    response = client.post(
+        "/api/workflows/run-graph",
+        json={
+            "graph": draft,
+            "run_dir": "runs/container_bound_run",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    root_scope = json.loads(
+        (project_root / "runs" / "container_bound_run" / "scope_frame.json").read_text()
+    )
+    child_scope = json.loads(
+        (
+            project_root
+            / "runs"
+            / "container_bound_run"
+            / "nodes"
+            / "New_Workflow"
+            / "nested_workflow"
+            / "scope_frame.json"
+        ).read_text()
+    )
+    child_output = json.loads(
+        (
+            project_root
+            / "runs"
+            / "container_bound_run"
+            / "nodes"
+            / "New_Workflow"
+            / "nested_workflow"
+            / "nodes"
+            / "collect_news"
+            / "output.json"
+        ).read_text()
+    )
+    compiled_root = json.loads(
+        (
+            project_root
+            / "runs"
+            / "_workflow_function_specs"
+            / "container_bound_run"
+            / "container_bound_root.accflow.json"
+        ).read_text()
+    )
+    compiled_child = json.loads(
+        (
+            project_root
+            / "runs"
+            / "_workflow_function_specs"
+            / "container_bound_run"
+            / "container_bound_root__New_Workflow.accflow.json"
+        ).read_text()
+    )
+    assert root_scope["binding_path"] is None
+    assert Path(root_scope["workspace_root"]) == (
+        project_root / "runs" / "container_bound_run"
+    ).resolve()
+    assert Path(child_scope["workspace_root"]) == workspace.resolve()
+    assert Path(child_scope["binding_path"]) == binding_path.resolve()
+    assert child_scope["ephemeral"] is False
+    assert child_output["cwd"] == str(workspace.resolve())
+    assert compiled_root["nodes"][0]["metadata"]["binding_ref"] == (
+        "bindings/New_Workflow.binding.local.json"
+    )
+    assert compiled_child["metadata"]["binding_ref"] == "bindings/New_Workflow.binding.local.json"
 
 
 def test_submit_empty_workbench_container_writes_noop_child_spec(

@@ -25,7 +25,7 @@ from acc.runtime.policy import (
 from acc.runtime.policy import use_submit_validate as use_submit_validate
 from acc.runtime.policy import use_supervisor as use_supervisor
 from acc.session import utc_now_iso
-from acc.store import is_clean_workflow_path, load_json, write_json
+from acc.store import is_clean_workflow_path, load_clean_environment_binding, load_json, write_json
 
 
 def load_cli_input(input_path: Path | None, input_json: str | None) -> dict[str, Any]:
@@ -109,8 +109,9 @@ class WorkflowAppService:
         node_executor: Any | None = None,
         should_cancel: Callable[[], bool] | None = None,
     ) -> dict[str, Any]:
+        if workspace is not None and binding_path is not None:
+            raise AccError("Provide workspace or binding_path, not both")
         _ = (
-            binding_path,
             inherited_workspace,
             inherited_ephemeral,
             parent_invocation_id,
@@ -124,6 +125,7 @@ class WorkflowAppService:
             workflow_path,
             run_dir,
             workspace=workspace,
+            binding_path=binding_path,
             callable_registry=self.callable_registry,
             input_payload=input_payload,
             should_cancel=should_cancel,
@@ -277,8 +279,9 @@ async def run_clean_workflow_template(
     node_executor: Any | None = None,
     should_cancel: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
+    if workspace is not None and binding_path is not None:
+        raise AccError("Provide workspace or binding_path, not both")
     _ = (
-        binding_path,
         inherited_workspace,
         inherited_ephemeral,
         parent_invocation_id,
@@ -288,11 +291,20 @@ async def run_clean_workflow_template(
     )
     from acc.app.core_v2_runtime import run_core_v2_workflow_path
 
+    resolved_workspace = workspace
+    resolved_binding_path = binding_path
+    if binding_path is not None:
+        binding = load_clean_environment_binding(binding_path)
+        resolved_workspace = binding.workspace_root
+        resolved_binding_path = binding.binding_path
+
     record = await run_core_v2_workflow_path(
         workflow_path,
         run_dir,
         input_payload=input_payload,
-        workspace=workspace,
+        workspace=resolved_workspace,
+        binding_path=resolved_binding_path,
+        ephemeral=workspace is None and binding_path is None,
         should_cancel=should_cancel,
         callable_registry=resolve_callable_registry(
             callable_registry=callable_registry,

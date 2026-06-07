@@ -58,6 +58,7 @@ artifacts_app = typer.Typer(help="Artifact comparison commands.")
 environment_app = typer.Typer(help="Environment inspection commands.")
 ports_app = typer.Typer(help="Port inbox/outbox inspection commands.")
 template_app = typer.Typer(help="Template bundle export/import commands.")
+mcp_app = typer.Typer(help="MCP stdio server commands.")
 app.add_typer(session_app, name="session")
 app.add_typer(graphops_app, name="graphops")
 app.add_typer(runs_app, name="runs")
@@ -72,6 +73,7 @@ app.add_typer(artifacts_app, name="artifacts")
 app.add_typer(environment_app, name="environment")
 app.add_typer(ports_app, name="ports")
 app.add_typer(template_app, name="template")
+app.add_typer(mcp_app, name="mcp")
 
 
 @app.callback()
@@ -306,6 +308,21 @@ def server_command(
         raise typer.Exit(1) from exc
 
     uvicorn.run(create_app(), host=host, port=port)
+
+
+@mcp_app.command("serve")
+def mcp_serve(
+    project_root: Annotated[
+        Path,
+        typer.Option("--project-root", help="ACC project root for MCP tools."),
+    ] = Path("."),
+) -> None:
+    try:
+        from acc.mcp_server import run_stdio_server
+    except ImportError as exc:
+        log_stderr(f"MCP dependencies are not installed: {exc}")
+        raise typer.Exit(1) from exc
+    run_stdio_server(project_root.resolve())
 
 
 @runs_app.command("list")

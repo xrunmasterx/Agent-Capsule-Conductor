@@ -221,6 +221,18 @@ export type WorkflowGraphNode = {
   input_mapping?: Record<string, unknown>;
   cwd_policy?: string;
   relative_cwd?: string;
+  invocation_policy?: {
+    timeout_seconds?: number | null;
+    permission_profile?: {
+      workspace_access?: string;
+      network?: boolean;
+      shell?: boolean;
+      dangerous?: boolean;
+      env_policy?: string;
+      allowed_env?: string[];
+      timeout_seconds?: number;
+    };
+  };
   input_ports?: WorkflowPort[];
   output_ports?: WorkflowPort[];
   control?: {
@@ -328,7 +340,9 @@ export type DecisionInboxAction = {
     | 'rerun_from'
     | 'fork'
     | 'validate_patch'
-    | 'dry_run_patch';
+    | 'dry_run_patch'
+    | 'validate_graphops_proposal'
+    | 'dry_run_graphops_proposal';
   method: 'GET' | 'POST';
   url: string;
   destructive: boolean;
@@ -341,6 +355,7 @@ export type DecisionInboxItem = {
     | 'run_failed'
     | 'node_failed'
     | 'graphops_proposal'
+    | 'graphops_persistence_proposal'
     | 'validation_warning';
   status: 'open';
   severity: 'high' | 'medium' | 'low';
@@ -359,16 +374,25 @@ export type DecisionInboxItem = {
     summary?: string;
   };
   graphops?: {
-    patch_id: string;
-    patch_path: string;
-    target_type: string;
-    target_path: string;
+    patch_id?: string;
+    patch_path?: string;
+    target_type?: string;
+    target_path?: string;
     operation_count: number;
     apply_requires_human_approval: true;
     apply_status?: 'not_implemented';
     dry_run_only?: boolean;
-    governance_mode?: 'proposal_dry_run_only';
+    governance_mode?: 'proposal_dry_run_only' | 'persistence_proposal';
     semantic_status?: 'valid' | 'invalid';
+    proposal_id?: string;
+    proposal_path?: string;
+    target_paths?: string[];
+    status?: string;
+    requester?: string;
+    approver?: string;
+    validation_status?: string;
+    dry_run_status?: string;
+    approved_target_paths?: string[];
   };
   evidence: Array<{
     label: string;
@@ -401,6 +425,15 @@ export type WorkflowBindingView = {
   workspaceRoot?: string | null;
   exists: boolean;
   status: 'unbound' | 'valid' | 'missing' | 'invalid' | string;
+  valid?: boolean;
+  error?: string | null;
+};
+
+export type WorkflowDirectorySelection = {
+  workflow_id: string;
+  status: 'selected' | 'cancelled' | 'unsupported' | 'failed' | string;
+  workspace_root?: string | null;
+  workspaceRoot?: string | null;
   valid?: boolean;
   error?: string | null;
 };
@@ -438,4 +471,104 @@ export type GraphOpsExample = {
   id: string;
   path: string;
   name: string;
+};
+
+export type GraphOpsTransactionProposal = {
+  schema_version: 'acc.graphops.transaction.v1';
+  proposal_id: string;
+  author: string;
+  source?: Record<string, unknown>;
+  base: {
+    content_hashes: Record<string, 'absent' | string>;
+  };
+  rationale: string;
+  targets: Array<{
+    target_type: 'agent_class' | 'tool_class' | 'workflow';
+    target_path: string;
+    operation: 'create_agent_class' | 'create_tool_class' | 'create_workflow';
+    template: Record<string, unknown>;
+  }>;
+};
+
+export type GraphOpsProposalPayload = {
+  proposal_id: string;
+  status: string;
+  proposal: GraphOpsTransactionProposal;
+  validation?: Record<string, unknown>;
+  dry_run?: GraphOpsDryRunPayload;
+  approval?: Record<string, unknown>;
+  apply_manifest?: GraphOpsApplyManifest;
+  semantic_diff?: Record<string, unknown>;
+};
+
+export type GraphOpsDryRunPayload = {
+  status: string;
+  proposal_id: string;
+  mutated: boolean;
+  target_paths: string[];
+  dry_run_digest: string;
+  semantic_diff?: Record<string, unknown>;
+};
+
+export type GraphOpsApplyManifest = {
+  status: string;
+  proposal_id: string;
+  created_files: string[];
+  semantic_diff?: Record<string, unknown>;
+};
+
+export type AuthoringAgentSummary = {
+  id: string;
+  version: string;
+  kind: 'agent_class';
+  runtime: 'codex_cli' | 'claude_sdk' | 'generic_cli' | string;
+  backend: string;
+  source_id: string;
+  source_path?: string | null;
+  name?: string;
+  description?: string | null;
+  default_permissions: Record<string, unknown>;
+};
+
+export type AuthoringValidation = {
+  status: 'valid' | 'invalid' | string;
+  errors: Array<{ code?: string; message: string; [key: string]: unknown }>;
+  warnings: Array<{ code?: string; message: string; [key: string]: unknown }>;
+};
+
+export type AuthoringRequiredAction = {
+  kind:
+    | 'ask'
+    | 'confirm_canvas_apply'
+    | 'approve_resource_persistence'
+    | 'reject_or_revise'
+    | string;
+  prompt?: string;
+  reason?: string;
+  resource_draft_id?: string | null;
+  [key: string]: unknown;
+};
+
+export type AuthoringSessionPayload = {
+  session_id: string;
+  agent_id: string;
+  task_id?: string;
+  status: string;
+  messages: Array<{ role: string; content: string; created_at?: string }>;
+  last_proposal?: Record<string, unknown> | null;
+  validation?: AuthoringValidation | null;
+  required_actions?: AuthoringRequiredAction[];
+  evidence?: Record<string, string | null>;
+};
+
+export type AuthoringMessageResponse = {
+  session_id: string;
+  message_id: string;
+  assistant_message: string;
+  proposal?: Record<string, unknown> | null;
+  validation: AuthoringValidation;
+  required_actions: AuthoringRequiredAction[];
+  questions: string[];
+  risk_notes: string[];
+  confidence: 'low' | 'medium' | 'high' | string;
 };

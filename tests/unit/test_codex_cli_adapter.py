@@ -3,8 +3,9 @@ import json
 from pathlib import Path
 from typing import Any
 
+from acc.adapters import codex_cli
 from acc.adapters.base import AgentRunRequest
-from acc.adapters.codex_cli import CodexCliAdapter, build_codex_command
+from acc.adapters.codex_cli import CodexCliAdapter, build_codex_command, terminate_process_tree
 from acc.artifact_store import ArtifactStore
 
 
@@ -46,6 +47,14 @@ class FakeProcess:
 
     async def wait(self) -> None:
         return None
+
+
+class FailingJsonEventProcess(FakeProcess):
+    async def communicate(self, input: bytes | None = None) -> tuple[bytes, bytes]:
+        return (
+            b'{"type":"error","message":"structured output schema rejected"}\n',
+            b"plugin warning\n",
+        )
 
 
 class FakePipe:
@@ -98,6 +107,43 @@ class StreamingFakeProcess:
     async def wait(self) -> None:
         if not self.killed:
             self.write_codex_output()
+        return None
+
+
+class TimeoutAfterStdoutProcess:
+    def __init__(self, command: tuple[str, ...], stdout_chunks: list[bytes]) -> None:
+        self.command = command
+        self.returncode: int | None = None
+        self.stdin = FakeStdin()
+        self.stdout = FakePipe(stdout_chunks)
+        self.stderr = FakePipe([])
+        self.killed = False
+
+    def kill(self) -> None:
+        self.killed = True
+        self.returncode = -9
+
+    async def wait(self) -> None:
+        if not self.killed:
+            await asyncio.sleep(10)
+
+
+class PidFakeProcess:
+    pid = 4321
+
+    def __init__(self) -> None:
+        self.killed = False
+        self.waited = False
+
+    def kill(self) -> None:
+        self.killed = True
+
+    async def wait(self) -> None:
+        self.waited = True
+
+
+class TaskkillFakeProcess:
+    async def wait(self) -> None:
         return None
 
 
@@ -188,6 +234,25 @@ def test_codex_cancel_marker_kills_streamed_process(monkeypatch, tmp_path: Path)
     assert result.status == "cancelled"
     assert process_holder["process"].killed is True
     assert "cancellation requested" in request.stderr_log_path.read_text(encoding="utf-8")
+
+
+def test_terminate_process_tree_uses_taskkill_on_windows(monkeypatch) -> None:
+    captured: dict[str, tuple[str, ...]] = {}
+
+    async def fake_create(*args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return TaskkillFakeProcess()
+
+    monkeypatch.setattr(codex_cli.os, "name", "nt")
+    monkeypatch.setattr(codex_cli.asyncio, "create_subprocess_exec", fake_create)
+    process = PidFakeProcess()
+
+    asyncio.run(terminate_process_tree(process))
+
+    assert captured["args"] == ("taskkill", "/PID", "4321", "/T", "/F")
+    assert process.waited is True
+    assert process.killed is False
 
 
 def test_codex_run_uses_isolated_codex_home_seeded_from_user_home(
@@ -292,6 +357,24 @@ def test_codex_nonzero_exit_returns_failed(monkeypatch, tmp_path: Path) -> None:
     assert result.exit_code == 2
 
 
+def test_codex_nonzero_exit_prefers_structured_stdout_error(
+    monkeypatch, tmp_path: Path
+) -> None:
+    async def fake_create(*args, **kwargs):
+        return FailingJsonEventProcess(args, returncode=1, write_output=False)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create)
+    request = make_request(tmp_path)
+
+    result = asyncio.run(CodexCliAdapter().run(request))
+
+    assert result.status == "failed"
+    assert result.error == "structured output schema rejected"
+    assert request.stderr_log_path.read_text(encoding="utf-8") == (
+        "structured output schema rejected\n"
+    )
+
+
 def test_codex_missing_output_returns_failed(monkeypatch, tmp_path: Path) -> None:
     async def fake_create(*args, **kwargs):
         return FakeProcess(args, write_output=False)
@@ -332,6 +415,87 @@ def test_codex_timeout_after_output_returns_success(monkeypatch, tmp_path: Path)
     ]
     assert events[-1]["type"] == "timeout"
     assert events[-1]["output_salvaged"] is True
+
+
+def test_codex_timeout_salvages_structured_agent_message_from_stdout(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    output = {"status": "success", "summary": "from stdout"}
+    event = {
+        "type": "item.completed",
+        "item": {
+            "type": "agent_message",
+            "text": json.dumps(output),
+        },
+    }
+
+    async def fake_create(*args, **kwargs):
+        return TimeoutAfterStdoutProcess(args, [json.dumps(event).encode() + b"\n"])
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create)
+    request = make_request(tmp_path, timeout=0.01)
+
+    result = asyncio.run(CodexCliAdapter().run(request))
+
+    assert result.status == "success"
+    assert result.output_json_path == request.output_json_path
+    assert json.loads(request.output_json_path.read_text(encoding="utf-8")) == output
+    events = [
+        json.loads(line)
+        for line in request.events_log_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert events[-1]["type"] == "timeout"
+    assert events[-1]["stdout_output_salvaged"] is True
+
+
+def test_authoring_codex_home_uses_minimal_config_without_plugin_noise(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    source_home = tmp_path / "source-codex-home"
+    source_home.mkdir()
+    (source_home / "auth.json").write_text('{"mode":"test"}', encoding="utf-8")
+    (source_home / "AGENTS.md").write_text("host rules", encoding="utf-8")
+    (source_home / "config.toml").write_text(
+        "\n".join(
+            [
+                'model = "gpt-test"',
+                'model_reasoning_effort = "high"',
+                'notify = ["plugin-helper"]',
+                '[projects."F:\\\\Agent-Capsule-Conductor"]',
+                'trust_level = "trusted"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CODEX_HOME", str(source_home))
+    captured: dict[str, dict[str, str]] = {}
+
+    async def fake_create(*args, **kwargs):
+        captured["env"] = kwargs["env"]
+        return FakeProcess(args)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create)
+    request = AgentRunRequest(
+        **{
+            **make_request(tmp_path).__dict__,
+            "input_payload": {"schema_version": "acc.authoring.request.v1"},
+            "node_id": "authoring_request",
+        }
+    )
+
+    result = asyncio.run(CodexCliAdapter().run(request))
+
+    codex_home = Path(captured["env"]["CODEX_HOME"])
+    config_text = (codex_home / "config.toml").read_text(encoding="utf-8")
+    assert result.status == "success"
+    assert (codex_home / "auth.json").read_text(encoding="utf-8") == '{"mode":"test"}'
+    assert not (codex_home / "AGENTS.md").exists()
+    assert 'model = "gpt-test"' in config_text
+    assert 'model_reasoning_effort = "high"' in config_text
+    assert "notify" not in config_text
+    assert "[projects" not in config_text
 
 
 def test_codex_rejects_unapproved_dangerous_sandbox(tmp_path: Path) -> None:

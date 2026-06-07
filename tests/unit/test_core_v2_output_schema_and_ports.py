@@ -1,7 +1,14 @@
 from __future__ import annotations
 
 from acc.app.core_v2_runtime import MISSING_PORT_VALUE, output_value_for_port
-from acc.callable_runner import output_schema_for_agent
+from acc.callable_runner import (
+    codex_sandbox_for_permissions,
+    effective_permission_profile,
+    normalize_output_schema_for_structured_output,
+    output_schema_for_agent,
+    render_agent_prompt,
+    structured_output_schema_errors,
+)
 from acc.domain import (
     AgentClassTemplate,
     CallableRef,
@@ -42,7 +49,102 @@ def test_node_output_schema_overrides_template_output_schema() -> None:
         output_schema=node_schema,
     )
 
-    assert output_schema_for_agent(template, node) == node_schema
+    assert output_schema_for_agent(template, node) == {
+        **node_schema,
+        "additionalProperties": False,
+    }
+
+
+def test_output_schema_for_agent_normalizes_none_schema_keywords() -> None:
+    node_schema = {
+        "type": "object",
+        "properties": {
+            "summary": {"type": "string", "description": "ok", "items": None},
+            "artifacts": {"type": "array", "items": {"type": "string"}},
+            "nullable_enum": {"enum": ["ok", None]},
+        },
+        "required": ["summary"],
+    }
+    template = AgentClassTemplate(
+        id="worker.codex",
+        version="0.1.0",
+        runtime="codex_cli",
+    )
+    node = NodeInvocationSpec(
+        id="worker",
+        callable_ref=CallableRef(kind="agent_class", id="worker.codex"),
+        output_schema=node_schema,
+    )
+
+    schema = output_schema_for_agent(template, node)
+
+    assert "items" not in schema["properties"]["summary"]
+    assert schema["properties"]["artifacts"]["items"] == {"type": "string"}
+    assert schema["properties"]["nullable_enum"]["enum"] == ["ok", None]
+    assert schema["additionalProperties"] is False
+
+
+def test_structured_output_schema_errors_reports_unfixable_schema() -> None:
+    schema = {
+        "type": "object",
+        "properties": {"summary": {"type": "array", "items": "bad"}},
+    }
+
+    errors = structured_output_schema_errors(
+        normalize_output_schema_for_structured_output(schema)
+    )
+
+    assert errors
+    assert errors[0]["code"] == "output_schema_invalid"
+
+
+def test_codex_local_readonly_no_sandbox_mode_uses_dangerous_bypass_with_prompt_guard() -> None:
+    template = AgentClassTemplate(
+        id="worker.codex",
+        version="0.1.0",
+        runtime="codex_cli",
+        default_prompt="Read the local codebase and answer with evidence.",
+    )
+    node = NodeInvocationSpec(
+        id="worker",
+        callable_ref=CallableRef(kind="agent_class", id="worker.codex"),
+        metadata={"codex_execution_mode": "local_readonly_no_sandbox"},
+    )
+
+    permissions = effective_permission_profile(template, node)
+    prompt = render_agent_prompt(template, node, {"main": "question"})
+
+    assert permissions.dangerous is True
+    assert permissions.workspace_access == "read_only"
+    assert permissions.shell is True
+    assert permissions.network is False
+    assert codex_sandbox_for_permissions(permissions) == "danger-full-access"
+    assert "Local Read-Only No-Sandbox Contract" in prompt
+    assert "Do not create, edit, delete, move" in prompt
+
+
+def test_codex_danger_full_access_mode_does_not_add_readonly_prompt_guard() -> None:
+    template = AgentClassTemplate(
+        id="worker.codex",
+        version="0.1.0",
+        runtime="codex_cli",
+        default_prompt="Modify the workspace if needed.",
+    )
+    node = NodeInvocationSpec(
+        id="worker",
+        callable_ref=CallableRef(kind="agent_class", id="worker.codex"),
+        metadata={"codex_execution_mode": "danger_full_access"},
+    )
+
+    permissions = effective_permission_profile(template, node)
+    prompt = render_agent_prompt(template, node, {"main": "question"})
+
+    assert permissions.dangerous is True
+    assert permissions.workspace_access == "writes_workspace"
+    assert permissions.shell is True
+    assert permissions.network is True
+    assert codex_sandbox_for_permissions(permissions) == "danger-full-access"
+    assert "Local Read-Only No-Sandbox Contract" not in prompt
 
 
 def test_template_output_schema_is_fallback_when_node_has_no_override() -> None:
@@ -62,7 +164,10 @@ def test_template_output_schema_is_fallback_when_node_has_no_override() -> None:
         callable_ref=CallableRef(kind="agent_class", id="worker.codex"),
     )
 
-    assert output_schema_for_agent(template, node) == template_schema
+    assert output_schema_for_agent(template, node) == {
+        **template_schema,
+        "additionalProperties": False,
+    }
 
 
 def test_output_value_for_port_prefers_outputs_container_over_legacy_top_level() -> None:

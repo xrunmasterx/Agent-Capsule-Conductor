@@ -2472,6 +2472,244 @@ small {
   color: #45545f;
 }
 
+.assistant-drawer-body {
+  display: grid;
+  grid-template-rows: auto auto minmax(80px, auto) auto auto;
+  gap: 12px;
+  min-height: 0;
+  padding: 12px;
+  overflow: auto;
+}
+
+.assistant-target-row,
+.assistant-proposal-panel,
+.assistant-temp-list,
+.assistant-required-actions,
+.assistant-graphops-review,
+.assistant-session-row,
+.assistant-message {
+  border: 1px solid #d8dee4;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.assistant-target-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.assistant-session-row {
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.assistant-session-row label {
+  display: grid;
+  gap: 5px;
+}
+
+.assistant-session-row select {
+  width: 100%;
+  border: 1px solid #cfd8df;
+  border-radius: 6px;
+  background: #ffffff;
+  color: inherit;
+  padding: 6px 8px;
+  font: inherit;
+}
+
+.assistant-target-row span,
+.assistant-message span,
+.assistant-proposal-panel header span,
+.assistant-graphops-review header span {
+  color: #667581;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0;
+}
+
+.assistant-target-row strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.assistant-compose {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.assistant-compose textarea {
+  width: 100%;
+  min-height: 104px;
+  max-height: 180px;
+  box-sizing: border-box;
+  overflow: auto;
+  resize: vertical;
+  border: 1px solid #cfd8df;
+  border-radius: 8px;
+  padding: 9px 10px;
+  font: inherit;
+  line-height: 1.45;
+}
+
+.assistant-message-list {
+  display: grid;
+  gap: 8px;
+}
+
+.assistant-message {
+  padding: 8px 10px;
+}
+
+.assistant-message p,
+.assistant-empty,
+.assistant-proposal-panel p,
+.assistant-graphops-review p,
+.assistant-validation p {
+  margin: 4px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.assistant-message.user {
+  border-color: #c7d7ea;
+  background: #f5f9fd;
+}
+
+.assistant-message.system {
+  border-color: #d6d1bd;
+  background: #fffaf0;
+}
+
+.assistant-proposal-panel,
+.assistant-graphops-review {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+}
+
+.assistant-proposal-panel header,
+.assistant-temp-list header,
+.assistant-graphops-review header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.assistant-proposal-panel ol {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+}
+
+.assistant-proposal-panel details,
+.assistant-graphops-review details {
+  border-top: 1px solid #e3e8ec;
+  padding-top: 8px;
+}
+
+.assistant-proposal-panel pre,
+.assistant-graphops-review pre {
+  max-height: 240px;
+  overflow: auto;
+  margin: 8px 0 0;
+  padding: 8px;
+  border-radius: 6px;
+  background: #101419;
+  color: #dce7f3;
+  font-size: 11px;
+}
+
+.assistant-graphops-summary {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 6px;
+  background: #f7f9fb;
+  font-size: 12px;
+}
+
+.assistant-graphops-summary ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.assistant-graphops-summary span {
+  overflow-wrap: anywhere;
+  color: #667581;
+  font-size: 11px;
+}
+
+.assistant-validation {
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.assistant-validation.invalid {
+  border: 1px solid #f1b8b8;
+  background: #fff5f5;
+  color: #8f2424;
+}
+
+.assistant-validation.warning {
+  border: 1px solid #e6cf8b;
+  background: #fff9e6;
+  color: #71551a;
+}
+
+.assistant-proposal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.assistant-temp-list {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.assistant-required-actions {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.assistant-temp-list article,
+.assistant-required-actions article {
+  display: grid;
+  gap: 3px;
+  padding: 8px;
+  border-radius: 6px;
+  background: #f7f9fb;
+}
+
+.assistant-temp-list span,
+.assistant-temp-list small,
+.assistant-required-actions span,
+.assistant-session-row small {
+  overflow-wrap: anywhere;
+  color: #667581;
+  font-size: 11px;
+}
+
 .inspector-title-row {
   display: flex;
   align-items: center;
@@ -3538,6 +3776,11 @@ small {
   background: #fff6dc;
 }
 
+.node-badge.temporary {
+  color: #7c2d12;
+  background: #ffedd5;
+}
+
 .workflow-edge-data .react-flow__edge-path {
   stroke: #f8fafc;
   stroke-dasharray: 8 6;
@@ -4557,10 +4800,84 @@ small {
   z-index: 40;
 }
 
+.graph-workbench-v2 .assistant-drawer {
+  top: 128px;
+}
+
 .graph-workbench-v2 .drawer-title-row {
   border-bottom-color: #1f252d;
   background: #0d1115;
   color: var(--wb-text);
+}
+
+.graph-workbench-v2 .assistant-target-row,
+.graph-workbench-v2 .assistant-proposal-panel,
+.graph-workbench-v2 .assistant-temp-list,
+.graph-workbench-v2 .assistant-required-actions,
+.graph-workbench-v2 .assistant-graphops-review,
+.graph-workbench-v2 .assistant-session-row,
+.graph-workbench-v2 .assistant-message {
+  border-color: #252c35;
+  background: #101419;
+  color: var(--wb-text);
+}
+
+.graph-workbench-v2 .assistant-target-row span,
+.graph-workbench-v2 .assistant-message span,
+.graph-workbench-v2 .assistant-proposal-panel header span,
+.graph-workbench-v2 .assistant-graphops-review header span,
+.graph-workbench-v2 .assistant-temp-list span,
+.graph-workbench-v2 .assistant-temp-list small,
+.graph-workbench-v2 .assistant-required-actions span,
+.graph-workbench-v2 .assistant-graphops-summary span,
+.graph-workbench-v2 .assistant-session-row small,
+.graph-workbench-v2 .assistant-empty {
+  color: var(--wb-text-muted);
+}
+
+.graph-workbench-v2 .assistant-compose textarea,
+.graph-workbench-v2 .assistant-session-row select {
+  border-color: #2f3844;
+  background: #080b0e;
+  color: var(--wb-text);
+}
+
+.graph-workbench-v2 .assistant-message.user {
+  border-color: #2d4b66;
+  background: #0d1a24;
+}
+
+.graph-workbench-v2 .assistant-message.system {
+  border-color: #4d4128;
+  background: #1a160d;
+}
+
+.graph-workbench-v2 .assistant-proposal-panel details,
+.graph-workbench-v2 .assistant-graphops-review details {
+  border-top-color: #252c35;
+}
+
+.graph-workbench-v2 .assistant-temp-list article,
+.graph-workbench-v2 .assistant-required-actions article,
+.graph-workbench-v2 .assistant-graphops-summary {
+  background: #0b0f13;
+}
+
+.graph-workbench-v2 .assistant-validation.invalid {
+  border-color: #6f2a2a;
+  background: #211111;
+  color: #ffb4b4;
+}
+
+.graph-workbench-v2 .assistant-validation.warning {
+  border-color: #6b5724;
+  background: #201909;
+  color: #f3d88b;
+}
+
+.graph-workbench-v2 .node-badge.temporary {
+  color: #ffd7a8;
+  background: #4a2611;
 }
 
 .graph-workbench-v2 .right-inspector {

@@ -174,9 +174,10 @@ def agent_callable_path(project_root: Path, callable_id: str) -> Path:
 
 
 def list_workflows_payload(
+    project_root: Path | None = None,
     workflows_dir: Path | None = None,
 ) -> dict[str, Any]:
-    project_root = repo_root().resolve()
+    project_root = (project_root or repo_root()).resolve()
     workflows = [
         workflow_metadata(path, project_root)
         for path in discover_workflow_files(project_root, workflows_dir)
@@ -187,9 +188,10 @@ def list_workflows_payload(
 
 def show_workflow_payload(
     workflow_ref: str,
+    project_root: Path | None = None,
     workflows_dir: Path | None = None,
 ) -> dict[str, Any]:
-    project_root = repo_root().resolve()
+    project_root = (project_root or repo_root()).resolve()
     path = resolve_workflow_reference(project_root, workflow_ref, workflows_dir)
     metadata = workflow_metadata(path, project_root)
     payload = read_workflow_payload(path)

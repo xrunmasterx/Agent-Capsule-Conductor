@@ -33,8 +33,14 @@ class CallableRegistry:
     are migration input only and must not seed runtime execution.
     """
 
-    def __init__(self, assets: dict[tuple[str, str], CallableAsset]) -> None:
+    def __init__(
+        self,
+        assets: dict[tuple[str, str], CallableAsset],
+        *,
+        project_root: Path | None = None,
+    ) -> None:
         self._assets = dict(assets)
+        self.project_root = project_root.resolve() if project_root else None
 
     @classmethod
     def from_project_root(cls, project_root: Path) -> CallableRegistry:
@@ -56,7 +62,7 @@ class CallableRegistry:
                     source_id=template.id,
                     source_path=path,
                 )
-        return cls(assets)
+        return cls(assets, project_root=project_root)
 
     def has(self, kind: str, callable_id: str) -> bool:
         return (kind, callable_id) in self._assets

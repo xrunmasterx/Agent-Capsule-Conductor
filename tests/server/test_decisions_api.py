@@ -70,6 +70,55 @@ def test_decision_inbox_aggregates_graphops_proposals(client, project_root: Path
     assert {action["kind"] for action in item["actions"]} == {"validate_patch", "dry_run_patch"}
 
 
+def test_decision_inbox_aggregates_graphops_v3_persistence_proposals(
+    client,
+    project_root: Path,
+) -> None:
+    proposal_dir = project_root / "runs" / "_graphops_proposals" / "graphops_tx_decision"
+    proposal_dir.mkdir(parents=True)
+    write_json(
+        proposal_dir / "proposal.json",
+        {
+            "proposal_id": "graphops_tx_decision",
+            "status": "awaiting_human_approval",
+            "proposal": {
+                "schema_version": "acc.graphops.transaction.v1",
+                "proposal_id": "graphops_tx_decision",
+                "author": "authoring-agent.codex",
+                "source": {"kind": "authoring_session", "id": "authoring_decision"},
+                "base": {
+                    "content_hashes": {
+                        "callables/agents/decision.codex.yaml": "absent",
+                    }
+                },
+                "rationale": "Persist generated agent.",
+                "targets": [
+                    {
+                        "target_type": "agent_class",
+                        "target_path": "callables/agents/decision.codex.yaml",
+                        "operation": "create_agent_class",
+                        "template": {"id": "decision.codex", "runtime": "codex_cli"},
+                    }
+                ],
+            },
+        },
+    )
+
+    response = client.get("/api/decisions?include_events=false")
+
+    assert response.status_code == 200, response.text
+    item = response.json()["items"][0]
+    assert item["kind"] == "graphops_persistence_proposal"
+    assert item["graphops"]["proposal_id"] == "graphops_tx_decision"
+    assert item["graphops"]["apply_requires_human_approval"] is True
+    assert item["graphops"]["requester"] == "authoring_decision"
+    assert item["graphops"]["validation_status"] == ""
+    assert {action["kind"] for action in item["actions"]} == {
+        "validate_graphops_proposal",
+        "dry_run_graphops_proposal",
+    }
+
+
 def write_json_load(path: Path) -> dict:
     import json
 

@@ -69,6 +69,41 @@ const reverseConnection = __workflowViewerTestables.reverseConnection as unknown
 const canvasToWorkflowGraph = __workflowViewerTestables.canvasToWorkflowGraph as unknown as (
   canvas: Record<string, unknown>,
 ) => Record<string, unknown>;
+const captureAuthoringSnapshot = __workflowViewerTestables.captureAuthoringSnapshot as unknown as (input: {
+  taskId: string;
+  canvas: Record<string, unknown>;
+  selection: Record<string, unknown>;
+  callables: Array<Record<string, unknown>>;
+  workflows: Array<Record<string, unknown>>;
+}) => Record<string, unknown>;
+const buildDeterministicCanvasAuthoringProposal = __workflowViewerTestables.buildDeterministicCanvasAuthoringProposal as unknown as (
+  input: { message: string; snapshot: Record<string, unknown> },
+) => { proposal: Record<string, unknown> | null; errors: string[]; warnings: string[] };
+const applyCanvasAuthoringProposal = __workflowViewerTestables.applyCanvasAuthoringProposal as unknown as (input: {
+  canvas: Record<string, unknown>;
+  taskId: string;
+  proposal: Record<string, unknown>;
+  temporaryResources: Record<string, unknown>;
+  callables: Array<Record<string, unknown>>;
+  workflows: Array<Record<string, unknown>>;
+}) => { canvas: Record<string, unknown>; temporaryResources: Record<string, unknown>; selection: Record<string, unknown> };
+const validateCanvasAuthoringProposal = __workflowViewerTestables.validateCanvasAuthoringProposal as unknown as (
+  proposal: Record<string, unknown>,
+  context: {
+    canvas: Record<string, unknown>;
+    taskId: string;
+    temporaryResources: Record<string, unknown>;
+    callables: Array<Record<string, unknown>>;
+    workflows: Array<Record<string, unknown>>;
+  },
+) => { status: string; errors: string[]; warnings: string[] };
+const temporaryResourceIssueForCanvas = __workflowViewerTestables.temporaryResourceIssueForCanvas as unknown as (
+  canvas: Record<string, unknown>,
+  authoring?: Record<string, unknown>,
+) => string | null;
+const temporaryResourceIssueForGraph = __workflowViewerTestables.temporaryResourceIssueForGraph as unknown as (
+  graph: Record<string, unknown>,
+) => string | null;
 const deleteSelectionFromCanvas = __workflowViewerTestables.deleteSelectionFromCanvas as unknown as (
   canvas: ReturnType<typeof canvasFixture>,
   selection: Record<string, unknown>,
@@ -152,6 +187,26 @@ function canvasWithTargetEvidencePort() {
   };
 }
 
+function callableFixture(id: string, kind = 'agent_class') {
+  return {
+    id,
+    version: '0.1.0',
+    kind,
+    backend: 'template',
+    source_id: id,
+    name: id,
+    input_ports: { main: { type: 'artifact', required: false } },
+    output_ports: { main: { type: 'artifact', required: true } },
+    artifact_contract: {
+      output_schema: {
+        type: 'object',
+        properties: { summary: { type: 'string' } },
+        required: ['summary'],
+      },
+    },
+  };
+}
+
 function renderCanvas(
   canvas = canvasFixture(),
   selection: Record<string, unknown> = { type: 'workflow', id: 'source_flow' },
@@ -201,6 +256,610 @@ afterEach(() => {
 });
 
 describe('WorkspaceCanvas data edges', () => {
+  test('CanvasAuthoringProposal adds existing callable nodes and serializes output_schema', () => {
+    const canvas = { ...canvasFixture(), workflows: [], edges: [] };
+    const callables = [callableFixture('research.codex'), callableFixture('review.generic', 'tool_class')];
+    const snapshot = captureAuthoringSnapshot({
+      taskId: canvas.id,
+      canvas,
+      selection: { type: 'task_canvas', taskId: canvas.id },
+      callables,
+      workflows: [],
+    });
+    const generated = buildDeterministicCanvasAuthoringProposal({
+      message: 'Create a research workflow',
+      snapshot,
+    });
+
+    expect(generated.errors).toEqual([]);
+    expect(generated.proposal).toBeTruthy();
+    const proposal = JSON.parse(JSON.stringify(generated.proposal)) as Record<string, unknown>;
+    const operations = proposal.operations as Array<Record<string, unknown>>;
+    operations[0].node_id = 'explicit_research_node';
+    operations[1].node_id = 'explicit_review_node';
+    operations[2].from = 'explicit_research_node';
+    operations[2].to = 'explicit_review_node';
+
+    const applied = applyCanvasAuthoringProposal({
+      canvas,
+      taskId: canvas.id,
+      proposal,
+      temporaryResources: {},
+      callables,
+      workflows: [],
+    });
+    const graph = canvasToWorkflowGraph(applied.canvas) as { nodes: Array<Record<string, unknown>>; control_edges: unknown[] };
+
+    expect(graph.nodes).toHaveLength(2);
+    expect(graph.nodes.map((node) => node.id)).toEqual(['explicit_research_node', 'explicit_review_node']);
+    expect(graph.nodes[0].callable_ref).toEqual({ kind: 'agent_class', id: 'research.codex' });
+    expect(graph.nodes[0].input).toEqual({ user_prompt: 'Create a research workflow' });
+    expect(graph.nodes[0].output_schema).toEqual(
+      expect.objectContaining({ required: ['summary'] }),
+    );
+    expect(graph.control_edges).toHaveLength(1);
+  });
+
+  test('CanvasAuthoringProposal can create a workflow container and scoped internal nodes in order', () => {
+    const canvas = { ...canvasFixture(), workflows: [], edges: [] };
+    const callables = [callableFixture('fake-agent.generic')];
+    const snapshot = captureAuthoringSnapshot({
+      taskId: canvas.id,
+      canvas,
+      selection: { type: 'task_canvas', taskId: canvas.id },
+      callables,
+      workflows: [],
+    });
+    const proposal = {
+      proposal_id: 'proposal_scoped_workflow_container',
+      base_task_id: canvas.id,
+      base_canvas_hash: snapshot.snapshot_id,
+      target: snapshot.target,
+      rationale: 'Create an inline workflow container with internal fan-out and fan-in.',
+      operations: [
+        {
+          op: 'add_workflow_container',
+          scope_workflow_id: null,
+          node_id: 'workflow_tech_plan_review',
+          label: 'Tech Plan Review',
+          workflow_ref: null,
+          position: { x: 80, y: 80 },
+        },
+        ...[
+          ['node_requirement_clarification', 120, 120],
+          ['node_architecture_fit_analysis', 460, 40],
+          ['node_risk_boundary_analysis', 460, 200],
+          ['node_test_acceptance_analysis', 460, 360],
+          ['node_engineering_plan_synthesis', 800, 200],
+          ['node_final_plan_review', 1140, 200],
+        ].map(([nodeId, x, y]) => ({
+          op: 'add_existing_callable_node',
+          scope_workflow_id: 'workflow_tech_plan_review',
+          node_id: nodeId,
+          callable_id: 'fake-agent.generic',
+          callable_kind: 'agent_class',
+          label: String(nodeId),
+          position: { x, y },
+          input: { user_prompt: String(nodeId) },
+        })),
+        {
+          op: 'add_control_edge',
+          scope_workflow_id: 'workflow_tech_plan_review',
+          from: 'node_requirement_clarification',
+          to: 'node_architecture_fit_analysis',
+        },
+        {
+          op: 'add_control_edge',
+          scope_workflow_id: 'workflow_tech_plan_review',
+          from: 'node_requirement_clarification',
+          to: 'node_risk_boundary_analysis',
+        },
+        {
+          op: 'add_control_edge',
+          scope_workflow_id: 'workflow_tech_plan_review',
+          from: 'node_requirement_clarification',
+          to: 'node_test_acceptance_analysis',
+        },
+        {
+          op: 'add_control_edge',
+          scope_workflow_id: 'workflow_tech_plan_review',
+          from: 'node_architecture_fit_analysis',
+          to: 'node_engineering_plan_synthesis',
+        },
+        {
+          op: 'add_control_edge',
+          scope_workflow_id: 'workflow_tech_plan_review',
+          from: 'node_risk_boundary_analysis',
+          to: 'node_engineering_plan_synthesis',
+        },
+        {
+          op: 'add_control_edge',
+          scope_workflow_id: 'workflow_tech_plan_review',
+          from: 'node_test_acceptance_analysis',
+          to: 'node_engineering_plan_synthesis',
+        },
+        {
+          op: 'add_control_edge',
+          scope_workflow_id: 'workflow_tech_plan_review',
+          from: 'node_engineering_plan_synthesis',
+          to: 'node_final_plan_review',
+        },
+      ],
+    };
+
+    const validation = validateCanvasAuthoringProposal(proposal as Record<string, unknown>, {
+      canvas,
+      taskId: canvas.id,
+      temporaryResources: {},
+      callables,
+      workflows: [],
+    });
+    expect(validation).toEqual({ status: 'valid', errors: [], warnings: [] });
+
+    const applied = applyCanvasAuthoringProposal({
+      canvas,
+      taskId: canvas.id,
+      proposal: proposal as Record<string, unknown>,
+      temporaryResources: {},
+      callables,
+      workflows: [],
+    });
+    const container = (applied.canvas.workflows as Array<Record<string, unknown>>).find(
+      (workflow) => workflow.id === 'workflow_tech_plan_review',
+    );
+    expect(container?.internalNodes).toHaveLength(6);
+    expect(container?.internalEdges).toHaveLength(7);
+    const nodes = new Map(
+      ((container?.internalNodes || []) as Array<{ id: string; position: { x: number; y: number } }>).map((node) => [
+        node.id,
+        node.position,
+      ]),
+    );
+    const requirement = nodes.get('node_requirement_clarification');
+    const architecture = nodes.get('node_architecture_fit_analysis');
+    const risk = nodes.get('node_risk_boundary_analysis');
+    const test = nodes.get('node_test_acceptance_analysis');
+    const synthesis = nodes.get('node_engineering_plan_synthesis');
+    const finalReview = nodes.get('node_final_plan_review');
+    expect(requirement?.x).toBeLessThan(architecture?.x || 0);
+    expect(requirement?.x).toBeLessThan(risk?.x || 0);
+    expect(requirement?.x).toBeLessThan(test?.x || 0);
+    expect(Math.abs((architecture?.x || 0) - (risk?.x || 0))).toBeLessThanOrEqual(1);
+    expect(Math.abs((risk?.x || 0) - (test?.x || 0))).toBeLessThanOrEqual(1);
+    expect(synthesis?.x).toBeGreaterThan(architecture?.x || 0);
+    expect(finalReview?.x).toBeGreaterThan(synthesis?.x || 0);
+    expect(requirement?.y).toBeGreaterThanOrEqual(154);
+  });
+
+  test('CanvasAuthoringProposal rejects scoped operations before the workflow container exists', () => {
+    const canvas = { ...canvasFixture(), workflows: [], edges: [] };
+    const callables = [callableFixture('fake-agent.generic')];
+    const snapshot = captureAuthoringSnapshot({
+      taskId: canvas.id,
+      canvas,
+      selection: { type: 'task_canvas', taskId: canvas.id },
+      callables,
+      workflows: [],
+    });
+    const proposal = {
+      proposal_id: 'proposal_forward_scope_reference',
+      base_task_id: canvas.id,
+      base_canvas_hash: snapshot.snapshot_id,
+      target: snapshot.target,
+      rationale: 'Forward scope references should be rejected.',
+      operations: [
+        {
+          op: 'add_existing_callable_node',
+          scope_workflow_id: 'workflow_future',
+          node_id: 'node_a',
+          callable_id: 'fake-agent.generic',
+          callable_kind: 'agent_class',
+          label: 'A',
+          position: { x: 100, y: 100 },
+        },
+        {
+          op: 'add_workflow_container',
+          scope_workflow_id: null,
+          node_id: 'workflow_future',
+          label: 'Future',
+          workflow_ref: null,
+          position: { x: 80, y: 80 },
+        },
+      ],
+    };
+
+    const validation = validateCanvasAuthoringProposal(proposal as Record<string, unknown>, {
+      canvas,
+      taskId: canvas.id,
+      temporaryResources: {},
+      callables,
+      workflows: [],
+    });
+    expect(validation.status).toBe('invalid');
+    expect(validation.errors.join('\n')).toMatch(/Authoring scope 不存在: workflow_future/u);
+  });
+
+  test('CanvasAuthoringProposal scopes internal node ids and internal edge endpoints by container', () => {
+    const canvas = { ...canvasFixture(), workflows: [], edges: [] };
+    const callables = [callableFixture('fake-agent.generic')];
+    const snapshot = captureAuthoringSnapshot({
+      taskId: canvas.id,
+      canvas,
+      selection: { type: 'task_canvas', taskId: canvas.id },
+      callables,
+      workflows: [],
+    });
+    const baseProposal = {
+      proposal_id: 'proposal_scoped_duplicate_ids',
+      base_task_id: canvas.id,
+      base_canvas_hash: snapshot.snapshot_id,
+      target: snapshot.target,
+      rationale: 'Internal ids are scoped by workflow container.',
+      operations: [
+        {
+          op: 'add_workflow_container',
+          scope_workflow_id: null,
+          node_id: 'workflow_a',
+          label: 'A',
+          workflow_ref: null,
+          position: { x: 80, y: 80 },
+        },
+        {
+          op: 'add_workflow_container',
+          scope_workflow_id: null,
+          node_id: 'workflow_b',
+          label: 'B',
+          workflow_ref: null,
+          position: { x: 520, y: 80 },
+        },
+        {
+          op: 'add_existing_callable_node',
+          scope_workflow_id: 'workflow_a',
+          node_id: 'shared_node',
+          callable_id: 'fake-agent.generic',
+          callable_kind: 'agent_class',
+          label: 'Shared A',
+          position: { x: 100, y: 100 },
+        },
+        {
+          op: 'add_existing_callable_node',
+          scope_workflow_id: 'workflow_b',
+          node_id: 'shared_node',
+          callable_id: 'fake-agent.generic',
+          callable_kind: 'agent_class',
+          label: 'Shared B',
+          position: { x: 100, y: 100 },
+        },
+      ],
+    };
+
+    expect(
+      validateCanvasAuthoringProposal(baseProposal as Record<string, unknown>, {
+        canvas,
+        taskId: canvas.id,
+        temporaryResources: {},
+        callables,
+        workflows: [],
+      }).status,
+    ).toBe('valid');
+
+    const duplicateInSameScope = {
+      ...baseProposal,
+      proposal_id: 'proposal_duplicate_internal_id',
+      operations: [
+        ...baseProposal.operations,
+        {
+          op: 'add_existing_callable_node',
+          scope_workflow_id: 'workflow_a',
+          node_id: 'shared_node',
+          callable_id: 'fake-agent.generic',
+          callable_kind: 'agent_class',
+          label: 'Duplicate',
+          position: { x: 240, y: 100 },
+        },
+      ],
+    };
+    const crossScopeEdge = {
+      ...baseProposal,
+      proposal_id: 'proposal_cross_scope_edge',
+      operations: [
+        ...baseProposal.operations,
+        {
+          op: 'add_control_edge',
+          scope_workflow_id: 'workflow_a',
+          from: 'shared_node',
+          to: 'node_only_in_workflow_b',
+        },
+      ],
+    };
+
+    expect(
+      validateCanvasAuthoringProposal(duplicateInSameScope as Record<string, unknown>, {
+        canvas,
+        taskId: canvas.id,
+        temporaryResources: {},
+        callables,
+        workflows: [],
+      }).errors.join('\n'),
+    ).toMatch(/节点 id 已存在: workflow_a.shared_node/u);
+    expect(
+      validateCanvasAuthoringProposal(crossScopeEdge as Record<string, unknown>, {
+        canvas,
+        taskId: canvas.id,
+        temporaryResources: {},
+        callables,
+        workflows: [],
+      }).errors.join('\n'),
+    ).toMatch(/控制线目标节点不存在: node_only_in_workflow_b/u);
+  });
+
+  test('CanvasAuthoringProposal rejects stale canvas hash', () => {
+    const canvas = { ...canvasFixture(), workflows: [], edges: [] };
+    const callables = [callableFixture('research.codex')];
+    const snapshot = captureAuthoringSnapshot({
+      taskId: canvas.id,
+      canvas,
+      selection: { type: 'task_canvas', taskId: canvas.id },
+      callables,
+      workflows: [],
+    });
+    const generated = buildDeterministicCanvasAuthoringProposal({
+      message: 'Create one node',
+      snapshot,
+    });
+    const changedCanvas = {
+      ...canvas,
+      workflows: [agentWorkflow('other_agent', 100, 100)],
+    };
+    const validation = validateCanvasAuthoringProposal(generated.proposal as Record<string, unknown>, {
+      canvas: changedCanvas,
+      taskId: canvas.id,
+      temporaryResources: {},
+      callables,
+      workflows: [],
+    });
+
+    expect(validation.status).toBe('invalid');
+    expect(validation.errors.join('\n')).toMatch(/过期|stale|变化/u);
+  });
+
+  test('CanvasAuthoringProposal rejects duplicate node ids and missing edge removal', () => {
+    const canvas = {
+      ...canvasFixture(),
+      workflows: [agentWorkflow('existing_node', 100, 100)],
+      edges: [],
+    };
+    const snapshot = captureAuthoringSnapshot({
+      taskId: canvas.id,
+      canvas,
+      selection: { type: 'task_canvas', taskId: canvas.id },
+      callables: [callableFixture('fake-agent.generic')],
+      workflows: [],
+    });
+    const duplicateNodeProposal = {
+      proposal_id: 'proposal_duplicate_node',
+      base_task_id: canvas.id,
+      base_canvas_hash: snapshot.snapshot_id,
+      target: snapshot.target,
+      rationale: 'Duplicate node ids should be rejected.',
+      operations: [
+        {
+          op: 'add_existing_callable_node',
+          scope_workflow_id: null,
+          node_id: 'existing_node',
+          callable_id: 'fake-agent.generic',
+          callable_kind: 'agent_class',
+          label: 'Existing Node',
+          position: { x: 300, y: 100 },
+        },
+      ],
+    };
+    const missingEdgeProposal = {
+      ...duplicateNodeProposal,
+      proposal_id: 'proposal_missing_edge',
+      rationale: 'Missing edge removal should be rejected.',
+      operations: [
+        {
+          op: 'remove_edge',
+          scope_workflow_id: null,
+          edge_id: 'missing_edge',
+        },
+      ],
+    };
+
+    expect(
+      validateCanvasAuthoringProposal(duplicateNodeProposal as Record<string, unknown>, {
+        canvas,
+        taskId: canvas.id,
+        temporaryResources: {},
+        callables: [callableFixture('fake-agent.generic')],
+        workflows: [],
+      }).errors.join('\n'),
+    ).toMatch(/节点 id 已存在/u);
+    expect(() =>
+      applyCanvasAuthoringProposal({
+        canvas,
+        taskId: canvas.id,
+        proposal: missingEdgeProposal as Record<string, unknown>,
+        temporaryResources: {},
+        callables: [callableFixture('fake-agent.generic')],
+        workflows: [],
+      }),
+    ).toThrow(/连线不存在/u);
+  });
+
+  test('CanvasAuthoringProposal rejects invalid control edge endpoints and cycles', () => {
+    const canvas = {
+      ...canvasFixture(),
+      workflows: [agentWorkflow('node_a', 100, 100), agentWorkflow('node_b', 520, 100)],
+      edges: [
+        {
+          id: 'control_node_b_node_a',
+          kind: 'control',
+          source: { workflowId: 'node_b' },
+          target: { workflowId: 'node_a' },
+          condition: null,
+          context: 'none',
+        },
+      ],
+    };
+    const snapshot = captureAuthoringSnapshot({
+      taskId: canvas.id,
+      canvas,
+      selection: { type: 'task_canvas', taskId: canvas.id },
+      callables: [callableFixture('fake-agent.generic')],
+      workflows: [],
+    });
+    const missingEndpointProposal = {
+      proposal_id: 'proposal_missing_endpoint',
+      base_task_id: canvas.id,
+      base_canvas_hash: snapshot.snapshot_id,
+      target: snapshot.target,
+      rationale: 'Bad endpoint should be rejected.',
+      operations: [
+        {
+          op: 'add_control_edge',
+          scope_workflow_id: null,
+          from: 'missing_node',
+          to: 'node_a',
+        },
+      ],
+    };
+    const cycleProposal = {
+      ...missingEndpointProposal,
+      proposal_id: 'proposal_cycle',
+      rationale: 'Cycle should be rejected.',
+      operations: [
+        {
+          op: 'add_control_edge',
+          scope_workflow_id: null,
+          from: 'node_a',
+          to: 'node_b',
+        },
+      ],
+    };
+
+    expect(() =>
+      applyCanvasAuthoringProposal({
+        canvas,
+        taskId: canvas.id,
+        proposal: missingEndpointProposal as Record<string, unknown>,
+        temporaryResources: {},
+        callables: [callableFixture('fake-agent.generic')],
+        workflows: [],
+      }),
+    ).toThrow(/来源节点不存在|端点不存在/u);
+    expect(() =>
+      applyCanvasAuthoringProposal({
+        canvas,
+        taskId: canvas.id,
+        proposal: cycleProposal as Record<string, unknown>,
+        temporaryResources: {},
+        callables: [callableFixture('fake-agent.generic')],
+        workflows: [],
+      }),
+    ).toThrow(/循环/u);
+  });
+
+  test('selected node proposal updates invocation input and output_schema without output.json', () => {
+    const canvas = canvasFixture();
+    const callables = [callableFixture('fake-agent.generic')];
+    const snapshot = captureAuthoringSnapshot({
+      taskId: canvas.id,
+      canvas,
+      selection: { type: 'workflow', id: 'source_agent' },
+      callables,
+      workflows: [],
+    });
+    const generated = buildDeterministicCanvasAuthoringProposal({
+      message: 'Rewrite the selected node prompt',
+      snapshot,
+    });
+    const applied = applyCanvasAuthoringProposal({
+      canvas,
+      taskId: canvas.id,
+      proposal: generated.proposal as Record<string, unknown>,
+      temporaryResources: {},
+      callables,
+      workflows: [],
+    });
+    const graph = canvasToWorkflowGraph(applied.canvas) as { nodes: Array<Record<string, unknown>> };
+    const node = graph.nodes.find((item) => item.id === 'source_agent');
+
+    expect(node?.input).toEqual({ user_prompt: 'Rewrite the selected node prompt' });
+    expect(node?.output_schema).toEqual(expect.objectContaining({ required: ['summary'] }));
+    expect(JSON.stringify(node)).not.toContain('output.json');
+  });
+
+  test('temporary agent template stays canvas-local and blocks run/save graph submission', () => {
+    const canvas = { ...canvasFixture(), workflows: [], edges: [] };
+    const snapshot = captureAuthoringSnapshot({
+      taskId: canvas.id,
+      canvas,
+      selection: { type: 'task_canvas', taskId: canvas.id },
+      callables: [],
+      workflows: [],
+    });
+    const generated = buildDeterministicCanvasAuthoringProposal({
+      message: '创建一个新的 agent 模板处理报告',
+      snapshot,
+    });
+    const applied = applyCanvasAuthoringProposal({
+      canvas,
+      taskId: canvas.id,
+      proposal: generated.proposal as Record<string, unknown>,
+      temporaryResources: {},
+      callables: [],
+      workflows: [],
+    });
+    const graph = canvasToWorkflowGraph(applied.canvas);
+
+    expect(Object.keys(applied.temporaryResources)[0]).toMatch(/^tmp_agent_/u);
+    expect(temporaryResourceIssueForCanvas(applied.canvas, { temporaryResources: applied.temporaryResources })).toMatch(
+      /临时 agent template/u,
+    );
+    expect(temporaryResourceIssueForGraph(graph)).toMatch(/临时 callable/u);
+  });
+
+  test('temporary replacement operation cannot target a real callable node', () => {
+    const canvas = canvasFixture();
+    const snapshot = captureAuthoringSnapshot({
+      taskId: canvas.id,
+      canvas,
+      selection: { type: 'workflow', id: 'source_agent' },
+      callables: [callableFixture('review.generic')],
+      workflows: [],
+    });
+    const proposal = {
+      proposal_id: 'proposal_replace_real_node',
+      base_task_id: canvas.id,
+      base_canvas_hash: snapshot.snapshot_id,
+      target: snapshot.target,
+      rationale: 'Real nodes must not be replaceable through the temporary replacement op.',
+      operations: [
+        {
+          op: 'replace_temporary_template_with_existing_callable',
+          scope_workflow_id: null,
+          node_id: 'source_agent',
+          temporary_resource_id: 'tmp_agent_missing',
+          callable_id: 'review.generic',
+          callable_kind: 'agent_class',
+        },
+      ],
+    };
+
+    const validation = validateCanvasAuthoringProposal(proposal as Record<string, unknown>, {
+      canvas,
+      taskId: canvas.id,
+      temporaryResources: {},
+      callables: [callableFixture('review.generic')],
+      workflows: [],
+    });
+
+    expect(validation.status).toBe('invalid');
+    expect(validation.errors.join('\n')).toMatch(/不是临时 agent template/u);
+  });
+
   test('normalizeSelectionIntent maps root and internal node clicks to scoped selection', () => {
     const canvas = canvasFixture();
 
