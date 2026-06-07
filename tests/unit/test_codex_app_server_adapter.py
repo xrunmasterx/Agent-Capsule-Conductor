@@ -35,6 +35,9 @@ async def run_thread_start_turn_start(tmp_path: Path) -> None:
     ]
     provider_events = read_jsonl(request.provider_events_log_path)
     assert any(event.get("method") == "turn/completed" for event in provider_events)
+    writes = read_jsonl(tmp_path / "rpc_writes.jsonl")
+    initialize = next(item for item in writes if item.get("method") == "initialize")
+    assert initialize["params"]["clientInfo"]["name"] == "acc"
 
 
 def test_codex_app_server_adapter_resumes_prior_thread(tmp_path: Path) -> None:
@@ -83,6 +86,29 @@ async def run_authoring_mode_accepts_plain_message(tmp_path: Path) -> None:
     assert result.output_json_path is None
     assert result.assistant_messages == ("plain authoring reply",)
     assert not request.output_json_path.exists()
+
+
+def test_codex_app_server_extracts_json_object_from_markdown_message(tmp_path: Path) -> None:
+    asyncio.run(run_extracts_json_object_from_markdown_message(tmp_path))
+
+
+async def run_extracts_json_object_from_markdown_message(tmp_path: Path) -> None:
+    message = (
+        "Here is the draft:\n"
+        "```json\n"
+        '{"schema_version":"test.output.v1","summary":"from fenced json"}'
+        "\n```"
+    )
+    command = fake_codex_command(tmp_path, message=message)
+    request = make_request(tmp_path, command, response_mode="authoring_optional_proposal")
+
+    result = await CodexAppServerAdapter().run_turn(request)
+
+    assert result.status == "success"
+    assert json.loads(request.output_json_path.read_text(encoding="utf-8")) == {
+        "schema_version": "test.output.v1",
+        "summary": "from fenced json",
+    }
 
 
 def test_codex_app_server_cancel_marker_cancels_turn(tmp_path: Path) -> None:
@@ -211,6 +237,16 @@ for line in sys.stdin:
     method = payload.get("method")
     request_id = payload.get("id")
     if method == "initialize":
+        if "clientInfo" not in payload.get("params", {}):
+            emit({
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {
+                    "code": -32600,
+                    "message": "Invalid request: missing field `clientInfo`",
+                },
+            })
+            continue
         emit({"jsonrpc": "2.0", "id": request_id, "result": {}})
     elif method == "thread/resume":
         emit({

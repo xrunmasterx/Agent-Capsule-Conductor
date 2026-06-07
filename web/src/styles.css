@@ -2473,8 +2473,8 @@ small {
 }
 
 .assistant-drawer-body {
-  display: grid;
-  grid-template-rows: auto auto minmax(80px, auto) auto auto;
+  display: flex;
+  flex-direction: column;
   gap: 12px;
   min-height: 0;
   padding: 12px;
@@ -2497,6 +2497,7 @@ small {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 10px;
   padding: 8px 10px;
   font-size: 12px;
@@ -2535,11 +2536,27 @@ small {
 }
 
 .assistant-target-row strong {
+  flex: 1 1 140px;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 12px;
+}
+
+.assistant-target-row small {
+  flex: 0 0 auto;
+  max-width: 100%;
+}
+
+.assistant-compose .compact-tabs {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.assistant-compose .compact-tabs button {
+  flex: 1 1 92px;
+  min-width: 0;
 }
 
 .assistant-compose {
@@ -2565,10 +2582,20 @@ small {
 .assistant-message-list {
   display: grid;
   gap: 8px;
+  max-height: min(260px, 28vh);
+  min-height: 0;
+  overflow: auto;
+  padding-right: 2px;
 }
 
 .assistant-message {
+  min-height: 0;
   padding: 8px 10px;
+}
+
+.assistant-message p {
+  max-height: none;
+  overflow: visible;
 }
 
 .assistant-message p,
@@ -2625,7 +2652,7 @@ small {
 
 .assistant-proposal-panel pre,
 .assistant-graphops-review pre {
-  max-height: 240px;
+  max-height: min(240px, 28vh);
   overflow: auto;
   margin: 8px 0 0;
   padding: 8px;
@@ -2633,6 +2660,53 @@ small {
   background: #101419;
   color: #dce7f3;
   font-size: 11px;
+}
+
+.assistant-drawer .agent-session-subsection {
+  display: grid;
+  gap: 8px;
+  min-height: 0;
+}
+
+.assistant-drawer .agent-session-subsection[aria-label="Agent timeline"] {
+  max-height: min(220px, 24vh);
+  overflow: hidden;
+}
+
+.assistant-drawer .agent-session-subsection[aria-label="Agent timeline"] h5 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.assistant-drawer .event-timeline.compact {
+  max-height: min(180px, 20vh);
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.assistant-drawer .event-timeline.compact article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+  min-width: 0;
+  padding: 7px 8px;
+}
+
+.assistant-drawer .event-timeline.compact strong,
+.assistant-drawer .event-timeline.compact span,
+.assistant-drawer .event-timeline.compact small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.25;
+}
+
+.assistant-drawer .event-timeline.compact span {
+  color: #667581;
+  font-size: 11px;
+}
+
+.assistant-drawer .event-timeline.compact small {
+  font-size: 10px;
 }
 
 .assistant-graphops-summary {
@@ -4850,6 +4924,16 @@ small {
 .graph-workbench-v2 .assistant-message.system {
   border-color: #4d4128;
   background: #1a160d;
+}
+
+.graph-workbench-v2 .assistant-drawer .event-timeline.compact article {
+  border-color: #252c35;
+  background: #0b0f13;
+}
+
+.graph-workbench-v2 .assistant-drawer .event-timeline.compact span,
+.graph-workbench-v2 .assistant-drawer .event-timeline.compact small {
+  color: var(--wb-text-muted);
 }
 
 .graph-workbench-v2 .assistant-proposal-panel details,

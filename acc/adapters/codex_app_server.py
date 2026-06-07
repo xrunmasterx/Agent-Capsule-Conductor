@@ -156,7 +156,16 @@ async def run_codex_turn(
         node_id=request.node_id,
         payload={"runtime": "codex_app_server"},
     )
-    await client.request("initialize", {})
+    await client.request(
+        "initialize",
+        {
+            "clientInfo": {
+                "name": "acc",
+                "title": "Agent Callable Conductor",
+                "version": "0.1.0",
+            }
+        },
+    )
     await client.notify("initialized", {})
     thread_id = await start_or_resume_thread(client, request)
     await client.request(
@@ -542,12 +551,39 @@ def extract_thread_id(result: Any) -> str | None:
 
 def latest_json_object(messages: list[str]) -> dict[str, Any] | None:
     for text in reversed(messages):
+        payload = extract_json_object(text)
+        if payload is not None:
+            return payload
+    return None
+
+
+def extract_json_object(text: str) -> dict[str, Any] | None:
+    stripped = text.strip()
+    candidates = [stripped]
+    if "```" in stripped:
+        parts = stripped.split("```")
+        for index in range(1, len(parts), 2):
+            block = parts[index].strip()
+            if block.lower().startswith("json"):
+                block = block[4:].strip()
+            candidates.append(block)
+    decoder = json.JSONDecoder()
+    for candidate in candidates:
         try:
-            payload = json.loads(text)
+            payload = json.loads(candidate)
         except json.JSONDecodeError:
-            continue
+            payload = None
         if isinstance(payload, dict):
             return payload
+        for offset, char in enumerate(candidate):
+            if char != "{":
+                continue
+            try:
+                payload, _end = decoder.raw_decode(candidate[offset:])
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict):
+                return payload
     return None
 
 

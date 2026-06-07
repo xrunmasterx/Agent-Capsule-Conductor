@@ -2268,6 +2268,21 @@ export function WorkflowViewer({
     setEvidenceDock({ open: false, title: '运行证据', content: null });
   }
 
+  function resetAssistantConversationState() {
+    setAssistantInput('');
+    setAssistantMessages([]);
+    setAssistantProposal(null);
+    setAssistantBackendValidation(null);
+    setAssistantRequiredActions([]);
+    setAssistantGraphOpsReview(null);
+    setAssistantSessionId(null);
+    setAssistantAgentSession(null);
+    setAssistantPendingTurn(null);
+    setAssistantEvents([]);
+    setAssistantSessionStatus('disconnected');
+    setAssistantBusy(false);
+  }
+
   function currentAuthoringSnapshot(): AuthoringContextSnapshot {
     return captureAuthoringSnapshot({
       taskId: activeTaskId,
@@ -2408,7 +2423,7 @@ export function WorkflowViewer({
       setAssistantEvents((current) => mergeAgentEvents(current, eventPayload.events || []));
       const draftTurnId =
         typeof session.current_output_turn_id === 'string' ? session.current_output_turn_id : '';
-      const hasDraft = draftTurnId === assistantPendingTurn.turn_id;
+      const hasDraft = Boolean(draftTurnId);
       if (hasDraft) {
         try {
           const draft = await api.validateAssistantDraft(session.session_id, draftTurnId);
@@ -3103,9 +3118,8 @@ export function WorkflowViewer({
     setSourceGraph(nextGraph);
     setCanvas(nextCanvas);
     setSelection({ type: 'task_canvas', taskId: nextCanvas.id });
-    setAssistantProposal(null);
+    resetAssistantConversationState();
     setFocusedWorkflowId(null);
-    setChrome((current) => ({ ...current, rightPanel: 'none' }));
     closeEvidenceDock();
   }
 
@@ -3121,8 +3135,7 @@ export function WorkflowViewer({
     setCanvas(nextCanvas);
     setSelection({ type: 'task_canvas', taskId: nextCanvas.id });
     setFocusedWorkflowId(null);
-    setChrome((current) => ({ ...current, rightPanel: 'none' }));
-    setAssistantProposal(null);
+    resetAssistantConversationState();
     closeEvidenceDock();
   }
 
@@ -3146,7 +3159,7 @@ export function WorkflowViewer({
     setSourceGraph(nextGraph);
     setCanvas(nextCanvas);
     setSelection({ type: 'task_canvas', taskId: nextCanvas.id });
-    setAssistantProposal(null);
+    resetAssistantConversationState();
     setMessage(`已删除任务 ${taskId}`);
   }
 
@@ -4882,7 +4895,7 @@ function AssistantDrawer({
             <p className="assistant-empty">等待输入需求</p>
           )}
         </div>
-        <AgentEventTimeline events={events} />
+        <AgentEventTimeline events={events} maxEvents={4} />
         {proposal ? (
           <section className="assistant-proposal-panel" aria-label="CanvasAuthoringProposal">
             <header>
@@ -8286,9 +8299,9 @@ function AgentSessionPanel({
   );
 }
 
-function AgentEventTimeline({ events }: { events: RunEvent[] }) {
+function AgentEventTimeline({ events, maxEvents = 12 }: { events: RunEvent[]; maxEvents?: number }) {
   const agentEvents = events.filter((event) => String(event.type || event.event || '').startsWith('agent_'));
-  const visibleEvents = agentEvents.slice(-12).reverse();
+  const visibleEvents = agentEvents.slice(-maxEvents).reverse();
   return (
     <section className="agent-session-subsection" aria-label="Agent timeline">
       <h5>Agent timeline</h5>
@@ -8310,7 +8323,7 @@ function agentEventSummary(event: RunEvent): string {
   const payload = isPlainRecord(event.payload) ? event.payload : {};
   const content = stringValue(payload.content);
   if (content) {
-    return compactText(content);
+    return compactText(assistantMessageDisplayContent(content));
   }
   const summary = stringValue(payload.summary) || stringValue(payload.message) || stringValue(payload.error);
   if (summary) {
@@ -8336,8 +8349,95 @@ function agentMessagesToAssistantMessages(messages: AgentMessage[]): AssistantCh
         message.role === 'user' || message.role === 'assistant' || message.role === 'system'
           ? message.role
           : 'system',
-      content: message.content,
+      content: assistantMessageDisplayContent(message.content),
     }));
+}
+
+function assistantMessageDisplayContent(content: string): string {
+  const payload = parseEmbeddedJsonObject(content);
+  if (!payload) {
+    return content;
+  }
+  const assistantMessage = typeof payload.assistant_message === 'string' ? payload.assistant_message : '';
+  const proposal = isPlainRecord(payload.proposal) ? payload.proposal : null;
+  const proposalId = proposal && typeof proposal.proposal_id === 'string' ? proposal.proposal_id : '';
+  const rationale = proposal && typeof proposal.rationale === 'string' ? proposal.rationale : '';
+  const lines = [
+    assistantMessage || '已生成结构化草稿。',
+    proposalId ? `Proposal: ${proposalId}` : '',
+    rationale ? `Rationale: ${rationale}` : '',
+  ].filter(Boolean);
+  return lines.length ? lines.join('\n') : '已生成结构化 JSON 草稿。';
+}
+
+function parseEmbeddedJsonObject(content: string): Record<string, unknown> | null {
+  const trimmed = content.trim();
+  const candidates = [trimmed];
+  if (trimmed.includes('```')) {
+    const parts = trimmed.split('```');
+    for (let index = 1; index < parts.length; index += 2) {
+      const block = parts[index].trim().replace(/^json\s*/iu, '').trim();
+      candidates.push(block);
+    }
+  }
+  for (const candidate of candidates) {
+    const parsed = parseJsonObject(candidate);
+    if (parsed) {
+      return parsed;
+    }
+    for (let offset = 0; offset < candidate.length; offset += 1) {
+      if (candidate[offset] !== '{') {
+        continue;
+      }
+      const scanned = scanJsonObject(candidate.slice(offset));
+      if (scanned) {
+        return scanned;
+      }
+    }
+  }
+  return null;
+}
+
+function parseJsonObject(value: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return isPlainRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function scanJsonObject(value: string): Record<string, unknown> | null {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === '\\') {
+      escaped = inString;
+      continue;
+    }
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) {
+      continue;
+    }
+    if (char === '{') {
+      depth += 1;
+    } else if (char === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        return parseJsonObject(value.slice(0, index + 1));
+      }
+    }
+  }
+  return null;
 }
 
 function mergeAgentEvents(base: RunEvent[], incoming: RunEvent[]): RunEvent[] {

@@ -417,6 +417,7 @@ let assistantSessionMessages: Array<{ role: string; content: string; turn_id?: s
 let assistantCurrentOutputTurnId: string | null = null;
 let assistantCanvasHash = 'hash_fixture';
 let assistantLastMessage = '';
+let assistantTaskId = 'task_canvas_default';
 
 function failRoute(method: string, url: string, detail: string, status = 500) {
   failedRoutes.set(`${method} ${url}`, { status, detail });
@@ -561,7 +562,7 @@ function assistantSessionFixture() {
   return {
     schema_version: 'acc.agent_session.v1',
     session_id: 'agent_session_workbench_assistant',
-    task_id: 'task_canvas_default',
+    task_id: assistantTaskId,
     node_id: 'workbench_assistant',
     callable_ref: { kind: 'agent_class', id: 'echo-test.generic' },
     runtime: 'codex_app_server',
@@ -672,6 +673,7 @@ beforeEach(() => {
   assistantCurrentOutputTurnId = null;
   assistantCanvasHash = 'hash_fixture';
   assistantLastMessage = '';
+  assistantTaskId = 'task_canvas_default';
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -977,6 +979,13 @@ beforeEach(() => {
       if (method === 'POST' && url === '/api/agent-sessions') {
         const body = JSON.parse(String(init?.body || '{}'));
         if (body.source?.type === 'workbench_assistant') {
+          const nextAssistantTaskId = String(body.source?.task_id || 'task_canvas_default');
+          if (nextAssistantTaskId !== assistantTaskId) {
+            assistantSessionMessages = [];
+            assistantCurrentOutputTurnId = null;
+            assistantLastMessage = '';
+          }
+          assistantTaskId = nextAssistantTaskId;
           assistantCanvasHash = String(body.source?.canvas_hash || assistantCanvasHash);
           return new Response(JSON.stringify(assistantSessionFixture()), {
             status: 200,
@@ -2977,6 +2986,33 @@ describe('Agent Callable Workbench editable UI', () => {
       expect(nodes.length).toBeGreaterThanOrEqual(1);
     });
     expect(screen.queryByLabelText('CanvasAuthoringProposal')).not.toBeInTheDocument();
+  });
+
+  test('Workbench AI assistant resets conversation state when switching tasks', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await openNavIndex(user, 0);
+    await user.click(await screen.findByRole('button', { name: /AI \u52a9\u624b/i }));
+
+    const longPrompt = '这是一个很长的旧任务需求 '.repeat(24);
+    fireEvent.change(
+      screen.getByPlaceholderText('\u63cf\u8ff0\u8981\u751f\u6210\u6216\u8c03\u6574\u7684 workflow \u8349\u7a3f'),
+      { target: { value: longPrompt } },
+    );
+    await user.click(screen.getByRole('button', { name: /\u63d0\u4ea4 turn|\u751f\u6210 Proposal/u }));
+    await waitFor(() => {
+      expect(screen.getByLabelText('AI \u52a9\u624b\u6d88\u606f')).toHaveTextContent(longPrompt.slice(0, 16));
+    });
+
+    const workbench = await screen.findByLabelText('ACC Workbench');
+    await user.click(within(workbench).getByRole('button', { name: '\u65b0\u5efa\u4efb\u52a1' }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('AI \u52a9\u624b\u6d88\u606f')).not.toHaveTextContent(longPrompt.slice(0, 16));
+    });
+    expect(screen.getByLabelText('AI \u52a9\u624b\u6d88\u606f')).toHaveTextContent('\u7b49\u5f85\u8f93\u5165\u9700\u6c42');
+    expect(screen.getByRole('button', { name: /\u63d0\u4ea4 turn|\u53d1\u9001/u })).toBeInTheDocument();
   });
 
   test('Workbench AI temporary agent blocks save validate and run after task reload', async () => {
