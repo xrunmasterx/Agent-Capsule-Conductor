@@ -58,6 +58,64 @@ def test_get_node_includes_projection_fields(client, project_root) -> None:
     assert payload["log_ref"]
 
 
+def test_node_events_include_agent_session_timeline(client, project_root) -> None:
+    run_dir = project_root / "runs" / "agent_events_run"
+    node_dir = run_dir / "nodes" / "agent"
+    session_dir = project_root / "runs" / "_agent_sessions" / "agent_events_run" / "agent"
+    turn_dir = session_dir / "turns" / "turn_1"
+    turn_dir.mkdir(parents=True)
+    node_dir.mkdir(parents=True)
+    (node_dir / "events.jsonl").write_text(
+        json.dumps(
+            {
+                "type": "node_started",
+                "timestamp": "2026-06-05T00:00:00Z",
+                "node_id": "agent",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (node_dir / "runtime.json").write_text(
+        json.dumps({"agent_session_ref": str(session_dir.resolve()), "turn_id": "turn_1"}),
+        encoding="utf-8",
+    )
+    (turn_dir / "events.jsonl").write_text(
+        json.dumps(
+            {
+                "type": "agent_message",
+                "timestamp": "2026-06-05T00:00:01Z",
+                "session_id": "agent_session_test",
+                "turn_id": "turn_1",
+                "payload": {"content": "done"},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "run_summary.json").write_text(
+        json.dumps(
+            {
+                "run_id": "agent_events_run",
+                "status": "success",
+                "run_dir": str(run_dir.resolve()),
+                "node_count": 1,
+                "nodes": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    response = client.get("/api/runs/agent_events_run/nodes/agent/events")
+
+    assert response.status_code == 200, response.text
+    events = response.json()["events"]
+    assert [event["type"] for event in events] == ["node_started", "agent_message"]
+    assert events[1]["source"] == "agent_session"
+    assert events[1]["agent_session_id"] == "agent_session_test"
+    assert events[1]["agent_turn_id"] == "turn_1"
+
+
 def test_run_events_include_recursive_nested_workflow_scope(client, project_root) -> None:
     run_dir = project_root / "runs" / "recursive_nested_events_run"
     workflow_a_nested = run_dir / "nodes" / "workflow_a" / "nested_workflow"

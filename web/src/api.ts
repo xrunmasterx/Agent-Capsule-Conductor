@@ -1,6 +1,12 @@
 import type {
   ArtifactContent,
   ArtifactList,
+  AgentMessage,
+  AgentAssistantDraftValidation,
+  AgentOutputPublishResult,
+  AgentSessionRecord,
+  AgentTurnEventPayload,
+  AgentTurnRecord,
   AuthoringAgentSummary,
   AuthoringMessageResponse,
   AuthoringSessionPayload,
@@ -319,6 +325,82 @@ export const api = {
   nodeLog: (runId: string, nodeId: string, stream: 'stdout' | 'stderr', offset = 0, limit = 65536) =>
     getJson<NodeLogDelta>(
       `/api/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/logs/${encodeURIComponent(stream)}?offset=${encodeURIComponent(String(offset))}&limit=${encodeURIComponent(String(limit))}`,
+    ),
+  createAgentSessionFromRunNode: (runId: string, nodeId: string) =>
+    sendJson<AgentSessionRecord>('POST', '/api/agent-sessions', {
+      source: { type: 'run_node', run_id: runId, node_id: nodeId },
+    }),
+  createWorkbenchAssistantSession: (payload: {
+    task_id: string;
+    canvas_hash: string;
+    canvas_snapshot: Record<string, unknown>;
+    selection?: Record<string, unknown> | null;
+    agent_id?: string | null;
+    workspace_ref?: string | null;
+  }) =>
+    sendJson<AgentSessionRecord>('POST', '/api/agent-sessions', {
+      source: {
+        type: 'workbench_assistant',
+        task_id: payload.task_id,
+        canvas_hash: payload.canvas_hash,
+        canvas_snapshot: payload.canvas_snapshot,
+        selection: payload.selection || {},
+        ...(payload.agent_id ? { agent_id: payload.agent_id } : {}),
+        ...(payload.workspace_ref ? { workspace_ref: payload.workspace_ref } : {}),
+      },
+    }),
+  getAgentSession: (sessionId: string) =>
+    getJson<AgentSessionRecord>(`/api/agent-sessions/${encodeURIComponent(sessionId)}`),
+  getAgentSessionMessages: (sessionId: string) =>
+    getJson<{ session_id: string; messages: AgentMessage[] }>(
+      `/api/agent-sessions/${encodeURIComponent(sessionId)}/messages`,
+    ),
+  submitAgentTurn: (
+    sessionId: string,
+    payload: {
+      message: string;
+      reason: 'node_chat' | 'output_revision';
+      expected_provider_session_id?: string | null;
+    },
+  ) =>
+    sendJson<AgentTurnRecord>(
+      'POST',
+      `/api/agent-sessions/${encodeURIComponent(sessionId)}/turns/submit`,
+      payload,
+    ),
+  submitWorkbenchAssistantTurn: (
+    sessionId: string,
+    payload: {
+      message: string;
+      reason: 'workbench_chat' | 'canvas_revision' | 'selected_node_revision';
+      canvas_hash: string;
+      canvas_snapshot: Record<string, unknown>;
+      selection?: Record<string, unknown> | null;
+      expected_provider_session_id?: string | null;
+    },
+  ) =>
+    sendJson<AgentTurnRecord>(
+      'POST',
+      `/api/agent-sessions/${encodeURIComponent(sessionId)}/turns/submit`,
+      payload,
+    ),
+  getAgentTurnEvents: (sessionId: string, turnId: string) =>
+    getJson<AgentTurnEventPayload>(
+      `/api/agent-sessions/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(turnId)}/events`,
+    ),
+  streamAgentTurnEventsUrl: (sessionId: string, turnId: string) =>
+    `/api/agent-sessions/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(turnId)}/stream`,
+  validateAssistantDraft: (sessionId: string, expectedTurnId: string) =>
+    sendJson<AgentAssistantDraftValidation>(
+      'POST',
+      `/api/agent-sessions/${encodeURIComponent(sessionId)}/assistant-draft/validate`,
+      { expected_turn_id: expectedTurnId },
+    ),
+  publishAgentOutput: (sessionId: string, expectedTurnId: string) =>
+    sendJson<AgentOutputPublishResult>(
+      'POST',
+      `/api/agent-sessions/${encodeURIComponent(sessionId)}/output/publish`,
+      { expected_turn_id: expectedTurnId },
     ),
   runStreamUrl: (runId: string) => `/api/runs/${encodeURIComponent(runId)}/stream`,
   decisions: (limit = 100) =>

@@ -9,12 +9,12 @@ from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
+from acc.app.agent_sessions import AgentTurnService
 from acc.app.core_v2_loader import load_workflow_function_template
 from acc.app.human_gate import create_pending_human_gate, node_requires_human_approval
 from acc.app.run_lifecycle import is_terminal_run_status, write_run_summary_status
 from acc.app.workflow_refs import WorkflowCatalog
 from acc.callable_registry import CallableRegistry
-from acc.callable_runner import AgentExecutionContext, CallableClassRunner
 from acc.domain import (
     AccError,
     ArtifactBundle,
@@ -1835,18 +1835,24 @@ async def execute_core_v2_callable(
         except AccError:
             pass
         else:
-            return await CallableClassRunner().run_agent_class(
+            service = AgentTurnService(project_root_for_agent_sessions(scope))
+            return await service.run_workflow_node_turn(
                 asset,
                 payload,
                 node_dir,
-                AgentExecutionContext(
-                    node=node,
-                    scope=scope,
-                    session=session,
-                    binding_materializations=binding_materializations,
-                ),
+                node=node,
+                scope=scope,
+                session=session,
+                binding_materializations=binding_materializations,
             )
     return execute_hermetic_callable(node, payload, scope, callable_registry)
+
+
+def project_root_for_agent_sessions(scope: ScopeFrame) -> Path:
+    run_dir = scope.environment_root.resolve()
+    if run_dir.parent.name == "runs":
+        return run_dir.parent.parent
+    return run_dir.parent
 
 
 async def execute_workflow_function_callable(

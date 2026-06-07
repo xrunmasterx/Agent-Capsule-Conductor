@@ -39,65 +39,151 @@ class FakeCodexProcess:
     def __init__(self, command: tuple[str, ...]) -> None:
         self.command = command
         self.returncode = 0
+        self.stdout = FakeCodexStdout()
+        self.stderr = FakeCodexStderr(b"")
+        self.stdin = FakeCodexStdin(self)
+
+    def handle_rpc(self, line: bytes) -> None:
+        payload = json.loads(line.decode("utf-8"))
+        method = payload.get("method")
+        request_id = payload.get("id")
+        if method == "initialize":
+            self.stdout.push({"jsonrpc": "2.0", "id": request_id, "result": {}})
+        elif method == "thread/start":
+            self.stdout.push(
+                {"jsonrpc": "2.0", "id": request_id, "result": {"threadId": "thread_fake"}}
+            )
+        elif method == "thread/resume":
+            self.stdout.push(
+                {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {"threadId": payload["params"]["threadId"]},
+                }
+            )
+        elif method == "turn/start":
+            self.stdout.push({"jsonrpc": "2.0", "id": request_id, "result": {}})
+            prompt = json.dumps(payload.get("params") or {}, ensure_ascii=False)
+            self.stdout.push_agent_message(codex_output_for_prompt(prompt))
+            self.stdout.push(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "turn/completed",
+                    "params": {"usage": {"input_tokens": 1, "output_tokens": 1}},
+                }
+            )
+            self.stdout.close()
 
     async def communicate(self, input: bytes | None = None) -> tuple[bytes, bytes]:
-        output_path = Path(self.command[self.command.index("-o") + 1])
         prompt = (input or b"").decode("utf-8", errors="replace")
-        if "A_SENTINEL_123" in prompt:
-            analysis = "received A_SENTINEL_123 and continued downstream analysis"
-            summary = "cleaner consumed upstream sentinel"
-        else:
-            analysis = "produced A_SENTINEL_123 as upstream sentinel"
-            summary = "research produced upstream sentinel"
-        output_path.write_text(
-            json.dumps(
-                {
-                    "schema_version": "acc.agent.output.v1",
-                    "status": "success",
-                    "summary": summary,
-                    "report_markdown": analysis,
-                    "findings": [
-                        {
-                            "id": "F1",
-                            "severity": "info",
-                            "title": "sentinel",
-                            "detail": "A_SENTINEL_123",
-                            "recommendation": "Keep propagating the sentinel.",
-                            "evidence_ids": ["E1"],
-                            "confidence": "high",
-                        }
-                    ],
-                    "evidence": [
-                        {
-                            "id": "E1",
-                            "kind": "observation",
-                            "ref": "test",
-                            "note": "test evidence",
-                            "quote": "A_SENTINEL_123",
-                        }
-                    ],
-                    "artifacts": [],
-                    "quality": {
-                        "confidence": "high",
-                        "assumptions": [],
-                        "uncertainties": [],
-                        "limitations": [],
-                    },
-                    "next_actions": [],
-                    "outputs": {},
-                },
-                indent=2,
-                sort_keys=True,
-            ),
-            encoding="utf-8",
-        )
-        return b'{"event":"codex"}\n', b""
+        return json.dumps(codex_output_for_prompt(prompt)).encode("utf-8"), b""
 
     def kill(self) -> None:
         self.returncode = -9
 
     async def wait(self) -> None:
         return None
+
+
+class FakeCodexStdin:
+    def __init__(self, process: FakeCodexProcess) -> None:
+        self.process = process
+
+    def write(self, data: bytes) -> None:
+        for line in data.splitlines():
+            if line.strip():
+                self.process.handle_rpc(line)
+
+    async def drain(self) -> None:
+        return None
+
+    def close(self) -> None:
+        return None
+
+
+class FakeCodexStdout:
+    def __init__(self) -> None:
+        self.lines: asyncio.Queue[bytes] = asyncio.Queue()
+
+    def push(self, payload: dict) -> None:
+        self.lines.put_nowait(json.dumps(payload).encode("utf-8") + b"\n")
+
+    def push_agent_message(self, payload: dict) -> None:
+        self.push(
+            {
+                "jsonrpc": "2.0",
+                "method": "item/completed",
+                "params": {
+                    "item": {
+                        "type": "agentMessage",
+                        "text": json.dumps(payload, ensure_ascii=False),
+                    }
+                },
+            }
+        )
+
+    def close(self) -> None:
+        self.lines.put_nowait(b"")
+
+    async def readline(self) -> bytes:
+        return await self.lines.get()
+
+
+class FakeCodexStderr:
+    def __init__(self, payload: bytes) -> None:
+        self.payload = payload
+        self.done = False
+
+    async def read(self, size: int = -1) -> bytes:
+        _ = size
+        if self.done:
+            return b""
+        self.done = True
+        return self.payload
+
+
+def codex_output_for_prompt(prompt: str) -> dict:
+        if "A_SENTINEL_123" in prompt:
+            analysis = "received A_SENTINEL_123 and continued downstream analysis"
+            summary = "cleaner consumed upstream sentinel"
+        else:
+            analysis = "produced A_SENTINEL_123 as upstream sentinel"
+            summary = "research produced upstream sentinel"
+        return {
+            "schema_version": "acc.agent.output.v1",
+            "status": "success",
+            "summary": summary,
+            "report_markdown": analysis,
+            "findings": [
+                {
+                    "id": "F1",
+                    "severity": "info",
+                    "title": "sentinel",
+                    "detail": "A_SENTINEL_123",
+                    "recommendation": "Keep propagating the sentinel.",
+                    "evidence_ids": ["E1"],
+                    "confidence": "high",
+                }
+            ],
+            "evidence": [
+                {
+                    "id": "E1",
+                    "kind": "observation",
+                    "ref": "test",
+                    "note": "test evidence",
+                    "quote": "A_SENTINEL_123",
+                }
+            ],
+            "artifacts": [],
+            "quality": {
+                "confidence": "high",
+                "assumptions": [],
+                "uncertainties": [],
+                "limitations": [],
+            },
+            "next_actions": [],
+            "outputs": {},
+        }
 
 
 class FailingCodexProcess:
@@ -679,11 +765,14 @@ output_ports:
     )
     command = list(captured[0])
     assert result["status"] == "success"
-    assert command[command.index("--cd") + 1] == str(workspace.resolve())
+    assert command[1:] == ["app-server", "--listen", "stdio://"]
     assert child_runtime["workspace_dir"] == str(workspace.resolve())
-    assert child_runtime["command_argv_redacted"][
-        child_runtime["command_argv_redacted"].index("--cd") + 1
-    ] == str(workspace.resolve())
+    assert child_runtime["command_argv_redacted"] == [
+        "codex",
+        "app-server",
+        "--listen",
+        "stdio://",
+    ]
 
 
 def test_core_v2_production_codex_agents_pass_data_edge_to_downstream(
@@ -790,7 +879,7 @@ output_ports:
     assert cleaner_bindings["bindings"][0]["source_node"] == "research"
     assert cleaner_bindings["bindings"][0]["target_port"] == "evidence"
     assert cleaner_runtime["execution_mode"] == "production"
-    assert cleaner_runtime["adapter"] == "codex_cli"
+    assert cleaner_runtime["adapter"] == "codex_app_server"
     assert cleaner_runtime["permissions_effective"]["network"] is False
     assert cleaner_runtime["permissions_effective"]["dangerous"] is False
     assert research_schema["additionalProperties"] is False
@@ -902,9 +991,7 @@ output_ports:
     )
 
     assert result["status"] == "success"
-    assert "--search" in captured[0]
-    assert "--dangerously-bypass-approvals-and-sandbox" in captured[0]
-    assert "--sandbox" not in captured[0]
+    assert captured[0][1:] == ("app-server", "--listen", "stdio://")
     assert runtime["permissions_effective"]["network"] is True
     assert runtime["permissions_effective"]["dangerous"] is True
 
@@ -1234,21 +1321,27 @@ def test_non_main_data_edge_uses_outputs_container_port_value(
         def __init__(self, command: tuple[str, ...]) -> None:
             self.command = command
             self.returncode = 0
+            self.stdout = FakeCodexStdout()
+            self.stderr = FakeCodexStderr(b"")
+            self.stdin = FakeCodexStdin(self)
 
-        async def communicate(self, input: bytes | None = None) -> tuple[bytes, bytes]:
-            output_path = Path(self.command[self.command.index("-o") + 1])
-            output_path.write_text(
-                json.dumps(
-                        {
-                            "outputs": {"risk_table": [{"risk": "structured"}]},
-                        },
-                    indent=2,
-                    sort_keys=True,
-                ),
-                encoding="utf-8",
-            )
-            _ = input
-            return b'{"event":"codex"}\n', b""
+        def handle_rpc(self, line: bytes) -> None:
+            payload = json.loads(line.decode("utf-8"))
+            method = payload.get("method")
+            request_id = payload.get("id")
+            if method == "initialize":
+                self.stdout.push({"jsonrpc": "2.0", "id": request_id, "result": {}})
+            elif method == "thread/start":
+                self.stdout.push(
+                    {"jsonrpc": "2.0", "id": request_id, "result": {"threadId": "thread_fake"}}
+                )
+            elif method == "turn/start":
+                self.stdout.push({"jsonrpc": "2.0", "id": request_id, "result": {}})
+                self.stdout.push_agent_message(
+                    {"outputs": {"risk_table": [{"risk": "structured"}]}}
+                )
+                self.stdout.push({"jsonrpc": "2.0", "method": "turn/completed", "params": {}})
+                self.stdout.close()
 
         def kill(self) -> None:
             self.returncode = -9

@@ -182,6 +182,10 @@ class AgentAdapterDispatcher:
     def resolve(self, runtime: str) -> AgentAdapter:
         if runtime == "codex_cli":
             return CodexCliAdapter()
+        if runtime == "codex_app_server":
+            raise AccError(
+                "codex_app_server is a streaming runtime; use AgentTurnService instead"
+            )
         if runtime == "generic_cli":
             return GenericCliAdapter()
         if runtime == "claude_sdk":
@@ -195,7 +199,7 @@ def adapter_command(template: AgentClassTemplate) -> str | None:
 
 
 def adapter_args_base(template: AgentClassTemplate) -> list[str]:
-    if template.runtime == "codex_cli":
+    if template.runtime in {"codex_cli", "codex_app_server"}:
         return ["exec"]
     raw_args = template.metadata.get("args_base") or template.metadata.get("args")
     if isinstance(raw_args, list):
@@ -206,6 +210,8 @@ def adapter_args_base(template: AgentClassTemplate) -> list[str]:
 def command_preview(runtime: str, request: AgentRunRequest) -> list[str]:
     if runtime == "codex_cli":
         return build_codex_command(request)
+    if runtime == "codex_app_server":
+        return [request.command or "codex", "app-server", "--listen", "stdio://"]
     if request.command:
         return [request.command, *request.args_base]
     return []

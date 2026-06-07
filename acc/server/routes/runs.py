@@ -166,7 +166,7 @@ def get_node_events(
         "run_id": run_id,
         "node_id": node_id,
         "event_log": relative_project_path(project_root, event_log),
-        "events": read_jsonl_tolerant(event_log, limit=limit),
+        "events": read_node_events_with_agent(run_dir, node_id, limit=limit),
     }
 
 
@@ -399,6 +399,43 @@ def read_run_events_with_nested(run_dir: Path, limit: int = 200) -> list[dict[st
     return [event for _, _, event in ordered_events[-limit:]]
 
 
+def read_node_events_with_agent(
+    run_dir: Path,
+    node_id: str,
+    limit: int,
+) -> list[dict[str, Any]]:
+    node_dir = run_dir / "nodes" / node_id
+    ordered_events: list[tuple[str, int, dict[str, Any]]] = []
+    sequence = 0
+    for event in read_jsonl_tolerant(node_dir / "events.jsonl", limit=limit):
+        ordered_events.append((event_sort_key(event), sequence, event))
+        sequence += 1
+    runtime = load_json_tolerant(node_dir / "runtime.json")
+    session_ref = runtime.get("agent_session_ref")
+    turn_id = runtime.get("turn_id")
+    if isinstance(session_ref, str) and isinstance(turn_id, str):
+        agent_event_log = Path(session_ref) / "turns" / turn_id / "events.jsonl"
+        for event in read_jsonl_tolerant(agent_event_log, limit=limit):
+            projected = dict(event)
+            projected["source"] = "agent_session"
+            projected["agent_session_id"] = event.get("session_id")
+            projected["agent_turn_id"] = event.get("turn_id")
+            ordered_events.append((event_sort_key(projected), sequence, projected))
+            sequence += 1
+    ordered_events.sort(key=lambda item: (item[0], item[1]))
+    return [event for _, _, event in ordered_events[-limit:]]
+
+
+def load_json_tolerant(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def read_nested_workflow_events(
     run_dir: Path,
     parent_ui_node_id: str | None,
@@ -418,7 +455,9 @@ def read_nested_workflow_events(
             else node_dir.name
         )
         for event in read_jsonl_tolerant(nested_run_dir / "events.jsonl", limit=limit):
-            nested_events.append(annotate_nested_event(event, nested_parent_ui_node_id, nested_run_dir))
+            nested_events.append(
+                annotate_nested_event(event, nested_parent_ui_node_id, nested_run_dir)
+            )
         nested_events.extend(
             read_nested_workflow_events(
                 nested_run_dir,
@@ -429,7 +468,11 @@ def read_nested_workflow_events(
     return nested_events
 
 
-def annotate_nested_event(event: dict[str, Any], parent_node_id: str, nested_run_dir: Path) -> dict[str, Any]:
+def annotate_nested_event(
+    event: dict[str, Any],
+    parent_node_id: str,
+    nested_run_dir: Path,
+) -> dict[str, Any]:
     nested_event = dict(event)
     nested_event["nested"] = True
     nested_event["parent_node_id"] = parent_node_id

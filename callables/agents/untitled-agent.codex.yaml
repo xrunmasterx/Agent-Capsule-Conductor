@@ -1,6 +1,6 @@
 id: untitled-agent.codex
 version: 0.1.0
-runtime: codex_cli
+runtime: codex_app_server
 default_prompt: 输出1
 input_ports:
   main:

@@ -1,3 +1,7 @@
+> Current note: this document describes the deprecated compatibility path for `codex exec`.
+> Workbench/Core v2 Codex agent nodes now use `codex_app_server`, launched as
+> `codex app-server --listen stdio://`. See `docs/ACC_CODEX_APP_SERVER_RUNTIME.md`.
+
 # ACC 调用 Codex CLI 的形式：第一性原理与费曼式拆解
 
 > 结论先行：ACC 当前不是直接调用 OpenAI API，也不是自己实现一个 LLM agent loop。ACC 把一个 workflow 里的 Codex agent 节点包装成一次本地 `codex exec` 子进程调用。`codex`、`exec`、`--sandbox`、`--json`、`--output-schema`、`-o`、`--search`、`--cd`、`-` 这些是 Codex CLI 官方/本机 CLI 提供的命令或参数；`ACC_RUN_MODE`、`ACC_ENABLE_EXTERNAL_AGENT_EXECUTION`、`ACC_CODEX_TIMEOUT_SECONDS`、`resolved_prompt.md`、`agent_payload.json`、`runtime.json`、`events.jsonl` 等是 ACC 自己定义的运行控制和证据文件。

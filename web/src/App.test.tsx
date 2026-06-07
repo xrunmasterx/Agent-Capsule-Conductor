@@ -411,6 +411,12 @@ const routes: Record<string, unknown> = {
 };
 
 const failedRoutes = new Map<string, { status: number; detail: string }>();
+let agentSessionMessages: Array<{ role: string; content: string; turn_id?: string; created_at?: string }> = [];
+let agentCurrentOutputTurnId = 'turn_draft_fixture';
+let assistantSessionMessages: Array<{ role: string; content: string; turn_id?: string; created_at?: string }> = [];
+let assistantCurrentOutputTurnId: string | null = null;
+let assistantCanvasHash = 'hash_fixture';
+let assistantLastMessage = '';
 
 function failRoute(method: string, url: string, detail: string, status = 500) {
   failedRoutes.set(`${method} ${url}`, { status, detail });
@@ -498,7 +504,174 @@ function workspaceCanvasRunEvents(runId: string) {
   };
 }
 
+function agentSessionFixture(runId = 'ui_workflow_acc_workspace_canvas_fixture_123') {
+  return {
+    schema_version: 'acc.agent_session.v1',
+    session_id: 'agent_session_research_codex',
+    task_id: runId,
+    node_id: 'research_codex',
+    callable_ref: { kind: 'agent_class', id: 'fake-agent.generic' },
+    runtime: 'codex_app_server',
+    provider_session_id: 'provider_fixture',
+    workspace_ref: 'E:/Agent Capsule Conductor/acc_codex',
+    status: 'ready',
+    current_output_ref: 'current_output.json',
+    published_output_ref: 'published_output.json',
+    bound_run_id: runId,
+    bound_node_id: 'research_codex',
+    bound_node_output_ref: `runs/${runId}/nodes/Research_Flow/internal/research_codex/output.json`,
+    current_output_turn_id: agentCurrentOutputTurnId,
+    published_output_turn_id: 'turn_initial_fixture',
+    last_turn_id: agentCurrentOutputTurnId,
+    created_at: '2026-06-07T00:00:00Z',
+    updated_at: '2026-06-07T00:00:01Z',
+    session_dir: `runs/_agent_sessions/${runId}/research_codex`,
+    output_schema: { type: 'object', properties: { summary: { type: 'string' } } },
+  };
+}
+
+function agentNodeEventsFixture(runId: string) {
+  return {
+    run_id: runId,
+    node_id: 'research_codex',
+    event_log: `runs/${runId}/nodes/Research_Flow/internal/research_codex/events.jsonl`,
+    events: [
+      { type: 'node_completed', node_id: 'research_codex', status: 'success', timestamp: '2026-06-07T00:00:00Z' },
+      {
+        type: 'agent_message',
+        node_id: 'research_codex',
+        session_id: 'agent_session_research_codex',
+        turn_id: agentCurrentOutputTurnId,
+        timestamp: '2026-06-07T00:00:01Z',
+        payload: { content: 'Agent session fixture message' },
+      },
+      {
+        type: 'agent_output_draft',
+        node_id: 'research_codex',
+        session_id: 'agent_session_research_codex',
+        turn_id: agentCurrentOutputTurnId,
+        timestamp: '2026-06-07T00:00:02Z',
+        payload: { output_path: `runs/_agent_sessions/${runId}/research_codex/current_output.json` },
+      },
+    ],
+  };
+}
+
+function assistantSessionFixture() {
+  return {
+    schema_version: 'acc.agent_session.v1',
+    session_id: 'agent_session_workbench_assistant',
+    task_id: 'task_canvas_default',
+    node_id: 'workbench_assistant',
+    callable_ref: { kind: 'agent_class', id: 'echo-test.generic' },
+    runtime: 'codex_app_server',
+    provider_session_id: 'provider_assistant_fixture',
+    workspace_ref: 'E:/Agent Capsule Conductor/acc_codex',
+    status: 'ready',
+    session_kind: 'workbench_assistant',
+    current_output_ref: assistantCurrentOutputTurnId ? 'current_output.json' : null,
+    published_output_ref: null,
+    bound_run_id: null,
+    bound_node_id: null,
+    current_output_turn_id: assistantCurrentOutputTurnId,
+    published_output_turn_id: null,
+    last_turn_id: assistantCurrentOutputTurnId,
+    created_at: '2026-06-07T00:00:00Z',
+    updated_at: '2026-06-07T00:00:01Z',
+    session_dir: 'runs/_agent_sessions/task_canvas_default/workbench_assistant',
+    output_schema: { type: 'object' },
+  };
+}
+
+function assistantDraftFixture() {
+  const wantsTemp = assistantLastMessage.toLowerCase().includes('new agent');
+  return {
+    session_id: 'agent_session_workbench_assistant',
+    turn_id: assistantCurrentOutputTurnId || 'turn_assistant_fixture',
+    status: 'valid',
+    assistant_message: 'Backend generated a proposal.',
+    proposal: wantsTemp
+      ? {
+          proposal_id: 'canvas_proposal_temp',
+          base_task_id: 'task_canvas_default',
+          base_canvas_hash: assistantCanvasHash,
+          target: { kind: 'task_canvas', task_id: 'task_canvas_default' },
+          rationale: 'Draft temporary agent',
+          operations: [
+            {
+              op: 'create_temporary_agent_template',
+              scope_workflow_id: null,
+              draft_id: 'tmp_agent_test',
+              node_id: 'tmp_agent_test',
+              label: 'Temporary Agent',
+              position: { x: 120, y: 180 },
+              agent_draft: {
+                id: 'tmp_agent_test',
+                version: '0.1.0',
+                runtime: 'codex_cli',
+                name: 'Temporary Agent',
+                default_prompt: assistantLastMessage,
+                input_ports: { main: { type: 'artifact', required: false } },
+                output_ports: { main: { type: 'artifact', required: true } },
+                artifact_contract: { output_schema: { type: 'object', properties: { summary: { type: 'string' } } } },
+                metadata: { temporary: true },
+              },
+              input: { user_prompt: assistantLastMessage },
+              output_schema: { type: 'object', properties: { summary: { type: 'string' } }, required: ['summary'] },
+            },
+          ],
+        }
+      : {
+          proposal_id: 'canvas_proposal_backend',
+          base_task_id: 'task_canvas_default',
+          base_canvas_hash: assistantCanvasHash,
+          target: { kind: 'task_canvas', task_id: 'task_canvas_default' },
+          rationale: 'Backend authoring proposal',
+          operations: [
+            {
+              op: 'add_existing_callable_node',
+              scope_workflow_id: null,
+              node_id: 'Echo_Test',
+              callable_id: 'echo-test.generic',
+              callable_kind: 'agent_class',
+              label: 'Echo Test',
+              position: { x: 120, y: 180 },
+              input: { user_prompt: assistantLastMessage || 'Create a research and review workflow' },
+              input_ports: [{ id: 'main', direction: 'input', required: false }],
+              output_ports: [{ id: 'main', direction: 'output', required: true }],
+              output_schema: { type: 'object', properties: { summary: { type: 'string' } }, required: ['summary'] },
+            },
+          ],
+        },
+    required_actions: wantsTemp
+      ? [
+          {
+            kind: 'approve_resource_persistence',
+            resource_draft_id: 'tmp_agent_test',
+            reason: 'Temporary agent must be persisted before run/save',
+          },
+        ]
+      : [{ kind: 'confirm_canvas_apply', reason: 'Review and apply proposal' }],
+    questions: [],
+    risk_notes: [],
+    confidence: 'medium',
+  };
+}
+
 beforeEach(() => {
+  agentSessionMessages = [
+    {
+      role: 'assistant',
+      content: 'Agent session fixture message',
+      turn_id: 'turn_initial_fixture',
+      created_at: '2026-06-07T00:00:01Z',
+    },
+  ];
+  agentCurrentOutputTurnId = 'turn_draft_fixture';
+  assistantSessionMessages = [];
+  assistantCurrentOutputTurnId = null;
+  assistantCanvasHash = 'hash_fixture';
+  assistantLastMessage = '';
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -797,6 +970,179 @@ beforeEach(() => {
             type: 'json',
             content: '{"status":"success","summary":"Codex agent output fixture"}',
             size_bytes: 59,
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      if (method === 'POST' && url === '/api/agent-sessions') {
+        const body = JSON.parse(String(init?.body || '{}'));
+        if (body.source?.type === 'workbench_assistant') {
+          assistantCanvasHash = String(body.source?.canvas_hash || assistantCanvasHash);
+          return new Response(JSON.stringify(assistantSessionFixture()), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        const runId = String(body.source?.run_id || 'ui_workflow_acc_workspace_canvas_fixture_123');
+        return new Response(JSON.stringify(agentSessionFixture(runId)), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (method === 'GET' && url === '/api/agent-sessions/agent_session_workbench_assistant') {
+        return new Response(JSON.stringify(assistantSessionFixture()), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (method === 'GET' && url === '/api/agent-sessions/agent_session_workbench_assistant/messages') {
+        return new Response(
+          JSON.stringify({ session_id: 'agent_session_workbench_assistant', messages: assistantSessionMessages }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      if (method === 'POST' && url === '/api/agent-sessions/agent_session_workbench_assistant/turns/submit') {
+        const body = JSON.parse(String(init?.body || '{}'));
+        assistantCurrentOutputTurnId = body.reason === 'workbench_chat' ? null : 'turn_assistant_fixture';
+        assistantCanvasHash = String(body.canvas_hash || assistantCanvasHash);
+        assistantLastMessage = String(body.message || '');
+        assistantSessionMessages.push(
+          { role: 'user', content: assistantLastMessage, turn_id: 'turn_assistant_fixture' },
+          { role: 'assistant', content: 'Backend generated a proposal.', turn_id: 'turn_assistant_fixture' },
+        );
+        return new Response(
+          JSON.stringify({
+            session_id: 'agent_session_workbench_assistant',
+            turn_id: 'turn_assistant_fixture',
+            reason: body.reason || 'canvas_revision',
+            status: 'queued',
+            events_url: '/api/agent-sessions/agent_session_workbench_assistant/turns/turn_assistant_fixture/events',
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      if (
+        method === 'GET' &&
+        url === '/api/agent-sessions/agent_session_workbench_assistant/turns/turn_assistant_fixture/events'
+      ) {
+        return new Response(
+          JSON.stringify({
+            session_id: 'agent_session_workbench_assistant',
+            turn_id: 'turn_assistant_fixture',
+            events: [
+              {
+                type: 'agent_message',
+                session_id: 'agent_session_workbench_assistant',
+                turn_id: 'turn_assistant_fixture',
+                timestamp: '2026-06-07T00:00:03Z',
+                payload: { content: 'Backend generated a proposal.' },
+              },
+              ...(assistantCurrentOutputTurnId
+                ? [
+                    {
+                      type: 'agent_output_draft',
+                      session_id: 'agent_session_workbench_assistant',
+                      turn_id: 'turn_assistant_fixture',
+                      timestamp: '2026-06-07T00:00:04Z',
+                      payload: { output_path: 'runs/_agent_sessions/task_canvas_default/workbench_assistant/current_output.json' },
+                    },
+                  ]
+                : []),
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      if (method === 'POST' && url === '/api/agent-sessions/agent_session_workbench_assistant/assistant-draft/validate') {
+        return new Response(JSON.stringify(assistantDraftFixture()), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (method === 'GET' && url === '/api/agent-sessions/agent_session_research_codex') {
+        return new Response(JSON.stringify(agentSessionFixture()), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (method === 'GET' && url === '/api/agent-sessions/agent_session_research_codex/messages') {
+        return new Response(
+          JSON.stringify({ session_id: 'agent_session_research_codex', messages: agentSessionMessages }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      if (method === 'POST' && url === '/api/agent-sessions/agent_session_research_codex/turns/submit') {
+        const body = JSON.parse(String(init?.body || '{}'));
+        agentCurrentOutputTurnId = 'turn_chat_fixture';
+        agentSessionMessages.push(
+          { role: 'user', content: String(body.message || ''), turn_id: agentCurrentOutputTurnId },
+          { role: 'assistant', content: 'Hermetic agent turn completed.', turn_id: agentCurrentOutputTurnId },
+        );
+        return new Response(
+          JSON.stringify({
+            session_id: 'agent_session_research_codex',
+            turn_id: agentCurrentOutputTurnId,
+            reason: body.reason || 'node_chat',
+            status: 'queued',
+            events_url: '/api/agent-sessions/agent_session_research_codex/turns/turn_chat_fixture/events',
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      if (
+        method === 'GET' &&
+        url === '/api/agent-sessions/agent_session_research_codex/turns/turn_chat_fixture/events'
+      ) {
+        return new Response(
+          JSON.stringify({
+            session_id: 'agent_session_research_codex',
+            turn_id: 'turn_chat_fixture',
+            events: [
+              {
+                type: 'agent_message',
+                session_id: 'agent_session_research_codex',
+                turn_id: 'turn_chat_fixture',
+                timestamp: '2026-06-07T00:00:03Z',
+                payload: { content: 'Hermetic agent turn completed.' },
+              },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      if (method === 'POST' && url === '/api/agent-sessions/agent_session_research_codex/output/publish') {
+        const body = JSON.parse(String(init?.body || '{}'));
+        return new Response(
+          JSON.stringify({
+            session_id: 'agent_session_research_codex',
+            status: 'published',
+            published_output_path: 'runs/_agent_sessions/ui_workflow_acc_workspace_canvas_fixture_123/research_codex/published_output.json',
+            target_output_path: `runs/ui_workflow_acc_workspace_canvas_fixture_123/nodes/Research_Flow/internal/research_codex/output.json`,
+            expected_turn_id: body.expected_turn_id,
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      const dynamicNodeEvents = url.match(
+        /^\/api\/runs\/(ui_workflow_acc_workspace_canvas(?:_fixture)?_\d+)\/nodes\/research_codex\/events\?limit=\d+$/u,
+      );
+      if (method === 'GET' && dynamicNodeEvents) {
+        return new Response(JSON.stringify(agentNodeEventsFixture(dynamicNodeEvents[1])), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (
+        method === 'GET' &&
+        /^\/api\/artifacts\/read\?path=runs%2F_agent_sessions%2Fui_workflow_acc_workspace_canvas(?:_fixture)?_\d+%2Fresearch_codex%2Fcurrent_output\.json$/u.test(url)
+      ) {
+        return new Response(
+          JSON.stringify({
+            path: 'runs/_agent_sessions/ui_workflow_acc_workspace_canvas_fixture_123/research_codex/current_output.json',
+            name: 'current_output.json',
+            type: 'json',
+            content: '{"summary":"Draft output fixture"}',
+            size_bytes: 34,
           }),
           { status: 200, headers: { 'Content-Type': 'application/json' } },
         );
@@ -2621,9 +2967,9 @@ describe('Agent Callable Workbench editable UI', () => {
       screen.getByPlaceholderText('描述要生成或调整的 workflow 草稿'),
       'Create a research and review workflow',
     );
-    await user.click(screen.getByRole('button', { name: '生成 Proposal' }));
+    await user.click(screen.getByRole('button', { name: /提交 turn|生成 Proposal/u }));
 
-    expect(await screen.findByLabelText('CanvasAuthoringProposal')).toHaveTextContent('Proposal');
+    expect(await screen.findByLabelText('CanvasAuthoringProposal')).toHaveTextContent('canvas_proposal_backend');
     await user.click(screen.getByRole('button', { name: '应用到当前画布' }));
 
     await waitFor(() => {
@@ -2643,7 +2989,7 @@ describe('Agent Callable Workbench editable UI', () => {
       screen.getByPlaceholderText('描述要生成或调整的 workflow 草稿'),
       'create a new agent template for reporting',
     );
-    await user.click(screen.getByRole('button', { name: '生成 Proposal' }));
+    await user.click(screen.getByRole('button', { name: /提交 turn|生成 Proposal/u }));
     await user.click(await screen.findByRole('button', { name: '应用到当前画布' }));
     await waitFor(() => {
       expect(window.localStorage.getItem('acc.workbench.tasks.v1') || '').toContain('tmp_agent_');
@@ -2683,7 +3029,7 @@ describe('Agent Callable Workbench editable UI', () => {
       screen.getByPlaceholderText('\u63cf\u8ff0\u8981\u751f\u6210\u6216\u8c03\u6574\u7684 workflow \u8349\u7a3f'),
       'create a new agent template for reporting',
     );
-    await user.click(screen.getByRole('button', { name: '\u751f\u6210 Proposal' }));
+    await user.click(screen.getByRole('button', { name: /\u63d0\u4ea4 turn|\u751f\u6210 Proposal/u }));
     await user.click(await screen.findByRole('button', { name: '\u5e94\u7528\u5230\u5f53\u524d\u753b\u5e03' }));
     vi.mocked(fetch).mockClear();
 
@@ -2831,6 +3177,50 @@ describe('Agent Callable Workbench editable UI', () => {
     expect(await screen.findByLabelText('output.json 内容')).toHaveTextContent('Codex agent output fixture');
   });
 
+  test('Selected agent node exposes bound session chat draft and publish controls', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await openNavIndex(user, 0);
+    await loadWorkspaceDemo(user);
+    const codexLabel = (await screen.findAllByText('Codex CLI'))[0];
+    const codexNode = codexLabel.closest('[role="group"]');
+    expect(codexNode).toBeTruthy();
+    fireEvent.click(codexNode as HTMLElement);
+
+    const toolbar = await screen.findByLabelText('工作流工具栏');
+    await user.click(within(toolbar).getByRole('button', { name: /^运行$/i }));
+    await screen.findByText(/ui_workflow_acc_workspace_canvas_fixture: 成功/i);
+
+    expect(await screen.findByLabelText('Agent Session')).toHaveTextContent(
+      'agent_session_research_codex',
+    );
+    expect(screen.getByLabelText('Agent timeline')).toHaveTextContent('agent_output_draft');
+    expect(screen.getByRole('button', { name: /发布为本节点输出/i })).toBeEnabled();
+
+    await user.type(screen.getByLabelText('Agent node chat message'), '请修订摘要');
+    await user.click(screen.getByRole('button', { name: /发送 turn/i }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Agent messages')).toHaveTextContent('请修订摘要');
+    });
+    expect(screen.getByLabelText('Agent messages')).toHaveTextContent('Hermetic agent turn completed.');
+
+    await user.click(screen.getByRole('button', { name: /发布为本节点输出/i }));
+
+    await waitFor(() => {
+      const publishCall = vi.mocked(fetch).mock.calls.find(
+        ([url, init]) =>
+          url === '/api/agent-sessions/agent_session_research_codex/output/publish' &&
+          init?.method === 'POST',
+      );
+      expect(publishCall).toBeTruthy();
+      const body = JSON.parse(String(publishCall?.[1]?.body));
+      expect(body).toEqual({ expected_turn_id: 'turn_chat_fixture' });
+      expect(JSON.stringify(body)).not.toContain('target_output_path');
+    });
+  });
+
   test('Run Inspector exposes implemented debugger replay action', async () => {
     const user = userEvent.setup();
     render(<App />);
@@ -2871,4 +3261,3 @@ describe('Agent Callable Workbench editable UI', () => {
     });
   });
 });
-

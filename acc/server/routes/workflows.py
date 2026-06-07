@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -174,15 +175,16 @@ def prepare_runtime_graph(
     workflow_id = str(graph.get("id") or "")
     if not workflow_id:
         raise HTTPException(status_code=400, detail="Workflow graph id is required")
-    graph_dir = project_root / "runs" / "_workflow_function_specs" / run_dir.name
+    graph_dir = runtime_workflow_spec_dir(project_root, run_dir)
     graph_dir.mkdir(parents=True, exist_ok=True)
-    accflow_path = graph_dir / f"{workflow_id}.accflow.json"
+    accflow_path = graph_dir / "root.accflow.json"
     workflows_dir = configured_project_dir(project_root, "ACC_WORKFLOWS_DIR", "workflows")
     bundle = graph_bundle_for_accflow_save(
         graph,
         source_path=accflow_path,
         callable_registry=CallableRegistry.from_project_root(project_root),
     )
+    bundle, child_name_map = runtime_named_workflow_bundle(bundle)
     try:
         bundle = resolve_bundle_workflow_refs(
             bundle,
@@ -199,7 +201,99 @@ def prepare_runtime_graph(
         request=request,
         workflows_dir=workflows_dir,
     )
+    write_runtime_spec_manifest(
+        graph_dir,
+        project_root=project_root,
+        run_dir=run_dir,
+        workflow_id=workflow_id,
+        root_path=accflow_path,
+        child_name_map=child_name_map,
+        child_names=sorted(bundle.children),
+    )
     return accflow_path
+
+
+def runtime_workflow_spec_dir(project_root: Path, run_dir: Path) -> Path:
+    run_key = relative_project_path(project_root, run_dir)
+    return project_root / "runs" / "_workflow_function_specs" / f"run-{stable_short_hash(run_key)}"
+
+
+def stable_short_hash(value: str, *, length: int = 12) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:length]
+
+
+def runtime_named_workflow_bundle(
+    bundle: CompiledWorkbenchWorkflowBundle,
+) -> tuple[CompiledWorkbenchWorkflowBundle, dict[str, str]]:
+    child_name_map = {
+        child_name: f"child-{index:04d}.accflow.json"
+        for index, child_name in enumerate(sorted(bundle.children), start=1)
+    }
+    if not child_name_map:
+        return bundle, {}
+    children = {
+        child_name_map[child_name]: rewrite_workflow_ref_names(child_payload, child_name_map)
+        for child_name, child_payload in bundle.children.items()
+    }
+    root = rewrite_workflow_ref_names(bundle.root, child_name_map)
+    return (
+        CompiledWorkbenchWorkflowBundle(
+            root=root,
+            children=children,
+            validation_preview=bundle.validation_preview,
+            ref_resolution_preview=bundle.ref_resolution_preview,
+            normalization=bundle.normalization,
+        ),
+        child_name_map,
+    )
+
+
+def rewrite_workflow_ref_names(payload: dict[str, Any], name_map: dict[str, str]) -> dict[str, Any]:
+    rewritten = json.loads(json.dumps(payload))
+    for node in rewritten.get("nodes") or []:
+        if not isinstance(node, dict):
+            continue
+        ref = node.get("callable_ref")
+        if isinstance(ref, dict) and ref.get("kind") == "workflow_function":
+            ref_id = str(ref.get("id") or "")
+            if ref_id in name_map:
+                ref["id"] = name_map[ref_id]
+        workflow_ref = node.get("workflow_ref")
+        if isinstance(workflow_ref, str) and workflow_ref in name_map:
+            node["workflow_ref"] = name_map[workflow_ref]
+    metadata = rewritten.get("metadata")
+    if isinstance(metadata, dict):
+        child_path = metadata.get("compiled_child_path")
+        if isinstance(child_path, str) and child_path in name_map:
+            metadata["compiled_child_path"] = name_map[child_path]
+    return rewritten
+
+
+def write_runtime_spec_manifest(
+    graph_dir: Path,
+    *,
+    project_root: Path,
+    run_dir: Path,
+    workflow_id: str,
+    root_path: Path,
+    child_name_map: dict[str, str],
+    child_names: list[str],
+) -> None:
+    reverse_child_name_map = {new: old for old, new in child_name_map.items()}
+    manifest = {
+        "schema_version": "acc.runtime.workflow_specs.v1",
+        "run_dir": relative_project_path(project_root, run_dir),
+        "workflow_id": workflow_id,
+        "root": root_path.name,
+        "children": [
+            {
+                "path": child_name,
+                "original_path": reverse_child_name_map.get(child_name, child_name),
+            }
+            for child_name in child_names
+        ],
+    }
+    write_accflow_json(graph_dir / "runtime_specs.json", manifest)
 
 
 def graph_with_latest_workbench_node_modes(
@@ -644,7 +738,7 @@ def write_bundle_to_directory(
     workflows_dir: Path | None = None,
 ) -> dict[str, Any]:
     accflow_path.parent.mkdir(parents=True, exist_ok=True)
-    staging_dir = accflow_path.parent / f".{accflow_path.stem}.{uuid4().hex}.bundle"
+    staging_dir = accflow_path.parent / f".bundle-{uuid4().hex[:12]}"
     staging_dir.mkdir(parents=True)
     staging_root = staging_dir / accflow_path.name
     try:

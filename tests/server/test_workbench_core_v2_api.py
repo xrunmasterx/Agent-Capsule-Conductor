@@ -9,6 +9,22 @@ from acc.app.local_directory_picker import LocalDirectorySelection
 from acc.server.routes import workflows as workflow_routes
 
 
+def runtime_spec_dir(project_root: Path, run_name: str) -> Path:
+    return workflow_routes.runtime_workflow_spec_dir(project_root, project_root / "runs" / run_name)
+
+
+def runtime_spec_manifest(project_root: Path, run_name: str) -> dict:
+    spec_dir = runtime_spec_dir(project_root, run_name)
+    return json.loads((spec_dir / "runtime_specs.json").read_text())
+
+
+def runtime_spec_child_path(manifest: dict, original_path: str) -> str:
+    for child in manifest["children"]:
+        if child["original_path"] == original_path:
+            return child["path"]
+    raise AssertionError(f"Missing runtime child spec for {original_path}")
+
+
 def workbench_draft() -> dict:
     return {
         "id": "workbench_stock_flow",
@@ -413,9 +429,51 @@ def test_submit_workbench_container_writes_run_local_child_specs(
     )
 
     assert response.status_code == 200, response.text
-    spec_dir = project_root / "runs" / "_workflow_function_specs" / "container_submit"
-    assert (spec_dir / "workbench_container_flow.accflow.json").exists()
-    assert (spec_dir / "workbench_container_flow__New_Workflow.accflow.json").exists()
+    spec_dir = runtime_spec_dir(project_root, "container_submit")
+    manifest = runtime_spec_manifest(project_root, "container_submit")
+    assert manifest["workflow_id"] == "workbench_container_flow"
+    assert (spec_dir / manifest["root"]).exists()
+    child_path = runtime_spec_child_path(
+        manifest,
+        "workbench_container_flow__New_Workflow.accflow.json",
+    )
+    assert (spec_dir / child_path).exists()
+
+
+def test_submit_runtime_specs_use_bounded_paths_for_long_workbench_run_ids(
+    client: TestClient,
+    project_root: Path,
+) -> None:
+    draft = workbench_draft()
+    draft["id"] = "ui_workflow_task_canvas_default_1780839716123"
+    run_name = "ui_workflow_task_canvas_default_1780839716123"
+
+    response = client.post(
+        "/api/workflows/run-graph/submit",
+        json={
+            "graph": draft,
+            "run_dir": f"runs/{run_name}",
+            "task_id": "task_canvas_default",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    spec_dir = runtime_spec_dir(project_root, run_name)
+    manifest = runtime_spec_manifest(project_root, run_name)
+    root_path = spec_dir / manifest["root"]
+    assert manifest["workflow_id"] == draft["id"]
+    assert manifest["run_dir"] == f"runs/{run_name}"
+    assert root_path.exists()
+    assert root_path.name == "root.accflow.json"
+    assert len(str(root_path)) < 240
+    old_unbounded_path = (
+        project_root
+        / "runs"
+        / "_workflow_function_specs"
+        / run_name
+        / f"{draft['id']}.accflow.json"
+    )
+    assert not old_unbounded_path.exists()
 
 
 def test_select_workflow_binding_directory_returns_selected_path(
@@ -655,24 +713,14 @@ def test_workbench_container_run_uses_container_binding(
             / "output.json"
         ).read_text()
     )
-    compiled_root = json.loads(
-        (
-            project_root
-            / "runs"
-            / "_workflow_function_specs"
-            / "container_bound_run"
-            / "container_bound_root.accflow.json"
-        ).read_text()
+    spec_dir = runtime_spec_dir(project_root, "container_bound_run")
+    manifest = runtime_spec_manifest(project_root, "container_bound_run")
+    compiled_root = json.loads((spec_dir / manifest["root"]).read_text())
+    compiled_child_path = runtime_spec_child_path(
+        manifest,
+        "container_bound_root__New_Workflow.accflow.json",
     )
-    compiled_child = json.loads(
-        (
-            project_root
-            / "runs"
-            / "_workflow_function_specs"
-            / "container_bound_run"
-            / "container_bound_root__New_Workflow.accflow.json"
-        ).read_text()
-    )
+    compiled_child = json.loads((spec_dir / compiled_child_path).read_text())
     assert root_scope["binding_path"] is None
     assert Path(root_scope["workspace_root"]) == (
         project_root / "runs" / "container_bound_run"
@@ -701,8 +749,12 @@ def test_submit_empty_workbench_container_writes_noop_child_spec(
     )
 
     assert response.status_code == 200, response.text
-    spec_dir = project_root / "runs" / "_workflow_function_specs" / "empty_container_submit"
-    child_path = spec_dir / "empty_workbench_container_flow__New_Workflow_2.accflow.json"
+    spec_dir = runtime_spec_dir(project_root, "empty_container_submit")
+    manifest = runtime_spec_manifest(project_root, "empty_container_submit")
+    child_path = spec_dir / runtime_spec_child_path(
+        manifest,
+        "empty_workbench_container_flow__New_Workflow_2.accflow.json",
+    )
     assert child_path.exists()
     child = json.loads(child_path.read_text())
     assert child["nodes"] == []

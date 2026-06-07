@@ -58,6 +58,88 @@ export type RuntimeConfig = {
   real_external_agents_enabled: boolean;
 };
 
+export type AgentSessionRecord = {
+  schema_version?: string;
+  session_id: string;
+  task_id?: string;
+  node_id?: string;
+  callable_ref?: Record<string, unknown>;
+  runtime?: string;
+  provider_session_id?: string | null;
+  workspace_ref?: string;
+  status?: string;
+  current_output_ref?: string | null;
+  published_output_ref?: string | null;
+  bound_run_id?: string | null;
+  bound_node_id?: string | null;
+  bound_node_output_ref?: string | null;
+  current_output_turn_id?: string | null;
+  published_output_turn_id?: string | null;
+  last_turn_id?: string | null;
+  last_published_at?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  session_dir?: string;
+  output_schema?: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
+export type AgentTurnRecord = {
+  schema_version?: string;
+  session_id: string;
+  turn_id: string;
+  reason?:
+    | 'workflow_node'
+    | 'node_chat'
+    | 'output_revision'
+    | 'workbench_chat'
+    | 'canvas_revision'
+    | 'selected_node_revision'
+    | string;
+  status?: 'queued' | 'running' | 'success' | 'failed' | 'cancelled' | 'timeout' | string;
+  prompt_ref?: string;
+  input_ref?: string;
+  draft_output_ref?: string;
+  usage_ref?: string;
+  started_at?: string | null;
+  ended_at?: string | null;
+  events_url?: string;
+  [key: string]: unknown;
+};
+
+export type AgentMessage = {
+  role: 'user' | 'assistant' | 'system' | string;
+  content: string;
+  turn_id?: string;
+  created_at?: string;
+  [key: string]: unknown;
+};
+
+export type AgentTurnEventPayload = {
+  session_id: string;
+  turn_id: string;
+  events: RunEvent[];
+};
+
+export type AgentOutputPublishResult = {
+  session_id: string;
+  status: string;
+  published_output_path?: string;
+  target_output_path?: string;
+};
+
+export type AgentAssistantDraftValidation = {
+  session_id: string;
+  turn_id: string;
+  status: 'valid' | 'invalid' | string;
+  assistant_message?: string;
+  proposal?: Record<string, unknown> | null;
+  required_actions?: AuthoringRequiredAction[];
+  questions?: string[];
+  risk_notes?: string[];
+  confidence?: 'low' | 'medium' | 'high' | string;
+};
+
 export type RunSummary = {
   run_id: string;
   workflow_id?: string | null;

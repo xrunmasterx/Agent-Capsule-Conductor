@@ -29,10 +29,14 @@ import {
   LayoutDashboard,
   Link2,
   Bot,
+  MessageSquare,
   Play,
+  RefreshCw,
   Save,
+  Send,
   TestTube,
   Trash2,
+  UploadCloud,
 } from 'lucide-react';
 import dagre from 'dagre';
 import {
@@ -60,6 +64,9 @@ import { api } from '../api';
 import { shortPath, statusTone } from '../format';
 import type {
   AgentClassDraft,
+  AgentMessage,
+  AgentSessionRecord,
+  AgentTurnRecord,
   ArtifactContent,
   AuthoringAgentSummary,
   AuthoringRequiredAction,
@@ -68,6 +75,7 @@ import type {
   CallableSummary,
   GraphOpsDryRunPayload,
   GraphOpsTransactionProposal,
+  InteractionRequest,
   NodeLogDelta,
   NodeRunSummary,
   RunEvent,
@@ -386,6 +394,16 @@ type EvidenceDockState = {
   };
 };
 
+type AgentSessionUiState = {
+  status: 'idle' | 'loading' | 'ready' | 'error';
+  session: AgentSessionRecord | null;
+  messages: AgentMessage[];
+  events: RunEvent[];
+  pendingTurn: AgentTurnRecord | null;
+  interactions: InteractionRequest[];
+  error: string;
+};
+
 type SelectedDetailsKind = 'canvas' | 'node' | 'workflow' | 'internal-node' | 'edge' | 'port' | 'empty';
 
 type SelectedDetailsPropertyGroup = {
@@ -580,6 +598,8 @@ type AssistantGraphOpsReview = {
   validation: Record<string, unknown>;
   dryRun: GraphOpsDryRunPayload;
 };
+
+type AssistantTurnReason = 'workbench_chat' | 'canvas_revision' | 'selected_node_revision';
 
 type WorkbenchTask = {
   taskId: string;
@@ -1213,6 +1233,8 @@ function authoringBackendCanvasSnapshot(snapshot: AuthoringContextSnapshot): Rec
     workflows: snapshot.canvas.workflows,
     edges: snapshot.canvas.edges,
     canonical_graph: snapshot.canonical_graph,
+    callable_catalog: snapshot.callable_catalog,
+    workflow_catalog: snapshot.workflow_catalog,
   };
 }
 
@@ -2206,6 +2228,10 @@ export function WorkflowViewer({
   const [authoringAgents, setAuthoringAgents] = useState<AuthoringAgentSummary[]>([]);
   const [selectedAuthoringAgentId, setSelectedAuthoringAgentId] = useState('');
   const [assistantSessionId, setAssistantSessionId] = useState<string | null>(null);
+  const [assistantAgentSession, setAssistantAgentSession] = useState<AgentSessionRecord | null>(null);
+  const [assistantPendingTurn, setAssistantPendingTurn] = useState<AgentTurnRecord | null>(null);
+  const [assistantEvents, setAssistantEvents] = useState<RunEvent[]>([]);
+  const [assistantTurnReason, setAssistantTurnReason] = useState<AssistantTurnReason>('canvas_revision');
   const [assistantSessionStatus, setAssistantSessionStatus] = useState('disconnected');
   const [assistantBackendValidation, setAssistantBackendValidation] =
     useState<CanvasAuthoringValidationResult | null>(null);
@@ -2213,6 +2239,15 @@ export function WorkflowViewer({
   const [assistantGraphOpsReview, setAssistantGraphOpsReview] =
     useState<AssistantGraphOpsReview | null>(null);
   const [assistantBusy, setAssistantBusy] = useState(false);
+  const [agentSessionState, setAgentSessionState] = useState<AgentSessionUiState>({
+    status: 'idle',
+    session: null,
+    messages: [],
+    events: [],
+    pendingTurn: null,
+    interactions: [],
+    error: '',
+  });
   const graphRef = useRef(sourceGraph);
   const selectedRunId = currentTask?.activeRunId || currentTask?.latestRunId || null;
   const selectedRunProjection = selectedRunId ? runsById[selectedRunId] : undefined;
@@ -2256,7 +2291,7 @@ export function WorkflowViewer({
       if (agentId && !selectedAuthoringAgentId) {
         setSelectedAuthoringAgentId(agentId);
       }
-      const session = await api.createAuthoringSession({
+      const session = await api.createWorkbenchAssistantSession({
         ...(agentId ? { agent_id: agentId } : {}),
         task_id: snapshot.task_id,
         canvas_hash: snapshot.snapshot_id,
@@ -2264,7 +2299,10 @@ export function WorkflowViewer({
         selection: authoringSelectionPayload(snapshot.selection),
       });
       setAssistantSessionId(session.session_id);
+      setAssistantAgentSession(session);
       setAssistantSessionStatus(session.status || 'ready');
+      const messages = await api.getAgentSessionMessages(session.session_id);
+      setAssistantMessages(agentMessagesToAssistantMessages(messages.messages || []));
       return session.session_id;
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error);
@@ -2344,6 +2382,117 @@ export function WorkflowViewer({
       // The drawer shows the backend error as a system message.
     });
   }, [assistantBusy, assistantOpen, assistantSessionId]);
+
+  useEffect(() => {
+    if (!assistantPendingTurn || !assistantSessionId) {
+      return;
+    }
+    let cancelled = false;
+    let source: EventSource | null = null;
+
+    async function refreshAssistantTurn(terminal = false) {
+      if (!assistantSessionId || !assistantPendingTurn || cancelled) {
+        return;
+      }
+      const [session, messages, eventPayload] = await Promise.all([
+        api.getAgentSession(assistantSessionId),
+        api.getAgentSessionMessages(assistantSessionId),
+        api.getAgentTurnEvents(assistantSessionId, assistantPendingTurn.turn_id),
+      ]);
+      if (cancelled) {
+        return;
+      }
+      setAssistantAgentSession(session);
+      setAssistantSessionStatus(session.status || assistantPendingTurn.status || 'running');
+      setAssistantMessages(agentMessagesToAssistantMessages(messages.messages || []));
+      setAssistantEvents((current) => mergeAgentEvents(current, eventPayload.events || []));
+      const draftTurnId =
+        typeof session.current_output_turn_id === 'string' ? session.current_output_turn_id : '';
+      const hasDraft = draftTurnId === assistantPendingTurn.turn_id;
+      if (hasDraft) {
+        try {
+          const draft = await api.validateAssistantDraft(session.session_id, draftTurnId);
+          if (!cancelled) {
+            const proposal = draft.proposal as CanvasAuthoringProposal | null | undefined;
+            setAssistantProposal(proposal || null);
+            setAssistantBackendValidation(
+              authoringValidationFromBackend({ status: draft.status, errors: [], warnings: [] }),
+            );
+            setAssistantRequiredActions(draft.required_actions || []);
+          }
+        } catch (error) {
+          if (!cancelled) {
+            setAssistantBackendValidation({
+              status: 'invalid',
+              errors: [error instanceof Error ? error.message : String(error)],
+              warnings: [],
+            });
+          }
+        }
+      }
+      const isTerminal =
+        terminal ||
+        !['queued', 'running'].includes(String(session.status || assistantPendingTurn.status || ''));
+      if (isTerminal) {
+        setAssistantPendingTurn(null);
+        setAssistantBusy(false);
+      }
+    }
+
+    if (typeof window.EventSource === 'function') {
+      source = new window.EventSource(
+        api.streamAgentTurnEventsUrl(assistantSessionId, assistantPendingTurn.turn_id),
+      );
+      source.addEventListener('agent_event', (event) => {
+        try {
+          const payload = JSON.parse((event as MessageEvent).data) as RunEvent;
+          setAssistantEvents((current) => mergeAgentEvents(current, [payload]));
+        } catch {
+          // Polling below refreshes canonical state if an SSE frame is malformed.
+        }
+      });
+      source.addEventListener('terminal', () => {
+        void refreshAssistantTurn(true).catch((error) => {
+          setAssistantMessages((current) => [
+            ...current,
+            {
+              id: authoringId('assistant_msg'),
+              role: 'system',
+              content: error instanceof Error ? error.message : String(error),
+            },
+          ]);
+          setAssistantBusy(false);
+        });
+        source?.close();
+      });
+      source.onerror = () => {
+        source?.close();
+      };
+    }
+
+    const interval = window.setInterval(() => {
+      void refreshAssistantTurn().catch((error) => {
+        setAssistantMessages((current) => [
+          ...current,
+          {
+            id: authoringId('assistant_msg'),
+            role: 'system',
+            content: error instanceof Error ? error.message : String(error),
+          },
+        ]);
+        setAssistantPendingTurn(null);
+        setAssistantBusy(false);
+      });
+    }, 1000);
+    void refreshAssistantTurn().catch(() => {
+      // The interval retries while the background turn is settling.
+    });
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      source?.close();
+    };
+  }, [assistantPendingTurn, assistantSessionId]);
 
   useEffect(() => {
     const snapshot = currentAuthoringSnapshot();
@@ -2712,6 +2861,158 @@ export function WorkflowViewer({
       workflowRun,
     ],
   );
+  const selectedAgentNodeRun =
+    selectedNodeSettings && selectedNodeSettings.kind !== 'Tool' ? selectedNodeSettings.run : undefined;
+  const selectedAgentSessionContext = useMemo(
+    () =>
+      selectedRunId && selectedAgentNodeRun
+        ? { runId: selectedRunId, nodeId: selectedAgentNodeRun.node_id }
+        : null,
+    [selectedAgentNodeRun, selectedRunId],
+  );
+  const selectedAgentEvents =
+    selectedAgentSessionContext && (agentSessionState.status === 'ready' || agentSessionState.status === 'loading')
+      ? agentSessionState.events
+      : selectedDetailsModel.events;
+  const selectedDetailsModelWithAgentEvents = useMemo(
+    () =>
+      selectedDetailsModel.nodeRun
+        ? { ...selectedDetailsModel, events: selectedAgentEvents }
+        : selectedDetailsModel,
+    [selectedAgentEvents, selectedDetailsModel],
+  );
+
+  const refreshRunProjection = useCallback(
+    async (runId: string) => {
+      const current = runsById[runId];
+      if (!current) {
+        return;
+      }
+      const [summary, result] = await Promise.all([
+        api.run(runId),
+        api.runEvents(runId).catch(() => ({ events: [] as RunEvent[] })),
+      ]);
+      const liveRun = mergeWorkflowRunWithEvents(
+        workflowRunFromRunSummary(summary, current.graph),
+        liveWorkflowRunFromEvents(current.graph, summary.run_dir || current.runDir, result.events),
+      );
+      const runStatus = normalizeTaskRunStatus(summary.status || liveRun.status);
+      const overlay = runOverlayFromRun({ ...liveRun, status: runStatus }, {
+        runId,
+        scope: current.scope,
+        targetId: current.targetId,
+      });
+      setRunsById((state) => ({
+        ...state,
+        [runId]: {
+          ...current,
+          status: runStatus,
+          summary,
+          run: { ...liveRun, status: runStatus },
+          events: result.events,
+          overlay,
+        },
+      }));
+    },
+    [runsById],
+  );
+
+  const refreshAgentSession = useCallback(async () => {
+    if (!selectedAgentSessionContext) {
+      setAgentSessionState({
+        status: 'idle',
+        session: null,
+        messages: [],
+        events: [],
+        pendingTurn: null,
+        interactions: [],
+        error: '',
+      });
+      return;
+    }
+    const { runId, nodeId } = selectedAgentSessionContext;
+    setAgentSessionState((current) => ({
+      ...current,
+      status: current.session ? 'ready' : 'loading',
+      error: '',
+    }));
+    try {
+      const session = await api.createAgentSessionFromRunNode(runId, nodeId);
+      const [messages, nodeEvents, interactions] = await Promise.all([
+        api.getAgentSessionMessages(session.session_id).catch(() => ({ messages: [] as AgentMessage[] })),
+        api.nodeEvents(runId, nodeId).catch(() => ({ events: [] as RunEvent[] })),
+        api.runInteractions(runId).catch(() => ({ interactions: [] as InteractionRequest[] })),
+      ]);
+      setAgentSessionState((current) => {
+        const pendingTurn =
+          current.pendingTurn &&
+          current.pendingTurn.turn_id === session.last_turn_id &&
+          ['queued', 'running'].includes(String(session.status || ''))
+            ? current.pendingTurn
+            : null;
+        return {
+          status: 'ready',
+          session,
+          messages: messages.messages || [],
+          events: nodeEvents.events || [],
+          pendingTurn,
+          interactions: (interactions.interactions || []).filter(
+            (item) => item.status === 'pending' && (!item.node_id || item.node_id === nodeId),
+          ),
+          error: '',
+        };
+      });
+    } catch (error) {
+      setAgentSessionState({
+        status: 'error',
+        session: null,
+        messages: [],
+        events: [],
+        pendingTurn: null,
+        interactions: [],
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }, [selectedAgentSessionContext]);
+
+  useEffect(() => {
+    void refreshAgentSession();
+  }, [refreshAgentSession]);
+
+  useEffect(() => {
+    const pendingTurn = agentSessionState.pendingTurn;
+    const session = agentSessionState.session;
+    if (!pendingTurn || !session) {
+      return;
+    }
+    const timeout = window.setTimeout(() => {
+      void Promise.all([
+        api.getAgentSession(session.session_id),
+        api.getAgentSessionMessages(session.session_id).catch(() => ({ messages: [] as AgentMessage[] })),
+        api.getAgentTurnEvents(session.session_id, pendingTurn.turn_id).catch(() => ({ events: [] as RunEvent[] })),
+      ])
+        .then(([nextSession, messages, turnEvents]) => {
+          setAgentSessionState((current) => ({
+            ...current,
+            status: 'ready',
+            session: nextSession,
+            messages: messages.messages || [],
+            events: mergeAgentEvents(current.events, turnEvents.events || []),
+            pendingTurn: ['queued', 'running'].includes(String(nextSession.status || ''))
+              ? pendingTurn
+              : null,
+            error: '',
+          }));
+        })
+        .catch(() => {
+          void refreshAgentSession();
+        });
+    }, 1000);
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [agentSessionState.pendingTurn, agentSessionState.session, refreshAgentSession]);
+
   const normalizedSelection = useMemo(
     () => normalizeWorkbenchSelection(displayCanvas, selection, focusedWorkflowId),
     [displayCanvas, focusedWorkflowId, selection],
@@ -3529,40 +3830,27 @@ export function WorkflowViewer({
     setAssistantBusy(true);
     try {
       const sessionId = await ensureAssistantSession(snapshot);
-      const response = await api.sendAuthoringMessage(sessionId, {
+      const currentSession =
+        assistantAgentSession && assistantAgentSession.session_id === sessionId
+          ? assistantAgentSession
+          : await api.getAgentSession(sessionId);
+      setAssistantAgentSession(currentSession);
+      const turn = await api.submitWorkbenchAssistantTurn(sessionId, {
         message: userText,
+        reason: assistantTurnReason,
         canvas_hash: snapshot.snapshot_id,
         canvas_snapshot: authoringBackendCanvasSnapshot(snapshot),
         selection: authoringSelectionPayload(snapshot.selection),
+        expected_provider_session_id:
+          typeof currentSession.provider_session_id === 'string'
+            ? currentSession.provider_session_id
+            : undefined,
       });
-      const proposal = response.proposal as CanvasAuthoringProposal | null | undefined;
-      setAssistantSessionStatus('proposal_ready');
-      setAssistantBackendValidation(authoringValidationFromBackend(response.validation));
-      setAssistantRequiredActions(response.required_actions || []);
-      if (!proposal) {
-        const text = response.assistant_message || 'Backend did not return an applicable proposal.';
-        setAssistantProposal(null);
-        setAssistantMessages((current) => [
-          ...current,
-          { id: authoringId('assistant_msg'), role: 'assistant', content: text },
-        ]);
-        setMessage(text);
-        return;
-      }
-      setAssistantProposal(proposal);
+      setAssistantPendingTurn(turn);
+      setAssistantSessionStatus(turn.status || 'queued');
       setAssistantInput('');
-      setAssistantMessages((current) => [
-        ...current,
-        {
-          id: authoringId('assistant_msg'),
-          role: 'assistant',
-          content: [
-            response.assistant_message || `Generated proposal: ${proposal.rationale}`,
-            ...(response.risk_notes || []).map((note) => `Risk: ${note}`),
-          ].join('\n'),
-        },
-      ]);
       setChrome((current) => ({ ...current, rightPanel: 'assistant' }));
+      setMessage(`AI 助手 turn ${turn.turn_id}: ${turn.status || 'queued'}`);
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error);
       setAssistantProposal(null);
@@ -3573,7 +3861,9 @@ export function WorkflowViewer({
       ]);
       setMessage(text);
     } finally {
-      setAssistantBusy(false);
+      if (!assistantPendingTurn) {
+        setAssistantBusy(false);
+      }
     }
   }
 
@@ -3767,6 +4057,45 @@ export function WorkflowViewer({
     ]);
   }
 
+  async function submitSelectedAgentTurn(messageText: string, reason: 'node_chat' | 'output_revision') {
+    const session = agentSessionState.session;
+    if (!session) {
+      throw new Error('当前节点还没有可用的 Agent Session');
+    }
+    const turn = await api.submitAgentTurn(session.session_id, {
+      message: messageText,
+      reason,
+      expected_provider_session_id:
+        typeof session.provider_session_id === 'string' ? session.provider_session_id : undefined,
+    });
+    setAgentSessionState((current) => ({ ...current, pendingTurn: turn }));
+    setMessage(`Agent turn ${turn.turn_id}: ${turn.status || 'queued'}`);
+    await refreshAgentSession();
+  }
+
+  async function publishSelectedAgentOutput(expectedTurnId: string) {
+    const session = agentSessionState.session;
+    if (!session) {
+      throw new Error('当前节点还没有可用的 Agent Session');
+    }
+    await api.publishAgentOutput(session.session_id, expectedTurnId);
+    if (selectedRunId) {
+      await refreshRunProjection(selectedRunId);
+    }
+    await refreshAgentSession();
+    setMessage(`已发布 ${expectedTurnId} 为当前节点 output.json`);
+    onChanged?.();
+  }
+
+  async function answerSelectedAgentInteraction(interactionId: string, answer: Record<string, unknown>) {
+    const runId = selectedAgentSessionContext?.runId;
+    if (!runId) {
+      throw new Error('当前节点没有绑定 run，无法处理审批');
+    }
+    await api.answerInteraction(runId, interactionId, answer);
+    await refreshAgentSession();
+  }
+
   return (
     <WorkbenchShell>
       <TopBar
@@ -3884,16 +4213,25 @@ export function WorkflowViewer({
             authoringAgents={authoringAgents}
             selectedAuthoringAgentId={selectedAuthoringAgentId}
             sessionId={assistantSessionId}
+            agentSession={assistantAgentSession}
             sessionStatus={assistantSessionStatus}
+            pendingTurn={assistantPendingTurn}
+            events={assistantEvents}
+            turnReason={assistantTurnReason}
             requiredActions={assistantRequiredActions}
             graphOpsReview={assistantGraphOpsReview}
             busy={assistantBusy}
             targetLabel={authoringSelectionLabel(selection, selectedWorkflow, selectedInternalNode)}
+            hasSelectedRunNode={Boolean(selectedAgentSessionContext)}
             onAgentChange={(agentId) => {
               setSelectedAuthoringAgentId(agentId);
               setAssistantSessionId(null);
+              setAssistantAgentSession(null);
+              setAssistantPendingTurn(null);
+              setAssistantEvents([]);
               setAssistantSessionStatus('disconnected');
             }}
+            onTurnReasonChange={setAssistantTurnReason}
             onInput={setAssistantInput}
             onSubmit={generateAssistantProposal}
             onApply={applyAssistantProposal}
@@ -3930,12 +4268,17 @@ export function WorkflowViewer({
       <SelectionDetailsDock
         state={evidenceDock}
         message={message}
-        model={selectedDetailsModel}
+        model={selectedDetailsModelWithAgentEvents}
         callableState={selectedCallableDetailState}
         runtimeConfig={runtimeConfig}
+        agentSessionState={agentSessionState}
         currentTaskId={currentTask?.taskId}
         selectedRunId={selectedRunId}
         onReadEvidence={readEvidence}
+        onRefreshAgentSession={refreshAgentSession}
+        onSubmitAgentTurn={submitSelectedAgentTurn}
+        onPublishAgentOutput={publishSelectedAgentOutput}
+        onAnswerAgentInteraction={answerSelectedAgentInteraction}
         onToggle={() => setEvidenceDock((current) => ({ ...current, open: !current.open }))}
         onUpdateInput={(nextInput) => {
           if (selection.type === 'workflow' && selectedWorkflow && isExecutableNodeWorkflow(selectedWorkflow)) {
@@ -4369,12 +4712,18 @@ function AssistantDrawer({
   authoringAgents,
   selectedAuthoringAgentId,
   sessionId,
+  agentSession,
   sessionStatus,
+  pendingTurn,
+  events,
+  turnReason,
   requiredActions,
   graphOpsReview,
   busy,
   targetLabel,
+  hasSelectedRunNode,
   onAgentChange,
+  onTurnReasonChange,
   onInput,
   onSubmit,
   onApply,
@@ -4394,12 +4743,18 @@ function AssistantDrawer({
   authoringAgents: AuthoringAgentSummary[];
   selectedAuthoringAgentId: string;
   sessionId: string | null;
+  agentSession: AgentSessionRecord | null;
   sessionStatus: string;
+  pendingTurn: AgentTurnRecord | null;
+  events: RunEvent[];
+  turnReason: AssistantTurnReason;
   requiredActions: AuthoringRequiredAction[];
   graphOpsReview: AssistantGraphOpsReview | null;
   busy: boolean;
   targetLabel: string;
+  hasSelectedRunNode: boolean;
   onAgentChange: (agentId: string) => void;
+  onTurnReasonChange: (reason: AssistantTurnReason) => void;
   onInput: (value: string) => void;
   onSubmit: (event?: FormEvent<HTMLFormElement>) => void;
   onApply: () => void;
@@ -4442,6 +4797,7 @@ function AssistantDrawer({
         <div className="assistant-target-row">
           <span>目标</span>
           <strong>{targetLabel}</strong>
+          <small>{hasSelectedRunNode ? '已选中运行节点，可在 Inspector 进入节点会话' : '画布级 Copilot'}</small>
         </div>
         <div className="assistant-session-row">
           <label>
@@ -4462,19 +4818,58 @@ function AssistantDrawer({
               )}
             </select>
           </label>
-          <small>{sessionId ? `${sessionStatus} · ${sessionId}` : sessionStatus}</small>
+          <small>
+            {sessionId ? `${sessionStatus} · ${sessionId}` : sessionStatus}
+            {agentSession?.provider_session_id ? ` · provider ${agentSession.provider_session_id}` : ''}
+          </small>
         </div>
         <form className="assistant-compose" onSubmit={onSubmit}>
+          <div className="segmented-control compact-tabs" role="tablist" aria-label="AI assistant turn mode">
+            <button
+              type="button"
+              className={turnReason === 'workbench_chat' ? 'active' : ''}
+              onClick={() => onTurnReasonChange('workbench_chat')}
+            >
+              对话
+            </button>
+            <button
+              type="button"
+              className={turnReason === 'canvas_revision' ? 'active' : ''}
+              onClick={() => onTurnReasonChange('canvas_revision')}
+            >
+              生成修改
+            </button>
+            <button
+              type="button"
+              className={turnReason === 'selected_node_revision' ? 'active' : ''}
+              onClick={() => onTurnReasonChange('selected_node_revision')}
+            >
+              修订当前草稿
+            </button>
+          </div>
           <textarea
             value={input}
             onChange={(event) => onInput(event.target.value)}
-            placeholder="描述要生成或调整的 workflow 草稿"
+            placeholder={
+              turnReason === 'workbench_chat'
+                ? '像 Codex CLI 一样和当前画布助手对话'
+                : '描述要生成或调整的 workflow 草稿'
+            }
             rows={4}
           />
-          <button type="submit" className="primary-action" disabled={busy}>
-            {busy ? '生成中...' : '生成 Proposal'}
+          <button type="submit" className="primary-action" disabled={busy || Boolean(pendingTurn)}>
+            {busy || pendingTurn ? '执行中...' : turnReason === 'workbench_chat' ? '发送' : '提交 turn'}
           </button>
         </form>
+        {pendingTurn ? (
+          <section className="assistant-proposal-panel" aria-label="AI assistant pending turn">
+            <header>
+              <span>Running turn</span>
+              <strong>{pendingTurn.turn_id}</strong>
+            </header>
+            <p>{pendingTurn.reason || turnReason} · {pendingTurn.status || 'queued'}</p>
+          </section>
+        ) : null}
         <div className="assistant-message-list" aria-label="AI 助手消息">
           {messages.length ? (
             messages.map((message) => (
@@ -4487,10 +4882,11 @@ function AssistantDrawer({
             <p className="assistant-empty">等待输入需求</p>
           )}
         </div>
+        <AgentEventTimeline events={events} />
         {proposal ? (
           <section className="assistant-proposal-panel" aria-label="CanvasAuthoringProposal">
             <header>
-              <span>Proposal</span>
+              <span>待应用草稿</span>
               <strong>{proposal.proposal_id}</strong>
             </header>
             <p>{proposal.rationale}</p>
@@ -6984,10 +7380,15 @@ function SelectionDetailsDock({
   model,
   callableState,
   runtimeConfig,
+  agentSessionState,
   currentTaskId,
   selectedRunId,
   onToggle,
   onReadEvidence,
+  onRefreshAgentSession,
+  onSubmitAgentTurn,
+  onPublishAgentOutput,
+  onAnswerAgentInteraction,
   onUpdateInput,
   onUpdateLabel,
   onUpdateForwardMainOutput,
@@ -6999,10 +7400,15 @@ function SelectionDetailsDock({
   model: SelectedEntityDetailsModel;
   callableState: CallableDetailLoadState;
   runtimeConfig: RuntimeConfig | null;
+  agentSessionState: AgentSessionUiState;
   currentTaskId?: string;
   selectedRunId?: string | null;
   onToggle: () => void;
   onReadEvidence: (path: string | null | undefined, title?: string) => void;
+  onRefreshAgentSession: () => Promise<void>;
+  onSubmitAgentTurn: (message: string, reason: 'node_chat' | 'output_revision') => Promise<void>;
+  onPublishAgentOutput: (expectedTurnId: string) => Promise<void>;
+  onAnswerAgentInteraction: (interactionId: string, answer: Record<string, unknown>) => Promise<void>;
   onUpdateInput: (input: Record<string, unknown>) => void;
   onUpdateLabel: (label: string) => void;
   onUpdateForwardMainOutput: (value: boolean) => void;
@@ -7035,7 +7441,12 @@ function SelectionDetailsDock({
             model={model}
             callableState={callableState}
             runtimeConfig={runtimeConfig}
+            agentSessionState={agentSessionState}
             onReadEvidence={onReadEvidence}
+            onRefreshAgentSession={onRefreshAgentSession}
+            onSubmitAgentTurn={onSubmitAgentTurn}
+            onPublishAgentOutput={onPublishAgentOutput}
+            onAnswerAgentInteraction={onAnswerAgentInteraction}
             onUpdateInput={onUpdateInput}
             onUpdateLabel={onUpdateLabel}
             onUpdateForwardMainOutput={onUpdateForwardMainOutput}
@@ -7367,7 +7778,12 @@ function SelectionPropertiesPane({
   model,
   callableState,
   runtimeConfig,
+  agentSessionState,
   onReadEvidence,
+  onRefreshAgentSession,
+  onSubmitAgentTurn,
+  onPublishAgentOutput,
+  onAnswerAgentInteraction,
   onUpdateInput,
   onUpdateLabel,
   onUpdateForwardMainOutput,
@@ -7377,7 +7793,12 @@ function SelectionPropertiesPane({
   model: SelectedEntityDetailsModel;
   callableState: CallableDetailLoadState;
   runtimeConfig: RuntimeConfig | null;
+  agentSessionState: AgentSessionUiState;
   onReadEvidence: (path: string | null | undefined, title?: string) => void;
+  onRefreshAgentSession: () => Promise<void>;
+  onSubmitAgentTurn: (message: string, reason: 'node_chat' | 'output_revision') => Promise<void>;
+  onPublishAgentOutput: (expectedTurnId: string) => Promise<void>;
+  onAnswerAgentInteraction: (interactionId: string, answer: Record<string, unknown>) => Promise<void>;
   onUpdateInput: (input: Record<string, unknown>) => void;
   onUpdateLabel: (label: string) => void;
   onUpdateForwardMainOutput: (value: boolean) => void;
@@ -7397,7 +7818,12 @@ function SelectionPropertiesPane({
           node={model.nodeSettings}
           callableState={callableState}
           runtimeConfig={runtimeConfig}
+          agentSessionState={agentSessionState}
           onReadEvidence={onReadEvidence}
+          onRefreshAgentSession={onRefreshAgentSession}
+          onSubmitAgentTurn={onSubmitAgentTurn}
+          onPublishAgentOutput={onPublishAgentOutput}
+          onAnswerAgentInteraction={onAnswerAgentInteraction}
           onUpdateInput={onUpdateInput}
           onUpdateLabel={onUpdateLabel}
           onUpdateForwardMainOutput={onUpdateForwardMainOutput}
@@ -7415,21 +7841,31 @@ function SelectionNodeProperties({
   node,
   callableState,
   runtimeConfig,
+  agentSessionState,
   onUpdateInput,
   onUpdateLabel,
   onUpdateForwardMainOutput,
   onUpdateCodexExecutionMode,
   onReadEvidence,
+  onRefreshAgentSession,
+  onSubmitAgentTurn,
+  onPublishAgentOutput,
+  onAnswerAgentInteraction,
   onOpenCallableResource,
 }: {
   node: AgentNodeSettingsModel;
   callableState: CallableDetailLoadState;
   runtimeConfig: RuntimeConfig | null;
+  agentSessionState: AgentSessionUiState;
   onUpdateInput: (input: Record<string, unknown>) => void;
   onUpdateLabel: (label: string) => void;
   onUpdateForwardMainOutput: (value: boolean) => void;
   onUpdateCodexExecutionMode: (value: CodexExecutionMode) => void;
   onReadEvidence: (path: string | null | undefined, title?: string) => void;
+  onRefreshAgentSession: () => Promise<void>;
+  onSubmitAgentTurn: (message: string, reason: 'node_chat' | 'output_revision') => Promise<void>;
+  onPublishAgentOutput: (expectedTurnId: string) => Promise<void>;
+  onAnswerAgentInteraction: (interactionId: string, answer: Record<string, unknown>) => Promise<void>;
   onOpenCallableResource: (callableId: string, name: string, kind: 'agent_class' | 'tool_class') => void;
 }) {
   const detail = callableState.detail;
@@ -7491,6 +7927,17 @@ function SelectionNodeProperties({
       <RuntimeInputEditor input={node.input} onChange={onUpdateInput} />
 
       <SelectionRunEvidenceSummary nodeRun={node.run} runtimeConfig={runtimeConfig} />
+
+      <AgentSessionPanel
+        node={node}
+        state={agentSessionState}
+        events={agentSessionState.events}
+        onReadEvidence={onReadEvidence}
+        onRefresh={onRefreshAgentSession}
+        onSubmitTurn={onSubmitAgentTurn}
+        onPublish={onPublishAgentOutput}
+        onAnswerInteraction={onAnswerAgentInteraction}
+      />
 
       <section className="node-settings-card">
         <div className="node-settings-section-header">
@@ -7559,6 +8006,368 @@ function SelectionNodeProperties({
       <TechnicalDetailsDisclosure node={node} runtimeConfig={runtimeConfig} callableDetail={detail} />
     </div>
   );
+}
+
+function AgentSessionPanel({
+  node,
+  state,
+  events,
+  onReadEvidence,
+  onRefresh,
+  onSubmitTurn,
+  onPublish,
+  onAnswerInteraction,
+}: {
+  node: AgentNodeSettingsModel;
+  state: AgentSessionUiState;
+  events: RunEvent[];
+  onReadEvidence: (path: string | null | undefined, title?: string) => void;
+  onRefresh: () => Promise<void>;
+  onSubmitTurn: (message: string, reason: 'node_chat' | 'output_revision') => Promise<void>;
+  onPublish: (expectedTurnId: string) => Promise<void>;
+  onAnswerInteraction: (interactionId: string, answer: Record<string, unknown>) => Promise<void>;
+}) {
+  const [messageText, setMessageText] = useState('');
+  const [reason, setReason] = useState<'node_chat' | 'output_revision'>('node_chat');
+  const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState('');
+  const session = state.session;
+  const draftPath = agentSessionArtifactPath(session, session?.current_output_ref);
+  const publishedSessionPath = agentSessionArtifactPath(session, session?.published_output_ref);
+  const canPublish = Boolean(
+    session?.bound_run_id &&
+    session?.bound_node_id &&
+    session.current_output_turn_id &&
+    session.current_output_turn_id !== session.published_output_turn_id,
+  );
+
+  async function submitTurn() {
+    const trimmed = messageText.trim();
+    if (!trimmed) {
+      return;
+    }
+    setBusy(true);
+    setActionError('');
+    try {
+      await onSubmitTurn(trimmed, reason);
+      setMessageText('');
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function publishDraft() {
+    if (!session?.current_output_turn_id) {
+      return;
+    }
+    setBusy(true);
+    setActionError('');
+    try {
+      await onPublish(session.current_output_turn_id);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function answerInteraction(interactionId: string, answer: Record<string, unknown>) {
+    setBusy(true);
+    setActionError('');
+    try {
+      await onAnswerInteraction(interactionId, answer);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (node.kind === 'Tool') {
+    return null;
+  }
+
+  if (!node.run) {
+    return (
+      <section className="node-settings-card agent-session-card" aria-label="Agent Session">
+        <div className="node-settings-section-header">
+          <div>
+            <span className="panel-kicker">Agent Session</span>
+            <h4>尚未创建会话</h4>
+          </div>
+        </div>
+        <p className="empty-state">先运行当前 Agent 节点，Workbench 才能绑定 run node session。</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="node-settings-card agent-session-card" aria-label="Agent Session">
+      <div className="node-settings-section-header">
+        <div>
+          <span className="panel-kicker">Agent Session</span>
+          <h4>{session?.session_id || '正在绑定节点会话'}</h4>
+        </div>
+        <button
+          type="button"
+          className="secondary-action compact-action"
+          disabled={busy || state.status === 'loading'}
+          onClick={() => void onRefresh()}
+        >
+          <RefreshCw aria-hidden="true" size={14} />
+          刷新
+        </button>
+      </div>
+
+      {state.status === 'loading' ? <p className="empty-state">正在读取 Agent Session...</p> : null}
+      {state.status === 'error' ? <p className="notice compact-notice">{state.error}</p> : null}
+      {actionError ? <p className="notice compact-notice">{actionError}</p> : null}
+
+      {session ? (
+        <>
+          <dl className="node-settings-facts agent-session-facts">
+            <dt>session_id</dt>
+            <dd>{session.session_id}</dd>
+            <dt>provider_session_id</dt>
+            <dd>{session.provider_session_id || 'n/a'}</dd>
+            <dt>bound node</dt>
+            <dd>{[session.bound_run_id, session.bound_node_id].filter(Boolean).join(' / ') || 'unbound'}</dd>
+            <dt>last turn</dt>
+            <dd>{session.last_turn_id || 'n/a'} / {session.status || 'unknown'}</dd>
+            <dt>draft turn</dt>
+            <dd>{session.current_output_turn_id || 'n/a'}</dd>
+            <dt>published turn</dt>
+            <dd>{session.published_output_turn_id || 'n/a'}</dd>
+          </dl>
+
+          {state.interactions.length > 0 ? (
+            <section className="agent-session-subsection" aria-label="Agent approval requests">
+              <h5>待审批</h5>
+              {state.interactions.map((interaction) => (
+                <article key={interaction.interaction_id} className="interaction-card compact">
+                  <strong>{interaction.kind}</strong>
+                  <p>{interaction.prompt}</p>
+                  <div className="interaction-actions">
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void answerInteraction(interaction.interaction_id, { decision: 'approve' })}
+                    >
+                      通过
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void answerInteraction(interaction.interaction_id, { decision: 'reject' })}
+                    >
+                      拒绝
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </section>
+          ) : null}
+
+          <section className="agent-session-subsection" aria-label="Agent output state">
+            <div className="node-settings-section-header compact">
+              <div>
+                <span className="panel-kicker">输出状态</span>
+                <h5>草稿与已发布输出</h5>
+              </div>
+              <button
+                type="button"
+                className="secondary-action compact-action"
+                disabled={!canPublish || busy}
+                onClick={() => void publishDraft()}
+              >
+                <UploadCloud aria-hidden="true" size={14} />
+                发布为本节点输出
+              </button>
+            </div>
+            <div className="agent-output-actions">
+              <button
+                type="button"
+                className="path-button"
+                disabled={!draftPath}
+                onClick={() => onReadEvidence(draftPath, '待发布草稿 current_output.json')}
+              >
+                <FileText aria-hidden="true" size={16} />
+                <span>待发布草稿</span>
+                <small>{shortPath(draftPath)}</small>
+              </button>
+              <button
+                type="button"
+                className="path-button"
+                disabled={!node.run.output_path}
+                onClick={() => onReadEvidence(node.run?.output_path, '已发布输出 output.json')}
+              >
+                <FileText aria-hidden="true" size={16} />
+                <span>已发布输出</span>
+                <small>{shortPath(node.run.output_path)}</small>
+              </button>
+              <button
+                type="button"
+                className="path-button"
+                disabled={!publishedSessionPath}
+                onClick={() => onReadEvidence(publishedSessionPath, 'session published_output.json')}
+              >
+                <FileText aria-hidden="true" size={16} />
+                <span>Session 发布副本</span>
+                <small>{shortPath(publishedSessionPath)}</small>
+              </button>
+            </div>
+            {!canPublish ? (
+              <p className="muted">没有新的可发布草稿，或当前 session 未绑定 run node。</p>
+            ) : null}
+          </section>
+
+          <section className="agent-session-subsection" aria-label="Agent messages">
+            <h5>消息</h5>
+            <div className="agent-message-list">
+              {state.messages.length === 0 ? <p className="empty-state">暂无会话消息。</p> : null}
+              {state.messages.slice(-8).map((item, index) => (
+                <article key={`${item.turn_id || 'msg'}-${index}`} className={`agent-message role-${item.role}`}>
+                  <strong>{item.role}</strong>
+                  <p>{item.content}</p>
+                  {item.turn_id ? <small>{item.turn_id}</small> : null}
+                </article>
+              ))}
+            </div>
+          </section>
+
+          <section className="agent-session-subsection" aria-label="Agent chat composer">
+            <div className="segmented-control compact-tabs" role="tablist" aria-label="Agent turn reason">
+              <button
+                type="button"
+                className={reason === 'node_chat' ? 'active' : ''}
+                onClick={() => setReason('node_chat')}
+              >
+                <MessageSquare aria-hidden="true" size={14} />
+                对话
+              </button>
+              <button
+                type="button"
+                className={reason === 'output_revision' ? 'active' : ''}
+                onClick={() => setReason('output_revision')}
+              >
+                修订输出
+              </button>
+            </div>
+            <label className="node-settings-field">
+              <span>{reason === 'node_chat' ? '给当前节点发送消息' : '要求当前节点修订待发布输出'}</span>
+              <textarea
+                aria-label="Agent node chat message"
+                rows={4}
+                value={messageText}
+                onChange={(event) => setMessageText(event.target.value)}
+                placeholder="只会发送给当前 run node 绑定的 Agent Session"
+              />
+            </label>
+            <button
+              type="button"
+              className="secondary-action compact-action"
+              disabled={busy || !messageText.trim()}
+              onClick={() => void submitTurn()}
+            >
+              <Send aria-hidden="true" size={14} />
+              发送 turn
+            </button>
+            {state.pendingTurn ? (
+              <p className="muted">正在执行 {state.pendingTurn.turn_id}: {state.pendingTurn.status || 'queued'}</p>
+            ) : null}
+          </section>
+
+          <AgentEventTimeline events={events} />
+        </>
+      ) : null}
+    </section>
+  );
+}
+
+function AgentEventTimeline({ events }: { events: RunEvent[] }) {
+  const agentEvents = events.filter((event) => String(event.type || event.event || '').startsWith('agent_'));
+  const visibleEvents = agentEvents.slice(-12).reverse();
+  return (
+    <section className="agent-session-subsection" aria-label="Agent timeline">
+      <h5>Agent timeline</h5>
+      {visibleEvents.length === 0 ? <p className="empty-state">暂无 agent 事件。</p> : null}
+      <div className="event-timeline compact">
+        {visibleEvents.map((event, index) => (
+          <article key={event.event_id || `${event.type || event.event}-${index}`}>
+            <strong>{String(event.type || event.event || 'agent_event')}</strong>
+            <span>{agentEventSummary(event)}</span>
+            <small>{event.timestamp || ''}</small>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function agentEventSummary(event: RunEvent): string {
+  const payload = isPlainRecord(event.payload) ? event.payload : {};
+  const content = stringValue(payload.content);
+  if (content) {
+    return compactText(content);
+  }
+  const summary = stringValue(payload.summary) || stringValue(payload.message) || stringValue(payload.error);
+  if (summary) {
+    return compactText(summary);
+  }
+  const toolName = stringValue(payload.name) || stringValue(payload.tool) || stringValue(payload.command);
+  if (toolName) {
+    return compactText(toolName);
+  }
+  const outputPath = stringValue(payload.output_path);
+  if (outputPath) {
+    return shortPath(outputPath);
+  }
+  return event.status ? String(event.status) : 'canonical agent event';
+}
+
+function agentMessagesToAssistantMessages(messages: AgentMessage[]): AssistantChatMessage[] {
+  return messages
+    .filter((message) => typeof message.content === 'string' && message.content.trim())
+    .map((message, index) => ({
+      id: `${message.turn_id || 'assistant_msg'}_${index}`,
+      role:
+        message.role === 'user' || message.role === 'assistant' || message.role === 'system'
+          ? message.role
+          : 'system',
+      content: message.content,
+    }));
+}
+
+function mergeAgentEvents(base: RunEvent[], incoming: RunEvent[]): RunEvent[] {
+  const seen = new Set<string>();
+  const merged: RunEvent[] = [];
+  for (const event of [...base, ...incoming]) {
+    const key = String(event.event_id || `${event.timestamp || ''}:${event.type || event.event || ''}:${event.turn_id || ''}`);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    merged.push(event);
+  }
+  return merged.sort((left, right) =>
+    String(left.timestamp || '').localeCompare(String(right.timestamp || '')),
+  );
+}
+
+function agentSessionArtifactPath(session: AgentSessionRecord | null | undefined, ref: unknown): string {
+  if (!session || typeof ref !== 'string' || !ref) {
+    return '';
+  }
+  if (/^[a-zA-Z]:[\\/]/u.test(ref) || ref.startsWith('/') || ref.startsWith('\\')) {
+    return ref;
+  }
+  const sessionDir = typeof session.session_dir === 'string' ? session.session_dir : '';
+  if (!sessionDir) {
+    return ref;
+  }
+  return `${sessionDir.replace(/[\\/]+$/u, '')}/${ref}`;
 }
 
 function SelectionRunEvidenceSummary({

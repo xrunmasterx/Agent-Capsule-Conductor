@@ -5,6 +5,7 @@ from pathlib import Path
 from fastapi import FastAPI
 
 from acc.server.routes import (
+    agent_sessions,
     artifacts,
     authoring,
     callables,
@@ -23,6 +24,7 @@ def create_app(project_root: Path | str | None = None) -> FastAPI:
     app = FastAPI(title="Agent Callable Workbench Server", version="0.1.0")
     app.state.project_root = Path(project_root or Path.cwd()).resolve()
     app.include_router(health.router, prefix="/api")
+    app.include_router(agent_sessions.router, prefix="/api")
     app.include_router(authoring.router, prefix="/api")
     app.include_router(callables.router, prefix="/api")
     app.include_router(runs.router, prefix="/api")

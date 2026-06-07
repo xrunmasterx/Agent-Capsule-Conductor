@@ -1,3 +1,7 @@
+> Current note: Codex agent execution in Workbench/Core v2 now goes through
+> `AgentTurnService` and the `codex_app_server` runtime. Older references to
+> direct `CallableClassRunner().run_agent_class(...)` for Codex are historical.
+
 # ACC Workbench Product UI Architecture and Brandkit Direction
 
 ## 结论先行

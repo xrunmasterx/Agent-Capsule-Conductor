@@ -68,7 +68,7 @@ class DAGScheduler:
         cls,
         node_ids: Iterable[str],
         control_edges: Iterable[tuple[str, str]],
-    ) -> "DAGScheduler":
+    ) -> DAGScheduler:
         node_order = tuple(node_ids)
         dependencies: dict[str, list[str]] = {node_id: [] for node_id in node_order}
         known = set(node_order)
