@@ -143,47 +143,47 @@ class FakeCodexStderr:
 
 
 def codex_output_for_prompt(prompt: str) -> dict:
-        if "A_SENTINEL_123" in prompt:
-            analysis = "received A_SENTINEL_123 and continued downstream analysis"
-            summary = "cleaner consumed upstream sentinel"
-        else:
-            analysis = "produced A_SENTINEL_123 as upstream sentinel"
-            summary = "research produced upstream sentinel"
-        return {
-            "schema_version": "acc.agent.output.v1",
-            "status": "success",
-            "summary": summary,
-            "report_markdown": analysis,
-            "findings": [
-                {
-                    "id": "F1",
-                    "severity": "info",
-                    "title": "sentinel",
-                    "detail": "A_SENTINEL_123",
-                    "recommendation": "Keep propagating the sentinel.",
-                    "evidence_ids": ["E1"],
-                    "confidence": "high",
-                }
-            ],
-            "evidence": [
-                {
-                    "id": "E1",
-                    "kind": "observation",
-                    "ref": "test",
-                    "note": "test evidence",
-                    "quote": "A_SENTINEL_123",
-                }
-            ],
-            "artifacts": [],
-            "quality": {
+    if "A_SENTINEL_123" in prompt:
+        analysis = "received A_SENTINEL_123 and continued downstream analysis"
+        summary = "cleaner consumed upstream sentinel"
+    else:
+        analysis = "produced A_SENTINEL_123 as upstream sentinel"
+        summary = "research produced upstream sentinel"
+    return {
+        "schema_version": "acc.agent.output.v1",
+        "status": "success",
+        "summary": summary,
+        "report_markdown": analysis,
+        "findings": [
+            {
+                "id": "F1",
+                "severity": "info",
+                "title": "sentinel",
+                "detail": "A_SENTINEL_123",
+                "recommendation": "Keep propagating the sentinel.",
+                "evidence_ids": ["E1"],
                 "confidence": "high",
-                "assumptions": [],
-                "uncertainties": [],
-                "limitations": [],
-            },
-            "next_actions": [],
-            "outputs": {},
-        }
+            }
+        ],
+        "evidence": [
+            {
+                "id": "E1",
+                "kind": "observation",
+                "ref": "test",
+                "note": "test evidence",
+                "quote": "A_SENTINEL_123",
+            }
+        ],
+        "artifacts": [],
+        "quality": {
+            "confidence": "high",
+            "assumptions": [],
+            "uncertainties": [],
+            "limitations": [],
+        },
+        "next_actions": [],
+        "outputs": {},
+    }
 
 
 class FailingCodexProcess:
@@ -885,6 +885,189 @@ output_ports:
     assert research_schema["additionalProperties"] is False
     assert "anyOf" not in research_schema
     assert research_schema["properties"]["findings"]["items"]["additionalProperties"] is False
+
+
+def test_core_v2_codex_typed_output_reaches_downstream(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("ACC_RUN_MODE", "production")
+    monkeypatch.setenv("ACC_ENABLE_EXTERNAL_AGENT_EXECUTION", "1")
+
+    class TypedCodexProcess(FakeCodexProcess):
+        def handle_rpc(self, line: bytes) -> None:
+            payload = json.loads(line.decode("utf-8"))
+            method = payload.get("method")
+            request_id = payload.get("id")
+            if method == "initialize":
+                self.stdout.push({"jsonrpc": "2.0", "id": request_id, "result": {}})
+            elif method == "thread/start":
+                self.stdout.push(
+                    {"jsonrpc": "2.0", "id": request_id, "result": {"threadId": "thread_fake"}}
+                )
+            elif method == "turn/start":
+                self.stdout.push({"jsonrpc": "2.0", "id": request_id, "result": {}})
+                self.stdout.push_agent_message(
+                    {
+                        "ticker": "NVDA",
+                        "company_name": "NVIDIA Corporation",
+                        "sources": ["https://example.test/nvda"],
+                    }
+                )
+                self.stdout.push({"jsonrpc": "2.0", "method": "turn/completed", "params": {}})
+                self.stdout.close()
+
+    async def fake_create(*args, **kwargs):
+        _ = kwargs
+        return TypedCodexProcess(args)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create)
+    agents_dir = tmp_path / "callables" / "agents"
+    agents_dir.mkdir(parents=True)
+    (agents_dir / "stock.codex.yaml").write_text(
+        """
+id: stock.codex
+version: 0.1.0
+runtime: codex_app_server
+output_ports:
+  main:
+    type: json
+""".strip(),
+        encoding="utf-8",
+    )
+    typed_schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "ticker": {"type": "string"},
+            "company_name": {"type": "string"},
+            "sources": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["ticker", "company_name", "sources"],
+    }
+    workflow_path = tmp_path / "typed_output.accflow.json"
+    write_v2(
+        workflow_path,
+        {
+            "schema_version": CORE_V2_SCHEMA_VERSION,
+            "id": "typed_output",
+            "version": "0.1.0",
+            "nodes": [
+                {
+                    "id": "target",
+                    "callable_ref": {"kind": "agent_class", "id": "stock.codex"},
+                    "prompt_policy": {"user_prompt": "Output ticker and company_name."},
+                    "ports": {"outputs": {"main": {"type": "json"}}},
+                    "output_schema": typed_schema,
+                },
+                {
+                    "id": "consume",
+                    "callable_ref": {"kind": "agent_class", "id": "stock.codex"},
+                    "ports": {"inputs": {"main": {"type": "json"}}},
+                    "output_schema": typed_schema,
+                },
+            ],
+            "control_edges": [{"from": "target", "to": "consume"}],
+            "data_edges": [
+                {
+                    "source": {"node": "target", "port": "main"},
+                    "target": {"node": "consume", "port": "main"},
+                    "materialization": "copy",
+                }
+            ],
+        },
+    )
+
+    record = WorkflowAppService(project_root=tmp_path).run_sync(
+        workflow_path,
+        tmp_path / "run",
+        workspace=tmp_path,
+    )
+    consume_input = json.loads(
+        (tmp_path / "run" / "nodes" / "consume" / "agent_payload.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert record["status"] == "success"
+    assert consume_input["main"]["ticker"] == "NVDA"
+    assert consume_input["main"]["company_name"] == "NVIDIA Corporation"
+
+
+def test_core_v2_codex_typed_output_still_rejects_extra_fields(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("ACC_RUN_MODE", "production")
+    monkeypatch.setenv("ACC_ENABLE_EXTERNAL_AGENT_EXECUTION", "1")
+
+    class ExtraFieldCodexProcess(FakeCodexProcess):
+        def handle_rpc(self, line: bytes) -> None:
+            payload = json.loads(line.decode("utf-8"))
+            method = payload.get("method")
+            request_id = payload.get("id")
+            if method == "initialize":
+                self.stdout.push({"jsonrpc": "2.0", "id": request_id, "result": {}})
+            elif method == "thread/start":
+                self.stdout.push(
+                    {"jsonrpc": "2.0", "id": request_id, "result": {"threadId": "thread_fake"}}
+                )
+            elif method == "turn/start":
+                self.stdout.push({"jsonrpc": "2.0", "id": request_id, "result": {}})
+                self.stdout.push_agent_message({"ticker": "NVDA", "unexpected": "nope"})
+                self.stdout.push({"jsonrpc": "2.0", "method": "turn/completed", "params": {}})
+                self.stdout.close()
+
+    async def fake_create(*args, **kwargs):
+        _ = kwargs
+        return ExtraFieldCodexProcess(args)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create)
+    agents_dir = tmp_path / "callables" / "agents"
+    agents_dir.mkdir(parents=True)
+    (agents_dir / "stock.codex.yaml").write_text(
+        """
+id: stock.codex
+version: 0.1.0
+runtime: codex_app_server
+output_ports:
+  main:
+    type: json
+""".strip(),
+        encoding="utf-8",
+    )
+    workflow_path = tmp_path / "typed_output_extra.accflow.json"
+    write_v2(
+        workflow_path,
+        {
+            "schema_version": CORE_V2_SCHEMA_VERSION,
+            "id": "typed_output_extra",
+            "version": "0.1.0",
+            "nodes": [
+                {
+                    "id": "target",
+                    "callable_ref": {"kind": "agent_class", "id": "stock.codex"},
+                    "prompt_policy": {"user_prompt": "Output ticker."},
+                    "output_schema": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {"ticker": {"type": "string"}},
+                        "required": ["ticker"],
+                    },
+                }
+            ],
+        },
+    )
+
+    record = WorkflowAppService(project_root=tmp_path).run_sync(
+        workflow_path,
+        tmp_path / "run",
+        workspace=tmp_path,
+    )
+    run_summary = read_json(tmp_path / "run" / "run_summary.json")
+
+    assert record["status"] == "failed"
+    assert "Additional properties are not allowed" in run_summary["nodes"][0]["summary"]
 
 
 def test_core_v2_production_requires_external_agent_gate(

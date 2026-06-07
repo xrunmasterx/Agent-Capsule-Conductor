@@ -13,7 +13,7 @@ output_ports:
 artifact_contract: {}
 metadata:
   agent_provider: codex
-  model: 默认模型
+  model: gpt-5.5
   reasoning_effort: medium
   skills: []
   name: 测试智能体

@@ -98,6 +98,30 @@ def test_structured_output_schema_errors_reports_unfixable_schema() -> None:
     assert errors[0]["code"] == "output_schema_invalid"
 
 
+def test_render_agent_prompt_includes_output_schema_contract() -> None:
+    template = AgentClassTemplate(
+        id="worker.codex",
+        version="0.1.0",
+        runtime="codex_cli",
+    )
+    node = NodeInvocationSpec(
+        id="worker",
+        callable_ref=CallableRef(kind="agent_class", id="worker.codex"),
+        output_schema={
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {"ticker": {"type": "string"}},
+            "required": ["ticker"],
+        },
+    )
+
+    prompt = render_agent_prompt(template, node, {"main": "question"})
+
+    assert "Do not include properties that are not declared in this schema." in prompt
+    assert '"ticker"' in prompt
+    assert '"additionalProperties": false' in prompt
+
+
 def test_codex_local_readonly_no_sandbox_mode_uses_dangerous_bypass_with_prompt_guard() -> None:
     template = AgentClassTemplate(
         id="worker.codex",

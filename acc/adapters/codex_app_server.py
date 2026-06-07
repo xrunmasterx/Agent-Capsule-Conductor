@@ -14,6 +14,7 @@ from acc.adapters.streaming import (
     StreamingAgentTurnResult,
 )
 from acc.agent_events import append_agent_event, append_provider_event
+from acc.runtime.codex_models import normalize_codex_model, normalize_codex_reasoning_effort
 from acc.utils import AccError
 
 APPROVAL_METHODS = frozenset(
@@ -224,11 +225,12 @@ async def start_or_resume_thread(
     params: dict[str, Any] = {
         "cwd": str(request.workspace_dir.resolve()),
         "developerInstructions": None,
-        "model": request.model,
+        "model": normalize_codex_model(request.model),
         "persistExtendedHistory": True,
     }
-    if request.reasoning_effort:
-        params["config"] = {"model_reasoning_effort": request.reasoning_effort}
+    reasoning_effort = normalize_codex_reasoning_effort(request.reasoning_effort)
+    if reasoning_effort:
+        params["config"] = {"model_reasoning_effort": reasoning_effort}
     if request.provider_session_id:
         try:
             result = await client.request(

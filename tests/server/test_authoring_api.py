@@ -301,7 +301,7 @@ def test_authoring_validate_rejects_unfixable_output_schema(client: TestClient) 
     assert "repair_hint" in payload["errors"][0]
 
 
-def test_authoring_validate_accepts_normalizable_output_schema(client: TestClient) -> None:
+def test_authoring_validate_rejects_items_on_string_output_schema(client: TestClient) -> None:
     proposal = {
         "proposal_id": "p1",
         "base_task_id": "task_canvas",
@@ -341,7 +341,9 @@ def test_authoring_validate_accepts_normalizable_output_schema(client: TestClien
     )
 
     assert response.status_code == 200, response.text
-    assert response.json()["status"] == "valid"
+    payload = response.json()
+    assert payload["status"] == "invalid"
+    assert payload["errors"][0]["code"] == "output_schema_invalid"
 
 
 def test_authoring_message_can_return_main_to_main_repair_hint(

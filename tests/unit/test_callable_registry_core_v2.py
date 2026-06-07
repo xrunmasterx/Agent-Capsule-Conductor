@@ -122,6 +122,23 @@ def test_save_agent_callable_payload_writes_valid_template(tmp_path: Path) -> No
     ).exists()
 
 
+def test_save_agent_callable_payload_normalizes_codex_model(tmp_path: Path) -> None:
+    result = save_agent_callable_payload(
+        tmp_path,
+        "research.codex",
+        {
+            "id": "research.codex",
+            "runtime": "codex_app_server",
+            "metadata": {"model": "默认模型", "reasoning_effort": "max"},
+        },
+        overwrite=False,
+    )
+
+    metadata = result["callable"]["metadata"]
+    assert metadata["model"] == "gpt-5.5"
+    assert metadata["reasoning_effort"] == "xhigh"
+
+
 def test_save_agent_callable_payload_rejects_duplicate_without_overwrite(
     tmp_path: Path,
 ) -> None:

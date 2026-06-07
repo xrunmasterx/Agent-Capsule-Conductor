@@ -56,9 +56,17 @@ AUTHORING_CORE_RULES = (
     "Set input_ports and output_ports to null unless you are defining named non-main ports.",
     "For follow-up messages, treat the latest canvas_snapshot as the source of truth; "
     "use prior conversation and previous_proposal only as context for the requested revision.",
-    "output_schema must be strict: every object schema must set additionalProperties=false; "
-    "prefer summary:string and artifacts:string[].",
-    "Use items only for array properties; never put items on string properties.",
+    "Every add_existing_callable_node, create_temporary_agent_template, and "
+    "update_output_schema operation must include a strict output_schema whose fields match "
+    "the node's user_prompt. If the prompt asks for ticker/company_name/industry/sources, "
+    "the schema must declare those exact fields; use summary/artifacts only for generic "
+    "natural-language summaries.",
+    "output_schema must be a strict JSON object schema: type=object, "
+    "additionalProperties=false, non-empty properties, and required may reference only "
+    "declared properties.",
+    "Supported output_schema property types are string, number, integer, boolean, "
+    "array<string>, array<object>, and nested strict object. Do not use anyOf, oneOf, "
+    "allOf, $ref, patternProperties, or other advanced JSON Schema keywords.",
     "Phase 2 does not persist new resources; new agents must use "
     "create_temporary_agent_template and remain non-runnable until GraphOps persistence.",
     "Persistent agent, tool, or workflow creation must go through GraphOps proposal; "
@@ -134,40 +142,25 @@ SIMPLE_INPUT_SCHEMA = strict_object(
     },
     nullable=True,
 )
-SIMPLE_STRING_SCHEMA_PROPERTY = strict_object(
-    {
-        "type": {"type": "string", "enum": ["string"]},
-        "description": NULLABLE_STRING,
-    }
-)
-SIMPLE_ARRAY_SCHEMA_PROPERTY = strict_object(
-    {
-        "type": {"type": "string", "enum": ["array"]},
-        "description": NULLABLE_STRING,
-        "items": strict_object({"type": {"type": "string", "enum": ["string"]}}),
-    }
-)
-SIMPLE_JSON_SCHEMA_PROPERTY: dict[str, Any] = {
-    "anyOf": [SIMPLE_STRING_SCHEMA_PROPERTY, SIMPLE_ARRAY_SCHEMA_PROPERTY]
+NODE_SCHEMA_PROPERTY_REF: dict[str, Any] = {"$ref": "#/$defs/nodeSchemaProperty"}
+NODE_SCHEMA_PROPERTIES_MAP: dict[str, Any] = {
+    "type": "object",
+    "minProperties": 1,
+    "additionalProperties": NODE_SCHEMA_PROPERTY_REF,
 }
-SIMPLE_OUTPUT_SCHEMA = strict_object(
+NODE_OUTPUT_SCHEMA_SCHEMA = strict_object(
     {
         "type": {"type": "string", "enum": ["object"]},
         "additionalProperties": {"type": "boolean", "enum": [False]},
-        "properties": strict_object(
-            {
-                "summary": SIMPLE_JSON_SCHEMA_PROPERTY,
-                "artifacts": SIMPLE_JSON_SCHEMA_PROPERTY,
-            }
-        ),
+        "properties": NODE_SCHEMA_PROPERTIES_MAP,
         "required": {
             "type": "array",
-            "items": {"type": "string", "enum": ["summary", "artifacts"]},
+            "items": {"type": "string"},
         },
     },
     nullable=True,
 )
-ARTIFACT_CONTRACT_SCHEMA = strict_object({"output_schema": SIMPLE_OUTPUT_SCHEMA})
+ARTIFACT_CONTRACT_SCHEMA = strict_object({"output_schema": NODE_OUTPUT_SCHEMA_SCHEMA})
 AGENT_DRAFT_SCHEMA = strict_object(
     {
         "id": {"type": "string"},
@@ -248,7 +241,7 @@ AUTHORING_OPERATION_SCHEMA: dict[str, Any] = {
                 "input": SIMPLE_INPUT_SCHEMA,
                 "input_ports": PORT_VIEW_ARRAY_SCHEMA,
                 "output_ports": PORT_VIEW_ARRAY_SCHEMA,
-                "output_schema": SIMPLE_OUTPUT_SCHEMA,
+                "output_schema": NODE_OUTPUT_SCHEMA_SCHEMA,
             }
         ),
         strict_object(
@@ -282,7 +275,7 @@ AUTHORING_OPERATION_SCHEMA: dict[str, Any] = {
                 "op": {"type": "string", "enum": ["update_output_schema"]},
                 "scope_workflow_id": NULLABLE_STRING,
                 "node_id": {"type": "string"},
-                "output_schema": SIMPLE_OUTPUT_SCHEMA,
+                "output_schema": NODE_OUTPUT_SCHEMA_SCHEMA,
             }
         ),
         strict_object(
@@ -329,7 +322,7 @@ AUTHORING_OPERATION_SCHEMA: dict[str, Any] = {
                 "position": POSITION_SCHEMA,
                 "agent_draft": AGENT_DRAFT_SCHEMA,
                 "input": SIMPLE_INPUT_SCHEMA,
-                "output_schema": SIMPLE_OUTPUT_SCHEMA,
+                "output_schema": NODE_OUTPUT_SCHEMA_SCHEMA,
             }
         ),
         strict_object(
@@ -363,6 +356,37 @@ CANVAS_AUTHORING_PROPOSAL_SCHEMA = strict_object(
 )
 AUTHORING_OUTPUT_SCHEMA: dict[str, Any] = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$defs": {
+        "nodeSchemaProperty": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "type": {
+                    "type": "string",
+                    "enum": ["string", "number", "integer", "boolean", "array", "object"],
+                },
+                "description": NULLABLE_STRING,
+                "items": {
+                    "anyOf": [
+                        NODE_SCHEMA_PROPERTY_REF,
+                        {"type": "null"},
+                    ]
+                },
+                "properties": {
+                    "anyOf": [
+                        NODE_SCHEMA_PROPERTIES_MAP,
+                        {"type": "null"},
+                    ]
+                },
+                "required": {
+                    "type": ["array", "null"],
+                    "items": {"type": "string"},
+                },
+                "additionalProperties": {"type": ["boolean", "null"], "enum": [False, None]},
+            },
+            "required": ["type"],
+        }
+    },
     "type": "object",
     "additionalProperties": False,
     "properties": {
@@ -888,6 +912,24 @@ class AuthoringSessionService:
         def node_exists_in_scope(scope_workflow_id: Any, node_id: Any) -> bool:
             return isinstance(node_id, str) and node_id in node_ids_for_scope(scope_workflow_id)
 
+        def existing_node_in_scope(scope_workflow_id: Any, node_id: Any) -> dict[str, Any] | None:
+            if not isinstance(node_id, str):
+                return None
+            candidates = workflows if scope_workflow_id is None else []
+            if isinstance(scope_workflow_id, str):
+                for workflow in workflows:
+                    if workflow.get("id") == scope_workflow_id:
+                        candidates = (
+                            workflow.get("internalNodes")
+                            if isinstance(workflow.get("internalNodes"), list)
+                            else []
+                        )
+                        break
+            for candidate in candidates:
+                if isinstance(candidate, dict) and candidate.get("id") == node_id:
+                    return candidate
+            return None
+
         def reserve_node_id(scope_workflow_id: Any, node_id: Any) -> bool:
             if not isinstance(node_id, str) or not node_id:
                 errors.append({"code": "node_id_missing", "message": "Operation requires node_id"})
@@ -990,6 +1032,17 @@ class AuthoringSessionService:
             errors.extend(
                 output_schema_operation_errors(
                     operation.get("output_schema"),
+                    f"operation {index}.output_schema",
+                )
+            )
+            schema_prompt = operation_prompt_for_schema_check(
+                operation,
+                existing_node=existing_node_in_scope(scope_workflow_id, node_id),
+            )
+            errors.extend(
+                output_schema_prompt_alignment_errors(
+                    operation.get("output_schema"),
+                    schema_prompt,
                     f"operation {index}.output_schema",
                 )
             )
@@ -1410,6 +1463,95 @@ def generic_output_schema(message: str) -> dict[str, Any]:
     }
 
 
+FORBIDDEN_NODE_OUTPUT_SCHEMA_KEYS = frozenset(
+    {
+        "$ref",
+        "anyOf",
+        "oneOf",
+        "allOf",
+        "not",
+        "patternProperties",
+        "dependentSchemas",
+        "if",
+        "then",
+        "else",
+    }
+)
+SUPPORTED_NODE_OUTPUT_PROPERTY_TYPES = frozenset(
+    {"string", "number", "integer", "boolean", "array", "object"}
+)
+PROMPT_FIELD_HINTS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("ticker", ("ticker", "股票代码", "证券代码")),
+    ("company_name", ("company_name", "公司名", "公司名称")),
+    ("industry", ("industry", "所属行业", "行业")),
+    ("core_business", ("core_business", "核心业务", "主营业务")),
+    (
+        "initial_research_hypothesis",
+        ("initial_research_hypothesis", "初始研究假设", "研究假设"),
+    ),
+    ("selection_rationale", ("selection_rationale", "选择依据", "选择理由")),
+    ("uncertainties", ("uncertainties", "不确定性", "不确定因素")),
+    ("sources", ("sources", "来源", "数据源", "参考资料")),
+    ("report_title", ("report_title", "报告标题")),
+    ("executive_summary", ("executive_summary", "执行摘要", "摘要")),
+    ("sections", ("sections", "报告章节", "章节")),
+    ("risk_notes", ("risk_notes", "风险提示", "风险说明")),
+)
+
+
+def operation_prompt_for_schema_check(
+    operation: dict[str, Any],
+    *,
+    existing_node: dict[str, Any] | None,
+) -> str:
+    input_payload = operation.get("input") if isinstance(operation.get("input"), dict) else {}
+    prompt = input_payload.get("user_prompt") or input_payload.get("prompt")
+    if isinstance(prompt, str):
+        return prompt
+    if existing_node:
+        existing_input = (
+            existing_node.get("input") if isinstance(existing_node.get("input"), dict) else {}
+        )
+        prompt = existing_input.get("user_prompt") or existing_input.get("prompt")
+        if isinstance(prompt, str):
+            return prompt
+    return ""
+
+
+def output_schema_prompt_alignment_errors(
+    value: Any,
+    prompt: str,
+    path: str,
+) -> list[dict[str, Any]]:
+    if not prompt or not isinstance(value, dict):
+        return []
+    properties = value.get("properties")
+    if not isinstance(properties, dict):
+        return []
+    missing = [
+        field
+        for field, hints in PROMPT_FIELD_HINTS
+        if any(hint.lower() in prompt.lower() for hint in hints)
+        and field not in properties
+    ]
+    if not missing:
+        return []
+    return [
+        {
+            "code": "output_schema_prompt_mismatch",
+            "message": (
+                f"{path}: output_schema is missing field(s) requested by user_prompt: "
+                + ", ".join(missing)
+            ),
+            "path": path,
+            "repair_hint": (
+                "Add the requested field(s) to output_schema.properties and include them "
+                "in required when the node must always produce them."
+            ),
+        }
+    ]
+
+
 def output_schema_operation_errors(value: Any, path: str) -> list[dict[str, Any]]:
     if value is None:
         return []
@@ -1423,7 +1565,7 @@ def output_schema_operation_errors(value: Any, path: str) -> list[dict[str, Any]
             }
         ]
     normalized = normalize_output_schema_for_structured_output(value)
-    return [
+    errors = [
         {
             **error,
             "message": f"{path}: {error.get('message', 'output_schema is invalid')}",
@@ -1431,6 +1573,136 @@ def output_schema_operation_errors(value: Any, path: str) -> list[dict[str, Any]
         }
         for error in structured_output_schema_errors(normalized)
     ]
+    errors.extend(supported_node_output_schema_errors(value, path))
+    return errors
+
+
+def supported_node_output_schema_errors(schema: dict[str, Any], path: str) -> list[dict[str, Any]]:
+    errors: list[dict[str, Any]] = []
+    if schema.get("type") != "object":
+        errors.append(output_schema_subset_error(path, "output_schema root type must be object"))
+    if schema.get("additionalProperties") is not False:
+        errors.append(
+            output_schema_subset_error(
+                path,
+                "output_schema root must set additionalProperties=false",
+            )
+        )
+    properties = schema.get("properties")
+    if not isinstance(properties, dict) or not properties:
+        errors.append(
+            output_schema_subset_error(path, "output_schema properties must be non-empty")
+        )
+        properties = {}
+    required = schema.get("required")
+    if required is not None:
+        if not isinstance(required, list) or not all(isinstance(item, str) for item in required):
+            errors.append(
+                output_schema_subset_error(path, "output_schema required must be string[]")
+            )
+        else:
+            unknown = sorted(set(required) - set(properties))
+            if unknown:
+                errors.append(
+                    output_schema_subset_error(
+                        path,
+                        "output_schema required references unknown field(s): "
+                        + ", ".join(unknown),
+                    )
+                )
+    for key in schema:
+        if key in FORBIDDEN_NODE_OUTPUT_SCHEMA_KEYS:
+            errors.append(output_schema_subset_error(f"{path}.{key}", f"{key} is not supported"))
+    for field_name, property_schema in properties.items():
+        errors.extend(
+            supported_node_property_schema_errors(
+                property_schema,
+                f"{path}.properties.{field_name}",
+            )
+        )
+    return errors
+
+
+def supported_node_property_schema_errors(value: Any, path: str) -> list[dict[str, Any]]:
+    if not isinstance(value, dict):
+        return [output_schema_subset_error(path, "property schema must be an object")]
+    errors: list[dict[str, Any]] = []
+    for key in value:
+        if key in FORBIDDEN_NODE_OUTPUT_SCHEMA_KEYS:
+            errors.append(output_schema_subset_error(f"{path}.{key}", f"{key} is not supported"))
+    schema_type = value.get("type")
+    if schema_type not in SUPPORTED_NODE_OUTPUT_PROPERTY_TYPES:
+        errors.append(
+            output_schema_subset_error(
+                path,
+                "property type must be one of: "
+                + ", ".join(sorted(SUPPORTED_NODE_OUTPUT_PROPERTY_TYPES)),
+            )
+        )
+        return errors
+    if schema_type != "array" and "items" in value:
+        errors.append(output_schema_subset_error(f"{path}.items", "items is only valid for arrays"))
+    if schema_type == "array":
+        items = value.get("items")
+        if not isinstance(items, dict):
+            errors.append(output_schema_subset_error(f"{path}.items", "array must define items"))
+        else:
+            item_type = items.get("type")
+            if item_type == "object":
+                errors.extend(supported_nested_object_schema_errors(items, f"{path}.items"))
+            elif item_type != "string":
+                errors.append(
+                    output_schema_subset_error(
+                        f"{path}.items",
+                        "array items must be string or strict object",
+                    )
+                )
+    if schema_type == "object":
+        errors.extend(supported_nested_object_schema_errors(value, path))
+    return errors
+
+
+def supported_nested_object_schema_errors(value: dict[str, Any], path: str) -> list[dict[str, Any]]:
+    errors: list[dict[str, Any]] = []
+    if value.get("additionalProperties") is not False:
+        errors.append(output_schema_subset_error(path, "object property must be strict"))
+    properties = value.get("properties")
+    if not isinstance(properties, dict) or not properties:
+        errors.append(output_schema_subset_error(path, "object property must declare properties"))
+        properties = {}
+    required = value.get("required")
+    if required is not None:
+        if not isinstance(required, list) or not all(isinstance(item, str) for item in required):
+            errors.append(output_schema_subset_error(path, "object required must be string[]"))
+        else:
+            unknown = sorted(set(required) - set(properties))
+            if unknown:
+                errors.append(
+                    output_schema_subset_error(
+                        path,
+                        "object required references unknown field(s): " + ", ".join(unknown),
+                    )
+                )
+    for field_name, property_schema in properties.items():
+        errors.extend(
+            supported_node_property_schema_errors(
+                property_schema,
+                f"{path}.properties.{field_name}",
+            )
+        )
+    return errors
+
+
+def output_schema_subset_error(path: str, message: str) -> dict[str, Any]:
+    return {
+        "code": "output_schema_invalid",
+        "message": f"{path}: {message}",
+        "path": path,
+        "repair_hint": (
+            "Use a strict object schema with supported property types only: string, number, "
+            "integer, boolean, array<string>, array<object>, or nested strict object."
+        ),
+    }
 
 
 WORKFLOW_INTENT_TARGET_KINDS = frozenset({"task_canvas", "workflow"})

@@ -33,13 +33,26 @@ type AgentOption = {
   models: string[];
 };
 
+const CODEX_DEFAULT_MODEL = 'gpt-5.5';
+
 const AGENT_OPTIONS: AgentOption[] = [
   {
     value: 'codex',
     label: 'Codex',
-    runtime: 'codex_cli',
+    runtime: 'codex_app_server',
     accent: '#0f766e',
-    models: ['默认模型', '高能力模型', '快速模型'],
+    models: [
+      CODEX_DEFAULT_MODEL,
+      'gpt-5.5-pro',
+      'gpt-5.4',
+      'gpt-5.4-pro',
+      'gpt-5.4-mini',
+      'gpt-5.4-nano',
+      'gpt-5',
+      'gpt-5-mini',
+      'gpt-5-nano',
+      'o3',
+    ],
   },
   {
     value: 'claude',
@@ -82,7 +95,7 @@ const THINKING_LEVELS = [
   { value: 'low', label: '轻量' },
   { value: 'medium', label: '标准' },
   { value: 'high', label: '深入' },
-  { value: 'max', label: '极限' },
+  { value: 'xhigh', label: '极限' },
 ];
 
 export function CallableBrowser({
@@ -277,7 +290,7 @@ function CallableDetailView({ detail, onEdit }: { detail: CallableDetail; onEdit
         </div>
         <div>
           <span>模型</span>
-          <strong>{String(metadata.model || '默认模型')}</strong>
+          <strong>{normalizeModelForProvider(provider, metadata.model)}</strong>
         </div>
         <div>
           <span>思考强度</span>
@@ -416,7 +429,7 @@ function AgentClassEditor({
               <label className="agent-form-field select-field">
                 <span>模型</span>
                 <select
-                  value={String((draft.metadata || {}).model || option.models[0])}
+                  value={normalizeModelForProvider(provider, (draft.metadata || {}).model)}
                   onChange={(event) => updateMetadata('model', event.target.value)}
                 >
                   {option.models.map((model) => (
@@ -430,7 +443,7 @@ function AgentClassEditor({
               <label className="agent-form-field select-field">
                 <span>思考强度</span>
                 <select
-                  value={String((draft.metadata || {}).reasoning_effort || 'medium')}
+                  value={normalizeReasoningEffort((draft.metadata || {}).reasoning_effort)}
                   onChange={(event) => updateMetadata('reasoning_effort', event.target.value)}
                 >
                   {THINKING_LEVELS.map((level) => (
@@ -519,7 +532,7 @@ function emptyAgentDraft(): AgentClassDraft {
     artifact_contract: {},
     metadata: {
       agent_provider: option.value,
-      model: option.models[0],
+      model: normalizeModelForProvider(option.value, option.models[0]),
       reasoning_effort: 'medium',
       skills: [],
     },
@@ -534,8 +547,15 @@ function draftFromDetail(detail: CallableDetail): AgentClassDraft {
       runtime: detail.runtime,
       metadata: detail.metadata,
     }),
-    model: String((detail.metadata || {}).model || '默认模型'),
-    reasoning_effort: String((detail.metadata || {}).reasoning_effort || 'medium'),
+    model: normalizeModelForProvider(
+      providerFromDraft({
+        id: detail.id,
+        runtime: detail.runtime,
+        metadata: detail.metadata,
+      }),
+      (detail.metadata || {}).model,
+    ),
+    reasoning_effort: normalizeReasoningEffort((detail.metadata || {}).reasoning_effort),
     skills: skillsFromMetadata(detail.metadata),
   };
 
@@ -560,8 +580,8 @@ function normalizeDraftForSave(draft: AgentClassDraft, selectedId: string): Agen
   const metadata = {
     ...(draft.metadata || {}),
     agent_provider: provider,
-    model: String((draft.metadata || {}).model || option.models[0]),
-    reasoning_effort: String((draft.metadata || {}).reasoning_effort || 'medium'),
+    model: normalizeModelForProvider(provider, (draft.metadata || {}).model || option.models[0]),
+    reasoning_effort: normalizeReasoningEffort((draft.metadata || {}).reasoning_effort),
     skills: skillsFromMetadata(draft.metadata),
   };
 
@@ -585,7 +605,7 @@ function providerFromDraft(draft: Pick<AgentClassDraft, 'id' | 'runtime' | 'meta
   if (draft.runtime === 'claude_sdk') {
     return 'claude';
   }
-  if (draft.runtime === 'codex_cli') {
+  if (draft.runtime === 'codex_cli' || draft.runtime === 'codex_app_server') {
     return 'codex';
   }
   if (draft.id?.includes('.hermes')) {
@@ -608,6 +628,45 @@ function skillsFromMetadata(metadata?: Record<string, unknown>): string[] {
     return [];
   }
   return skills.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+}
+
+function normalizeModelForProvider(provider: AgentProvider, value: unknown): string {
+  const option = agentOption(provider);
+  const raw = typeof value === 'string' ? value.trim() : '';
+  if (provider !== 'codex') {
+    return raw || option.models[0];
+  }
+  const key = raw.toLowerCase().replaceAll('_', '-').replaceAll(' ', '');
+  const aliases: Record<string, string> = {
+    '': CODEX_DEFAULT_MODEL,
+    default: CODEX_DEFAULT_MODEL,
+    defaultmodel: CODEX_DEFAULT_MODEL,
+    默认模型: CODEX_DEFAULT_MODEL,
+    高能力模型: CODEX_DEFAULT_MODEL,
+    代码实现模型: CODEX_DEFAULT_MODEL,
+    代码审阅模型: CODEX_DEFAULT_MODEL,
+    长上下文模型: CODEX_DEFAULT_MODEL,
+    快速模型: 'gpt-5.4-mini',
+    'gpt5.5': 'gpt-5.5',
+    gpt55: 'gpt-5.5',
+    'gpt5.5pro': 'gpt-5.5-pro',
+    'gpt5.4': 'gpt-5.4',
+    gpt54: 'gpt-5.4',
+    'gpt5.4mini': 'gpt-5.4-mini',
+    gpt54mini: 'gpt-5.4-mini',
+    'gpt5.4nano': 'gpt-5.4-nano',
+    gpt54nano: 'gpt-5.4-nano',
+    gpt5: 'gpt-5',
+  };
+  return aliases[raw] || aliases[key] || raw || option.models[0];
+}
+
+function normalizeReasoningEffort(value: unknown): string {
+  const raw = typeof value === 'string' ? value.trim() : '';
+  if (raw === 'max') {
+    return 'xhigh';
+  }
+  return raw || 'medium';
 }
 
 function displayTitle(

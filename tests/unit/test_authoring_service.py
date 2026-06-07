@@ -8,7 +8,6 @@ from typing import Any
 import pytest
 import yaml
 from jsonschema import Draft202012Validator
-from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
 
 from acc.app.authoring import (
     AUTHORING_OUTPUT_SCHEMA,
@@ -20,6 +19,7 @@ from acc.app.authoring import (
     generic_output_schema,
     hermetic_authoring_output,
     infer_authoring_request_intent,
+    output_schema_operation_errors,
     parse_authoring_output,
 )
 from acc.domain import AccError
@@ -100,6 +100,24 @@ def authoring_output_with_proposal(proposal: dict, message: str = "ok") -> dict:
         "questions": [],
         "risk_notes": [],
         "confidence": "medium",
+    }
+
+
+def stock_target_schema() -> dict:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "ticker": {"type": "string", "description": "Ticker symbol."},
+            "company_name": {"type": "string", "description": "Company name."},
+            "industry": {"type": "string", "description": "Industry."},
+            "sources": {
+                "type": "array",
+                "description": "Source URLs.",
+                "items": {"type": "string"},
+            },
+        },
+        "required": ["ticker", "company_name", "industry", "sources"],
     }
 
 
@@ -186,30 +204,44 @@ def test_authoring_output_schema_is_strict_and_accepts_canvas_proposal() -> None
     }
     output = hermetic_authoring_output("Create a two step workflow", context)
 
-    assert_strict_objects(AUTHORING_OUTPUT_SCHEMA)
-    assert_openai_strict_required(AUTHORING_OUTPUT_SCHEMA)
+    assert AUTHORING_OUTPUT_SCHEMA["additionalProperties"] is False
     Draft202012Validator(AUTHORING_OUTPUT_SCHEMA).validate(output)
 
 
-def test_authoring_output_schema_rejects_items_null_on_string_property() -> None:
-    output = hermetic_authoring_output("Create a two step workflow", {
-        "task_id": "task_1",
-        "canvas_hash": "hash_1",
-        "canvas_snapshot": canvas(),
-        "callable_catalog": [
-            {
-                "id": "author.codex",
-                "kind": "agent_class",
-                "name": "Author",
-            }
-        ],
-    })
-    output["proposal"]["operations"][0]["output_schema"]["properties"]["summary"][
-        "items"
-    ] = None
+def test_authoring_output_schema_accepts_typed_node_schema() -> None:
+    output = authoring_output_with_proposal(
+        two_step_proposal(
+                {
+                    "op": "add_existing_callable_node",
+                    "scope_workflow_id": None,
+                    "node_id": "target",
+                    "callable_id": "author.codex",
+                    "callable_kind": "agent_class",
+                    "label": "Target",
+                    "position": {"x": 0, "y": 0},
+                    "input": {
+                        "user_prompt": (
+                            "输出 ticker、公司名、所属行业和来源，用于识别美股研究标的。"
+                        )
+                    },
+                    "input_ports": None,
+                    "output_ports": None,
+                    "output_schema": stock_target_schema(),
+                }
+            )
+        )
 
-    with pytest.raises(JsonSchemaValidationError):
-        Draft202012Validator(AUTHORING_OUTPUT_SCHEMA).validate(output)
+    Draft202012Validator(AUTHORING_OUTPUT_SCHEMA).validate(output)
+
+
+def test_output_schema_operation_errors_rejects_items_null_on_string_property() -> None:
+    schema = generic_output_schema("Create a two step workflow")
+    schema["properties"]["summary"]["items"] = None
+
+    errors = output_schema_operation_errors(schema, "operation 0.output_schema")
+
+    assert errors
+    assert errors[0]["code"] == "output_schema_invalid"
 
 
 def test_generic_output_schema_does_not_put_items_on_summary() -> None:
@@ -232,8 +264,8 @@ def test_authoring_prompt_injects_acc_workbench_rules() -> None:
     assert "Use only callable ids present in callable_catalog" in prompt
     assert "add_workflow_container first" in prompt
     assert "Set input_ports and output_ports to null" in prompt
-    assert "output_schema must be strict" in prompt
-    assert "never put items on string properties" in prompt
+    assert "output_schema must be a strict" in prompt
+    assert "fields match" in prompt
     assert "workflows/" in prompt
     assert "callables/" in prompt
 
@@ -535,6 +567,64 @@ def test_authoring_validation_gates_stale_unknown_duplicate_and_temporary(
         "temporary_id_invalid",
     } <= codes
     assert validation["warnings"][0]["code"] == "temporary_resource_unresolved"
+
+
+def test_authoring_validation_rejects_non_strict_node_output_schema(tmp_path: Path) -> None:
+    create_agent(tmp_path, "known.generic", "generic_cli")
+    service = AuthoringSessionService(tmp_path)
+    schema = stock_target_schema()
+    schema.pop("additionalProperties")
+    proposal = two_step_proposal(
+        {
+            "op": "add_existing_callable_node",
+            "scope_workflow_id": None,
+            "node_id": "target",
+            "callable_id": "known.generic",
+            "callable_kind": "agent_class",
+            "input": {"user_prompt": "输出 ticker、公司名、行业和来源。"},
+            "output_schema": schema,
+        }
+    )
+
+    validation = service.validate_proposal(
+        proposal=proposal,
+        task_id="task_1",
+        canvas_hash="hash_1",
+        canvas_snapshot=canvas(),
+    )
+
+    assert validation["status"] == "invalid"
+    assert validation["errors"][0]["code"] == "output_schema_invalid"
+    assert "additionalProperties=false" in validation["errors"][0]["message"]
+
+
+def test_authoring_validation_rejects_prompt_schema_mismatch(tmp_path: Path) -> None:
+    create_agent(tmp_path, "known.generic", "generic_cli")
+    service = AuthoringSessionService(tmp_path)
+    proposal = two_step_proposal(
+        {
+            "op": "add_existing_callable_node",
+            "scope_workflow_id": None,
+            "node_id": "target",
+            "callable_id": "known.generic",
+            "callable_kind": "agent_class",
+            "input": {
+                "user_prompt": "输出 ticker、公司名、所属行业、选择依据、来源和不确定性。"
+            },
+            "output_schema": generic_output_schema("target"),
+        }
+    )
+
+    validation = service.validate_proposal(
+        proposal=proposal,
+        task_id="task_1",
+        canvas_hash="hash_1",
+        canvas_snapshot=canvas(),
+    )
+
+    codes = [error["code"] for error in validation["errors"]]
+    assert validation["status"] == "invalid"
+    assert "output_schema_prompt_mismatch" in codes
 
 
 def test_authoring_validation_rejects_under_specified_complex_workflow(

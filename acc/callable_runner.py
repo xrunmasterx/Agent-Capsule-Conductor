@@ -470,6 +470,8 @@ def render_agent_prompt(
 ) -> str:
     user_prompt = node.prompt_policy.user_prompt or node.overrides.prompt or ""
     input_json = json.dumps(input_payload, ensure_ascii=False, indent=2, sort_keys=True)
+    output_schema = output_schema_for_agent(template, node)
+    output_schema_json = json.dumps(output_schema, ensure_ascii=False, indent=2, sort_keys=True)
     local_readonly_contract = codex_local_readonly_prompt_contract(node)
     return "\n".join(
         [
@@ -490,7 +492,13 @@ def render_agent_prompt(
             "",
             "# Output Contract",
             "",
-            "Return exactly one JSON object matching the provided output schema.",
+            "Return exactly one JSON object matching this output schema.",
+            "Do not include properties that are not declared in this schema.",
+            "Property names must match the schema exactly.",
+            "",
+            "```json",
+            output_schema_json,
+            "```",
             "",
         ]
     )

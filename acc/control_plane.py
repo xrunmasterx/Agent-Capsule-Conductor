@@ -13,6 +13,7 @@ from acc.app.core_v2_loader import LEGACY_GRAPH_SUFFIX, reject_legacy_graph_path
 from acc.callable_registry import CallableAsset, CallableRegistry, template_kind
 from acc.callable_runner import DEFAULT_AGENT_OUTPUT_SCHEMA
 from acc.run_index import load_run_summary, load_run_summary_by_id
+from acc.runtime.codex_models import normalize_codex_model, normalize_codex_reasoning_effort
 from acc.store import is_clean_workflow_path
 from acc.utils import AccError, load_json, repo_root
 
@@ -132,15 +133,21 @@ def agent_payload_to_yaml(payload: dict[str, Any]) -> dict[str, Any]:
     metadata = dict(payload.get("metadata") or {})
     name = payload.get("name")
     description = payload.get("description")
+    runtime = payload.get("runtime") or "codex_cli"
     if name:
         metadata["name"] = name
     if description:
         metadata["description"] = description
+    if runtime in {"codex_cli", "codex_app_server"}:
+        metadata["model"] = normalize_codex_model(metadata.get("model"))
+        reasoning_effort = normalize_codex_reasoning_effort(metadata.get("reasoning_effort"))
+        if reasoning_effort:
+            metadata["reasoning_effort"] = reasoning_effort
 
     data: dict[str, Any] = {
         "id": payload["id"],
         "version": payload.get("version") or "0.1.0",
-        "runtime": payload.get("runtime") or "codex_cli",
+        "runtime": runtime,
     }
     if payload.get("default_prompt"):
         data["default_prompt"] = payload["default_prompt"]

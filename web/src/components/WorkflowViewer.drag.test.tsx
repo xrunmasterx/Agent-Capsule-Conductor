@@ -276,6 +276,16 @@ describe('WorkspaceCanvas data edges', () => {
     const proposal = JSON.parse(JSON.stringify(generated.proposal)) as Record<string, unknown>;
     const operations = proposal.operations as Array<Record<string, unknown>>;
     operations[0].node_id = 'explicit_research_node';
+    operations[0].output_schema = {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        ticker: { type: 'string', description: 'Ticker symbol' },
+        company_name: { type: 'string', description: 'Company name' },
+        sources: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['ticker', 'company_name', 'sources'],
+    };
     operations[1].node_id = 'explicit_review_node';
     operations[2].from = 'explicit_research_node';
     operations[2].to = 'explicit_review_node';
@@ -294,9 +304,7 @@ describe('WorkspaceCanvas data edges', () => {
     expect(graph.nodes.map((node) => node.id)).toEqual(['explicit_research_node', 'explicit_review_node']);
     expect(graph.nodes[0].callable_ref).toEqual({ kind: 'agent_class', id: 'research.codex' });
     expect(graph.nodes[0].input).toEqual({ user_prompt: 'Create a research workflow' });
-    expect(graph.nodes[0].output_schema).toEqual(
-      expect.objectContaining({ required: ['summary'] }),
-    );
+    expect(graph.nodes[0].output_schema).toEqual(operations[0].output_schema);
     expect(graph.control_edges).toHaveLength(1);
   });
 
@@ -3429,4 +3437,3 @@ describe('WorkspaceCanvas drag buffer', () => {
     );
   });
 });
-

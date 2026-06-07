@@ -56,6 +56,23 @@ async def run_resumes_prior_thread(tmp_path: Path) -> None:
     assert '"method": "thread/resume"' in writes
 
 
+def test_codex_app_server_normalizes_model_and_reasoning(tmp_path: Path) -> None:
+    asyncio.run(run_normalizes_model_and_reasoning(tmp_path))
+
+
+async def run_normalizes_model_and_reasoning(tmp_path: Path) -> None:
+    command = fake_codex_command(tmp_path)
+    request = make_request(tmp_path, command, model="gpt5.5", reasoning_effort="max")
+
+    result = await CodexAppServerAdapter().run_turn(request)
+
+    assert result.status == "success"
+    writes = read_jsonl(tmp_path / "rpc_writes.jsonl")
+    thread_start = next(item for item in writes if item.get("method") == "thread/start")
+    assert thread_start["params"]["model"] == "gpt-5.5"
+    assert thread_start["params"]["config"]["model_reasoning_effort"] == "xhigh"
+
+
 def test_codex_app_server_chat_mode_accepts_plain_message(tmp_path: Path) -> None:
     asyncio.run(run_chat_mode_accepts_plain_message(tmp_path))
 
@@ -154,6 +171,8 @@ def make_request(
     response_mode: str = "structured_required",
     cancel_path: Path | None = None,
     approval_bridge=None,
+    model: str | None = None,
+    reasoning_effort: str | None = None,
 ) -> StreamingAgentTurnRequest:
     run_dir = tmp_path / "turn"
     run_dir.mkdir()
@@ -193,6 +212,8 @@ def make_request(
         turn_id="turn_test",
         provider_session_id=provider_session_id,
         cancel_path=cancel_path,
+        model=model,
+        reasoning_effort=reasoning_effort,
         response_mode=response_mode,  # type: ignore[arg-type]
         approval_bridge=approval_bridge,
     )
