@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from acc.domain import (
+from acc.models import (
     AccError,
     CallableRef,
     DecisionRecord,
@@ -14,8 +14,8 @@ from acc.domain import (
     PlanStep,
     PlanStepTransitionRecord,
     RunPlan,
-    control_ledger_to_dict,
 )
+from acc.serialization import control_ledger_to_dict
 from acc.store.control_ledger import (
     append_control_event,
     append_decision_record,

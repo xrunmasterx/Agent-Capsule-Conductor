@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from acc.domain import AgentCapabilities, AgentClassTemplate, ClassTemplate
+from acc.models import AgentCapabilities, AgentClassTemplate, ClassTemplate
 
 ADAPTER_DEFAULT_CAPABILITIES: dict[str, AgentCapabilities] = {
     "generic_cli": AgentCapabilities(log_streaming=True),

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from acc.domain import AccError
+from acc.models import AccError
 from acc.runtime.policy import (
     DEFAULT_PRODUCTION_CODEX_APP_SERVER_TIMEOUT_SECONDS,
     DEFAULT_PRODUCTION_CODEX_TIMEOUT_SECONDS,

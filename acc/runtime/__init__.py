@@ -7,7 +7,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from acc.domain import AccError, PermissionProfile
+from acc.models import AccError, PermissionProfile
 from acc.runtime.payload import (
     RUNTIME_ONLY_KEYS,
     AgentPayload,

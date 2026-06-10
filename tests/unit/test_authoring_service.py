@@ -22,7 +22,7 @@ from acc.app.authoring import (
     output_schema_operation_errors,
     parse_authoring_output,
 )
-from acc.domain import AccError
+from acc.models import AccError
 
 
 def create_agent(root: Path, callable_id: str = "author.codex", runtime: str = "codex_cli") -> None:

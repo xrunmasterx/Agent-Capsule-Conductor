@@ -6,7 +6,7 @@ import pytest
 
 from acc.app.human_gate import idempotent_answer_payload, validate_approval_answer
 from acc.app.interactions import answer_interaction, create_human_gate_interaction
-from acc.domain import AccError
+from acc.models import AccError
 
 
 def test_validate_approval_answer_accepts_only_declared_options(tmp_path: Path) -> None:

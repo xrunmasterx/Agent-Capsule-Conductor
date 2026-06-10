@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from acc.domain import control_ledger_to_dict
+from acc.serialization import control_ledger_to_dict
 from acc.store.control_ledger import (
     load_decisions,
     load_dispatches,

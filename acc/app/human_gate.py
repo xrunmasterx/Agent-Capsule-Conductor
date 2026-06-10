@@ -8,7 +8,7 @@ from acc.app.interactions import (
     get_interaction,
     interaction_payload,
 )
-from acc.domain import AccError, InteractionRequest, NodeInvocationSpec
+from acc.models import AccError, InteractionRequest, NodeInvocationSpec
 
 APPROVAL_CHOICES = frozenset({"approve", "reject"})
 

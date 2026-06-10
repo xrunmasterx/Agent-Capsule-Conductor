@@ -15,7 +15,7 @@ from acc.adapters.base import (
     write_jsonl,
 )
 from acc.adapters.capabilities import default_adapter_capabilities
-from acc.domain import AccError, AgentCapabilities
+from acc.models import AccError, AgentCapabilities
 
 
 class CodexCliAdapter:

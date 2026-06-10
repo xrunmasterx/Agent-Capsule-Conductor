@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from acc.app.workflow_normalization import normalize_workflow_payload_contracts
-from acc.domain import AccError
+from acc.models import AccError
 
 
 def _workflow_with_main_data_edge() -> dict:

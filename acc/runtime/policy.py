@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 
-from acc.domain import AccError
+from acc.models import AccError
 
 HERMETIC_RUN_MODE = "hermetic"
 PRODUCTION_RUN_MODE = "production"

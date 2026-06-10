@@ -6,7 +6,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from acc.domain import AccError, EnvironmentBinding, SessionInstance
+from acc.models import AccError, EnvironmentBinding, SessionInstance
 from acc.session import utc_now_iso
 
 

@@ -14,7 +14,7 @@ import yaml
 from acc.app.workbench_adapter import compile_workbench_workflow_bundle
 from acc.callable_registry import CallableRegistry
 from acc.control_plane import agent_payload_to_yaml, reject_secret_like_path, validate_callable_id
-from acc.domain import AccError, AgentClassTemplate
+from acc.models import AccError, AgentClassTemplate
 from acc.engine import parse_workflow_function_template
 from acc.engine.workflow_validation import collect_callable_validation_issues
 from acc.graphops import contains_policy_value, contains_value, validate_relative_path

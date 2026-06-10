@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from acc.domain import (
+from acc.models import (
     AccError,
     AgentCapabilities,
     CallableRef,
@@ -23,7 +23,7 @@ from acc.engine.supervisor import (
 
 
 def _roster(*ids: str) -> SupervisorRoster:
-    from acc.domain import RosterEntry
+    from acc.models import RosterEntry
     from acc.session import utc_now_iso
 
     return SupervisorRoster(

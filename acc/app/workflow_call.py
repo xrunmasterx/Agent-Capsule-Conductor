@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from acc.domain import AccError
+from acc.models import AccError
 
 
 def build_nested_workflow_input_payload(*args: Any, **kwargs: Any) -> dict[str, Any]:

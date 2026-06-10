@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from acc.domain import CORE_V2_SCHEMA_VERSION, AccError
+from acc.models import CORE_V2_SCHEMA_VERSION, AccError
 from acc.hermetic_callables import HERMETIC_AGENT_CLASS_IDS, HERMETIC_TOOL_CLASS_IDS
 
 

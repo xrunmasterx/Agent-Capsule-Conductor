@@ -12,7 +12,7 @@ from acc.app.interactions import (
     interaction_payload,
     list_interactions,
 )
-from acc.domain import AccError, InteractionKind
+from acc.models import AccError, InteractionKind
 from acc.server.context import get_project_root
 
 router = APIRouter(prefix="/runs", tags=["interactions"])

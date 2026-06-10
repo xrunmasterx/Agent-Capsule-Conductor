@@ -7,7 +7,7 @@ from typing import Any
 
 from acc.adapters.base import AgentRunRequest, AgentRunResult, ResumeRequest, write_jsonl
 from acc.adapters.capabilities import default_adapter_capabilities
-from acc.domain import AccError, AgentCapabilities
+from acc.models import AccError, AgentCapabilities
 
 MessageStreamFactory = Callable[[AgentRunRequest], AsyncIterable[dict[str, Any]]]
 

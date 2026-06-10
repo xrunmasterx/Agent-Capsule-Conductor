@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from acc.domain import (
+from acc.models import (
     AccError,
     CallableRef,
     ControlEdge,

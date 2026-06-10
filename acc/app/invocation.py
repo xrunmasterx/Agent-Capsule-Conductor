@@ -5,7 +5,7 @@ from typing import Any
 
 from acc.callable_registry import CallableAsset, CallableRegistry
 from acc.callable_runner import CallableClassRunner
-from acc.domain import (
+from acc.models import (
     AccError,
     AgentClassTemplate,
     CallableRef,

@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from acc.app.interactions import get_interaction
-from acc.domain import AccError, PlanStep, PlanStepTransitionRecord
+from acc.models import AccError, PlanStep, PlanStepTransitionRecord
 from acc.session import utc_now_iso
 from acc.store import load_json, write_json
 from acc.store.control_ledger import (

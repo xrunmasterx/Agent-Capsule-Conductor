@@ -6,7 +6,7 @@ from typing import Any
 
 from acc.callable_registry import CallableRegistry
 from acc.callable_runner import DEFAULT_AGENT_OUTPUT_SCHEMA
-from acc.domain import AccError, AgentClassTemplate, CallableRef, PortContract
+from acc.models import AccError, AgentClassTemplate, CallableRef, PortContract
 
 MAIN_PORTS = {"main", "default"}
 

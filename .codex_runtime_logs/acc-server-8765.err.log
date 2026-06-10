@@ -1,0 +1,12 @@
+Using CPython 3.11.15
+Creating virtual environment at: .venv
+   Building agent-callable-conductor @ file:///F:/Agent-Capsule-Conductor-v2
+      Built agent-callable-conductor @ file:///F:/Agent-Capsule-Conductor-v2
+warning: Failed to hardlink files; falling back to full copy. This may lead to degraded performance.
+         If the cache and target directories are on different filesystems, hardlinking may not be supported.
+         If this is intentional, set `export UV_LINK_MODE=copy` or use `--link-mode=copy` to suppress this warning.
+Installed 48 packages in 1.33s
+INFO:     Started server process [20100]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8765 (Press CTRL+C to quit)

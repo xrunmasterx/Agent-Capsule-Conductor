@@ -9,7 +9,7 @@ from typing import Any
 from uuid import uuid4
 
 from acc.app.run_lifecycle import resume_waiting_run
-from acc.domain import AccError, CallableRef, RecoveryLevel, WakeupReason, WakeupRequest
+from acc.models import AccError, CallableRef, RecoveryLevel, WakeupReason, WakeupRequest
 from acc.session import utc_now_iso
 from acc.store import load_json, write_json
 

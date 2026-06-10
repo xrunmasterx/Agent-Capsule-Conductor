@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from acc.app.graphops_v3 import GraphOpsProposalService, validate_transaction
-from acc.domain import AccError
+from acc.models import AccError
 
 
 def valid_transaction() -> dict:

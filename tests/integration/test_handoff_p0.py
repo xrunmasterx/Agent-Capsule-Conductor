@@ -12,7 +12,7 @@ from acc.app.core_v2_runtime import (
     run_core_v2_workflow_path,
 )
 from acc.app.handoff import materialize_handoff_plan_step
-from acc.domain import (
+from acc.models import (
     AccError,
     CallableRef,
     ControlEdge,

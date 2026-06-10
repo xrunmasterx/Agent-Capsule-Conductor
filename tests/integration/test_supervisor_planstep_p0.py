@@ -14,7 +14,7 @@ from acc.app.supervisor import (
     materialize_supervisor_plan_steps,
     replay_supervisor_plan_from_recorded_decision,
 )
-from acc.domain import (
+from acc.models import (
     AccError,
     AgentCapabilities,
     CallableRef,

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from acc.domain import AccError, InteractionKind, InteractionRequest
+from acc.models import AccError, InteractionKind, InteractionRequest
 from acc.session import utc_now_iso
 from acc.store import load_json, write_json
 

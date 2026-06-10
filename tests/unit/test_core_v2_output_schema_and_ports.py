@@ -9,7 +9,7 @@ from acc.callable_runner import (
     render_agent_prompt,
     structured_output_schema_errors,
 )
-from acc.domain import (
+from acc.models import (
     AgentClassTemplate,
     CallableRef,
     ControlEdge,

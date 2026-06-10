@@ -37,7 +37,7 @@ from acc.callable_runner import (
     structured_output_schema_errors,
     validate_output_schema,
 )
-from acc.domain import (
+from acc.models import (
     AccError,
     AgentClassTemplate,
     CallableRef,

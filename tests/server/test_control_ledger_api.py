@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from acc.domain import (
+from acc.models import (
     CallableRef,
     DecisionRecord,
     DispatchEnvelope,

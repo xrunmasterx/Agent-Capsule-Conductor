@@ -4,7 +4,7 @@ from dataclasses import replace
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
-from acc.domain import (
+from acc.models import (
     AccError,
     HandoffControlPolicy,
     HandoffRequest,
@@ -12,8 +12,8 @@ from acc.domain import (
     PlanStepTransitionRecord,
     RunPlan,
     WorkflowFunctionTemplate,
-    control_ledger_to_dict,
 )
+from acc.serialization import control_ledger_to_dict
 from acc.engine.handoff import compile_handoff_to_plan_step
 from acc.session import utc_now_iso
 from acc.store import load_json, safe_child_path, write_json

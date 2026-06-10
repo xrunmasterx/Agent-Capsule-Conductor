@@ -4,7 +4,7 @@ from dataclasses import is_dataclass, replace
 
 import pytest
 
-from acc.domain import (
+from acc.models import (
     AccError,
     CallableRef,
     ControlEventRecord,

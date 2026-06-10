@@ -6,7 +6,7 @@ from typing import Any
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
 
-from acc.domain import CORE_V2_SCHEMA_VERSION
+from acc.models import CORE_V2_SCHEMA_VERSION
 from acc.engine import parse_workflow_function_template, validate_workflow_function_template
 from acc.utils import AccError, load_json
 

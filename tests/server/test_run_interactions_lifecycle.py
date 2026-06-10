@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from acc.app.interactions import create_interaction, get_interaction
-from acc.domain import (
+from acc.models import (
     CallableRef,
     DecisionRecord,
     PlanStep,

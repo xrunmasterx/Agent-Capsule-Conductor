@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from acc.domain import (
+from acc.models import (
     CallableRef,
     NodeInvocationSpec,
     WorkflowFunctionTemplate,

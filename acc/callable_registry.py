@@ -6,7 +6,7 @@ from typing import Any
 
 import yaml
 
-from acc.domain import (
+from acc.models import (
     AccError,
     AgentClassTemplate,
     CallableRef,

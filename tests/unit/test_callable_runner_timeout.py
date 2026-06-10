@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from acc.callable_runner import effective_timeout_seconds
-from acc.domain import AgentClassTemplate, CallableRef, InvocationPolicy, NodeInvocationSpec
+from acc.models import AgentClassTemplate, CallableRef, InvocationPolicy, NodeInvocationSpec
 
 
 def test_codex_app_server_node_uses_production_default_timeout(

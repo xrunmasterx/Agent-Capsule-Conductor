@@ -12,7 +12,7 @@ from acc.adapters.capabilities import (
     resolve_class_template_capabilities,
 )
 from acc.adapters.generic_cli import GenericCliAdapter
-from acc.domain import AccError, AgentCapabilities, AgentClassTemplate
+from acc.models import AccError, AgentCapabilities, AgentClassTemplate
 
 
 def test_agent_capabilities_defaults() -> None:

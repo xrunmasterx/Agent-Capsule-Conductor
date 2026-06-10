@@ -14,7 +14,7 @@ from acc.adapters.claude_sdk import ClaudeSdkAdapter
 from acc.adapters.codex_cli import CodexCliAdapter, build_codex_command
 from acc.adapters.generic_cli import GenericCliAdapter
 from acc.callable_registry import CallableAsset
-from acc.domain import (
+from acc.models import (
     AccError,
     AgentClassTemplate,
     NodeInvocationSpec,

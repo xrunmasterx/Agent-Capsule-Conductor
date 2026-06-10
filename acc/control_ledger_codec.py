@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from typing import Any, TypeVar, cast, get_args
 
-from acc.domain import (
+from acc.models import (
     CORE_CALLABLE_KINDS,
     EXECUTABLE_METADATA_KEYS,
     AccError,

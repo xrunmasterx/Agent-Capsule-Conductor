@@ -13,7 +13,7 @@ from acc.app.workflow_normalization import (
 )
 from acc.callable_registry import CallableRegistry
 from acc.callable_runner import normalize_output_schema_for_structured_output
-from acc.domain import CORE_V2_SCHEMA_VERSION
+from acc.models import CORE_V2_SCHEMA_VERSION
 from acc.engine import is_clean_workflow_payload, parse_workflow_function_template
 from acc.engine.workflow_validation import collect_callable_validation_issues
 from acc.store import is_clean_workflow_path

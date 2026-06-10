@@ -11,7 +11,7 @@ from acc.app.scheduler import (
     reconcile_wakeup_state,
     scan_session_health,
 )
-from acc.domain import CallableRef
+from acc.models import CallableRef
 
 
 def test_enqueue_wakeup_coalesces_by_key(tmp_path: Path) -> None:

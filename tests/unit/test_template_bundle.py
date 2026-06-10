@@ -7,7 +7,7 @@ import pytest
 import yaml
 
 from acc.app.template_bundle import export_template_bundle, import_template_bundle
-from acc.domain import AccError
+from acc.models import AccError
 
 
 def _seed_callable(root: Path, class_id: str = "demo.generic") -> None:

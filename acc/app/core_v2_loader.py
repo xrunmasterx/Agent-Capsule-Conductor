@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from acc.domain import WorkflowFunctionTemplate
+from acc.models import WorkflowFunctionTemplate
 from acc.engine import parse_workflow_function_template, validate_workflow_function_template
 from acc.utils import AccError, load_json
 

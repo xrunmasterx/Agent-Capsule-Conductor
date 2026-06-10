@@ -20,7 +20,7 @@ from acc.app.run_lifecycle import (
     resume_waiting_run,
 )
 from acc.app.scheduler import enqueue_wakeup, new_wakeup_request
-from acc.domain import AccError, DecisionRecord
+from acc.models import AccError, DecisionRecord
 from acc.session import utc_now_iso
 from acc.store.control_ledger import append_control_event, append_decision_record
 

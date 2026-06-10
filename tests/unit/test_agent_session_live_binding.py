@@ -7,7 +7,7 @@ from typing import Any
 
 from acc.adapters.streaming import StreamingAgentTurnRequest, StreamingAgentTurnResult
 from acc.app.agent_sessions import AgentTurnService
-from acc.domain import (
+from acc.models import (
     AgentClassTemplate,
     CallableRef,
     NodeInvocationSpec,

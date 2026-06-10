@@ -11,7 +11,7 @@ Phase 2 surface (DESIGN §15 RunInspector / STRATEGY §6.2). Surfaces:
   ``run_manifest.json`` side-channels written by Phase 2 and returns
   ``NodeProjectionView`` instances.
 
-Layering: imports ``acc.result_store``, ``acc.binding``, and
+Layering: imports ``acc.result_store`` and
 ``acc.persistence`` only — must NOT import ``acc.app`` or ``acc.cli``
 (R1/R2 layering contract). The default port id (``"default"``) and
 terminal node id (``"__workflow__"``) are duplicated as module
@@ -31,7 +31,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from acc.binding.provenance import ProvenanceObject
 from acc.persistence.manifest import ManifestCorruptError
 from acc.persistence.manifest import read as read_run_manifest
 from acc.result_store.filesystem import FilesystemResultStore
@@ -189,12 +188,14 @@ def _bundle_summary(result: NodeResult) -> dict[str, Any]:
 def _safe_provenance(raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict):
         return {}
-    try:
-        # Round-trip through ProvenanceObject so the Workbench only ever
-        # receives schema-valid records (X-4 enforcement).
-        return ProvenanceObject.from_jsonable(raw).to_jsonable()
-    except (TypeError, ValueError):
-        return {}
+    # Return a sanitized copy with only known provenance fields.
+    _PROVENANCE_KEYS = frozenset({
+        "producer_session_id", "bundle_id", "binding_applied",
+        "call_depth", "materialization_mode_resolved",
+        "parent_frame_id", "invoking_workflow_call_id",
+        "inline_value_sha256", "source_artifact_sha256", "schema_version",
+    })
+    return {k: v for k, v in raw.items() if k in _PROVENANCE_KEYS}
 
 
 def _safe_binding_resolved(raw: Any) -> list[dict[str, Any]]:

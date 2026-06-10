@@ -15,7 +15,7 @@ from acc.app.human_gate import create_pending_human_gate, node_requires_human_ap
 from acc.app.run_lifecycle import is_terminal_run_status, write_run_summary_status
 from acc.app.workflow_refs import WorkflowCatalog
 from acc.callable_registry import CallableRegistry
-from acc.domain import (
+from acc.models import (
     AccError,
     ArtifactBundle,
     CallableOverride,
@@ -36,6 +36,8 @@ from acc.domain import (
     ScopeFrame,
     SessionInstance,
     WorkflowFunctionTemplate,
+)
+from acc.serialization import (
     workflow_function_template_from_dict,
     workflow_function_template_to_dict,
 )

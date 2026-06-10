@@ -6,7 +6,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from acc.cli import app
-from acc.domain import CORE_V2_SCHEMA_VERSION
+from acc.models import CORE_V2_SCHEMA_VERSION
 
 
 def _write_tool_callable(root: Path) -> None:

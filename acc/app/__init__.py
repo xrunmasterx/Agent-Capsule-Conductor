@@ -14,7 +14,7 @@ from acc.app.core_v2_loader import (
 from acc.app.inspect import workflow_inspect_payload
 from acc.app.workflow_refs import WorkflowCatalog
 from acc.callable_registry import CallableRegistry
-from acc.domain import CORE_V2_SCHEMA_VERSION, AccError, WorkflowFunctionTemplate
+from acc.models import CORE_V2_SCHEMA_VERSION, AccError, WorkflowFunctionTemplate
 from acc.engine.workflow_validation import (
     build_workflow_dry_run_report,
     validate_callable_workflow_function_report,

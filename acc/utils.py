@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from acc.domain import AccError
+from acc.models import AccError
 
 
 def dump_json(data: Any) -> str:

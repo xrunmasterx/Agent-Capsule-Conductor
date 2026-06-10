@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from acc.domain import (
+from acc.models import (
     CORE_V2_SCHEMA_VERSION,
     ArtifactContract,
     CallableRef,
@@ -17,11 +17,13 @@ from acc.domain import (
     RuntimePolicy,
     TimeoutPolicy,
     WorkflowFunctionTemplate,
+)
+from acc.serialization import (
     execution_plan_to_dict,
-    validate_core_v2_workflow_function_template,
     workflow_function_template_from_dict,
     workflow_function_template_to_dict,
 )
+from acc.validation import validate_core_v2_workflow_function_template
 
 
 def test_workflow_function_template_json_round_trip_is_stable() -> None:

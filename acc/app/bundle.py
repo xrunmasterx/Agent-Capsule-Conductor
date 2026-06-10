@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from acc.domain import NodeInvocationSpec, WorkflowFunctionTemplate
+from acc.models import NodeInvocationSpec, WorkflowFunctionTemplate
 
 
 @dataclass(frozen=True)

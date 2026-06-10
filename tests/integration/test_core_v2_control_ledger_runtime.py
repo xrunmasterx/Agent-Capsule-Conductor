@@ -10,7 +10,7 @@ import acc.app.core_v2_runtime as core_v2_runtime
 from acc.app.core_v2_runtime import run_core_v2_workflow_path
 from acc.app.human_gate_service import answer_human_gate
 from acc.app.interactions import list_interactions
-from acc.domain import CORE_V2_SCHEMA_VERSION
+from acc.models import CORE_V2_SCHEMA_VERSION
 from acc.store.control_ledger import (
     load_decisions,
     load_dispatches,

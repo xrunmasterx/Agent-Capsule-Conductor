@@ -16,7 +16,7 @@ from acc.app.run_lifecycle import (
     is_terminal_run_status,
     resume_waiting_run,
 )
-from acc.domain import (
+from acc.models import (
     AccError,
     CallableRef,
     DecisionRecord,

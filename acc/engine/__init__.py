@@ -5,7 +5,7 @@ from collections import deque
 from pathlib import Path
 from typing import Any
 
-from acc.domain import (
+from acc.models import (
     CORE_V2_SCHEMA_VERSION,
     AccError,
     ArtifactContract,
@@ -32,8 +32,8 @@ from acc.domain import (
     WorkflowFunctionTemplate,
     WorkflowInputBinding,
     WorkflowOutputBinding,
-    validate_core_v2_workflow_function_template,
 )
+from acc.validation import validate_core_v2_workflow_function_template
 
 IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 PATH_KEYS = {"workspace", "workspace_root", "workspace_path", "local_path"}

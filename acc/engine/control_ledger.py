@@ -25,7 +25,7 @@ from acc.control_ledger_codec import (
     validate_replay_policy,
     validate_run_plan,
 )
-from acc.domain import (
+from acc.models import (
     CONTROL_LEDGER_SCHEMA_VERSION,
     AccError,
     ExecutionPlan,

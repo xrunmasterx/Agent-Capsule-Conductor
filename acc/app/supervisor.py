@@ -10,7 +10,7 @@ from uuid import uuid4
 from acc.app.capabilities import default_adapter_capabilities
 from acc.app.invocation import CallableInvocationService
 from acc.callable_registry import CallableRegistry
-from acc.domain import (
+from acc.models import (
     CORE_V2_SCHEMA_VERSION,
     AccError,
     AgentClassTemplate,
@@ -26,8 +26,8 @@ from acc.domain import (
     SupervisorDecision,
     SupervisorPlan,
     SupervisorRoster,
-    control_ledger_to_dict,
 )
+from acc.serialization import control_ledger_to_dict
 from acc.engine.supervisor import (
     compile_supervisor_plan_to_steps,
     parse_dynamic_invocation_intent,

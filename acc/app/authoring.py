@@ -16,7 +16,7 @@ from acc.callable_runner import (
     normalize_output_schema_for_structured_output,
     structured_output_schema_errors,
 )
-from acc.domain import (
+from acc.models import (
     AccError,
     AgentClassTemplate,
     CallableRef,

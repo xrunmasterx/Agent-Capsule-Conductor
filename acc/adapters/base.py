@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
-from acc.domain import AgentCapabilities
+from acc.models import AgentCapabilities
 
 
 @dataclass(frozen=True)

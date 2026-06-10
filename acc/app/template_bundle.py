@@ -12,7 +12,7 @@ from uuid import uuid4
 import yaml
 
 from acc.callable_registry import CallableRegistry
-from acc.domain import AccError, AgentClassTemplate
+from acc.models import AccError, AgentClassTemplate
 from acc.session import utc_now_iso
 from acc.store import load_json, write_json
 

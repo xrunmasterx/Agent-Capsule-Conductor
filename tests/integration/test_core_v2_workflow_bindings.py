@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 from acc.app.core_v2_runtime import run_core_v2_workflow_path
-from acc.domain import CORE_V2_SCHEMA_VERSION
+from acc.models import CORE_V2_SCHEMA_VERSION
 
 
 def test_core_v2_explicit_bindings_and_workflow_outputs(tmp_path: Path) -> None:

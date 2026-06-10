@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from acc.domain import (
+from acc.models import (
     CORE_V2_SCHEMA_VERSION,
     ArtifactContract,
     CallableRef,
@@ -16,10 +16,12 @@ from acc.domain import (
     RuntimePolicy,
     WorkflowFunctionTemplate,
     WorkflowOutputBinding,
+)
+from acc.validation import (
     validate_core_v2_execution_plan,
     validate_core_v2_workflow_function_template,
 )
-from acc.utils import AccError
+from acc.models import AccError
 
 
 def valid_template() -> WorkflowFunctionTemplate:

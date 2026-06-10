@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import fields, is_dataclass
 from pathlib import Path
 
-from acc.domain import (
+from acc.models import (
     AgentClassTemplate,
     CallableOverride,
     CallableRef,

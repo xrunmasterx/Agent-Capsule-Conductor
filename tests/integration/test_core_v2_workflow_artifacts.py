@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from acc.app.core_v2_runtime import run_core_v2_workflow_path
-from acc.domain import CORE_V2_SCHEMA_VERSION, AccError
+from acc.models import CORE_V2_SCHEMA_VERSION, AccError
 
 
 def test_core_v2_artifact_and_payload_files_are_written(tmp_path: Path) -> None:
