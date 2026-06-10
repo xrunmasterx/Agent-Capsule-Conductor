@@ -164,7 +164,8 @@ async def run_codex_turn(
                 "name": "acc",
                 "title": "Agent Callable Conductor",
                 "version": "0.1.0",
-            }
+            },
+            "capabilities": {"experimentalApi": True},
         },
     )
     await client.notify("initialized", {})

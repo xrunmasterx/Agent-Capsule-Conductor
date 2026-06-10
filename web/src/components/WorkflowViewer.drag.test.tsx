@@ -49,7 +49,7 @@ const workflowInternalEdgePaths = __workflowViewerTestables.workflowInternalEdge
   connectionMode: string,
   edgeViewMode: string,
   layoutOverlay?: Map<string, { x: number; y: number }>,
-) => Array<{ address: { scopeWorkflowId: string | null; edgeId: string }; path: string }>;
+) => Array<{ address: { scopeWorkflowId: string | null; edgeId: string }; edge: Record<string, unknown>; path: string }>;
 const resolveScopedConnection = __workflowViewerTestables.resolveScopedConnection as unknown as (
   canvas: ReturnType<typeof canvasFixture>,
   connection: Record<string, unknown>,
@@ -241,11 +241,11 @@ async function waitForFlowNodes() {
   await waitFor(() => {
     expect(flowMock.props?.nodes).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'source_flow' })]));
   });
-  return flowMock.props?.nodes as Array<{ id: string; position: { x: number; y: number }; parentId?: string }>;
+  return flowMock.props?.nodes as Array<{ id: string; position: { x: number; y: number }; parentId?: string; extent?: string }>;
 }
 
 function currentNode(id: string) {
-  const nodes = flowMock.props?.nodes as Array<{ id: string; position: { x: number; y: number }; parentId?: string }>;
+  const nodes = flowMock.props?.nodes as Array<{ id: string; position: { x: number; y: number }; parentId?: string; extent?: string }>;
   const node = nodes.find((item) => item.id === id);
   expect(node).toBeTruthy();
   return node!;
@@ -2188,6 +2188,7 @@ describe('WorkspaceCanvas data edges', () => {
         sourceHandle: 'source_agent:output:main',
         targetHandle: 'target_flow:input:news_research',
         className: 'workflow-edge-data',
+        markerEnd: expect.objectContaining({ type: 'arrowclosed' }),
       }),
     );
   });
@@ -2379,6 +2380,7 @@ describe('WorkspaceCanvas data edges', () => {
         targetHandle: 'target_flow:workflow-input-outer-target',
       }),
     );
+    expect(flowEdge.markerEnd).toBeUndefined();
   });
 
   test('workspace canvas passes root workflow control projection to React Flow', async () => {
@@ -2532,6 +2534,45 @@ describe('WorkspaceCanvas data edges', () => {
 
     expect(draggingPath).not.toEqual(committedPath);
     expect(draggingPath.startsWith('M 456 ')).toBe(true);
+  });
+
+  test('workflow internal control edge paths anchor at the visual center of agent nodes', () => {
+    const base = canvasFixture();
+    const workflowValue = {
+      ...base.workflows.find((workflowItem) => workflowItem.id === 'source_flow')!,
+      internalNodes: [
+        ...(base.workflows.find((workflowItem) => workflowItem.id === 'source_flow')?.internalNodes || []),
+        {
+          id: 'reviewer',
+          name: 'Reviewer',
+          task: 'agent',
+          kind: 'Agent',
+          status: 'not_run',
+          callableId: 'fake-agent.generic',
+          position: { x: 360, y: 72 },
+        },
+      ],
+      internalEdges: [
+        {
+          id: 'control_codex_reviewer',
+          kind: 'control' as const,
+          source: { workflowId: 'codex' },
+          target: { workflowId: 'reviewer' },
+        },
+      ],
+    };
+
+    const [pathInfo] = workflowInternalEdgePaths(
+      workflowValue as unknown as Record<string, unknown>,
+      { type: 'task_canvas', taskId: 'acc_workspace_canvas' },
+      'control',
+      'all',
+    );
+    const pathNumbers = pathInfo.path.match(/-?\d+(?:\.\d+)?/g)?.map(Number);
+
+    expect(pathInfo.edge.kind).toBe('control');
+    expect(pathNumbers?.[1]).toBe(138);
+    expect(pathNumbers?.[7]).toBe(138);
   });
 
   test('scoped edge deletion does not remove an edge with the same id in another scope', () => {
@@ -2910,6 +2951,44 @@ describe('WorkspaceCanvas drag buffer', () => {
     expect(onCanvasChange).not.toHaveBeenCalled();
   });
 
+  test('layout sync version resets uncommitted local drag positions to the canvas projection', async () => {
+    const { canvas, onCanvasChange, rerender } = renderCanvas();
+    await waitForFlowNodes();
+
+    act(() => {
+      (flowMock.props?.onNodeDragStart as () => void)();
+      (flowMock.props?.onNodesChange as (changes: unknown[]) => void)([
+        { id: 'target_flow', type: 'position', position: { x: 780, y: 640 }, dragging: true },
+      ]);
+    });
+
+    expect(currentNode('target_flow').position).toEqual({ x: 780, y: 640 });
+    expect(onCanvasChange).not.toHaveBeenCalled();
+
+    rerender(
+      <WorkspaceCanvas
+        canvas={canvas}
+        layoutSyncVersion={1}
+        selection={{ type: 'workflow', id: 'source_flow' }}
+        connectionMode="control"
+        workflowRun={null}
+        focusedWorkflowId={null}
+        callables={[]}
+        workflows={[]}
+        bindings={{}}
+        onFocusedWorkflow={vi.fn()}
+        onCanvasChange={onCanvasChange}
+        onSelect={vi.fn()}
+        onBlankCanvas={vi.fn()}
+        onConfigureWorkflow={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(currentNode('target_flow').position).toEqual({ x: 620, y: 120 });
+    });
+  });
+
   test('drag end commits only once and uses the final buffered position', async () => {
     const { canvas, onCanvasChange, rerender } = renderCanvas();
     await waitForFlowNodes();
@@ -2946,6 +3025,41 @@ describe('WorkspaceCanvas drag buffer', () => {
     });
   });
 
+  test('repeated drags of the same workflow commit distinct final positions', async () => {
+    const { canvas, onCanvasChange } = renderCanvas();
+    await waitForFlowNodes();
+
+    act(() => {
+      (flowMock.props?.onNodeDragStart as () => void)();
+      (flowMock.props?.onNodesChange as (changes: unknown[]) => void)([
+        { id: 'target_flow', type: 'position', position: { x: 760, y: 260 }, dragging: false },
+      ]);
+    });
+    expect(onCanvasChange).toHaveBeenCalledTimes(1);
+
+    const firstUpdater = onCanvasChange.mock.calls[0][0] as (current: typeof canvas) => typeof canvas;
+    const firstCanvas = firstUpdater(canvas);
+    expect(firstCanvas.workflows.find((item) => item.id === 'target_flow')?.position).toEqual({
+      x: 760,
+      y: 260,
+    });
+
+    act(() => {
+      (flowMock.props?.onNodeDragStart as () => void)();
+      (flowMock.props?.onNodesChange as (changes: unknown[]) => void)([
+        { id: 'target_flow', type: 'position', position: { x: 900, y: 520 }, dragging: false },
+      ]);
+    });
+    expect(onCanvasChange).toHaveBeenCalledTimes(2);
+
+    const secondUpdater = onCanvasChange.mock.calls[1][0] as (current: typeof firstCanvas) => typeof firstCanvas;
+    const secondCanvas = secondUpdater(firstCanvas);
+    expect(secondCanvas.workflows.find((item) => item.id === 'target_flow')?.position).toEqual({
+      x: 900,
+      y: 520,
+    });
+  });
+
   test('internal node dragging only moves the node before release', async () => {
     const { canvas, onCanvasChange } = renderCanvas();
     await waitForFlowNodes();
@@ -2966,6 +3080,7 @@ describe('WorkspaceCanvas drag buffer', () => {
     expect(currentNode('source_flow').position).toEqual({ x: 100, y: 100 });
     expect(internalNode.position).toEqual({ x: -80, y: -60 });
     expect(internalNode.parentId).toBe('source_flow');
+    expect(internalNode.extent).toBe('parent');
     expect((canvas.workflows[0].internalNodes[0] as { position: { x: number; y: number } }).position).toEqual({
       x: 40,
       y: 72,

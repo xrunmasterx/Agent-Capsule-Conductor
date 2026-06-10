@@ -27,6 +27,7 @@ from acc.runtime.policy import (
     PRODUCTION_RUN_MODE,
     acc_run_mode,
     external_agent_execution_enabled,
+    production_codex_app_server_timeout_seconds,
     production_codex_timeout_seconds,
 )
 from acc.store import write_json
@@ -535,6 +536,8 @@ def effective_timeout_seconds(template: AgentClassTemplate, node: NodeInvocation
         return int(node.runtime_policy.timeout.seconds)
     if template.runtime == "codex_cli" and acc_run_mode() == PRODUCTION_RUN_MODE:
         return production_codex_timeout_seconds()
+    if template.runtime == "codex_app_server" and acc_run_mode() == PRODUCTION_RUN_MODE:
+        return production_codex_app_server_timeout_seconds()
     return int(template.default_permissions.timeout_seconds or 60)
 
 

@@ -29,11 +29,9 @@ import {
   LayoutDashboard,
   Link2,
   Bot,
-  MessageSquare,
   Play,
   RefreshCw,
   Save,
-  Send,
   TestTube,
   Trash2,
   UploadCloud,
@@ -93,7 +91,6 @@ import type {
   WorkflowSummary,
 } from '../types';
 import { CodeBlock } from './CodeBlock';
-import { ReadableArtifact } from './ArtifactViewer';
 import {
   outputSchemaFromArtifactContract,
   paletteItemFromCallable,
@@ -141,7 +138,9 @@ type Props = {
 
 type ConnectionMode = 'data' | 'control';
 type CodexExecutionMode = 'default' | 'local_readonly_no_sandbox' | 'danger_full_access';
+type EmptyInputPolicy = 'allow' | 'block';
 const CONTROL_SLOT_LIMIT = 10;
+const DEFAULT_WORKFLOW_MAX_CONCURRENCY = 8;
 
 type InternalNodeView = {
   id: string;
@@ -159,6 +158,7 @@ type InternalNodeView = {
   control?: WorkflowGraphNode['control'];
   outputSchema?: Record<string, unknown>;
   forwardMainOutputOnControl?: boolean | null;
+  emptyInputPolicy?: EmptyInputPolicy;
   temporaryResourceId?: string;
   position?: { x: number; y: number };
 };
@@ -177,6 +177,7 @@ type WorkflowContainerModel = {
   control?: WorkflowGraphNode['control'];
   outputSchema?: Record<string, unknown>;
   forwardMainOutputOnControl?: boolean | null;
+  emptyInputPolicy?: EmptyInputPolicy;
   temporaryResourceId?: string;
   workflowRef?: string;
   directory: string;
@@ -600,6 +601,7 @@ type AssistantGraphOpsReview = {
 };
 
 type AssistantTurnReason = 'workbench_chat' | 'canvas_revision' | 'selected_node_revision';
+type BottomDockMode = 'evidence' | 'assistant';
 
 type WorkbenchTask = {
   taskId: string;
@@ -619,6 +621,16 @@ type WorkbenchTaskStorePayload = {
   version: 1;
   activeTaskId: string;
   tasks: WorkbenchTask[];
+};
+
+type AssistantApplyUndoToken = {
+  proposalId: string;
+  taskId: string;
+  beforeCanvas: WorkspaceCanvasModel;
+  beforeTemporaryResources: Record<string, TemporaryResourceDraft>;
+  beforeSelection: CanvasSelection;
+  afterCanvasHash: string;
+  affectedSelection: CanvasSelection;
 };
 
 type ResourceTemplate =
@@ -674,6 +686,7 @@ type WorkflowNodeData = {
   onSelectEdge: (address: EdgeAddress, altKey?: boolean) => void;
   onSelectPort: (workflowId: string, port: WorkflowPortView) => void;
   onSelectInternal: (workflowId: string, nodeId: string) => void;
+  onOpenNodeDetails: (selection: CanvasSelection) => void;
   onOpenFocus: (workflowId: string) => void;
   onConfigureWorkflow: (workflowId: string) => void;
   onResize: (workflowId: string, size: { width: number; height: number }) => void;
@@ -724,16 +737,16 @@ const nodeTypes = { workflowContainer: memo(WorkflowContainer), agentToolNode: m
 const DEFAULT_CONTAINER_SIZE = { width: 430, height: 328 };
 const BOUNDARY_NODE_SIZE = { width: 270, height: 240 };
 const AGENT_TOOL_NODE_SIZE = { width: 276, height: 132 };
-const AGENT_CONTROL_HANDLE_TOP = 26;
+const INTERNAL_AGENT_TOOL_NODE_SIZE = { width: 276, height: 158 };
+const AGENT_CONTROL_HANDLE_TOP = AGENT_TOOL_NODE_SIZE.height / 2;
 const AGENT_DATA_PORT_TOP = 88;
 const AGENT_DATA_PORT_GAP = 28;
-const WORKFLOW_INNER_HANDLE_TOP = 129;
 const WORKFLOW_INNER_HANDLE_X = 25;
 const WORKFLOW_CHILD_PADDING = 24;
 const WORKFLOW_CHILD_START_PADDING = 8;
-const WORKFLOW_LAYOUT_SAFE_AREA = { left: 96, top: 154, right: 96, bottom: 72 };
-const WORKFLOW_INTERNAL_LAYOUT_GAP = { rank: 210, node: 104 };
-const ROOT_LAYOUT_GAP = { rank: 180, node: 140 };
+const WORKFLOW_LAYOUT_SAFE_AREA = { left: 64, top: 146, right: 64, bottom: 56 };
+const WORKFLOW_INTERNAL_LAYOUT_GAP = { rank: 72, node: 28 };
+const ROOT_LAYOUT_GAP = { rank: 96, node: 88 };
 const INSPECTOR_DEFAULT_WIDTH = 390;
 const INSPECTOR_MIN_WIDTH = 320;
 const INSPECTOR_MAX_WIDTH = 640;
@@ -1006,6 +1019,16 @@ function selectedAuthoringNode(
     }
   }
   return null;
+}
+
+function effectiveAssistantTurnReason(
+  requestedReason: AssistantTurnReason,
+  selection: CanvasSelection,
+): AssistantTurnReason {
+  if (requestedReason === 'workbench_chat') {
+    return 'workbench_chat';
+  }
+  return isInspectableNodeSelection(selection) ? 'selected_node_revision' : 'canvas_revision';
 }
 
 function taskCanvasSkeletonProposal(
@@ -2189,6 +2212,7 @@ export function WorkflowViewer({
     [activeTaskId, tasks],
   );
   const [canvas, setCanvas] = useState<WorkspaceCanvasModel>(() => initialTask.canvas);
+  const [layoutSyncVersion, setLayoutSyncVersion] = useState(0);
   const [sourceGraph, setSourceGraph] = useState<WorkflowGraph>(() =>
     canvasToWorkflowGraph(initialTask.canvas),
   );
@@ -2219,6 +2243,9 @@ export function WorkflowViewer({
     title: '运行证据',
     content: null,
   });
+  const [bottomDockMode, setBottomDockMode] = useState<BottomDockMode>('evidence');
+  const [nodeDetailOpen, setNodeDetailOpen] = useState(false);
+  const [artifactCacheByPath, setArtifactCacheByPath] = useState<Record<string, ArtifactContent>>({});
   const [saveWorkflowDialog, setSaveWorkflowDialog] = useState<SaveWorkflowDialogState | null>(
     null,
   );
@@ -2231,7 +2258,7 @@ export function WorkflowViewer({
   const [assistantAgentSession, setAssistantAgentSession] = useState<AgentSessionRecord | null>(null);
   const [assistantPendingTurn, setAssistantPendingTurn] = useState<AgentTurnRecord | null>(null);
   const [assistantEvents, setAssistantEvents] = useState<RunEvent[]>([]);
-  const [assistantTurnReason, setAssistantTurnReason] = useState<AssistantTurnReason>('canvas_revision');
+  const [assistantTurnReason, setAssistantTurnReason] = useState<AssistantTurnReason>('workbench_chat');
   const [assistantSessionStatus, setAssistantSessionStatus] = useState('disconnected');
   const [assistantBackendValidation, setAssistantBackendValidation] =
     useState<CanvasAuthoringValidationResult | null>(null);
@@ -2239,6 +2266,7 @@ export function WorkflowViewer({
   const [assistantGraphOpsReview, setAssistantGraphOpsReview] =
     useState<AssistantGraphOpsReview | null>(null);
   const [assistantBusy, setAssistantBusy] = useState(false);
+  const [assistantApplyUndo, setAssistantApplyUndo] = useState<AssistantApplyUndoToken | null>(null);
   const [agentSessionState, setAgentSessionState] = useState<AgentSessionUiState>({
     status: 'idle',
     session: null,
@@ -2257,7 +2285,7 @@ export function WorkflowViewer({
   const runOverlay = selectedRunProjection?.overlay || null;
   const isRunning = currentTask ? isActiveTaskStatus(currentTask.status) : false;
   const resourceDetailOpen = chrome.rightPanel === 'resourceDetail';
-  const assistantOpen = chrome.rightPanel === 'assistant';
+  const assistantOpen = bottomDockMode === 'assistant' && evidenceDock.open;
   const inspectorWidth = chrome.inspectorWidth;
   const workflowBindingKey = useMemo(
     () => [canvas.id, ...canvas.workflows.map((item) => item.id)].sort().join('|'),
@@ -2272,6 +2300,8 @@ export function WorkflowViewer({
     setAssistantInput('');
     setAssistantMessages([]);
     setAssistantProposal(null);
+    setAssistantApplyUndo(null);
+    setAssistantTurnReason('workbench_chat');
     setAssistantBackendValidation(null);
     setAssistantRequiredActions([]);
     setAssistantGraphOpsReview(null);
@@ -2366,6 +2396,40 @@ export function WorkflowViewer({
       return {
         ...current,
         [delta.run_id]: { ...runLogs, [delta.node_id]: nextNodeLogs },
+      };
+    });
+  }, []);
+
+  const appendRunAgentEvent = useCallback((runId: string, event: RunEvent) => {
+    const eventNodeId = typeof event.node_id === 'string' ? event.node_id : '';
+    setRunsById((current) => {
+      const projection = current[runId];
+      if (!projection) {
+        return current;
+      }
+      return {
+        ...current,
+        [runId]: {
+          ...projection,
+          events: mergeAgentEvents(projection.events, [event]),
+        },
+      };
+    });
+    setAgentSessionState((current) => {
+      const session = current.session;
+      if (!session) {
+        return current;
+      }
+      const matchesSession = event.session_id && event.session_id === session.session_id;
+      const matchesBoundNode =
+        session.bound_run_id === runId &&
+        (!eventNodeId || session.bound_node_id === eventNodeId);
+      if (!matchesSession && !matchesBoundNode) {
+        return current;
+      }
+      return {
+        ...current,
+        events: mergeAgentEvents(current.events, [event]),
       };
     });
   }, []);
@@ -2565,7 +2629,16 @@ export function WorkflowViewer({
         // Keep the stream best-effort; existing run polling remains the fallback.
       }
     };
+    const onAgentEvent = (event: MessageEvent<string>) => {
+      try {
+        const payload = JSON.parse(event.data) as RunEvent;
+        appendRunAgentEvent(selectedRunId, payload);
+      } catch {
+        // Durable node event reads refresh the timeline if a live frame is malformed.
+      }
+    };
     source.addEventListener('node_log_delta', onLogDelta as EventListener);
+    source.addEventListener('agent_event', onAgentEvent as EventListener);
     source.addEventListener('summary', onSummary as EventListener);
     source.onerror = () => {
       source.close();
@@ -2573,7 +2646,7 @@ export function WorkflowViewer({
     return () => {
       source.close();
     };
-  }, [appendNodeLogDelta, selectedRunId, updateRunProjection]);
+  }, [appendNodeLogDelta, appendRunAgentEvent, selectedRunId, updateRunProjection]);
 
   useEffect(() => {
     saveTaskStore({ version: 1, activeTaskId, tasks });
@@ -3060,12 +3133,23 @@ export function WorkflowViewer({
     () => mergeAuthoringValidation(assistantLocalValidation, assistantBackendValidation),
     [assistantBackendValidation, assistantLocalValidation],
   );
+  const currentAuthoringCanvasHash = useMemo(
+    () => canvasAuthoringHash(activeTaskId, stripRuntimeStateFromCanvas(canvas)),
+    [activeTaskId, canvas],
+  );
+  const canUndoAssistantApply =
+    Boolean(assistantApplyUndo) &&
+    assistantApplyUndo?.taskId === activeTaskId &&
+    assistantApplyUndo.afterCanvasHash === currentAuthoringCanvasHash &&
+    !isRunning &&
+    !assistantPendingTurn;
 
   useEffect(() => {
     if (selectionKey(normalizedSelection) !== selectionKey(selection)) {
       setSelection(normalizedSelection);
       if (normalizedSelection.type === 'task_canvas') {
         setChrome((current) => ({ ...current, rightPanel: 'none' }));
+        setNodeDetailOpen(false);
       }
     }
   }, [normalizedSelection, selection]);
@@ -3094,11 +3178,11 @@ export function WorkflowViewer({
   }, [dataConnectionDraft, displayCanvas]);
 
   function createDemo() {
-    const nextCanvas = workspaceDemoCanvas();
+    const nextCanvas = layoutWorkspaceCanvas(workspaceDemoCanvas());
     resetCanvas(nextCanvas);
     setSelection({ type: 'task_canvas', taskId: nextCanvas.id });
     setOpenedExternalWorkflow(false);
-    setMessage('已重置为 Workspace Canvas Demo');
+    setMessage('已重置为股市调研控制流示例');
   }
 
   function openWorkflow(workflowId: string) {
@@ -3164,10 +3248,9 @@ export function WorkflowViewer({
   }
 
   function autoLayout() {
-    updateCanvasAndGraph((current) => layoutCanvasForSelection(current, selection));
-    setMessage(selection.type === 'workflow' || selection.type === 'internal' || selection.type === 'port'
-      ? '已按连接关系重新布局选中 Workflow'
-      : '已按连接关系重新布局整个任务');
+    updateCanvasAndGraph((current) => layoutWorkspaceCanvas(current));
+    setLayoutSyncVersion((current) => current + 1);
+    setMessage('已按连接关系重新布局整个任务');
   }
 
   const startInspectorResize = useCallback(
@@ -3199,16 +3282,25 @@ export function WorkflowViewer({
   );
   const selectCanvasObject = useCallback((nextSelection: CanvasSelection) => {
     setSelection(nextSelection);
-    if (nextSelection.type !== 'task_canvas') {
-      setEvidenceDock((current) => ({ ...current, open: true }));
-      setChrome((current) => ({
-        ...current,
-        rightPanel:
-          current.rightPanel === 'resourceDetail' || current.rightPanel === 'inspector'
-            ? 'none'
-            : current.rightPanel,
-      }));
+    if (!isInspectableNodeSelection(nextSelection)) {
+      setNodeDetailOpen(false);
     }
+  }, []);
+
+  const openNodeDetails = useCallback((nextSelection: CanvasSelection) => {
+    setSelection(nextSelection);
+    if (!isInspectableNodeSelection(nextSelection)) {
+      setNodeDetailOpen(false);
+      return;
+    }
+    setNodeDetailOpen(true);
+    setChrome((current) => ({
+      ...current,
+      rightPanel:
+        current.rightPanel === 'resourceDetail' || current.rightPanel === 'inspector'
+          ? 'none'
+          : current.rightPanel,
+    }));
   }, []);
 
   const deleteSelectedCanvasObject = useCallback((targetSelection = selection) => {
@@ -3554,6 +3646,23 @@ export function WorkflowViewer({
     });
   }
 
+  async function ensureArtifactContent(path: string | null | undefined) {
+    if (!path || artifactCacheByPath[path]) {
+      return;
+    }
+    try {
+      const content = await api.artifact(path);
+      setArtifactCacheByPath((current) => ({
+        ...current,
+        [path]: truncateLargeLog(content),
+      }));
+    } catch {
+      setArtifactCacheByPath((current) => ({
+        ...Object.fromEntries(Object.entries(current).filter(([key]) => key !== path)),
+      }));
+    }
+  }
+
   async function saveBinding(workflowId: string, workspaceRoot: string) {
     const result = await api.saveWorkflowBinding(workflowId, workspaceRoot);
     const normalized = normalizeBinding(result, workflowId);
@@ -3681,6 +3790,35 @@ export function WorkflowViewer({
                 node.id === nodeId
                   ? { ...node, forwardMainOutputOnControl: value }
                   : node,
+              ),
+            }
+          : workflow,
+      ),
+    }));
+  }
+
+  function updateWorkflowEmptyInputPolicy(workflowId: string, value: EmptyInputPolicy) {
+    updateCanvasAndGraph((current) => ({
+      ...current,
+      workflows: current.workflows.map((workflow) =>
+        workflow.id === workflowId ? { ...workflow, emptyInputPolicy: value } : workflow,
+      ),
+    }));
+  }
+
+  function updateInternalEmptyInputPolicy(
+    workflowId: string,
+    nodeId: string,
+    value: EmptyInputPolicy,
+  ) {
+    updateCanvasAndGraph((current) => ({
+      ...current,
+      workflows: current.workflows.map((workflow) =>
+        workflow.id === workflowId
+          ? {
+              ...workflow,
+              internalNodes: workflow.internalNodes.map((node) =>
+                node.id === nodeId ? { ...node, emptyInputPolicy: value } : node,
               ),
             }
           : workflow,
@@ -3827,6 +3965,7 @@ export function WorkflowViewer({
     event?.preventDefault();
     const snapshot = currentAuthoringSnapshot();
     const userText = assistantInput.trim();
+    const effectiveTurnReason = effectiveAssistantTurnReason(assistantTurnReason, selection);
     if (!userText) {
       const text = 'Please enter a requirement.';
       setAssistantMessages((current) => [
@@ -3850,7 +3989,7 @@ export function WorkflowViewer({
       setAssistantAgentSession(currentSession);
       const turn = await api.submitWorkbenchAssistantTurn(sessionId, {
         message: userText,
-        reason: assistantTurnReason,
+        reason: effectiveTurnReason,
         canvas_hash: snapshot.snapshot_id,
         canvas_snapshot: authoringBackendCanvasSnapshot(snapshot),
         selection: authoringSelectionPayload(snapshot.selection),
@@ -3862,7 +4001,8 @@ export function WorkflowViewer({
       setAssistantPendingTurn(turn);
       setAssistantSessionStatus(turn.status || 'queued');
       setAssistantInput('');
-      setChrome((current) => ({ ...current, rightPanel: 'assistant' }));
+      setBottomDockMode('assistant');
+      setEvidenceDock((current) => ({ ...current, open: true }));
       setMessage(`AI 助手 turn ${turn.turn_id}: ${turn.status || 'queued'}`);
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error);
@@ -3884,6 +4024,9 @@ export function WorkflowViewer({
     if (!assistantProposal) {
       return;
     }
+    const beforeCanvas = stripRuntimeStateFromCanvas(canvas);
+    const beforeTemporaryResources = currentAuthoringState.temporaryResources;
+    const beforeSelection = selection;
     try {
       const result = applyCanvasAuthoringProposal({
         canvas,
@@ -3893,8 +4036,10 @@ export function WorkflowViewer({
         callables,
         workflows,
       });
-      graphRef.current = canvasToWorkflowGraph(result.canvas);
-      setSourceGraph(graphRef.current);
+      const nextGraph = canvasToWorkflowGraph(result.canvas);
+      const afterCanvasHash = canvasAuthoringHash(activeTaskId, stripRuntimeStateFromCanvas(result.canvas));
+      graphRef.current = nextGraph;
+      setSourceGraph(nextGraph);
       setCanvas(result.canvas);
       setTasks((currentTasks) =>
         currentTasks.map((task) =>
@@ -3909,6 +4054,15 @@ export function WorkflowViewer({
         ),
       );
       setSelection(result.selection);
+      setAssistantApplyUndo({
+        proposalId: assistantProposal.proposal_id,
+        taskId: activeTaskId,
+        beforeCanvas,
+        beforeTemporaryResources,
+        beforeSelection,
+        afterCanvasHash,
+        affectedSelection: result.selection,
+      });
       setAssistantProposal(null);
       setAssistantBackendValidation(null);
       setAssistantRequiredActions((current) =>
@@ -3933,6 +4087,37 @@ export function WorkflowViewer({
       ]);
       setMessage(text);
     }
+  }
+
+  function undoLastAssistantApply() {
+    if (!assistantApplyUndo || !canUndoAssistantApply) {
+      return;
+    }
+    const nextCanvas = stripRuntimeStateFromCanvas(assistantApplyUndo.beforeCanvas);
+    const nextGraph = canvasToWorkflowGraph(nextCanvas);
+    graphRef.current = nextGraph;
+    setSourceGraph(nextGraph);
+    setCanvas(nextCanvas);
+    setTasks((currentTasks) =>
+      currentTasks.map((task) =>
+        task.taskId === activeTaskId
+          ? {
+              ...task,
+              title: nextCanvas.name,
+              canvas: nextCanvas,
+              authoring: { temporaryResources: assistantApplyUndo.beforeTemporaryResources },
+            }
+          : task,
+      ),
+    );
+    setSelection(assistantApplyUndo.beforeSelection);
+    setAssistantApplyUndo(null);
+    const text = '已撤回上一次 AI 应用到画布的修改。';
+    setAssistantMessages((current) => [
+      ...current,
+      { id: authoringId('assistant_msg'), role: 'system', content: text },
+    ]);
+    setMessage(text);
   }
 
   async function persistTemporaryResourceDraft(resourceDraftId: string) {
@@ -4109,6 +4294,15 @@ export function WorkflowViewer({
     await refreshAgentSession();
   }
 
+  function openCallableResourceFromNode(callableId: string, name: string, kind: 'agent_class' | 'tool_class') {
+    setSelectedResource({
+      kind: kind === 'tool_class' ? 'tool_class' : 'agent_class',
+      callableId,
+      name: name || callableId,
+    });
+    setChrome((current) => ({ ...current, rightPanel: 'resourceDetail' }));
+  }
+
   return (
     <WorkbenchShell>
       <TopBar
@@ -4121,22 +4315,23 @@ export function WorkflowViewer({
         onValidate={validateGraph}
         onRun={runGraph}
         onAutoLayout={autoLayout}
-        assistantOpen={chrome.rightPanel === 'assistant'}
-        onToggleAssistant={() =>
-          setChrome((current) => ({
-            ...current,
-            rightPanel: current.rightPanel === 'assistant' ? 'none' : 'assistant',
-          }))
-        }
-        detailsOpen={evidenceDock.open}
-        onToggleDetails={() =>
-          setEvidenceDock((current) => ({ ...current, open: !current.open }))
-        }
+        assistantOpen={assistantOpen}
+        onToggleAssistant={() => {
+          const nextOpen = !(bottomDockMode === 'assistant' && evidenceDock.open);
+          setBottomDockMode('assistant');
+          setEvidenceDock((current) => ({ ...current, open: nextOpen }));
+        }}
+        detailsOpen={bottomDockMode === 'evidence' && evidenceDock.open}
+        onToggleDetails={() => {
+          const nextOpen = !(bottomDockMode === 'evidence' && evidenceDock.open);
+          setBottomDockMode('evidence');
+          setEvidenceDock((current) => ({ ...current, open: nextOpen }));
+        }}
       />
       <div
         className={[
           'workspace-canvas-layout',
-          chrome.rightPanel !== 'none' ? 'inspector-open' : '',
+          chrome.rightPanel !== 'none' && chrome.rightPanel !== 'assistant' ? 'inspector-open' : '',
         ]
           .filter(Boolean)
           .join(' ')}
@@ -4157,6 +4352,7 @@ export function WorkflowViewer({
           <>
             <WorkspaceCanvas
               canvas={displayCanvas}
+              layoutSyncVersion={layoutSyncVersion}
               selection={selection}
               connectionMode={connectionMode}
               workflowRun={workflowRun}
@@ -4167,6 +4363,7 @@ export function WorkflowViewer({
               onFocusedWorkflow={setFocusedWorkflowId}
               onCanvasChange={updateCanvas}
               onSelect={selectCanvasObject}
+              onOpenNodeDetails={openNodeDetails}
               onDeleteSelection={deleteSelectedCanvasObject}
               edgeViewMode={edgeViewMode}
               onConnectionMode={setConnectionMode}
@@ -4215,45 +4412,60 @@ export function WorkflowViewer({
             ) : null}
           </div>
         ) : null}
-        {assistantOpen ? (
-          <AssistantDrawer
-            width={inspectorWidth}
-            input={assistantInput}
-            messages={assistantMessages}
-            proposal={assistantProposal}
-            validation={assistantValidation}
-            temporaryResources={currentAuthoringState.temporaryResources}
-            authoringAgents={authoringAgents}
-            selectedAuthoringAgentId={selectedAuthoringAgentId}
-            sessionId={assistantSessionId}
-            agentSession={assistantAgentSession}
-            sessionStatus={assistantSessionStatus}
-            pendingTurn={assistantPendingTurn}
-            events={assistantEvents}
-            turnReason={assistantTurnReason}
-            requiredActions={assistantRequiredActions}
-            graphOpsReview={assistantGraphOpsReview}
-            busy={assistantBusy}
-            targetLabel={authoringSelectionLabel(selection, selectedWorkflow, selectedInternalNode)}
-            hasSelectedRunNode={Boolean(selectedAgentSessionContext)}
-            onAgentChange={(agentId) => {
-              setSelectedAuthoringAgentId(agentId);
-              setAssistantSessionId(null);
-              setAssistantAgentSession(null);
-              setAssistantPendingTurn(null);
-              setAssistantEvents([]);
-              setAssistantSessionStatus('disconnected');
+        {nodeDetailOpen && isNodeDetailModel(selectedDetailsModelWithAgentEvents) ? (
+          <NodeDetailOverlay
+            model={selectedDetailsModelWithAgentEvents}
+            callableState={selectedCallableDetailState}
+            runtimeConfig={runtimeConfig}
+            agentSessionState={agentSessionState}
+            artifactCacheByPath={artifactCacheByPath}
+            onEnsureArtifactContent={ensureArtifactContent}
+            onReadEvidence={readEvidence}
+            onRefreshAgentSession={refreshAgentSession}
+            onPublishAgentOutput={publishSelectedAgentOutput}
+            onAnswerAgentInteraction={answerSelectedAgentInteraction}
+            onClose={() => setNodeDetailOpen(false)}
+            onUpdateInput={(nextInput) => {
+              if (selection.type === 'workflow' && selectedWorkflow && isExecutableNodeWorkflow(selectedWorkflow)) {
+                updateWorkflowInvocationInput(selectedWorkflow.id, nextInput);
+              }
+              if (selection.type === 'internal' && selectedWorkflow && selectedInternalNode) {
+                updateInternalInvocationInput(selectedWorkflow.id, selectedInternalNode.id, nextInput);
+              }
             }}
-            onTurnReasonChange={setAssistantTurnReason}
-            onInput={setAssistantInput}
-            onSubmit={generateAssistantProposal}
-            onApply={applyAssistantProposal}
-            onDiscard={discardAssistantProposal}
-            onPersistTemporaryResource={persistTemporaryResourceDraft}
-            onApplyGraphOpsReview={applyGraphOpsPersistenceReview}
-            onDiscardGraphOpsReview={() => setAssistantGraphOpsReview(null)}
-            onClose={() => setChrome((current) => ({ ...current, rightPanel: 'none' }))}
-            onResize={startInspectorResize}
+            onUpdateLabel={(label) => {
+              if (selection.type === 'workflow' && selectedWorkflow && isExecutableNodeWorkflow(selectedWorkflow)) {
+                updateWorkflowInvocationLabel(selectedWorkflow.id, label);
+              }
+              if (selection.type === 'internal' && selectedWorkflow && selectedInternalNode) {
+                updateInternalInvocationLabel(selectedWorkflow.id, selectedInternalNode.id, label);
+              }
+            }}
+            onUpdateForwardMainOutput={(value) => {
+              if (selection.type === 'workflow' && selectedWorkflow && isExecutableNodeWorkflow(selectedWorkflow)) {
+                updateWorkflowForwardMainOutput(selectedWorkflow.id, value);
+              }
+              if (selection.type === 'internal' && selectedWorkflow && selectedInternalNode) {
+                updateInternalForwardMainOutput(selectedWorkflow.id, selectedInternalNode.id, value);
+              }
+            }}
+            onUpdateEmptyInputPolicy={(value) => {
+              if (selection.type === 'workflow' && selectedWorkflow && isExecutableNodeWorkflow(selectedWorkflow)) {
+                updateWorkflowEmptyInputPolicy(selectedWorkflow.id, value);
+              }
+              if (selection.type === 'internal' && selectedWorkflow && selectedInternalNode) {
+                updateInternalEmptyInputPolicy(selectedWorkflow.id, selectedInternalNode.id, value);
+              }
+            }}
+            onUpdateCodexExecutionMode={(value) => {
+              if (selection.type === 'workflow' && selectedWorkflow && isExecutableNodeWorkflow(selectedWorkflow)) {
+                updateWorkflowCodexExecutionMode(selectedWorkflow.id, value);
+              }
+              if (selection.type === 'internal' && selectedWorkflow && selectedInternalNode) {
+                updateInternalCodexExecutionMode(selectedWorkflow.id, selectedInternalNode.id, value);
+              }
+            }}
+            onOpenCallableResource={openCallableResourceFromNode}
           />
         ) : null}
       </div>
@@ -4280,59 +4492,52 @@ export function WorkflowViewer({
       ) : null}
       <SelectionDetailsDock
         state={evidenceDock}
+        mode={bottomDockMode}
         message={message}
         model={selectedDetailsModelWithAgentEvents}
-        callableState={selectedCallableDetailState}
-        runtimeConfig={runtimeConfig}
-        agentSessionState={agentSessionState}
         currentTaskId={currentTask?.taskId}
         selectedRunId={selectedRunId}
-        onReadEvidence={readEvidence}
-        onRefreshAgentSession={refreshAgentSession}
-        onSubmitAgentTurn={submitSelectedAgentTurn}
-        onPublishAgentOutput={publishSelectedAgentOutput}
-        onAnswerAgentInteraction={answerSelectedAgentInteraction}
         onToggle={() => setEvidenceDock((current) => ({ ...current, open: !current.open }))}
-        onUpdateInput={(nextInput) => {
-          if (selection.type === 'workflow' && selectedWorkflow && isExecutableNodeWorkflow(selectedWorkflow)) {
-            updateWorkflowInvocationInput(selectedWorkflow.id, nextInput);
-          }
-          if (selection.type === 'internal' && selectedWorkflow && selectedInternalNode) {
-            updateInternalInvocationInput(selectedWorkflow.id, selectedInternalNode.id, nextInput);
-          }
-        }}
-        onUpdateLabel={(label) => {
-          if (selection.type === 'workflow' && selectedWorkflow && isExecutableNodeWorkflow(selectedWorkflow)) {
-            updateWorkflowInvocationLabel(selectedWorkflow.id, label);
-          }
-          if (selection.type === 'internal' && selectedWorkflow && selectedInternalNode) {
-            updateInternalInvocationLabel(selectedWorkflow.id, selectedInternalNode.id, label);
-          }
-        }}
-        onUpdateForwardMainOutput={(value) => {
-          if (selection.type === 'workflow' && selectedWorkflow && isExecutableNodeWorkflow(selectedWorkflow)) {
-            updateWorkflowForwardMainOutput(selectedWorkflow.id, value);
-          }
-          if (selection.type === 'internal' && selectedWorkflow && selectedInternalNode) {
-            updateInternalForwardMainOutput(selectedWorkflow.id, selectedInternalNode.id, value);
-          }
-        }}
-        onUpdateCodexExecutionMode={(value) => {
-          if (selection.type === 'workflow' && selectedWorkflow && isExecutableNodeWorkflow(selectedWorkflow)) {
-            updateWorkflowCodexExecutionMode(selectedWorkflow.id, value);
-          }
-          if (selection.type === 'internal' && selectedWorkflow && selectedInternalNode) {
-            updateInternalCodexExecutionMode(selectedWorkflow.id, selectedInternalNode.id, value);
-          }
-        }}
-        onOpenCallableResource={(callableId, name, kind) => {
-          setSelectedResource({
-            kind: kind === 'tool_class' ? 'tool_class' : 'agent_class',
-            callableId,
-            name: name || callableId,
-          });
-          setChrome((current) => ({ ...current, rightPanel: 'resourceDetail' }));
-        }}
+        assistantContent={
+          <AssistantDockContent
+            input={assistantInput}
+            messages={assistantMessages}
+            proposal={assistantProposal}
+            validation={assistantValidation}
+            temporaryResources={currentAuthoringState.temporaryResources}
+            authoringAgents={authoringAgents}
+            selectedAuthoringAgentId={selectedAuthoringAgentId}
+            sessionId={assistantSessionId}
+            agentSession={assistantAgentSession}
+            sessionStatus={assistantSessionStatus}
+            pendingTurn={assistantPendingTurn}
+            turnReason={assistantTurnReason}
+            requiredActions={assistantRequiredActions}
+            graphOpsReview={assistantGraphOpsReview}
+            busy={assistantBusy}
+            targetLabel={authoringSelectionLabel(selection, selectedWorkflow, selectedInternalNode)}
+            hasSelectedRunNode={Boolean(selectedAgentSessionContext)}
+            model={selectedDetailsModelWithAgentEvents}
+            canUndoApply={canUndoAssistantApply}
+            onAgentChange={(agentId) => {
+              setSelectedAuthoringAgentId(agentId);
+              setAssistantSessionId(null);
+              setAssistantAgentSession(null);
+              setAssistantPendingTurn(null);
+              setAssistantEvents([]);
+              setAssistantSessionStatus('disconnected');
+            }}
+            onTurnReasonChange={setAssistantTurnReason}
+            onInput={setAssistantInput}
+            onSubmit={generateAssistantProposal}
+            onApply={applyAssistantProposal}
+            onDiscard={discardAssistantProposal}
+            onUndoApply={undoLastAssistantApply}
+            onPersistTemporaryResource={persistTemporaryResourceDraft}
+            onApplyGraphOpsReview={applyGraphOpsPersistenceReview}
+            onDiscardGraphOpsReview={() => setAssistantGraphOpsReview(null)}
+          />
+        }
       />
     </WorkbenchShell>
   );
@@ -5024,6 +5229,444 @@ function graphOpsStringList(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }
 
+function AssistantDockContent({
+  input,
+  messages,
+  proposal,
+  validation,
+  temporaryResources,
+  authoringAgents,
+  selectedAuthoringAgentId,
+  sessionId,
+  agentSession,
+  sessionStatus,
+  pendingTurn,
+  turnReason,
+  requiredActions,
+  graphOpsReview,
+  busy,
+  targetLabel,
+  hasSelectedRunNode,
+  model,
+  canUndoApply,
+  onAgentChange,
+  onTurnReasonChange,
+  onInput,
+  onSubmit,
+  onApply,
+  onDiscard,
+  onUndoApply,
+  onPersistTemporaryResource,
+  onApplyGraphOpsReview,
+  onDiscardGraphOpsReview,
+}: {
+  input: string;
+  messages: AssistantChatMessage[];
+  proposal: CanvasAuthoringProposal | null;
+  validation: CanvasAuthoringValidationResult | null;
+  temporaryResources: Record<string, TemporaryResourceDraft>;
+  authoringAgents: AuthoringAgentSummary[];
+  selectedAuthoringAgentId: string;
+  sessionId: string | null;
+  agentSession: AgentSessionRecord | null;
+  sessionStatus: string;
+  pendingTurn: AgentTurnRecord | null;
+  turnReason: AssistantTurnReason;
+  requiredActions: AuthoringRequiredAction[];
+  graphOpsReview: AssistantGraphOpsReview | null;
+  busy: boolean;
+  targetLabel: string;
+  hasSelectedRunNode: boolean;
+  model: SelectedEntityDetailsModel;
+  canUndoApply: boolean;
+  onAgentChange: (agentId: string) => void;
+  onTurnReasonChange: (reason: AssistantTurnReason) => void;
+  onInput: (value: string) => void;
+  onSubmit: (event?: FormEvent<HTMLFormElement>) => void;
+  onApply: () => void;
+  onDiscard: () => void;
+  onUndoApply: () => void;
+  onPersistTemporaryResource: (resourceDraftId: string) => void;
+  onApplyGraphOpsReview: (review: AssistantGraphOpsReview) => void;
+  onDiscardGraphOpsReview: () => void;
+}) {
+  const modificationMode = turnReason !== 'workbench_chat';
+  const validationErrors = validation?.errors || [];
+  const validationWarnings = validation?.warnings || [];
+  const temporaryDrafts = Object.values(temporaryResources).filter(
+    (draft) => draft.status !== 'discarded',
+  );
+  const graphOpsDiff = graphOpsReview?.dryRun.semantic_diff || {};
+  const graphOpsCreatedFiles =
+    graphOpsStringList(graphOpsDiff.created_files).length > 0
+      ? graphOpsStringList(graphOpsDiff.created_files)
+      : graphOpsReview?.dryRun.target_paths || [];
+  const graphOpsWarnings = graphOpsStringList(graphOpsDiff.warnings);
+
+  return (
+    <section className="assistant-bottom-dock-body" aria-label="AI 助手底部面板">
+      <div className="assistant-bottom-chat">
+        <header className="assistant-bottom-header">
+          <div>
+            <span>AI 助手</span>
+            <strong>{targetLabel}</strong>
+          </div>
+          <small>{hasSelectedRunNode ? '已聚焦选中节点' : '画布级对话'}</small>
+        </header>
+        <div className="assistant-session-row compact">
+          <label>
+            <span>Agent</span>
+            <select
+              value={selectedAuthoringAgentId}
+              onChange={(event) => onAgentChange(event.target.value)}
+              disabled={busy}
+            >
+              {authoringAgents.length ? (
+                authoringAgents.map((agent) => (
+                  <option key={agent.id} value={agent.id}>
+                    {agent.name || agent.id} · {agent.runtime}
+                  </option>
+                ))
+              ) : (
+                <option value="">未连接</option>
+              )}
+            </select>
+          </label>
+          <small>
+            {sessionId ? `${sessionStatus} · ${sessionId}` : sessionStatus}
+            {agentSession?.provider_session_id ? ` · provider ${agentSession.provider_session_id}` : ''}
+          </small>
+        </div>
+        <div className="assistant-message-list assistant-bottom-messages" aria-label="AI 助手消息">
+          {messages.length ? (
+            messages.map((message) => (
+              <article key={message.id} className={`assistant-message ${message.role}`}>
+                <span>{message.role}</span>
+                <p>{message.content}</p>
+              </article>
+            ))
+          ) : (
+            <p className="assistant-empty">等待输入需求</p>
+          )}
+        </div>
+        {pendingTurn ? (
+          <section className="assistant-proposal-panel compact" aria-label="AI assistant pending turn">
+            <header>
+              <span>Running turn</span>
+              <strong>{pendingTurn.turn_id}</strong>
+            </header>
+            <p>{pendingTurn.reason || turnReason} · {pendingTurn.status || 'queued'}</p>
+          </section>
+        ) : null}
+        <AssistantProposalSummary
+          proposal={proposal}
+          validationErrors={validationErrors}
+          validationWarnings={validationWarnings}
+          temporaryDrafts={temporaryDrafts}
+          requiredActions={requiredActions}
+          graphOpsReview={graphOpsReview}
+          graphOpsCreatedFiles={graphOpsCreatedFiles}
+          graphOpsWarnings={graphOpsWarnings}
+          busy={busy}
+          onDiscard={onDiscard}
+          onPersistTemporaryResource={onPersistTemporaryResource}
+          onApplyGraphOpsReview={onApplyGraphOpsReview}
+          onDiscardGraphOpsReview={onDiscardGraphOpsReview}
+        />
+        <form className="assistant-compose assistant-bottom-compose" onSubmit={onSubmit}>
+          <textarea
+            value={input}
+            onChange={(event) => onInput(event.target.value)}
+            placeholder={
+              modificationMode
+                ? '描述要生成或调整的 workflow 草稿'
+                : '像 Codex CLI 一样和当前画布助手对话'
+            }
+            rows={2}
+          />
+          <div className="assistant-compose-actions">
+            {modificationMode && proposal ? (
+              <button
+                type="button"
+                className="primary-action"
+                onClick={onApply}
+                disabled={busy || validation?.status === 'invalid'}
+              >
+                应用修改
+              </button>
+            ) : null}
+            <button type="submit" className="secondary-action" disabled={busy || Boolean(pendingTurn)}>
+              {busy || pendingTurn ? '执行中...' : modificationMode ? (proposal ? '继续微调' : '生成修改') : '发送'}
+            </button>
+          </div>
+        </form>
+      </div>
+      <AssistantControlRail
+        modificationMode={modificationMode}
+        canUndoApply={canUndoApply}
+        busy={busy}
+        pendingTurn={Boolean(pendingTurn)}
+        onModeChange={(nextModificationMode) =>
+          onTurnReasonChange(nextModificationMode ? 'canvas_revision' : 'workbench_chat')
+        }
+        onUndoApply={onUndoApply}
+      />
+      <SelectedNodeRuntimePane model={model} />
+    </section>
+  );
+}
+
+function AssistantControlRail({
+  modificationMode,
+  canUndoApply,
+  busy,
+  pendingTurn,
+  onModeChange,
+  onUndoApply,
+}: {
+  modificationMode: boolean;
+  canUndoApply: boolean;
+  busy: boolean;
+  pendingTurn: boolean;
+  onModeChange: (modificationMode: boolean) => void;
+  onUndoApply: () => void;
+}) {
+  return (
+    <div className="assistant-control-rail" aria-label="AI 助手模式控制">
+      <button
+        type="button"
+        className={!modificationMode ? 'active' : ''}
+        onClick={() => onModeChange(false)}
+      >
+        对话模式
+      </button>
+      <button
+        type="button"
+        className={modificationMode ? 'active' : ''}
+        onClick={() => onModeChange(true)}
+      >
+        修改模式
+      </button>
+      <button type="button" onClick={onUndoApply} disabled={!canUndoApply || busy || pendingTurn}>
+        撤回节点
+      </button>
+    </div>
+  );
+}
+
+function AssistantProposalSummary({
+  proposal,
+  validationErrors,
+  validationWarnings,
+  temporaryDrafts,
+  requiredActions,
+  graphOpsReview,
+  graphOpsCreatedFiles,
+  graphOpsWarnings,
+  busy,
+  onDiscard,
+  onPersistTemporaryResource,
+  onApplyGraphOpsReview,
+  onDiscardGraphOpsReview,
+}: {
+  proposal: CanvasAuthoringProposal | null;
+  validationErrors: string[];
+  validationWarnings: string[];
+  temporaryDrafts: TemporaryResourceDraft[];
+  requiredActions: AuthoringRequiredAction[];
+  graphOpsReview: AssistantGraphOpsReview | null;
+  graphOpsCreatedFiles: string[];
+  graphOpsWarnings: string[];
+  busy: boolean;
+  onDiscard: () => void;
+  onPersistTemporaryResource: (resourceDraftId: string) => void;
+  onApplyGraphOpsReview: (review: AssistantGraphOpsReview) => void;
+  onDiscardGraphOpsReview: () => void;
+}) {
+  if (!proposal && !temporaryDrafts.length && !requiredActions.length && !graphOpsReview) {
+    return null;
+  }
+  return (
+    <div className="assistant-bottom-proposal-stack">
+      {proposal ? (
+        <section className="assistant-proposal-panel compact" aria-label="CanvasAuthoringProposal">
+          <header>
+            <span>待应用草稿</span>
+            <strong>{proposal.proposal_id}</strong>
+          </header>
+          <p>{proposal.rationale}</p>
+          <ol>
+            {proposal.operations.map((operation, index) => (
+              <li key={`${operation.op}-${index}`}>{authoringOperationSummary(operation)}</li>
+            ))}
+          </ol>
+          {validationErrors.length ? (
+            <div className="assistant-validation invalid">
+              {validationErrors.map((error) => (
+                <p key={error}>{error}</p>
+              ))}
+            </div>
+          ) : null}
+          {validationWarnings.length ? (
+            <div className="assistant-validation warning">
+              {validationWarnings.map((warning) => (
+                <p key={warning}>{warning}</p>
+              ))}
+            </div>
+          ) : null}
+          <button type="button" onClick={onDiscard}>
+            丢弃草稿
+          </button>
+        </section>
+      ) : null}
+      {temporaryDrafts.length ? (
+        <section className="assistant-temp-list compact" aria-label="临时资源">
+          <header>临时资源</header>
+          {temporaryDrafts.map((draft) => (
+            <article key={draft.draft_id}>
+              <strong>{draft.agent_draft.name || draft.draft_id}</strong>
+              <span>{draft.draft_id}</span>
+            </article>
+          ))}
+        </section>
+      ) : null}
+      {requiredActions.length ? (
+        <section className="assistant-required-actions compact" aria-label="Authoring required actions">
+          <header>需要人工动作</header>
+          {requiredActions.map((action, index) => (
+            <article key={`${action.kind}-${index}`}>
+              <strong>{authoringRequiredActionLabel(action.kind)}</strong>
+              <span>{action.reason || action.prompt || action.resource_draft_id || 'Review required'}</span>
+              {action.kind === 'approve_resource_persistence' && action.resource_draft_id ? (
+                <button
+                  type="button"
+                  className="secondary-action compact-action"
+                  disabled={busy || !action.resource_draft_id}
+                  onClick={() => onPersistTemporaryResource(String(action.resource_draft_id))}
+                >
+                  保存为资源
+                </button>
+              ) : null}
+            </article>
+          ))}
+        </section>
+      ) : null}
+      {graphOpsReview ? (
+        <section className="assistant-graphops-review compact" aria-label="GraphOps 持久化预览">
+          <header>
+            <span>GraphOps 持久化预览</span>
+            <strong>{graphOpsReview.proposal.proposal_id}</strong>
+          </header>
+          <ul>
+            {graphOpsCreatedFiles.map((path) => (
+              <li key={path}>{path}</li>
+            ))}
+          </ul>
+          {graphOpsWarnings.length ? <p>Warning: {graphOpsWarnings.join('; ')}</p> : null}
+          <div className="assistant-proposal-actions">
+            <button type="button" onClick={onDiscardGraphOpsReview} disabled={busy}>
+              取消
+            </button>
+            <button
+              type="button"
+              className="primary-action"
+              onClick={() => onApplyGraphOpsReview(graphOpsReview)}
+              disabled={busy}
+            >
+              批准并写入
+            </button>
+          </div>
+        </section>
+      ) : null}
+    </div>
+  );
+}
+
+function SelectedNodeRuntimePane({ model }: { model: SelectedEntityDetailsModel }) {
+  const [tab, setTab] = useState<'live' | 'schema' | 'error'>('live');
+
+  useEffect(() => {
+    setTab('live');
+  }, [model.key]);
+
+  if (!isNodeDetailModel(model)) {
+    return (
+      <section className="selected-node-runtime-pane" aria-label="选中节点输出">
+        <header>
+          <span>选中节点输出</span>
+          <strong>未选择节点</strong>
+        </header>
+        <p className="empty-state">选择一个 Agent/Tool/Workflow 节点查看输出。</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="selected-node-runtime-pane" aria-label="选中节点输出">
+      <header>
+        <div>
+          <span>选中节点输出</span>
+          <strong>{model.title}</strong>
+        </div>
+        <small className={`evidence-dock-status status-${model.status || 'not_run'}`}>
+          {statusLabel(model.status || 'not_run')}
+        </small>
+      </header>
+      <div className="selected-node-runtime-tabs" role="tablist" aria-label="选中节点输出视图">
+        <button type="button" className={tab === 'live' ? 'active' : ''} onClick={() => setTab('live')}>
+          实时输出
+        </button>
+        <button type="button" className={tab === 'schema' ? 'active' : ''} onClick={() => setTab('schema')}>
+          output schema
+        </button>
+        <button type="button" className={tab === 'error' ? 'active' : ''} onClick={() => setTab('error')}>
+          error
+        </button>
+      </div>
+      {tab === 'live' ? <SelectionLiveOutput model={model} /> : null}
+      {tab === 'schema' ? <NodeOutputSchemaPane model={model} /> : null}
+      {tab === 'error' ? <NodeErrorPane model={model} /> : null}
+    </section>
+  );
+}
+
+function SelectionLiveOutput({ model }: { model: SelectedEntityDetailsModel }) {
+  const combinedLog = combinedLogText(model.log);
+  const agentEventLog = agentEventsLiveText(model.events);
+  const visibleLog = [combinedLog || model.log.excerpt, agentEventLog].filter(Boolean).join('\n\n');
+  return (
+    <div className="selection-log-output selection-live-output assistant-runtime-content" role="log" aria-live="polite">
+      {visibleLog.trim() ? <pre>{visibleLog}</pre> : <p className="empty-state">当前节点还没有实时输出。</p>}
+    </div>
+  );
+}
+
+function NodeOutputSchemaPane({ model }: { model: SelectedEntityDetailsModel }) {
+  const nodeSettings = model.nodeSettings;
+  const fields = dedupeSchemaFields([
+    ...(nodeSettings?.outputSchema ? schemaFieldsFromJsonSchema(nodeSettings.outputSchema) : []),
+    ...schemaFieldsFromPorts(undefined, nodeSettings?.outputPorts || []),
+  ]);
+  return (
+    <div className="assistant-runtime-content output-schema-content">
+      <SchemaFieldCards title="output schema" fields={fields} emptyText="当前节点没有声明 output schema。" />
+    </div>
+  );
+}
+
+function NodeErrorPane({ model }: { model: SelectedEntityDetailsModel }) {
+  const failedEvents = model.events
+    .filter((event) => String(event.event || '').includes('failed') || String(event.status || '').includes('failed'))
+    .map(agentEventLiveLine)
+    .filter((line) => line.trim());
+  const errorText = [model.log.stderr, ...failedEvents].filter(Boolean).join('\n\n');
+  return (
+    <div className="selection-log-output assistant-runtime-content error-output" role="log" aria-live="polite">
+      {errorText.trim() ? <pre>{errorText}</pre> : <p className="empty-state">当前节点没有错误输出。</p>}
+    </div>
+  );
+}
+
 function authoringRequiredActionLabel(kind: string): string {
   if (kind === 'ask') {
     return '提问';
@@ -5042,6 +5685,7 @@ function authoringRequiredActionLabel(kind: string): string {
 
 function WorkspaceCanvas({
   canvas,
+  layoutSyncVersion = 0,
   selection,
   connectionMode,
   edgeViewMode,
@@ -5053,6 +5697,7 @@ function WorkspaceCanvas({
   onFocusedWorkflow,
   onCanvasChange,
   onSelect,
+  onOpenNodeDetails,
   onDeleteSelection,
   onConnectionMode,
   onEdgeViewMode,
@@ -5061,6 +5706,7 @@ function WorkspaceCanvas({
   onConfigureWorkflow,
 }: {
   canvas: WorkspaceCanvasModel;
+  layoutSyncVersion?: number;
   selection: CanvasSelection;
   connectionMode: ConnectionMode;
   edgeViewMode: EdgeViewMode;
@@ -5072,6 +5718,7 @@ function WorkspaceCanvas({
   onFocusedWorkflow: (workflowId: string | null) => void;
   onCanvasChange: Dispatch<SetStateAction<WorkspaceCanvasModel>>;
   onSelect: (selection: CanvasSelection) => void;
+  onOpenNodeDetails: (selection: CanvasSelection) => void;
   onDeleteSelection: (selection?: CanvasSelection) => void;
   onConnectionMode: (mode: ConnectionMode) => void;
   onEdgeViewMode: (mode: EdgeViewMode) => void;
@@ -5105,6 +5752,7 @@ function WorkspaceCanvas({
   const lastDragCommitRef = useRef<string | null>(null);
   const forceCommittedProjectionRef = useRef(false);
   const projectionKeysRef = useRef({ identity: '', layout: '' });
+  const layoutSyncVersionRef = useRef(layoutSyncVersion);
   const lastFitViewNodeCountRef = useRef(0);
   const visibleCanvas = useMemo(
     () => focusCanvas(canvas, focusedWorkflowId),
@@ -5286,6 +5934,7 @@ function WorkspaceCanvas({
           }),
         (workflowId, nodeId) =>
           dispatchCanvasInteraction({ type: 'select', intent: { kind: 'internal-node', workflowId, nodeId } }),
+        onOpenNodeDetails,
         onFocusedWorkflow,
         onConfigureWorkflow,
         connectionMode === 'data',
@@ -5301,6 +5950,7 @@ function WorkspaceCanvas({
       selection,
       bindings,
       dispatchCanvasInteraction,
+      onOpenNodeDetails,
       onFocusedWorkflow,
       onConfigureWorkflow,
       connectionMode,
@@ -5324,6 +5974,20 @@ function WorkspaceCanvas({
   );
 
   useEffect(() => {
+    if (layoutSyncVersionRef.current === layoutSyncVersion) {
+      return;
+    }
+    layoutSyncVersionRef.current = layoutSyncVersion;
+    forceCommittedProjectionRef.current = false;
+    projectionKeysRef.current = {
+      identity: projectedIdentityKey,
+      layout: projectedLayoutKey,
+    };
+    flowNodesRef.current = projectedFlowNodes;
+    setFlowNodes(projectedFlowNodes);
+  }, [layoutSyncVersion, projectedFlowNodes, projectedIdentityKey, projectedLayoutKey]);
+
+  useEffect(() => {
     setFlowNodes((current) => {
       const previousKeys = projectionKeysRef.current;
       const hasCurrentNodes = current.length > 0;
@@ -5341,7 +6005,7 @@ function WorkspaceCanvas({
         !hasCurrentNodes ||
         identityChanged ||
         shouldForceCommittedProjection ||
-        (layoutChanged && !draggingRef.current)
+        layoutChanged
           ? projectedFlowNodes
           : reconcileFlowNodes(current, projectedFlowNodes, { preservePositions: true });
       flowNodesRef.current = nextNodes;
@@ -5396,6 +6060,8 @@ function WorkspaceCanvas({
         if (node) {
           commitDraggedFlowNode(node);
         }
+        nodeDragStartPositionRef.current.delete(nodeId);
+        nodeDragEligibleRef.current.delete(nodeId);
       });
     }
     if (hasRemoveChange) {
@@ -5873,6 +6539,26 @@ function WorkspaceCanvas({
     [dispatchCanvasInteraction],
   );
 
+  const handleNodeDoubleClick = useCallback(
+    (event: ReactMouseEvent, node: CanvasFlowNode) => {
+      if (isNodeDetailDoubleClickIgnored(event.target)) {
+        return;
+      }
+      const nextSelection = normalizeSelectionIntent(
+        visibleCanvas,
+        canvas,
+        { kind: 'react-flow-node', flowNodeId: node.id },
+        focusedWorkflowId,
+      );
+      if (nextSelection && isInspectableNodeSelection(nextSelection)) {
+        event.preventDefault();
+        event.stopPropagation();
+        onOpenNodeDetails(nextSelection);
+      }
+    },
+    [canvas, focusedWorkflowId, onOpenNodeDetails, visibleCanvas],
+  );
+
   const handleEdgeClick = useCallback(
     (event: ReactMouseEvent, edge: Edge) => {
       const address = edgeAddressFromFlowEdge(edge);
@@ -5893,10 +6579,7 @@ function WorkspaceCanvas({
     onBlankCanvas();
   }, [dispatchCanvasInteraction, onBlankCanvas]);
 
-  const defaultEdgeOptions = useMemo(
-    () => ({ markerEnd: { type: MarkerType.ArrowClosed } }),
-    [],
-  );
+  const defaultEdgeOptions = useMemo(() => ({}), []);
 
   return (
     <main
@@ -5935,6 +6618,7 @@ function WorkspaceCanvas({
           onConnectEnd={handleConnectEnd}
           onInit={handleInit}
           onNodeClick={handleNodeClick}
+          onNodeDoubleClick={handleNodeDoubleClick}
           onEdgeClick={handleEdgeClick}
           onPaneClick={handlePaneClick}
           onPaneContextMenu={openCreateMenu}
@@ -6146,7 +6830,7 @@ function WorkflowContainer({
         .join(' ')}
       data-testid={`workflow-container-${id}`}
       data-workflow-id={workflow.id}
-      style={{ width: workflow.size.width, minHeight: workflow.size.height }}
+      style={{ width: workflow.size.width, height: workflow.size.height }}
       onPointerDownCapture={(event) => {
         queueControlHandleConnectionStart(event.target, data.onControlHandleMouseDown);
       }}
@@ -6394,7 +7078,7 @@ function WorkflowInternalEdgeLayer({
           <path
             className={item.selected ? 'workflow-internal-edge-visible selected' : 'workflow-internal-edge-visible'}
             d={item.path}
-            markerEnd={`url(#${item.selected ? selectedMarkerId : markerId})`}
+            markerEnd={item.edge.kind === 'data' ? `url(#${item.selected ? selectedMarkerId : markerId})` : undefined}
           />
         </g>
       ))}
@@ -6471,7 +7155,7 @@ function workflowLocalEdgeEndpoint(
 ): { x: number; y: number } | null {
   const endpoint = side === 'source' ? edge.source.workflowId : edge.target.workflowId;
   if (side === 'source' && endpoint === workflowInputBoundaryId(workflow.id)) {
-    return workflowInnerInputPoint();
+    return workflowInnerInputPoint(workflow);
   }
   if (side === 'target' && endpoint === workflowOutputBoundaryId(workflow.id)) {
     return workflowInnerOutputPoint(workflow);
@@ -6494,17 +7178,17 @@ function workflowLocalEdgeEndpoint(
       };
 }
 
-function workflowInnerInputPoint(): { x: number; y: number } {
+function workflowInnerInputPoint(workflow: WorkflowContainerModel): { x: number; y: number } {
   return {
     x: WORKFLOW_INNER_HANDLE_X,
-    y: WORKFLOW_INNER_HANDLE_TOP,
+    y: workflow.size.height / 2,
   };
 }
 
 function workflowInnerOutputPoint(workflow: WorkflowContainerModel): { x: number; y: number } {
   return {
     x: Math.max(WORKFLOW_INNER_HANDLE_X, workflow.size.width - WORKFLOW_INNER_HANDLE_X),
-    y: WORKFLOW_INNER_HANDLE_TOP,
+    y: workflow.size.height / 2,
   };
 }
 
@@ -7154,7 +7838,9 @@ type AgentNodeSettingsModel = {
   input: Record<string, unknown>;
   inputPorts: WorkflowPortView[];
   outputPorts: WorkflowPortView[];
+  outputSchema?: Record<string, unknown>;
   forwardMainOutputOnControl?: boolean | null;
+  emptyInputPolicy?: EmptyInputPolicy;
   run?: NodeRunSummary;
   logs?: NodeLiveLogs;
   preview: Record<string, unknown>;
@@ -7226,6 +7912,7 @@ function AgentNodeSettings({
   onUpdateInput,
   onUpdateLabel,
   onUpdateForwardMainOutput,
+  onUpdateEmptyInputPolicy,
   onUpdateCodexExecutionMode,
   onReadEvidence,
   onOpenCallableResource,
@@ -7236,6 +7923,7 @@ function AgentNodeSettings({
   onUpdateInput: (input: Record<string, unknown>) => void;
   onUpdateLabel: (label: string) => void;
   onUpdateForwardMainOutput: (value: boolean) => void;
+  onUpdateEmptyInputPolicy: (value: EmptyInputPolicy) => void;
   onUpdateCodexExecutionMode: (value: CodexExecutionMode) => void;
   onReadEvidence: (path: string | null | undefined, title?: string) => void;
   onOpenCallableResource: (callableId: string, name: string, kind: 'agent_class' | 'tool_class') => void;
@@ -7252,7 +7940,6 @@ function AgentNodeSettings({
   const metadata = detail?.metadata || {};
   const skills = skillsFromMetadata(metadata);
   const templateKind = detail?.kind === 'tool_class' ? 'tool_class' : 'agent_class';
-  const runLabel = node.run?.run_dir ? shortPath(node.run.run_dir) : '尚未运行';
   const showCodexMode = isCodexAgentNode(node, detail);
 
   return (
@@ -7278,8 +7965,6 @@ function AgentNodeSettings({
           <dd>{node.kind === 'Tool' ? 'Tool' : 'Agent'}</dd>
           <dt>Template</dt>
           <dd>{templateName}</dd>
-          <dt>Run status</dt>
-          <dd>{runLabel}</dd>
         </dl>
         <label className="node-settings-checkbox">
           <input
@@ -7287,7 +7972,17 @@ function AgentNodeSettings({
             checked={node.forwardMainOutputOnControl !== false}
             onChange={(event) => onUpdateForwardMainOutput(event.currentTarget.checked)}
           />
-          <span>通过控制线传递 main 输出</span>
+          <span>输出信息到下一节点</span>
+        </label>
+        <label className="node-settings-checkbox">
+          <input
+            type="checkbox"
+            checked={node.emptyInputPolicy === 'block'}
+            onChange={(event) =>
+              onUpdateEmptyInputPolicy(event.currentTarget.checked ? 'block' : 'allow')
+            }
+          />
+          <span>空输入时阻止运行</span>
         </label>
         {showCodexMode ? (
           <CodexExecutionModeSelector
@@ -7297,7 +7992,12 @@ function AgentNodeSettings({
         ) : null}
       </section>
 
-      <NodePromptEditor nodeKey={node.nodeId} input={node.input} onChange={onUpdateInput} />
+      <NodePromptEditor
+        nodeKey={node.nodeId}
+        input={node.input}
+        systemPrompt={detail?.default_prompt || ''}
+        onChange={onUpdateInput}
+      />
 
       <section className="node-settings-card">
         <div className="node-settings-section-header">
@@ -7334,10 +8034,6 @@ function AgentNodeSettings({
           </div>
         </div>
         {templateDescription ? <p className="template-description">{templateDescription}</p> : null}
-        <section className="template-readonly-block">
-          <h5>System prompt</h5>
-          <p>{detail?.default_prompt || 'No system prompt configured'}</p>
-        </section>
         <section className="template-readonly-block">
           <h5>Skills</h5>
           {skills.length > 0 ? (
@@ -7387,210 +8083,195 @@ function AgentNodeSettings({
   );
 }
 
-function SelectionDetailsDock({
-  state,
-  message,
+function NodeDetailOverlay({
   model,
   callableState,
   runtimeConfig,
   agentSessionState,
-  currentTaskId,
-  selectedRunId,
-  onToggle,
+  artifactCacheByPath,
+  onEnsureArtifactContent,
+  onClose,
   onReadEvidence,
   onRefreshAgentSession,
-  onSubmitAgentTurn,
   onPublishAgentOutput,
   onAnswerAgentInteraction,
   onUpdateInput,
   onUpdateLabel,
   onUpdateForwardMainOutput,
+  onUpdateEmptyInputPolicy,
   onUpdateCodexExecutionMode,
   onOpenCallableResource,
 }: {
-  state: EvidenceDockState;
-  message: string;
   model: SelectedEntityDetailsModel;
   callableState: CallableDetailLoadState;
   runtimeConfig: RuntimeConfig | null;
   agentSessionState: AgentSessionUiState;
-  currentTaskId?: string;
-  selectedRunId?: string | null;
-  onToggle: () => void;
+  artifactCacheByPath: Record<string, ArtifactContent>;
+  onEnsureArtifactContent: (path: string | null | undefined) => Promise<void>;
+  onClose: () => void;
   onReadEvidence: (path: string | null | undefined, title?: string) => void;
   onRefreshAgentSession: () => Promise<void>;
-  onSubmitAgentTurn: (message: string, reason: 'node_chat' | 'output_revision') => Promise<void>;
   onPublishAgentOutput: (expectedTurnId: string) => Promise<void>;
   onAnswerAgentInteraction: (interactionId: string, answer: Record<string, unknown>) => Promise<void>;
   onUpdateInput: (input: Record<string, unknown>) => void;
   onUpdateLabel: (label: string) => void;
   onUpdateForwardMainOutput: (value: boolean) => void;
+  onUpdateEmptyInputPolicy: (value: EmptyInputPolicy) => void;
   onUpdateCodexExecutionMode: (value: CodexExecutionMode) => void;
   onOpenCallableResource: (callableId: string, name: string, kind: 'agent_class' | 'tool_class') => void;
 }) {
-  const openedArtifact = evidenceContentForCurrentSelection(state, {
-    currentTaskId,
-    selectedRunId,
-  });
-  const currentEvidenceTitle = openedArtifact?.name || state.title || '未打开证据';
   return (
-    <footer className={state.open ? 'evidence-dock selection-details-dock open' : 'evidence-dock selection-details-dock'} aria-label="选中对象详情">
-      <button type="button" className="evidence-dock-toggle selection-details-toggle" onClick={onToggle}>
-        <span className={`evidence-dock-status status-${model.status || 'not_run'}`}>
-          {statusLabel(model.status || 'not_run')}
-        </span>
-        <span className="selection-details-title">
-          <strong>{model.title}</strong>
-          {model.subtitle ? <small>{model.subtitle}</small> : null}
-        </span>
-        <span className="evidence-dock-message">{message}</span>
-        <span className="evidence-dock-current">{currentEvidenceTitle}</span>
-        {state.open ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
-      </button>
-      {state.open ? (
-        <div className="selection-details-body">
-          <SelectionLogPane model={model} openedArtifact={openedArtifact} onReadEvidence={onReadEvidence} />
-          <SelectionPropertiesPane
-            model={model}
-            callableState={callableState}
-            runtimeConfig={runtimeConfig}
-            agentSessionState={agentSessionState}
-            onReadEvidence={onReadEvidence}
-            onRefreshAgentSession={onRefreshAgentSession}
-            onSubmitAgentTurn={onSubmitAgentTurn}
-            onPublishAgentOutput={onPublishAgentOutput}
-            onAnswerAgentInteraction={onAnswerAgentInteraction}
-            onUpdateInput={onUpdateInput}
-            onUpdateLabel={onUpdateLabel}
-            onUpdateForwardMainOutput={onUpdateForwardMainOutput}
-            onUpdateCodexExecutionMode={onUpdateCodexExecutionMode}
-            onOpenCallableResource={onOpenCallableResource}
-          />
+    <section className="node-detail-overlay" aria-label="节点详情浮层">
+      <header className="node-detail-overlay-header">
+        <div>
+          <span className={`evidence-dock-status status-${model.status || 'not_run'}`}>
+            {statusLabel(model.status || 'not_run')}
+          </span>
+          <div>
+            <strong>{model.title}</strong>
+            {model.subtitle ? <small>{model.subtitle}</small> : null}
+          </div>
         </div>
-      ) : null}
-    </footer>
+        <button type="button" className="node-detail-close" aria-label="关闭节点详情" onClick={onClose}>
+          ×
+        </button>
+      </header>
+      <div className="node-detail-overlay-body">
+        <SelectionInputPane
+          model={model}
+          artifactCacheByPath={artifactCacheByPath}
+          onEnsureArtifactContent={onEnsureArtifactContent}
+        />
+        <SelectionPropertiesPane
+          model={model}
+          callableState={callableState}
+          runtimeConfig={runtimeConfig}
+          agentSessionState={agentSessionState}
+          onReadEvidence={onReadEvidence}
+          onRefreshAgentSession={onRefreshAgentSession}
+          onPublishAgentOutput={onPublishAgentOutput}
+          onAnswerAgentInteraction={onAnswerAgentInteraction}
+          onUpdateInput={onUpdateInput}
+          onUpdateLabel={onUpdateLabel}
+          onUpdateForwardMainOutput={onUpdateForwardMainOutput}
+          onUpdateEmptyInputPolicy={onUpdateEmptyInputPolicy}
+          onUpdateCodexExecutionMode={onUpdateCodexExecutionMode}
+          onOpenCallableResource={onOpenCallableResource}
+        />
+        <SelectionOutputPane
+          model={model}
+          artifactCacheByPath={artifactCacheByPath}
+          onEnsureArtifactContent={onEnsureArtifactContent}
+        />
+      </div>
+    </section>
   );
 }
 
-function SelectionLogPane({
+function SelectionInputPane({
   model,
-  openedArtifact,
-  onReadEvidence,
+  artifactCacheByPath,
+  onEnsureArtifactContent,
 }: {
   model: SelectedEntityDetailsModel;
-  openedArtifact: ArtifactContent | null;
-  onReadEvidence: (path: string | null | undefined, title?: string) => void;
+  artifactCacheByPath: Record<string, ArtifactContent>;
+  onEnsureArtifactContent: (path: string | null | undefined) => Promise<void>;
 }) {
   const inputAction = evidenceActionByLabel(model.evidenceActions, 'input.json');
+  const inputPath = inputAction?.path || '';
+  const inputArtifact = inputPath ? artifactCacheByPath[inputPath] || null : null;
+
+  useEffect(() => {
+    void onEnsureArtifactContent(inputPath);
+  }, [inputPath, onEnsureArtifactContent]);
+
+  return (
+    <section className="selection-input-pane" aria-label="输入">
+      <header className="selection-pane-header">
+        <div>
+          <span>输入</span>
+          <h3>{model.nodeRun ? shortPath(model.nodeRun.run_dir) : '尚未运行'}</h3>
+        </div>
+        <small title={inputPath || undefined}>{inputPath ? shortPath(inputPath) : '没有可用证据'}</small>
+      </header>
+      <section className="selection-open-artifact inline" aria-label="输入内容">
+        {inputArtifact ? (
+          <SelectionInputArtifact content={inputArtifact} />
+        ) : (
+          <div className="selection-log-output artifact-empty">
+            <p className="empty-state">当前节点还没有真实 input.json。</p>
+          </div>
+        )}
+      </section>
+    </section>
+  );
+}
+
+function SelectionOutputPane({
+  model,
+  artifactCacheByPath,
+  onEnsureArtifactContent,
+}: {
+  model: SelectedEntityDetailsModel;
+  artifactCacheByPath: Record<string, ArtifactContent>;
+  onEnsureArtifactContent: (path: string | null | undefined) => Promise<void>;
+}) {
   const outputAction = evidenceActionByLabel(model.evidenceActions, 'output.json');
-  const defaultOutputView = model.status === 'success' ? 'final' : 'live';
-  const [primaryView, setPrimaryView] = useState<'input' | 'output'>('output');
+  const outputPath = outputAction?.path || '';
+  const outputArtifact = outputPath ? artifactCacheByPath[outputPath] || null : null;
+  const defaultOutputView: 'live' = 'live';
   const [outputView, setOutputView] = useState<'live' | 'final'>(defaultOutputView);
   const [logStream, setLogStream] = useState<'all' | 'stdout' | 'stderr'>('all');
-  const lastArtifactRequestRef = useRef('');
 
   useEffect(() => {
     setOutputView(defaultOutputView);
     setLogStream('all');
-    lastArtifactRequestRef.current = '';
   }, [defaultOutputView, model.key]);
 
   useEffect(() => {
-    const path =
-      primaryView === 'input'
-        ? inputAction?.path
-        : outputView === 'final'
-          ? outputAction?.path
-          : null;
-    const title =
-      primaryView === 'input'
-        ? '输入'
-        : outputView === 'final'
-          ? 'output.json'
-          : '';
-    if (!path || openedArtifact?.path === path) {
-      return;
+    if (outputView === 'final') {
+      void onEnsureArtifactContent(outputPath);
     }
-    const requestKey = `${model.key}:${path}`;
-    if (lastArtifactRequestRef.current === requestKey) {
-      return;
-    }
-    lastArtifactRequestRef.current = requestKey;
-    onReadEvidence(path, title);
-  }, [
-    inputAction?.path,
-    model.key,
-    onReadEvidence,
-    openedArtifact?.path,
-    outputAction?.path,
-    outputView,
-    primaryView,
-  ]);
+  }, [model.status, onEnsureArtifactContent, outputPath, outputView]);
 
   const combinedLog = combinedLogText(model.log);
+  const agentEventLog = agentEventsLiveText(model.events);
   const visibleLog =
     logStream === 'stdout'
       ? model.log.stdout
       : logStream === 'stderr'
         ? model.log.stderr
-        : combinedLog || model.log.excerpt;
-  const selectedArtifactPath = primaryView === 'input' ? inputAction?.path : outputAction?.path;
-  const selectedArtifactNames = primaryView === 'input' ? ['input.json', 'agent_payload.json'] : ['output.json'];
-  const selectedArtifact = artifactMatchesEvidence(openedArtifact, selectedArtifactPath, selectedArtifactNames)
-    ? openedArtifact
-    : null;
-  const showLiveOutput = primaryView === 'output' && outputView === 'live';
-  const showArtifactOutput = primaryView === 'input' || (primaryView === 'output' && outputView === 'final');
-  const debugEvidencePath = selectedArtifactPath || '';
-  const debugRunDir = model.nodeRun?.run_dir || '';
-  const emptyArtifactText =
-    primaryView === 'input'
-      ? '当前节点还没有真实 input.json。'
-      : '当前节点还没有真实 output.json。';
+        : [combinedLog || model.log.excerpt, agentEventLog].filter(Boolean).join('\n\n');
+
   return (
-    <section className="selection-log-pane" aria-label="输入输出">
+    <section className="selection-output-pane" aria-label="输出">
       <header className="selection-pane-header">
         <div>
-          <span>输入 / 输出</span>
-          <h3>{model.nodeRun ? shortPath(model.nodeRun.run_dir) : '尚未运行'}</h3>
+          <span>输出</span>
+          <h3>{outputView === 'final' ? '最终结果' : '实时输出'}</h3>
         </div>
-        <div className="selection-view-tabs" role="tablist" aria-label="输入输出视图">
-          {(['input', 'output'] as const).map((view) => (
-            <button
-              key={view}
-              type="button"
-              className={primaryView === view ? 'active' : ''}
-              onClick={() => setPrimaryView(view)}
-            >
-              {view === 'input' ? '输入' : '输出'}
-            </button>
-          ))}
-        </div>
+        <small title={outputPath || undefined}>{outputPath ? shortPath(outputPath) : '没有可用证据'}</small>
       </header>
-
-      {primaryView === 'output' ? (
-        <div className="selection-output-tabs" role="tablist" aria-label="输出视图">
-          <button
-            type="button"
-            className={outputView === 'live' ? 'active' : ''}
-            onClick={() => setOutputView('live')}
-          >
-            实时输出
-          </button>
-          <button
-            type="button"
-            className={outputView === 'final' ? 'active' : ''}
-            onClick={() => setOutputView('final')}
-            disabled={!outputAction?.path}
-          >
-            output.json
-          </button>
-        </div>
-      ) : null}
-
-      {showLiveOutput ? (
-        <>
-          <div className="selection-log-tabs" role="tablist" aria-label="Live output stream">
+      <div className="selection-output-view-tabs" role="tablist" aria-label="输出视图">
+        <button
+          type="button"
+          className={outputView === 'live' ? 'active' : ''}
+          onClick={() => setOutputView('live')}
+        >
+          实时输出
+        </button>
+        <button
+          type="button"
+          className={outputView === 'final' ? 'active' : ''}
+          onClick={() => setOutputView('final')}
+          disabled={!outputPath}
+        >
+          最终结果
+        </button>
+      </div>
+      {outputView === 'live' ? (
+        <section className="selection-output-content" aria-label="实时输出内容">
+          <div className="selection-log-stream-tabs" role="tablist" aria-label="Live output stream">
             {(['all', 'stdout', 'stderr'] as const).map((tab) => (
               <button
                 key={tab}
@@ -7602,59 +8283,107 @@ function SelectionLogPane({
               </button>
             ))}
           </div>
-          <div className="selection-log-output" role="log" aria-live="polite">
+          <div className="selection-log-output selection-live-output" role="log" aria-live="polite">
             {visibleLog.trim() ? (
               <pre>{visibleLog}</pre>
             ) : (
-              <p className="empty-state">This node has not produced live output yet.</p>
+              <p className="empty-state">当前节点还没有实时输出。</p>
             )}
           </div>
-        </>
-      ) : null}
-
-      {showArtifactOutput ? (
-        <section className="selection-open-artifact inline" aria-label={primaryView === 'input' ? '输入内容' : 'output.json 内容'}>
-          <header className="selection-pane-header compact">
-            <div>
-              <span>{primaryView === 'input' ? '输入' : '最终输出'}</span>
-              <h3>{primaryView === 'input' ? 'input.json' : 'output.json'}</h3>
-            </div>
-            <small>{selectedArtifactPath ? shortPath(selectedArtifactPath) : '没有可用证据'}</small>
-          </header>
-          {selectedArtifact ? (
-            primaryView === 'input' ? (
-              <SelectionInputArtifact content={selectedArtifact} />
-            ) : (
-              <ReadableArtifact content={selectedArtifact} />
-            )
+        </section>
+      ) : (
+        <section className="selection-open-artifact inline selection-output-final" aria-label="最终结果内容">
+          {outputArtifact ? (
+            <ReadableOutputResult content={outputArtifact} />
           ) : (
             <div className="selection-log-output artifact-empty">
-              <p className="empty-state">{emptyArtifactText}</p>
+              <p className="empty-state">当前节点还没有真实 output.json。</p>
             </div>
           )}
         </section>
+      )}
+    </section>
+  );
+}
+
+function SelectionDetailsDock({
+  state,
+  mode,
+  message,
+  model,
+  currentTaskId,
+  selectedRunId,
+  onToggle,
+  assistantContent,
+}: {
+  state: EvidenceDockState;
+  mode: BottomDockMode;
+  message: string;
+  model: SelectedEntityDetailsModel;
+  currentTaskId?: string;
+  selectedRunId?: string | null;
+  onToggle: () => void;
+  assistantContent: ReactNode;
+}) {
+  const openedArtifact = evidenceContentForCurrentSelection(state, {
+    currentTaskId,
+    selectedRunId,
+  });
+  const currentEvidenceTitle =
+    mode === 'assistant' ? 'AI 助手' : openedArtifact?.name || state.title || '未打开证据';
+  return (
+    <footer className={state.open ? 'evidence-dock selection-details-dock open' : 'evidence-dock selection-details-dock'} aria-label="选中对象详情">
+      <button type="button" className="evidence-dock-toggle selection-details-toggle" onClick={onToggle}>
+        <span className={`evidence-dock-status status-${model.status || 'not_run'}`}>
+          {statusLabel(model.status || 'not_run')}
+        </span>
+        <span className="selection-details-title">
+          <strong>{mode === 'assistant' ? 'AI 助手' : model.title}</strong>
+          <small>{mode === 'assistant' ? model.title : model.subtitle || model.scopeLabel}</small>
+        </span>
+        <span className="evidence-dock-message">{mode === 'assistant' ? '对话、修改与选中节点输出' : message}</span>
+        <span className="evidence-dock-current">{currentEvidenceTitle}</span>
+        {state.open ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+      </button>
+      {state.open ? (
+        <div className="selection-details-body">
+          {mode === 'assistant' ? (
+            assistantContent
+          ) : (
+            <EvidenceDockArtifactContent artifact={openedArtifact} fallbackTitle={state.title || currentEvidenceTitle} />
+          )}
+        </div>
       ) : null}
-      <details className="selection-debug-details">
-        <summary>详细信息</summary>
-        <dl>
-          <div>
-            <dt>当前视图</dt>
-            <dd>{primaryView === 'input' ? '输入' : outputView === 'live' ? '实时输出' : 'output.json'}</dd>
-          </div>
-          {debugRunDir ? (
-            <div>
-              <dt>run dir</dt>
-              <dd>{debugRunDir}</dd>
-            </div>
-          ) : null}
-          {debugEvidencePath ? (
-            <div>
-              <dt>artifact</dt>
-              <dd>{debugEvidencePath}</dd>
-            </div>
-          ) : null}
-        </dl>
-      </details>
+    </footer>
+  );
+}
+
+function EvidenceDockArtifactContent({
+  artifact,
+  fallbackTitle,
+}: {
+  artifact: ArtifactContent | null;
+  fallbackTitle: string;
+}) {
+  if (!artifact) {
+    return (
+      <section className="selection-details-empty" aria-label="证据摘要">
+        <span>证据</span>
+        <h3>{fallbackTitle}</h3>
+        <p>当前没有打开的单文件证据。节点输入、输出和属性请双击节点在浮层中查看。</p>
+      </section>
+    );
+  }
+  return (
+    <section className="evidence-artifact-pane" aria-label="证据内容">
+      <header className="evidence-pane-header">
+        <div>
+          <span>证据</span>
+          <h3>{artifact.name || fallbackTitle}</h3>
+        </div>
+        <small title={artifact.path}>{shortPath(artifact.path)}</small>
+      </header>
+      <CodeBlock title={artifact.path} content={artifact.content} variant={artifact.type} />
     </section>
   );
 }
@@ -7676,7 +8405,7 @@ function SelectionInputArtifact({ content }: { content: ArtifactContent }) {
             <span>{block.badge}</span>
             <strong>{block.title}</strong>
           </header>
-          <p>{block.summary}</p>
+          <StructuredValueView value={block.value} />
         </article>
       ))}
     </div>
@@ -7687,7 +8416,7 @@ type InputSourceBlock = {
   id: string;
   badge: string;
   title: string;
-  summary: string;
+  value: unknown;
 };
 
 function inputBlocksFromArtifact(content: ArtifactContent): InputSourceBlock[] {
@@ -7700,12 +8429,12 @@ function inputBlocksFromArtifact(content: ArtifactContent): InputSourceBlock[] {
         id: content.path,
         badge: 'text',
         title: content.name || 'input',
-        summary: compactText(content.content),
+        value: content.content,
       },
     ];
   }
   if (!isPlainRecord(payload)) {
-    return [{ id: 'input', badge: 'value', title: 'input', summary: compactValue(payload) }];
+    return [{ id: 'input', badge: 'value', title: 'input', value: payload }];
   }
   const blocks: InputSourceBlock[] = [];
   for (const [portId, value] of Object.entries(payload)) {
@@ -7722,7 +8451,7 @@ function inputBlocksFromArtifact(content: ArtifactContent): InputSourceBlock[] {
           id: `main:${sourceId}`,
           badge: 'main',
           title: sourceId,
-          summary: compactValue(value.sources[sourceId]),
+          value: value.sources[sourceId],
         });
       }
       continue;
@@ -7731,10 +8460,179 @@ function inputBlocksFromArtifact(content: ArtifactContent): InputSourceBlock[] {
       id: portId,
       badge: portId,
       title: portId === 'main' ? 'main 输入' : `${portId} 输入`,
-      summary: compactValue(value),
+      value,
     });
   }
   return blocks;
+}
+
+function StructuredValueView({ value }: { value: unknown }) {
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return <pre className="selection-readable-text">{String(value) || 'empty'}</pre>;
+  }
+  if (value === null || value === undefined) {
+    return <p className="selection-readable-empty">empty</p>;
+  }
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      return <p className="selection-readable-empty">empty array</p>;
+    }
+    return (
+      <ol className="selection-readable-list">
+        {value.map((item, index) => (
+          <li key={`item-${index}`}>
+            <StructuredValueView value={item} />
+          </li>
+        ))}
+      </ol>
+    );
+  }
+  if (isPlainRecord(value)) {
+    const entries = Object.entries(value);
+    if (entries.length === 0) {
+      return <p className="selection-readable-empty">empty object</p>;
+    }
+    return (
+      <dl className="selection-readable-fields">
+        {entries.map(([key, item]) => (
+          <div key={key}>
+            <dt>{key}</dt>
+            <dd>
+              <StructuredValueView value={item} />
+            </dd>
+          </div>
+        ))}
+      </dl>
+    );
+  }
+  return <pre className="selection-readable-text">{String(value)}</pre>;
+}
+
+function ReadableOutputResult({ content }: { content: ArtifactContent }) {
+  const parsed = parseArtifactPayload(content.content);
+  if (!parsed.ok) {
+    return (
+      <article className="readable-output-result">
+        <section className="readable-output-section">
+          <h4>文本结果</h4>
+          <StructuredValueView value={content.content} />
+        </section>
+      </article>
+    );
+  }
+  return (
+    <article className="readable-output-result">
+      <ReadableOutputPayload value={parsed.value} />
+      <details className="readable-output-raw">
+        <summary>查看原始 JSON</summary>
+        <CodeBlock title={content.path} content={content.content} variant={content.type} />
+      </details>
+    </article>
+  );
+}
+
+function ReadableOutputPayload({ value }: { value: unknown }) {
+  if (!isPlainRecord(value)) {
+    return (
+      <section className="readable-output-section">
+        <h4>结果</h4>
+        <StructuredValueView value={value} />
+      </section>
+    );
+  }
+
+  const priorityKeys = [
+    'summary',
+    'report_markdown',
+    'markdown',
+    'analysis',
+    'conclusion',
+    'recommendation',
+    'recommendations',
+    'findings',
+    'next_actions',
+    'result',
+    'output',
+    'outputs',
+  ];
+  const status = scalarText(value.status);
+  const renderedKeys = new Set<string>();
+  const priorityEntries = priorityKeys
+    .filter((key) => Object.prototype.hasOwnProperty.call(value, key) && !isEmptyInputValue(value[key]))
+    .map((key) => {
+      renderedKeys.add(key);
+      return [key, value[key]] as const;
+    });
+  const remainingEntries = Object.entries(value).filter(
+    ([key, item]) => key !== 'status' && !renderedKeys.has(key) && !isEmptyInputValue(item),
+  );
+
+  if (status) {
+    renderedKeys.add('status');
+  }
+
+  return (
+    <>
+      {status ? (
+        <div className="summary-meta-row">
+          <span>状态：{status}</span>
+        </div>
+      ) : null}
+      {priorityEntries.length || remainingEntries.length ? (
+        <>
+          {priorityEntries.map(([key, item]) => (
+            <section key={key} className="readable-output-section">
+              <h4>{outputFieldLabel(key)}</h4>
+              <StructuredValueView value={item} />
+            </section>
+          ))}
+          {remainingEntries.map(([key, item]) => (
+            <section key={key} className="readable-output-section secondary">
+              <h4>{outputFieldLabel(key)}</h4>
+              <StructuredValueView value={item} />
+            </section>
+          ))}
+        </>
+      ) : (
+        <section className="readable-output-section">
+          <h4>结果</h4>
+          <StructuredValueView value={value} />
+        </section>
+      )}
+    </>
+  );
+}
+
+function parseArtifactPayload(content: string): { ok: true; value: unknown } | { ok: false } {
+  try {
+    return { ok: true, value: JSON.parse(content) as unknown };
+  } catch {
+    return { ok: false };
+  }
+}
+
+function scalarText(value: unknown): string {
+  return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
+    ? String(value)
+    : '';
+}
+
+function outputFieldLabel(key: string): string {
+  const labels: Record<string, string> = {
+    summary: '摘要',
+    report_markdown: '报告',
+    markdown: '正文',
+    analysis: '分析',
+    conclusion: '结论',
+    recommendation: '建议',
+    recommendations: '建议',
+    findings: '发现',
+    next_actions: '下一步',
+    result: '结果',
+    output: '输出',
+    outputs: '命名输出',
+  };
+  return labels[key] || key.replace(/_/gu, ' ');
 }
 
 function isControlMainAggregate(
@@ -7794,12 +8692,12 @@ function SelectionPropertiesPane({
   agentSessionState,
   onReadEvidence,
   onRefreshAgentSession,
-  onSubmitAgentTurn,
   onPublishAgentOutput,
   onAnswerAgentInteraction,
   onUpdateInput,
   onUpdateLabel,
   onUpdateForwardMainOutput,
+  onUpdateEmptyInputPolicy,
   onUpdateCodexExecutionMode,
   onOpenCallableResource,
 }: {
@@ -7809,12 +8707,12 @@ function SelectionPropertiesPane({
   agentSessionState: AgentSessionUiState;
   onReadEvidence: (path: string | null | undefined, title?: string) => void;
   onRefreshAgentSession: () => Promise<void>;
-  onSubmitAgentTurn: (message: string, reason: 'node_chat' | 'output_revision') => Promise<void>;
   onPublishAgentOutput: (expectedTurnId: string) => Promise<void>;
   onAnswerAgentInteraction: (interactionId: string, answer: Record<string, unknown>) => Promise<void>;
   onUpdateInput: (input: Record<string, unknown>) => void;
   onUpdateLabel: (label: string) => void;
   onUpdateForwardMainOutput: (value: boolean) => void;
+  onUpdateEmptyInputPolicy: (value: EmptyInputPolicy) => void;
   onUpdateCodexExecutionMode: (value: CodexExecutionMode) => void;
   onOpenCallableResource: (callableId: string, name: string, kind: 'agent_class' | 'tool_class') => void;
 }) {
@@ -7834,12 +8732,12 @@ function SelectionPropertiesPane({
           agentSessionState={agentSessionState}
           onReadEvidence={onReadEvidence}
           onRefreshAgentSession={onRefreshAgentSession}
-          onSubmitAgentTurn={onSubmitAgentTurn}
           onPublishAgentOutput={onPublishAgentOutput}
           onAnswerAgentInteraction={onAnswerAgentInteraction}
           onUpdateInput={onUpdateInput}
           onUpdateLabel={onUpdateLabel}
           onUpdateForwardMainOutput={onUpdateForwardMainOutput}
+          onUpdateEmptyInputPolicy={onUpdateEmptyInputPolicy}
           onUpdateCodexExecutionMode={onUpdateCodexExecutionMode}
           onOpenCallableResource={onOpenCallableResource}
         />
@@ -7858,10 +8756,10 @@ function SelectionNodeProperties({
   onUpdateInput,
   onUpdateLabel,
   onUpdateForwardMainOutput,
+  onUpdateEmptyInputPolicy,
   onUpdateCodexExecutionMode,
   onReadEvidence,
   onRefreshAgentSession,
-  onSubmitAgentTurn,
   onPublishAgentOutput,
   onAnswerAgentInteraction,
   onOpenCallableResource,
@@ -7873,10 +8771,10 @@ function SelectionNodeProperties({
   onUpdateInput: (input: Record<string, unknown>) => void;
   onUpdateLabel: (label: string) => void;
   onUpdateForwardMainOutput: (value: boolean) => void;
+  onUpdateEmptyInputPolicy: (value: EmptyInputPolicy) => void;
   onUpdateCodexExecutionMode: (value: CodexExecutionMode) => void;
   onReadEvidence: (path: string | null | undefined, title?: string) => void;
   onRefreshAgentSession: () => Promise<void>;
-  onSubmitAgentTurn: (message: string, reason: 'node_chat' | 'output_revision') => Promise<void>;
   onPublishAgentOutput: (expectedTurnId: string) => Promise<void>;
   onAnswerAgentInteraction: (interactionId: string, answer: Record<string, unknown>) => Promise<void>;
   onOpenCallableResource: (callableId: string, name: string, kind: 'agent_class' | 'tool_class') => void;
@@ -7884,16 +8782,10 @@ function SelectionNodeProperties({
   const detail = callableState.detail;
   const templateName = detail ? callableDisplayTitle(detail) : node.callableId || '未绑定模板';
   const templateDescription = detail ? callableDescription(detail) : '';
-  const inputFields = schemaFieldsFromPorts(detail?.input_ports, node.inputPorts);
-  const outputFields = [
-    ...schemaFieldsFromPorts(detail?.output_ports, node.outputPorts),
-    ...schemaFieldsFromArtifactContract(detail?.artifact_contract),
-  ];
   const provider = detail ? providerLabelFromCallable(detail) : node.kind === 'Tool' ? '工具' : '智能体';
   const metadata = detail?.metadata || {};
   const skills = skillsFromMetadata(metadata);
   const templateKind = detail?.kind === 'tool_class' ? 'tool_class' : 'agent_class';
-  const runLabel = node.run?.run_dir ? shortPath(node.run.run_dir) : '尚未运行';
   const showCodexMode = isCodexAgentNode(node, detail);
   return (
     <div className="selection-node-properties">
@@ -7914,10 +8806,6 @@ function SelectionNodeProperties({
           <dd>{node.kind === 'Tool' ? '工具' : '智能体'}</dd>
           <dt>使用模板</dt>
           <dd>{templateName}</dd>
-          <dt>运行状态</dt>
-          <dd>{runLabel}</dd>
-          <dt>Scope</dt>
-          <dd>{node.scopeLabel}</dd>
         </dl>
         <label className="node-settings-checkbox">
           <input
@@ -7925,7 +8813,17 @@ function SelectionNodeProperties({
             checked={node.forwardMainOutputOnControl !== false}
             onChange={(event) => onUpdateForwardMainOutput(event.currentTarget.checked)}
           />
-          <span>通过控制线传递 main 输出</span>
+          <span>输出信息到下一节点</span>
+        </label>
+        <label className="node-settings-checkbox">
+          <input
+            type="checkbox"
+            checked={node.emptyInputPolicy === 'block'}
+            onChange={(event) =>
+              onUpdateEmptyInputPolicy(event.currentTarget.checked ? 'block' : 'allow')
+            }
+          />
+          <span>空输入时阻止运行</span>
         </label>
         {showCodexMode ? (
           <CodexExecutionModeSelector
@@ -7935,11 +8833,12 @@ function SelectionNodeProperties({
         ) : null}
       </section>
 
-      <NodePromptEditor nodeKey={node.nodeId} input={node.input} onChange={onUpdateInput} />
-
-      <RuntimeInputEditor input={node.input} onChange={onUpdateInput} />
-
-      <SelectionRunEvidenceSummary nodeRun={node.run} runtimeConfig={runtimeConfig} />
+      <NodePromptEditor
+        nodeKey={node.nodeId}
+        input={node.input}
+        systemPrompt={detail?.default_prompt || ''}
+        onChange={onUpdateInput}
+      />
 
       <AgentSessionPanel
         node={node}
@@ -7947,7 +8846,6 @@ function SelectionNodeProperties({
         events={agentSessionState.events}
         onReadEvidence={onReadEvidence}
         onRefresh={onRefreshAgentSession}
-        onSubmitTurn={onSubmitAgentTurn}
         onPublish={onPublishAgentOutput}
         onAnswerInteraction={onAnswerAgentInteraction}
       />
@@ -7988,10 +8886,6 @@ function SelectionNodeProperties({
         </div>
         {templateDescription ? <p className="template-description">{templateDescription}</p> : null}
         <section className="template-readonly-block">
-          <h5>系统提示词</h5>
-          <p>{detail?.default_prompt || '未填写系统提示词'}</p>
-        </section>
-        <section className="template-readonly-block">
           <h5>Skills</h5>
           {skills.length > 0 ? (
             <div className="skill-chip-row readonly">
@@ -8005,17 +8899,6 @@ function SelectionNodeProperties({
         </section>
       </section>
 
-      <section className="node-settings-card">
-        <div className="node-settings-section-header">
-          <div>
-            <span className="panel-kicker">输入与输出</span>
-            <h4>这个节点需要什么，会产出什么</h4>
-          </div>
-        </div>
-        <SchemaFieldCards title="输入" fields={inputFields} emptyText="未声明输入字段结构。" />
-        <SchemaFieldCards title="输出" fields={dedupeSchemaFields(outputFields)} emptyText="未声明输出字段结构。" />
-      </section>
-
       <TechnicalDetailsDisclosure node={node} runtimeConfig={runtimeConfig} callableDetail={detail} />
     </div>
   );
@@ -8027,7 +8910,6 @@ function AgentSessionPanel({
   events,
   onReadEvidence,
   onRefresh,
-  onSubmitTurn,
   onPublish,
   onAnswerInteraction,
 }: {
@@ -8036,40 +8918,27 @@ function AgentSessionPanel({
   events: RunEvent[];
   onReadEvidence: (path: string | null | undefined, title?: string) => void;
   onRefresh: () => Promise<void>;
-  onSubmitTurn: (message: string, reason: 'node_chat' | 'output_revision') => Promise<void>;
   onPublish: (expectedTurnId: string) => Promise<void>;
   onAnswerInteraction: (interactionId: string, answer: Record<string, unknown>) => Promise<void>;
 }) {
-  const [messageText, setMessageText] = useState('');
-  const [reason, setReason] = useState<'node_chat' | 'output_revision'>('node_chat');
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState('');
   const session = state.session;
   const draftPath = agentSessionArtifactPath(session, session?.current_output_ref);
   const publishedSessionPath = agentSessionArtifactPath(session, session?.published_output_ref);
+  const outputStateLabel = session
+    ? canPublishAgentOutput(session)
+      ? '有待发布草稿'
+      : session.published_output_turn_id
+        ? '已发布'
+        : '等待输出'
+    : '未绑定';
   const canPublish = Boolean(
     session?.bound_run_id &&
     session?.bound_node_id &&
     session.current_output_turn_id &&
     session.current_output_turn_id !== session.published_output_turn_id,
   );
-
-  async function submitTurn() {
-    const trimmed = messageText.trim();
-    if (!trimmed) {
-      return;
-    }
-    setBusy(true);
-    setActionError('');
-    try {
-      await onSubmitTurn(trimmed, reason);
-      setMessageText('');
-    } catch (error) {
-      setActionError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setBusy(false);
-    }
-  }
 
   async function publishDraft() {
     if (!session?.current_output_turn_id) {
@@ -8103,25 +8972,15 @@ function AgentSessionPanel({
   }
 
   if (!node.run) {
-    return (
-      <section className="node-settings-card agent-session-card" aria-label="Agent Session">
-        <div className="node-settings-section-header">
-          <div>
-            <span className="panel-kicker">Agent Session</span>
-            <h4>尚未创建会话</h4>
-          </div>
-        </div>
-        <p className="empty-state">先运行当前 Agent 节点，Workbench 才能绑定 run node session。</p>
-      </section>
-    );
+    return null;
   }
 
   return (
-    <section className="node-settings-card agent-session-card" aria-label="Agent Session">
+    <section className="node-settings-card agent-session-card" aria-label="Agent 输出状态">
       <div className="node-settings-section-header">
         <div>
-          <span className="panel-kicker">Agent Session</span>
-          <h4>{session?.session_id || '正在绑定节点会话'}</h4>
+          <span className="panel-kicker">Agent 输出</span>
+          <h4>{outputStateLabel}</h4>
         </div>
         <button
           type="button"
@@ -8140,20 +8999,20 @@ function AgentSessionPanel({
 
       {session ? (
         <>
-          <dl className="node-settings-facts agent-session-facts">
-            <dt>session_id</dt>
-            <dd>{session.session_id}</dd>
-            <dt>provider_session_id</dt>
-            <dd>{session.provider_session_id || 'n/a'}</dd>
-            <dt>bound node</dt>
-            <dd>{[session.bound_run_id, session.bound_node_id].filter(Boolean).join(' / ') || 'unbound'}</dd>
-            <dt>last turn</dt>
-            <dd>{session.last_turn_id || 'n/a'} / {session.status || 'unknown'}</dd>
-            <dt>draft turn</dt>
-            <dd>{session.current_output_turn_id || 'n/a'}</dd>
-            <dt>published turn</dt>
-            <dd>{session.published_output_turn_id || 'n/a'}</dd>
-          </dl>
+          <div className="agent-session-status-grid">
+            <div>
+              <span>会话</span>
+              <strong>{session.status || 'ready'}</strong>
+            </div>
+            <div>
+              <span>草稿</span>
+              <strong>{session.current_output_turn_id ? '可用' : '无'}</strong>
+            </div>
+            <div>
+              <span>正式输出</span>
+              <strong>{session.published_output_turn_id ? '已发布' : '未发布'}</strong>
+            </div>
+          </div>
 
           {state.interactions.length > 0 ? (
             <section className="agent-session-subsection" aria-label="Agent approval requests">
@@ -8183,119 +9042,131 @@ function AgentSessionPanel({
             </section>
           ) : null}
 
-          <section className="agent-session-subsection" aria-label="Agent output state">
-            <div className="node-settings-section-header compact">
-              <div>
-                <span className="panel-kicker">输出状态</span>
-                <h5>草稿与已发布输出</h5>
-              </div>
-              <button
-                type="button"
-                className="secondary-action compact-action"
-                disabled={!canPublish || busy}
-                onClick={() => void publishDraft()}
-              >
-                <UploadCloud aria-hidden="true" size={14} />
-                发布为本节点输出
-              </button>
-            </div>
-            <div className="agent-output-actions">
-              <button
-                type="button"
-                className="path-button"
-                disabled={!draftPath}
-                onClick={() => onReadEvidence(draftPath, '待发布草稿 current_output.json')}
-              >
-                <FileText aria-hidden="true" size={16} />
-                <span>待发布草稿</span>
-                <small>{shortPath(draftPath)}</small>
-              </button>
-              <button
-                type="button"
-                className="path-button"
-                disabled={!node.run.output_path}
-                onClick={() => onReadEvidence(node.run?.output_path, '已发布输出 output.json')}
-              >
-                <FileText aria-hidden="true" size={16} />
-                <span>已发布输出</span>
-                <small>{shortPath(node.run.output_path)}</small>
-              </button>
-              <button
-                type="button"
-                className="path-button"
-                disabled={!publishedSessionPath}
-                onClick={() => onReadEvidence(publishedSessionPath, 'session published_output.json')}
-              >
-                <FileText aria-hidden="true" size={16} />
-                <span>Session 发布副本</span>
-                <small>{shortPath(publishedSessionPath)}</small>
-              </button>
-            </div>
-            {!canPublish ? (
-              <p className="muted">没有新的可发布草稿，或当前 session 未绑定 run node。</p>
-            ) : null}
-          </section>
-
-          <section className="agent-session-subsection" aria-label="Agent messages">
-            <h5>消息</h5>
-            <div className="agent-message-list">
-              {state.messages.length === 0 ? <p className="empty-state">暂无会话消息。</p> : null}
-              {state.messages.slice(-8).map((item, index) => (
-                <article key={`${item.turn_id || 'msg'}-${index}`} className={`agent-message role-${item.role}`}>
-                  <strong>{item.role}</strong>
-                  <p>{item.content}</p>
-                  {item.turn_id ? <small>{item.turn_id}</small> : null}
-                </article>
-              ))}
-            </div>
-          </section>
-
-          <section className="agent-session-subsection" aria-label="Agent chat composer">
-            <div className="segmented-control compact-tabs" role="tablist" aria-label="Agent turn reason">
-              <button
-                type="button"
-                className={reason === 'node_chat' ? 'active' : ''}
-                onClick={() => setReason('node_chat')}
-              >
-                <MessageSquare aria-hidden="true" size={14} />
-                对话
-              </button>
-              <button
-                type="button"
-                className={reason === 'output_revision' ? 'active' : ''}
-                onClick={() => setReason('output_revision')}
-              >
-                修订输出
-              </button>
-            </div>
-            <label className="node-settings-field">
-              <span>{reason === 'node_chat' ? '给当前节点发送消息' : '要求当前节点修订待发布输出'}</span>
-              <textarea
-                aria-label="Agent node chat message"
-                rows={4}
-                value={messageText}
-                onChange={(event) => setMessageText(event.target.value)}
-                placeholder="只会发送给当前 run node 绑定的 Agent Session"
-              />
-            </label>
+          <div className="agent-output-primary-actions">
             <button
               type="button"
               className="secondary-action compact-action"
-              disabled={busy || !messageText.trim()}
-              onClick={() => void submitTurn()}
+              disabled={!canPublish || busy}
+              onClick={() => void publishDraft()}
             >
-              <Send aria-hidden="true" size={14} />
-              发送 turn
+              <UploadCloud aria-hidden="true" size={14} />
+              发布为本节点输出
             </button>
-            {state.pendingTurn ? (
-              <p className="muted">正在执行 {state.pendingTurn.turn_id}: {state.pendingTurn.status || 'queued'}</p>
-            ) : null}
-          </section>
+            {!canPublish ? <p className="muted">当前没有新的待发布草稿。</p> : null}
+          </div>
 
-          <AgentEventTimeline events={events} />
+          <AgentSessionDebugDetails
+            session={session}
+            node={node}
+            messages={state.messages}
+            events={events}
+            draftPath={draftPath}
+            publishedSessionPath={publishedSessionPath}
+            onReadEvidence={onReadEvidence}
+          />
         </>
-      ) : null}
+      ) : state.status === 'loading' ? null : (
+        <p className="empty-state">当前 run node 还没有绑定到可读取的 Agent Session。</p>
+      )}
     </section>
+  );
+}
+
+function canPublishAgentOutput(session: AgentSessionRecord): boolean {
+  return Boolean(
+    session.bound_run_id &&
+      session.bound_node_id &&
+      session.current_output_turn_id &&
+      session.current_output_turn_id !== session.published_output_turn_id,
+  );
+}
+
+function AgentSessionDebugDetails({
+  session,
+  node,
+  messages,
+  events,
+  draftPath,
+  publishedSessionPath,
+  onReadEvidence,
+}: {
+  session: AgentSessionRecord;
+  node: AgentNodeSettingsModel;
+  messages: AgentMessage[];
+  events: RunEvent[];
+  draftPath: string | null;
+  publishedSessionPath: string | null;
+  onReadEvidence: (path: string | null | undefined, title?: string) => void;
+}) {
+  return (
+    <details className="agent-session-debug-details">
+      <summary>调试详情</summary>
+      <div className="agent-session-debug-content">
+        <dl className="node-settings-facts agent-session-facts">
+          <dt>session_id</dt>
+          <dd>{session.session_id}</dd>
+          <dt>provider_session_id</dt>
+          <dd>{session.provider_session_id || 'n/a'}</dd>
+          <dt>bound node</dt>
+          <dd>{[session.bound_run_id, session.bound_node_id].filter(Boolean).join(' / ') || 'unbound'}</dd>
+          <dt>last turn</dt>
+          <dd>{session.last_turn_id || 'n/a'} / {session.status || 'unknown'}</dd>
+          <dt>draft turn</dt>
+          <dd>{session.current_output_turn_id || 'n/a'}</dd>
+          <dt>published turn</dt>
+          <dd>{session.published_output_turn_id || 'n/a'}</dd>
+        </dl>
+
+        <div className="agent-output-actions">
+          <button
+            type="button"
+            className="path-button"
+            disabled={!draftPath}
+            onClick={() => onReadEvidence(draftPath, '待发布草稿 current_output.json')}
+          >
+            <FileText aria-hidden="true" size={16} />
+            <span>待发布草稿</span>
+            <small>{shortPath(draftPath)}</small>
+          </button>
+          <button
+            type="button"
+            className="path-button"
+            disabled={!node.run?.output_path}
+            onClick={() => onReadEvidence(node.run?.output_path, '已发布输出 output.json')}
+          >
+            <FileText aria-hidden="true" size={16} />
+            <span>已发布输出</span>
+            <small>{shortPath(node.run?.output_path)}</small>
+          </button>
+          <button
+            type="button"
+            className="path-button"
+            disabled={!publishedSessionPath}
+            onClick={() => onReadEvidence(publishedSessionPath, 'session published_output.json')}
+          >
+            <FileText aria-hidden="true" size={16} />
+            <span>Session 发布副本</span>
+            <small>{shortPath(publishedSessionPath)}</small>
+          </button>
+        </div>
+
+        <section className="agent-session-subsection" aria-label="Agent messages">
+          <h5>会话消息</h5>
+          <div className="agent-message-list">
+            {messages.length === 0 ? <p className="empty-state">暂无会话消息。</p> : null}
+            {messages.slice(-8).map((item, index) => (
+              <article key={`${item.turn_id || 'msg'}-${index}`} className={`agent-message role-${item.role}`}>
+                <strong>{item.role}</strong>
+                <p>{assistantMessageDisplayContent(item.content)}</p>
+                {item.turn_id ? <small>{item.turn_id}</small> : null}
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <AgentEventTimeline events={events} />
+      </div>
+    </details>
   );
 }
 
@@ -8308,7 +9179,7 @@ function AgentEventTimeline({ events, maxEvents = 12 }: { events: RunEvent[]; ma
       {visibleEvents.length === 0 ? <p className="empty-state">暂无 agent 事件。</p> : null}
       <div className="event-timeline compact">
         {visibleEvents.map((event, index) => (
-          <article key={event.event_id || `${event.type || event.event}-${index}`}>
+          <article key={`${event.event_id || event.type || event.event || 'agent_event'}-${index}`}>
             <strong>{String(event.type || event.event || 'agent_event')}</strong>
             <span>{agentEventSummary(event)}</span>
             <small>{event.timestamp || ''}</small>
@@ -8470,58 +9341,6 @@ function agentSessionArtifactPath(session: AgentSessionRecord | null | undefined
   return `${sessionDir.replace(/[\\/]+$/u, '')}/${ref}`;
 }
 
-function SelectionRunEvidenceSummary({
-  nodeRun,
-  runtimeConfig,
-}: {
-  nodeRun?: NodeRunSummary;
-  runtimeConfig: RuntimeConfig | null;
-}) {
-  if (!nodeRun) {
-    return (
-      <section className="node-settings-card">
-        <div className="node-settings-section-header">
-          <div>
-            <span className="panel-kicker">本次运行</span>
-            <h4>尚未运行</h4>
-          </div>
-        </div>
-        <p className="empty-state">运行后这里会显示输入来源、输出摘要和证据路径。</p>
-      </section>
-    );
-  }
-  const inputPorts = inputPortsFromRun(nodeRun);
-  const transferRows = transferRowsFromRun(nodeRun);
-  return (
-    <section className="node-settings-card selection-run-summary-card">
-      <div className="node-settings-section-header">
-        <div>
-          <span className="panel-kicker">本次运行</span>
-          <h4>运行证据摘要</h4>
-        </div>
-      </div>
-      <div className="run-evidence-facts">
-        <EvidenceFact label="状态" value={statusLabel(nodeRun.status)} tone={nodeRun.status} />
-        <EvidenceFact label="Run mode" value={runtimeLabel(runtimeConfig, nodeRun)} />
-        <EvidenceFact label="收到输入端口" value={inputPorts.length ? inputPorts.join(', ') : '未记录'} />
-      </div>
-      {transferRows.length > 0 ? (
-        <div className="evidence-flow-list">
-          {transferRows.map((row) => (
-            <article key={row.key} className="evidence-flow-row">
-              <strong>{row.label}</strong>
-              <span>{row.detail}</span>
-            </article>
-          ))}
-        </div>
-      ) : (
-        <p className="empty-state">没有记录到输入绑定；该节点可能只按控制顺序运行。</p>
-      )}
-      <p className="selection-output-summary">{outputSummaryFromRun(nodeRun)}</p>
-    </section>
-  );
-}
-
 function PropertyGroups({ groups }: { groups: SelectedDetailsPropertyGroup[] }) {
   return (
     <div className="selection-property-groups">
@@ -8550,10 +9369,12 @@ function PropertyGroups({ groups }: { groups: SelectedDetailsPropertyGroup[] }) 
 function NodePromptEditor({
   nodeKey,
   input,
+  systemPrompt,
   onChange,
 }: {
   nodeKey: string;
   input: Record<string, unknown>;
+  systemPrompt: string;
   onChange: (input: Record<string, unknown>) => void;
 }) {
   const initialInputRef = useRef(input);
@@ -8596,15 +9417,12 @@ function NodePromptEditor({
 
   return (
     <section className="node-settings-card node-prompt-card">
-      <div className="node-settings-section-header">
-        <div>
-          <span className="panel-kicker">本次任务</span>
-          <h4>用户提示词</h4>
-        </div>
-      </div>
-      <p className="node-settings-help">这段说明只影响当前画布节点，不会修改智能体模板里的系统提示词。</p>
+      <section className="template-readonly-block prompt-system-block">
+        <h5>系统提示词</h5>
+        <p>{systemPrompt || '未填写系统提示词'}</p>
+      </section>
       <label className="node-settings-field">
-        <span>任务说明</span>
+        <span>User Prompt</span>
         <textarea
           aria-label="用户提示词"
           rows={6}
@@ -8635,115 +9453,6 @@ function NodePromptEditor({
               onChange={(event) => updateJson(event.target.value)}
             />
           </label>
-          {error ? <p className="notice compact-notice">{error}</p> : null}
-        </div>
-      ) : null}
-    </section>
-  );
-}
-
-function RuntimeInputEditor({
-  input,
-  onChange,
-}: {
-  input: Record<string, unknown>;
-  onChange: (input: Record<string, unknown>) => void;
-}) {
-  const staticInput = staticInputFromInvocationInput(input);
-  const [jsonText, setJsonText] = useState(() => JSON.stringify(staticInput, null, 2));
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [error, setError] = useState('');
-  const mainValue = typeof staticInput.main === 'string' ? staticInput.main : '';
-
-  useEffect(() => {
-    setJsonText(JSON.stringify(staticInputFromInvocationInput(input), null, 2));
-    setError('');
-  }, [input]);
-
-  function updateMain(value: string) {
-    const nextStaticInput = { ...staticInputFromInvocationInput(input) };
-    if (value.trim()) {
-      nextStaticInput.main = value;
-    } else {
-      delete nextStaticInput.main;
-    }
-    onChange(mergeInvocationInput(input, promptFromInvocationInput(input), nextStaticInput));
-  }
-
-  function updateJson(value: string) {
-    setJsonText(value);
-    try {
-      const parsed = JSON.parse(value);
-      if (isPlainRecord(parsed)) {
-        setError('');
-        onChange(mergeInvocationInput(input, promptFromInvocationInput(input), parsed));
-        return;
-      }
-      setError('节点运行输入必须是 JSON 对象；当前修改不会提交。');
-    } catch (parseError) {
-      setError(parseError instanceof Error ? parseError.message : String(parseError));
-    }
-  }
-
-  function formatJson() {
-    try {
-      const parsed = JSON.parse(jsonText);
-      if (isPlainRecord(parsed)) {
-        setJsonText(JSON.stringify(parsed, null, 2));
-        setError('');
-        return;
-      }
-      setError('节点运行输入必须是 JSON 对象；当前修改不会提交。');
-    } catch (parseError) {
-      setError(parseError instanceof Error ? parseError.message : String(parseError));
-    }
-  }
-
-  return (
-    <section className="node-settings-card runtime-input-card">
-      <div className="node-settings-section-header">
-        <div>
-          <span className="panel-kicker">运行输入</span>
-          <h4>传给当前节点的输入</h4>
-        </div>
-      </div>
-      <p className="node-settings-help">
-        这里编辑的是当前选中 Agent/Tool 节点的运行时 static input；运行时会进入该节点的 input.json 和 ACC Runtime Input，不会自动传给同一个 Workflow 里的其它节点。
-      </p>
-      <label className="node-settings-field">
-        <span>main</span>
-        <textarea
-          aria-label="运行时输入 main"
-          rows={5}
-          value={mainValue}
-          onChange={(event) => updateMain(event.target.value)}
-          placeholder="填写本次运行要传入当前节点 main 端口的内容"
-        />
-      </label>
-      <div className="inline-action-row">
-        <button type="button" className="secondary-action compact-action" onClick={() => updateMain('')}>
-          清空 main
-        </button>
-        <button type="button" className="secondary-action compact-action" onClick={() => setAdvancedOpen((value) => !value)}>
-          {advancedOpen ? '收起 JSON' : '编辑完整 JSON'}
-        </button>
-      </div>
-      {advancedOpen ? (
-        <div className="advanced-input-editor">
-          <label className="node-settings-field">
-            <span>当前节点运行输入 JSON</span>
-            <textarea
-              aria-label="运行输入 JSON"
-              rows={7}
-              value={jsonText}
-              onChange={(event) => updateJson(event.target.value)}
-            />
-          </label>
-          <div className="inline-action-row">
-            <button type="button" className="secondary-action compact-action" onClick={formatJson}>
-              格式化 JSON
-            </button>
-          </div>
           {error ? <p className="notice compact-notice">{error}</p> : null}
         </div>
       ) : null}
@@ -8892,6 +9601,8 @@ function RightInspector({
   onUpdateInternalLabel,
   onUpdateWorkflowForwardMainOutput,
   onUpdateInternalForwardMainOutput,
+  onUpdateWorkflowEmptyInputPolicy,
+  onUpdateInternalEmptyInputPolicy,
   onUpdateWorkflowCodexExecutionMode,
   onUpdateInternalCodexExecutionMode,
   onOpenCallableResource,
@@ -8942,6 +9653,12 @@ function RightInspector({
     nodeId: string,
     value: boolean,
   ) => void;
+  onUpdateWorkflowEmptyInputPolicy: (workflowId: string, value: EmptyInputPolicy) => void;
+  onUpdateInternalEmptyInputPolicy: (
+    workflowId: string,
+    nodeId: string,
+    value: EmptyInputPolicy,
+  ) => void;
   onUpdateWorkflowCodexExecutionMode: (workflowId: string, value: CodexExecutionMode) => void;
   onUpdateInternalCodexExecutionMode: (
     workflowId: string,
@@ -8986,6 +9703,7 @@ function RightInspector({
             inputPorts: selectedWorkflow.inputPorts,
             outputPorts: selectedWorkflow.outputPorts,
             forwardMainOutputOnControl: selectedWorkflow.forwardMainOutputOnControl,
+            emptyInputPolicy: selectedWorkflow.emptyInputPolicy,
             run: nodeRunForWorkflow(workflowRun, selectedWorkflow),
             logs: nodeLiveLogsFor(liveLogs, nodeRunForWorkflow(workflowRun, selectedWorkflow)),
             preview: workflowInvocationPreview(selectedWorkflow),
@@ -8997,6 +9715,9 @@ function RightInspector({
           onUpdateLabel={(label) => onUpdateWorkflowLabel(selectedWorkflow.id, label)}
           onUpdateForwardMainOutput={(value) =>
             onUpdateWorkflowForwardMainOutput(selectedWorkflow.id, value)
+          }
+          onUpdateEmptyInputPolicy={(value) =>
+            onUpdateWorkflowEmptyInputPolicy(selectedWorkflow.id, value)
           }
           onUpdateCodexExecutionMode={(value) =>
             onUpdateWorkflowCodexExecutionMode(selectedWorkflow.id, value)
@@ -9032,6 +9753,7 @@ function RightInspector({
             inputPorts: selectedInternalNode.inputPorts || [port('main', 'input', 'input')],
             outputPorts: selectedInternalNode.outputPorts || [port('main', 'output', 'output')],
             forwardMainOutputOnControl: selectedInternalNode.forwardMainOutputOnControl,
+            emptyInputPolicy: selectedInternalNode.emptyInputPolicy,
             run: nodeRun,
             logs: nodeLiveLogsFor(liveLogs, nodeRun),
             preview: internalNodeInvocationPreview(selectedInternalNode),
@@ -9043,6 +9765,9 @@ function RightInspector({
           onUpdateLabel={(label) => onUpdateInternalLabel(selectedWorkflow.id, selectedInternalNode.id, label)}
           onUpdateForwardMainOutput={(value) =>
             onUpdateInternalForwardMainOutput(selectedWorkflow.id, selectedInternalNode.id, value)
+          }
+          onUpdateEmptyInputPolicy={(value) =>
+            onUpdateInternalEmptyInputPolicy(selectedWorkflow.id, selectedInternalNode.id, value)
           }
           onUpdateCodexExecutionMode={(value) =>
             onUpdateInternalCodexExecutionMode(selectedWorkflow.id, selectedInternalNode.id, value)
@@ -10773,7 +11498,7 @@ function flowNodeSize(node: CanvasFlowNode): { width: number | string; height: n
 }
 
 function dragCommitKey(node: CanvasFlowNode): string {
-  return `${node.id}:${node.parentId || ''}`;
+  return `${node.id}:${node.parentId || ''}:${Math.round(node.position.x)}:${Math.round(node.position.y)}`;
 }
 
 function toFlowNodes(
@@ -10783,6 +11508,7 @@ function toFlowNodes(
   onSelectWorkflowFn: (workflowId: string) => void,
   onSelectPortFn: (workflowId: string, port: WorkflowPortView) => void,
   onSelectInternalFn: (workflowId: string, nodeId: string) => void,
+  onOpenNodeDetails: (selection: CanvasSelection) => void,
   onOpenFocus: (workflowId: string) => void,
   onConfigureWorkflow: (workflowId: string) => void,
   showDataPorts: boolean,
@@ -10831,6 +11557,7 @@ function toFlowNodes(
         onSelectEdge,
         onSelectPort: onSelectPortFn,
         onSelectInternal: onSelectInternalFn,
+        onOpenNodeDetails,
         onOpenFocus,
         onConfigureWorkflow,
         onResize,
@@ -10842,6 +11569,7 @@ function toFlowNodes(
       id: internalFlowNodeId(workflow.id, node.id),
       type: 'agentToolNode',
       parentId: workflow.id,
+      extent: 'parent',
       position: node.position || defaultInternalNodePosition(index),
       selected:
         selection.type === 'internal' &&
@@ -11010,7 +11738,6 @@ function canvasEdgeToFlowEdge(
       sourceHandle: controlSourceHandleForFlowNode(sourceId, canvasWorkflowId(sourceId, parentWorkflowId), workflowContainerIds, parentWorkflowId),
       targetHandle: controlTargetHandleForFlowNode(targetId, canvasWorkflowId(targetId, parentWorkflowId), workflowContainerIds, parentWorkflowId),
       selected: isSelected,
-      markerEnd: { type: MarkerType.ArrowClosed, color: isSelected ? '#16b89e' : '#f8fafc' },
       className: 'workflow-edge-control',
       style: {
         stroke: isSelected ? '#16b89e' : connectionMode === 'control' ? '#f8fafc' : '#94a3b8',
@@ -11081,7 +11808,6 @@ function shellBoundaryFlowEdge(
     sourceHandle: sourceIsWorkflowInput ? workflowInputInnerSourceHandleId(workflowId) : controlSourceHandleId(sourceId),
     targetHandle: targetIsWorkflowOutput ? workflowOutputInnerTargetHandleId(workflowId) : controlTargetHandleId(targetId),
     selected: isSelected,
-    markerEnd: { type: MarkerType.ArrowClosed, color: isSelected ? '#16b89e' : '#f8fafc' },
     className: 'workflow-edge-control workflow-edge-boundary-main',
     style: {
       stroke: isSelected ? '#16b89e' : '#f8fafc',
@@ -12040,6 +12766,7 @@ function workflowFromGraphNode(
               callableId,
               runtime: callableId,
               codexExecutionMode: codexExecutionModeFromGraphNode(node),
+              emptyInputPolicy: emptyInputPolicyFromGraphNode(node),
             },
           ];
   return {
@@ -12060,6 +12787,7 @@ function workflowFromGraphNode(
     control: node.control,
     outputSchema: outputSchemaFromGraphNode(node),
     forwardMainOutputOnControl: forwardMainOutputFromGraphNode(node),
+    emptyInputPolicy: emptyInputPolicyFromGraphNode(node),
     workflowRef: callableKind === 'workflow_function' ? callableId : node.workflow_ref,
     directory:
       typeof metadata.directory === 'string'
@@ -12114,7 +12842,7 @@ function canvasToWorkflowGraph(canvas: WorkspaceCanvasModel): WorkflowGraph {
       save_mode: 'local_binding',
       default_state_mode: 'stateful',
     },
-    policy: { failure_mode: 'fail_fast', max_concurrency: 4 },
+    policy: { failure_mode: 'fail_fast', max_concurrency: DEFAULT_WORKFLOW_MAX_CONCURRENCY },
     metadata: {
       layout: canvas.layout || 'workspace-canvas',
       root_workflow_id: canvas.rootWorkflowId,
@@ -12265,10 +12993,10 @@ function internalWorkflowToGraph(workflow: WorkflowContainerModel): WorkflowGrap
       save_mode: 'local_binding',
       default_state_mode: 'stateful',
     },
-    policy: { failure_mode: 'fail_fast', max_concurrency: 4 },
+    policy: { failure_mode: 'fail_fast', max_concurrency: DEFAULT_WORKFLOW_MAX_CONCURRENCY },
     metadata: {
       layout: 'workflow-focus',
-      binding_ref: workflow.bindingPath || `bindings/${workflow.id}.binding.local.json`,
+      ...(workflow.bindingPath ? { binding_ref: workflow.bindingPath } : {}),
       workflow_port_edges: boundaryEdges.map(canvasEdgeToGraphMetadataEdge),
     },
   };
@@ -12277,10 +13005,11 @@ function internalWorkflowToGraph(workflow: WorkflowContainerModel): WorkflowGrap
 function internalNodeToGraphNode(node: InternalNodeView): WorkflowGraphNode {
   const callableId = node.callableId || 'fake-agent.generic';
   const codexMode = normalizedCodexExecutionMode(node.codexExecutionMode);
-  const metadata = {
-    ui_label: internalInvocationLabel(node),
-    ...(codexMode !== 'default' ? { codex_execution_mode: codexMode } : {}),
-  };
+  const metadata = invocationMetadata(
+    internalInvocationLabel(node),
+    codexMode,
+    node.emptyInputPolicy,
+  );
   const invocationPolicy = codexInvocationPolicyForMode(codexMode);
   return {
     id: node.id,
@@ -12302,6 +13031,18 @@ function internalNodeToGraphNode(node: InternalNodeView): WorkflowGraphNode {
     position: node.position,
     metadata,
     ...(invocationPolicy ? { invocation_policy: invocationPolicy } : {}),
+  };
+}
+
+function invocationMetadata(
+  label: string,
+  codexMode: CodexExecutionMode,
+  emptyInputPolicy?: EmptyInputPolicy,
+): Record<string, unknown> {
+  return {
+    ui_label: label,
+    ...(codexMode !== 'default' ? { codex_execution_mode: codexMode } : {}),
+    ...(emptyInputPolicy === 'block' ? { empty_input_policy: 'block' } : {}),
   };
 }
 
@@ -12328,7 +13069,7 @@ function workflowInvocationPreview(workflow: WorkflowContainerModel): Record<str
     workflow_call_input_bindings: workflow.sourceKind === 'workflow' ? [] : undefined,
     workflow_call_output_bindings: workflow.sourceKind === 'workflow' ? [] : undefined,
     invocation_policy: codexInvocationPolicyForMode(codexMode),
-    metadata: codexMode !== 'default' ? { codex_execution_mode: codexMode } : undefined,
+    metadata: invocationMetadata(workflowInvocationLabel(workflow), codexMode, workflow.emptyInputPolicy),
   };
 }
 
@@ -12341,7 +13082,7 @@ function internalNodeInvocationPreview(node: InternalNodeView): Record<string, u
     overrides: { static_input: staticInputFromInvocationInput(input) },
     input_bindings: {},
     invocation_policy: codexInvocationPolicyForMode(codexMode),
-    metadata: codexMode !== 'default' ? { codex_execution_mode: codexMode } : undefined,
+    metadata: invocationMetadata(internalInvocationLabel(node), codexMode, node.emptyInputPolicy),
   };
 }
 
@@ -12371,10 +13112,11 @@ function workflowToGraphNode(workflow: WorkflowContainerModel): WorkflowGraphNod
         : {}),
       ...(workflow.outputSchema ? { output_schema: workflow.outputSchema } : {}),
       position: workflow.position,
-      metadata: {
-        ui_label: workflowInvocationLabel(workflow),
-        ...(codexMode !== 'default' ? { codex_execution_mode: codexMode } : {}),
-      },
+      metadata: invocationMetadata(
+        workflowInvocationLabel(workflow),
+        codexMode,
+        workflow.emptyInputPolicy,
+      ),
       ...(invocationPolicy ? { invocation_policy: invocationPolicy } : {}),
     };
   }
@@ -12425,7 +13167,7 @@ function workflowToGraphNode(workflow: WorkflowContainerModel): WorkflowGraphNod
     metadata: { ui_label: workflowInvocationLabel(workflow) },
     ui: {
       semantic_kind: 'workflow_container',
-      binding_ref: workflow.bindingPath || `bindings/${workflow.id}.binding.local.json`,
+      ...(workflow.bindingPath ? { binding_ref: workflow.bindingPath } : {}),
       internal_nodes: workflow.internalNodes,
       internal_edges: workflow.internalEdges.map(canvasEdgeToGraphMetadataEdge),
     },
@@ -12451,6 +13193,10 @@ function normalizedCodexExecutionMode(value: unknown): CodexExecutionMode {
 
 function codexExecutionModeFromGraphNode(node: WorkflowGraphNode): CodexExecutionMode {
   return normalizedCodexExecutionMode(node.metadata?.codex_execution_mode);
+}
+
+function emptyInputPolicyFromGraphNode(node: WorkflowGraphNode): EmptyInputPolicy {
+  return node.metadata?.empty_input_policy === 'block' ? 'block' : 'allow';
 }
 
 function codexInvocationPolicyForMode(
@@ -12701,159 +13447,137 @@ function isActiveCanvasObjectStatus(status: string): boolean {
 function workspaceDemoCanvas(): WorkspaceCanvasModel {
   return {
     id: 'acc_workspace_canvas',
-    name: 'ACC Workspace Canvas',
+    name: '股市调研控制流示例',
     layout: 'workspace-canvas',
     rootWorkflowId: 'Root_Pipeline',
     workflows: [
       {
-        id: 'Research_Flow',
-        title: 'Research_Flow',
-        workflowRef: 'workflows/research.accflow.json',
-        directory: 'workflows/research',
+        id: 'Stock_Target_Agent',
+        title: '美股标的识别',
+        sourceKind: 'agent_session',
+        callableId: 'fake-agent.generic',
+        codexExecutionMode: 'default',
+        directory: 'workflows/demo/stock_target',
         status: 'not_run',
-        inputPorts: [
-          port('in_requirements', '需求文档', 'input'),
-          port('in_constraints', '约束条件', 'input'),
-          port('in_reference', '参考资料', 'input'),
-        ],
-        outputPorts: [
-          port('out_findings', '调研发现', 'output'),
-          port('out_refs', '参考链接', 'output'),
-          port('out_report', '调研报告', 'output'),
-        ],
-        internalNodes: [
-          internalNode('research_codex', 'Codex CLI', '论文与 GDC 调研', 'Agent'),
-          internalNode('research_claude', 'Claude Code', '开源实现分析', 'Agent'),
-          internalNode('research_cursor', 'Cursor', '当前源码检查', 'Agent'),
-          internalNode('research_merge', 'Merge', '调研结果整合', 'Tool'),
-        ],
-        internalEdges: [
-          controlEdge('research_codex', 'research_merge'),
-          controlEdge('research_claude', 'research_merge'),
-          controlEdge('research_cursor', 'research_merge'),
-        ],
-        position: { x: 120, y: 190 },
-        size: DEFAULT_CONTAINER_SIZE,
+        sourceInput: {
+          user_prompt:
+            '从用户给定的主题、新闻线索或候选公司中确定一个可调研的美股标的。若没有明确输入，使用 Microsoft Corporation / MSFT 作为可运行示例，并说明这是演示默认值。',
+        },
+        outputSchema: {
+          type: 'object',
+          required: ['ticker', 'company_name', 'selection_rationale'],
+          properties: {
+            ticker: { type: 'string' },
+            company_name: { type: 'string' },
+            industry: { type: 'string' },
+            core_business: { type: 'string' },
+            selection_rationale: { type: 'string' },
+          },
+        },
+        inputPorts: [port('main', '用户主题或候选公司', 'input')],
+        outputPorts: [port('main', '已确认调研标的', 'output', true)],
+        internalNodes: [],
+        internalEdges: [],
+        position: { x: 90, y: 380 },
+        size: { width: 300, height: 150 },
         warnings: [],
       },
       {
-        id: 'Paper_Digest_Pipeline',
-        title: 'Paper_Digest_Pipeline',
-        workflowRef: 'workflows/paper_digest.accflow.json',
-        directory: 'workflows/paper_digest',
+        id: 'Research_Flow',
+        title: '公司基本面调研',
+        workflowBodyKind: 'inline_container',
+        directory: 'workflows/demo/company_research',
         status: 'not_run',
-        inputPorts: [port('in_reference', '参考资料', 'input')],
+        inputPorts: [
+          port('main', '调研标的', 'input'),
+        ],
         outputPorts: [
-          port('out_digest', '论文精读', 'output'),
-          port('out_refs', '参考链接', 'output'),
+          port('main', '基本面调研结果', 'output', true),
         ],
         internalNodes: [
-          internalNode('paper_reader', 'Codex CLI', '论文结构化精读', 'Agent'),
-          internalNode('paper_extract', 'Artifact Collect', '提取图表与引用', 'Tool'),
+          internalNode('research_codex', 'Codex CLI', '业务模式与收入结构', 'Agent'),
+          internalNode('research_financials', '财报摘要', '收入、利润率与现金流', 'Agent'),
+          internalNode('research_industry', '行业定位', '竞争格局与增长驱动', 'Agent'),
+          internalNode('research_merge', '基本面汇总', '整合业务、财务和行业判断', 'Tool'),
         ],
-        internalEdges: [controlEdge('paper_reader', 'paper_extract')],
-        position: { x: 120, y: 610 },
+        internalEdges: [
+          controlEdge('research_codex', 'research_merge'),
+          controlEdge('research_financials', 'research_merge'),
+          controlEdge('research_industry', 'research_merge'),
+        ],
+        position: { x: 490, y: 170 },
         size: DEFAULT_CONTAINER_SIZE,
         warnings: [],
       },
       {
         id: 'Implementation_Flow',
-        title: 'Implementation_Flow',
-        workflowRef: 'workflows/implementation.accflow.json',
-        directory: 'workflows/implementation',
+        title: '估值与情景分析',
+        workflowBodyKind: 'inline_container',
+        directory: 'workflows/demo/valuation',
         status: 'not_run',
-        inputPorts: [
-          port('in_research_report', '调研报告', 'input', true),
-          port('in_refs', '参考链接', 'input'),
-          port('in_constraints', '约束条件', 'input'),
-        ],
-        outputPorts: [
-          port('out_patch', '代码变更', 'output'),
-          port('out_test_report', '测试报告', 'output'),
-          port('out_artifacts', '实现产物', 'output'),
-        ],
+        inputPorts: [port('main', '基本面调研结果', 'input')],
+        outputPorts: [port('main', '估值判断', 'output', true)],
         internalNodes: [
-          internalNode('impl_cursor', 'Cursor', '代码实现', 'Agent'),
-          internalNode('impl_test', 'Atomic Script', '单元测试', 'Tool'),
-          internalNode('impl_collect', 'Artifact Collect', '收集产物', 'Tool'),
+          internalNode('valuation_model', '估值框架', '收入倍数、利润率和现金流假设', 'Agent'),
+          internalNode('valuation_scenario', '情景分析', '牛熊情景和关键敏感性', 'Agent'),
+          internalNode('valuation_merge', '估值结论', '生成估值区间与风险收益判断', 'Tool'),
         ],
         internalEdges: [
-          controlEdge('impl_cursor', 'impl_test'),
-          controlEdge('impl_test', 'impl_collect'),
+          controlEdge('valuation_model', 'valuation_scenario'),
+          controlEdge('valuation_scenario', 'valuation_merge'),
         ],
-        position: { x: 690, y: 190 },
+        position: { x: 930, y: 80 },
         size: DEFAULT_CONTAINER_SIZE,
         warnings: [],
       },
       {
         id: 'Review_Flow',
-        title: 'Review_Flow',
-        workflowRef: 'workflows/review.accflow.json',
-        directory: 'workflows/review',
+        title: '风险与催化剂评估',
+        workflowBodyKind: 'inline_container',
+        directory: 'workflows/demo/risk_catalyst',
         status: 'not_run',
-        inputPorts: [
-          port('in_patch', '代码变更', 'input', true),
-          port('in_test_report', '测试报告', 'input'),
-          port('in_research_report', '调研报告', 'input'),
-          port('in_paper_digest', '论文精读', 'input'),
-        ],
-        outputPorts: [
-          port('out_review', '评审报告', 'output'),
-          port('out_risk_matrix', '风险矩阵', 'output'),
-          port('out_scorecard', '评分卡', 'output'),
-        ],
+        inputPorts: [port('main', '基本面调研结果', 'input')],
+        outputPorts: [port('main', '风险与催化剂', 'output', true)],
         internalNodes: [
-          internalNode('review_claude', 'Claude Code', '架构评审', 'Agent'),
-          internalNode('review_hermes', 'Hermes Review', '批判性 Review', 'Agent'),
-          internalNode('review_collect', 'Artifact Collect', '评审产物', 'Tool'),
+          internalNode('risk_macro', '宏观与监管风险', '利率、监管、汇率和政策变量', 'Agent'),
+          internalNode('risk_company', '公司特有风险', '竞争、执行、产品和客户集中度', 'Agent'),
+          internalNode('catalyst_scan', '催化剂扫描', '财报、产品、资本开支和新闻事件', 'Agent'),
+          internalNode('risk_collect', '风险汇总', '整合风险矩阵和催化剂清单', 'Tool'),
         ],
         internalEdges: [
-          controlEdge('review_claude', 'review_collect'),
-          controlEdge('review_hermes', 'review_collect'),
+          controlEdge('risk_macro', 'risk_collect'),
+          controlEdge('risk_company', 'risk_collect'),
+          controlEdge('catalyst_scan', 'risk_collect'),
         ],
-        position: { x: 1260, y: 300 },
+        position: { x: 930, y: 480 },
         size: DEFAULT_CONTAINER_SIZE,
         warnings: [],
       },
       {
         id: 'Root_Pipeline',
-        title: 'Root Pipeline',
-        workflowRef: 'root.accflow.json',
-        directory: '',
+        title: '生成投资调研报告',
+        workflowBodyKind: 'inline_container',
+        directory: 'workflows/demo/final_report',
         status: 'not_run',
-        inputPorts: [
-          port('in_final_report', '最终报告输入', 'input'),
-          port('in_risk_matrix', '风险矩阵输入', 'input'),
-          port('in_scorecard', '评分卡输入', 'input'),
-        ],
-        outputPorts: [
-          port('out_final_report', '最终报告', 'output'),
-          port('out_risk_matrix', '风险矩阵', 'output'),
-          port('out_scorecard', '评分卡', 'output'),
-        ],
+        inputPorts: [port('main', '分支分析结果', 'input')],
+        outputPorts: [port('main', '投资调研报告', 'output', true)],
         internalNodes: [
-          internalNode('root_publish', 'Artifact Collect', '发布最终产物', 'Tool'),
+          internalNode('report_writer', '报告撰写', '整合标的、基本面、估值、风险和催化剂', 'Agent'),
+          internalNode('root_publish', 'Artifact Collect', '发布最终调研报告', 'Tool'),
         ],
-        internalEdges: [],
-        position: { x: 1830, y: 300 },
+        internalEdges: [
+          controlEdge('report_writer', 'root_publish'),
+        ],
+        position: { x: 1370, y: 280 },
         size: DEFAULT_CONTAINER_SIZE,
         warnings: [],
       },
     ],
     edges: [
-      dataEdge('Research_Flow', 'out_report', 'Implementation_Flow', 'in_research_report'),
-      dataEdge('Research_Flow', 'out_refs', 'Implementation_Flow', 'in_refs'),
-      dataEdge('Implementation_Flow', 'out_patch', 'Review_Flow', 'in_patch'),
-      dataEdge('Implementation_Flow', 'out_test_report', 'Review_Flow', 'in_test_report'),
-      dataEdge('Research_Flow', 'out_report', 'Review_Flow', 'in_research_report'),
-      dataEdge('Paper_Digest_Pipeline', 'out_digest', 'Review_Flow', 'in_paper_digest'),
-      dataEdge('Review_Flow', 'out_review', 'Root_Pipeline', 'in_final_report'),
-      dataEdge('Review_Flow', 'out_risk_matrix', 'Root_Pipeline', 'in_risk_matrix'),
-      dataEdge('Review_Flow', 'out_scorecard', 'Root_Pipeline', 'in_scorecard'),
+      controlEdge('Stock_Target_Agent', 'Research_Flow'),
       controlEdge('Research_Flow', 'Implementation_Flow'),
-      controlEdge('Implementation_Flow', 'Review_Flow'),
-      controlEdge('Research_Flow', 'Paper_Digest_Pipeline'),
-      controlEdge('Paper_Digest_Pipeline', 'Review_Flow'),
+      controlEdge('Research_Flow', 'Review_Flow'),
+      controlEdge('Implementation_Flow', 'Root_Pipeline'),
       controlEdge('Review_Flow', 'Root_Pipeline'),
     ],
   };
@@ -12914,7 +13638,7 @@ function layoutWorkspaceCanvas(canvas: WorkspaceCanvasModel): WorkspaceCanvasMod
   workflowsWithInternalLayout.forEach((workflow) =>
     layout.setNode(workflow.id, {
       width: workflow.size.width,
-      height: workflow.size.height + 52,
+      height: workflow.size.height,
     }),
   );
   canvas.edges.forEach((edge) => layout.setEdge(edge.source.workflowId, edge.target.workflowId));
@@ -12984,8 +13708,8 @@ function layoutWorkflowInternalNodes(workflow: WorkflowContainerModel): Workflow
   workflow.internalNodes
     .forEach((node) =>
       layout.setNode(node.id, {
-        width: AGENT_TOOL_NODE_SIZE.width,
-        height: AGENT_TOOL_NODE_SIZE.height,
+        width: INTERNAL_AGENT_TOOL_NODE_SIZE.width,
+        height: INTERNAL_AGENT_TOOL_NODE_SIZE.height,
       }),
     );
   layout.setNode(outputBoundaryId, { width: 1, height: 1 });
@@ -13039,8 +13763,8 @@ function layoutWorkflowInternalNodes(workflow: WorkflowContainerModel): Workflow
       ? {
           ...node,
           position: {
-            x: Math.round(position.x - AGENT_TOOL_NODE_SIZE.width / 2 + WORKFLOW_LAYOUT_SAFE_AREA.left),
-            y: Math.round(position.y - AGENT_TOOL_NODE_SIZE.height / 2 + WORKFLOW_LAYOUT_SAFE_AREA.top),
+            x: Math.round(position.x - INTERNAL_AGENT_TOOL_NODE_SIZE.width / 2 + WORKFLOW_LAYOUT_SAFE_AREA.left),
+            y: Math.round(position.y - INTERNAL_AGENT_TOOL_NODE_SIZE.height / 2 + WORKFLOW_LAYOUT_SAFE_AREA.top),
           },
         }
       : node;
@@ -13227,7 +13951,7 @@ function internalNode(
     task,
     kind,
     status: 'not_run',
-    callableId: 'fake-agent.generic',
+    callableId: kind === 'Tool' ? 'merge' : 'fake-agent.generic',
     input: { topic: task || name },
   };
 }
@@ -14736,6 +15460,7 @@ function internalNodeFromExecutableWorkflow(
     outputSchema: workflow.outputSchema || wrapped?.outputSchema,
     forwardMainOutputOnControl:
       workflow.forwardMainOutputOnControl ?? wrapped?.forwardMainOutputOnControl ?? null,
+    emptyInputPolicy: workflow.emptyInputPolicy ?? wrapped?.emptyInputPolicy ?? 'allow',
     position,
   };
 }
@@ -14755,6 +15480,7 @@ function executableWorkflowFromInternalNode(
     control: node.control,
     outputSchema: node.outputSchema,
     forwardMainOutputOnControl: node.forwardMainOutputOnControl ?? null,
+    emptyInputPolicy: node.emptyInputPolicy,
     directory: 'Root canvas environment',
     status: node.status,
     inputPorts: node.inputPorts || [port('main', 'input', 'input')],
@@ -14854,8 +15580,8 @@ function normalizeWorkflowAbsoluteChildBounds(workflow: WorkflowContainerModel):
       return {
         minX: Math.min(bounds.minX, x),
         minY: Math.min(bounds.minY, y),
-        maxX: Math.max(bounds.maxX, x + AGENT_TOOL_NODE_SIZE.width),
-        maxY: Math.max(bounds.maxY, y + AGENT_TOOL_NODE_SIZE.height),
+        maxX: Math.max(bounds.maxX, x + INTERNAL_AGENT_TOOL_NODE_SIZE.width),
+        maxY: Math.max(bounds.maxY, y + INTERNAL_AGENT_TOOL_NODE_SIZE.height),
       };
     },
     {
@@ -14880,8 +15606,8 @@ function normalizeWorkflowChildBounds(nodes: InternalNodeView[]): {
       return {
         minX: Math.min(bounds.minX, x),
         minY: Math.min(bounds.minY, y),
-        maxX: Math.max(bounds.maxX, x + AGENT_TOOL_NODE_SIZE.width),
-        maxY: Math.max(bounds.maxY, y + AGENT_TOOL_NODE_SIZE.height),
+        maxX: Math.max(bounds.maxX, x + INTERNAL_AGENT_TOOL_NODE_SIZE.width),
+        maxY: Math.max(bounds.maxY, y + INTERNAL_AGENT_TOOL_NODE_SIZE.height),
       };
     },
     {
@@ -15188,6 +15914,25 @@ function isTextEditingKeyboardTarget(target: EventTarget | null): boolean {
     return true;
   }
   return Boolean(target.closest('input, textarea, select, [contenteditable="true"], .cm-editor, .monaco-editor'));
+}
+
+function isNodeDetailDoubleClickIgnored(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) {
+    return false;
+  }
+  return Boolean(
+    target.closest(
+      'button, input, textarea, select, [contenteditable="true"], .workflow-port-click-target, .workflow-port-node, .workflow-control-handle, .react-flow__handle',
+    ),
+  );
+}
+
+function isInspectableNodeSelection(selection: CanvasSelection): boolean {
+  return selection.type === 'workflow' || selection.type === 'internal';
+}
+
+function isNodeDetailModel(model: SelectedEntityDetailsModel): boolean {
+  return model.kind === 'node' || model.kind === 'internal-node' || model.kind === 'workflow';
 }
 
 function shouldDisconnectEdgeOnClick(event: { altKey: boolean; button: number }): boolean {
@@ -15503,7 +16248,9 @@ function selectedNodeSettingsModel({
       input: selectedWorkflow.sourceInput || {},
       inputPorts: selectedWorkflow.inputPorts,
       outputPorts: selectedWorkflow.outputPorts,
+      outputSchema: selectedWorkflow.outputSchema,
       forwardMainOutputOnControl: selectedWorkflow.forwardMainOutputOnControl,
+      emptyInputPolicy: selectedWorkflow.emptyInputPolicy,
       run: nodeRun,
       logs: nodeLiveLogsFor(liveLogs, nodeRun),
       preview: workflowInvocationPreview(selectedWorkflow),
@@ -15530,7 +16277,9 @@ function selectedNodeSettingsModel({
       input: selectedInternalNode.input || {},
       inputPorts: selectedInternalNode.inputPorts || [port('main', 'input', 'input')],
       outputPorts: selectedInternalNode.outputPorts || [port('main', 'output', 'output')],
+      outputSchema: selectedInternalNode.outputSchema,
       forwardMainOutputOnControl: selectedInternalNode.forwardMainOutputOnControl,
+      emptyInputPolicy: selectedInternalNode.emptyInputPolicy,
       run: nodeRun,
       logs: nodeLiveLogsFor(liveLogs, nodeRun),
       preview: internalNodeInvocationPreview(selectedInternalNode),
@@ -15675,27 +16424,76 @@ function evidenceActionByLabel(
   return actions.find((action) => action.label === label);
 }
 
-function artifactMatchesEvidence(
-  artifact: ArtifactContent | null,
-  expectedPath: string | null | undefined,
-  acceptedNames: string[],
-): artifact is ArtifactContent {
-  if (!artifact) {
-    return false;
-  }
-  if (expectedPath && artifact.path === expectedPath) {
-    return true;
-  }
-  const artifactName = artifact.name || artifact.path.split(/[\\/]/u).pop() || '';
-  return acceptedNames.includes(artifactName);
-}
-
 function combinedLogText(log: SelectedEntityDetailsModel['log']): string {
   const parts = [
     log.stderr ? `[stderr]\n${log.stderr.trimEnd()}` : '',
     log.stdout ? `[stdout]\n${log.stdout.trimEnd()}` : '',
   ].filter(Boolean);
   return parts.join('\n\n');
+}
+
+function agentEventsLiveText(events: RunEvent[]): string {
+  const lines = events
+    .filter((event) => String(event.type || event.event || '').startsWith('agent_'))
+    .slice(-80)
+    .map(agentEventLiveLine)
+    .filter(Boolean);
+  return lines.length ? ['[agent events]', ...lines].join('\n') : '';
+}
+
+function agentEventLiveLine(event: RunEvent): string {
+  const type = String(event.type || event.event || 'agent_event');
+  const timestamp = event.timestamp ? `${event.timestamp} ` : '';
+  const payload = isPlainRecord(event.payload) ? event.payload : {};
+  if (type === 'agent_message') {
+    const content = stringValue(payload.content);
+    return `${timestamp}assistant: ${compactText(assistantMessageDisplayContent(content))}`;
+  }
+  if (type === 'agent_output_draft') {
+    return `${timestamp}草稿已生成 ${shortPath(stringValue(payload.output_path))}`;
+  }
+  if (type === 'agent_output_published') {
+    return `${timestamp}输出已发布 ${shortPath(stringValue(payload.output_path))}`;
+  }
+  if (type === 'agent_turn_started') {
+    return `${timestamp}agent turn started`;
+  }
+  if (type === 'agent_turn_completed') {
+    return `${timestamp}agent turn completed`;
+  }
+  if (type === 'agent_turn_failed') {
+    return `${timestamp}agent turn failed: ${compactText(stringValue(payload.error) || stringValue(payload.message))}`;
+  }
+  if (type === 'agent_status') {
+    return `${timestamp}${readableAgentStatus(payload)}`;
+  }
+  return `${timestamp}${type}: ${agentEventSummary(event)}`;
+}
+
+function readableAgentStatus(payload: Record<string, unknown>): string {
+  const status = stringValue(payload.status);
+  const item = isPlainRecord(payload.item) ? payload.item : {};
+  const method = stringValue(payload.method);
+  const itemType = stringValue(item.type);
+  const query = stringValue(item.query);
+  const action = isPlainRecord(item.action) ? item.action : {};
+  const actionQuery = stringValue(action.query);
+  const queries = Array.isArray(action.queries)
+    ? action.queries.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    : [];
+  if (query || actionQuery || queries.length) {
+    return `搜索 ${compactText(query || actionQuery || queries.join('; '))}`;
+  }
+  if (itemType === 'reasoning') {
+    return method.endsWith('/completed') ? 'reasoning completed' : 'reasoning started';
+  }
+  if (itemType) {
+    return `${itemType} ${method || status || 'updated'}`;
+  }
+  if (status) {
+    return `status ${status}`;
+  }
+  return 'agent status updated';
 }
 
 function evidenceActionsFromNodeRun(nodeRun?: NodeRunSummary): SelectedDetailsEvidenceAction[] {
@@ -16002,6 +16800,10 @@ function textArtifact(name: string, content: string, type: ArtifactContent['type
   return { name, path: name, content, type, size_bytes: content.length };
 }
 
+function artifactNameFromPath(path: string): string {
+  return path.split(/[\\/]/u).filter(Boolean).pop() || path;
+}
+
 function truncateLargeLog(content: ArtifactContent): ArtifactContent {
   if (content.type !== 'log') {
     return content;
@@ -16058,6 +16860,7 @@ export const __workflowViewerTestables = {
   layoutCanvasForSelection,
   reusableWorkflowClassGraph,
   layoutWorkspaceCanvas,
+  workspaceDemoCanvas,
   nextRootPalettePosition,
   nodeRunForInternalNode,
   normalizeSelectionIntent,

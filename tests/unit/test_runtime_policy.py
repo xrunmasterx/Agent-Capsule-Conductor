@@ -4,11 +4,13 @@ import pytest
 
 from acc.domain import AccError
 from acc.runtime.policy import (
+    DEFAULT_PRODUCTION_CODEX_APP_SERVER_TIMEOUT_SECONDS,
     DEFAULT_PRODUCTION_CODEX_TIMEOUT_SECONDS,
     HERMETIC_RUN_MODE,
     PRODUCTION_RUN_MODE,
     acc_run_mode,
     external_agent_execution_enabled,
+    production_codex_app_server_timeout_seconds,
     production_codex_timeout_seconds,
     use_submit_validate,
     use_supervisor,
@@ -121,3 +123,37 @@ def test_production_codex_timeout_rejects_invalid_values(
 
     with pytest.raises(AccError, match=message):
         production_codex_timeout_seconds()
+
+
+def test_production_codex_app_server_timeout_uses_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("ACC_CODEX_APP_SERVER_TIMEOUT_SECONDS", raising=False)
+
+    assert (
+        production_codex_app_server_timeout_seconds()
+        == DEFAULT_PRODUCTION_CODEX_APP_SERVER_TIMEOUT_SECONDS
+    )
+
+
+def test_production_codex_app_server_timeout_accepts_positive_integer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ACC_CODEX_APP_SERVER_TIMEOUT_SECONDS", "600")
+
+    assert production_codex_app_server_timeout_seconds() == 600
+
+
+@pytest.mark.parametrize(
+    ("value", "message"),
+    [("abc", "must be an integer"), ("0", "must be positive"), ("-1", "must be positive")],
+)
+def test_production_codex_app_server_timeout_rejects_invalid_values(
+    monkeypatch: pytest.MonkeyPatch,
+    value: str,
+    message: str,
+) -> None:
+    monkeypatch.setenv("ACC_CODEX_APP_SERVER_TIMEOUT_SECONDS", value)
+
+    with pytest.raises(AccError, match=message):
+        production_codex_app_server_timeout_seconds()

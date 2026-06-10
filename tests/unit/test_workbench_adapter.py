@@ -238,6 +238,7 @@ def test_workbench_container_compiles_to_child_workflow_bundle(tmp_path: Path) -
     }
     assert "ui" not in root_node
     child = bundle.children["stock_info_collection__New_Workflow.accflow.json"]
+    assert child["policies"] == {"failure_mode": "fail_fast", "max_concurrency": 8}
     assert [node["id"] for node in child["nodes"]] == ["market_news", "market_sentiment"]
     assert child["control_edges"][0]["context"] == "none"
     assert child.get("data_edges", []) == []

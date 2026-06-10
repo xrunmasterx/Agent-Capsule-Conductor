@@ -227,6 +227,45 @@ def test_ready_queue_respects_workflow_max_concurrency(
     assert peak == 2
 
 
+def test_empty_input_policy_block_fails_before_callable(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    workflow_path = tmp_path / "empty_input_block.accflow.json"
+    write_v2(
+        workflow_path,
+        {
+            "schema_version": CORE_V2_SCHEMA_VERSION,
+            "id": "empty_input_block",
+            "version": "0.1.0",
+            "nodes": [
+                {
+                    "id": "identify",
+                    "callable_ref": {"kind": "tool_class", "id": "fake_producer"},
+                    "metadata": {"empty_input_policy": "block"},
+                }
+            ],
+        },
+    )
+    called = False
+
+    async def fake_callable(*args, **kwargs):
+        nonlocal called
+        _ = args, kwargs
+        called = True
+        return {"status": "success"}
+
+    monkeypatch.setattr(core_v2_runtime, "execute_core_v2_callable", fake_callable)
+
+    record = asyncio.run(run_core_v2_workflow_path(workflow_path, tmp_path / "run"))
+
+    assert record.status == "failed"
+    assert called is False
+    assert json.loads((tmp_path / "run" / "nodes" / "identify" / "input.json").read_text()) == {}
+    assert "requires runtime input" in (tmp_path / "run" / "nodes" / "identify" / "stderr.txt").read_text()
+    assert not (tmp_path / "run" / "nodes" / "identify" / "output.json").exists()
+
+
 def test_nested_workflow_function_still_uses_core_v2_nested_path(tmp_path: Path) -> None:
     child_path = tmp_path / "child.accflow.json"
     write_v2(

@@ -1482,6 +1482,19 @@ async def execute_core_v2_node(
                 node_id=node.id,
                 payload=record,
             )
+        if node.metadata.get("empty_input_policy") == "block" and is_empty_runtime_input(agent_payload):
+            message = (
+                f"Node {node.id} requires runtime input, but input.json is empty. "
+                "Provide ticker, theme, main input, or switch empty_input_policy to allow."
+            )
+            append_event(
+                event_log_path,
+                invocation.run_id,
+                "node_input_blocked",
+                node_id=node.id,
+                payload={"reason": "empty_input_policy", "message": message},
+            )
+            raise AccError(message)
 
         output = await execute_core_v2_callable(
             template,
@@ -1580,6 +1593,20 @@ async def execute_core_v2_node(
 class ResolvedNodePayload:
     payload: dict[str, Any]
     binding_records: list[dict[str, Any]]
+
+
+def is_empty_runtime_input(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not value.strip()
+    if isinstance(value, (int, float, bool)):
+        return False
+    if isinstance(value, dict):
+        return all(is_empty_runtime_input(item) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return all(is_empty_runtime_input(item) for item in value)
+    return False
 
 
 def resolve_node_payload(

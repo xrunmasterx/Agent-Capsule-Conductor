@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+
+from acc.adapters.streaming import StreamingAgentTurnRequest, StreamingAgentTurnResult
+from acc.agent_events import append_agent_event
+from acc.app.agent_sessions import AgentTurnService, AgentTurnTaskManager
 
 
 def test_agent_session_api_submits_async_turn(
@@ -147,6 +152,52 @@ def test_workbench_assistant_sse_stream_returns_canonical_events(
     assert "provider_events" not in text
 
 
+def test_agent_turn_task_manager_does_not_duplicate_adapter_failure_event(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("ACC_RUN_MODE", "production")
+    monkeypatch.setenv("ACC_ENABLE_EXTERNAL_AGENT_EXECUTION", "1")
+
+    asyncio.run(run_agent_turn_task_manager_does_not_duplicate_failure_event(tmp_path))
+
+
+async def run_agent_turn_task_manager_does_not_duplicate_failure_event(tmp_path: Path) -> None:
+    service = AgentTurnService(project_root=tmp_path)
+    session = service.create_session(
+        task_id="task",
+        node_id="node",
+        callable_ref={"kind": "agent_class", "id": "node.codex"},
+        runtime="codex_app_server",
+        workspace_ref=str(tmp_path),
+        output_schema=output_schema(),
+    )
+    turn = service.submit_agent_turn(
+        session["session_id"],
+        message="Run once.",
+        reason="node_chat",
+    )
+    manager = AgentTurnTaskManager(project_root=tmp_path)
+
+    manager.submit(
+        session_id=session["session_id"],
+        turn_id=turn["turn_id"],
+        adapter=FailingStreamingAdapter(),
+    )
+    for _ in range(20):
+        if not manager.tasks:
+            break
+        await asyncio.sleep(0.05)
+
+    final_turn = service.get_turn(session["session_id"], turn["turn_id"])
+    events = read_jsonl(
+        Path(session["session_dir"]) / "turns" / turn["turn_id"] / "events.jsonl"
+    )
+
+    assert final_turn["status"] == "failed"
+    assert [event["type"] for event in events].count("agent_turn_failed") == 1
+
+
 def test_agent_session_publish_requires_bound_run_node(
     client: TestClient,
     project_root: Path,
@@ -267,6 +318,32 @@ def output_schema() -> dict:
 
 def write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def read_jsonl(path: Path) -> list[dict]:
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+
+
+class FailingStreamingAdapter:
+    async def run_turn(self, request: StreamingAgentTurnRequest) -> StreamingAgentTurnResult:
+        append_agent_event(
+            request.events_log_path,
+            "agent_turn_failed",
+            session_id=request.session_id,
+            turn_id=request.turn_id,
+            run_id=request.run_id,
+            node_id=request.node_id,
+            payload={"error": "provider failed"},
+        )
+        return StreamingAgentTurnResult(
+            status="failed",
+            summary="provider failed",
+            output_json_path=None,
+            event_log_path=request.events_log_path,
+            provider_event_log_path=request.provider_events_log_path,
+            provider_session_id=None,
+            error="provider failed",
+        )
 
 
 def create_workbench_assistant_session(client: TestClient) -> dict:

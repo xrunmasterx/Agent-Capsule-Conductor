@@ -31,9 +31,11 @@ def build_node_run_projection(
         payload["execution_mode"] = runtime_payload.get("execution_mode")
         payload["adapter"] = runtime_payload.get("adapter")
         payload["binding_resolved"] = runtime_payload.get("binding_materializations") or []
-    payload["log_ref"] = node.log_ref or node.stdout_log
+    effective_stdout = effective_agent_turn_log(run_dir, runtime_payload, "stdout")
+    effective_stderr = effective_agent_turn_log(run_dir, runtime_payload, "stderr")
+    payload["log_ref"] = node.log_ref or effective_stdout or effective_stderr or node.stdout_log
     payload["log_excerpt"] = node.log_excerpt or read_log_excerpt(payload["log_ref"])
-    payload["transcript_ref"] = node.transcript_ref or node.stdout_log
+    payload["transcript_ref"] = node.transcript_ref or effective_stdout or node.stdout_log
     if project_root is not None and payload.get("log_ref"):
         payload["log_ref"] = _relative_or_keep(project_root, payload["log_ref"])
     if project_root is not None and payload.get("transcript_ref"):
@@ -120,6 +122,35 @@ def read_log_excerpt(log_ref: str | None) -> str | None:
     if len(text) <= LOG_EXCERPT_MAX_CHARS:
         return text
     return text[:LOG_EXCERPT_MAX_CHARS] + "\n... [truncated]"
+
+
+def effective_agent_turn_log(run_dir: Path, runtime_payload: Any, stream: str) -> str | None:
+    if not isinstance(runtime_payload, dict):
+        return None
+    session_ref = runtime_payload.get("agent_session_ref")
+    turn_id = runtime_payload.get("turn_id")
+    if not isinstance(session_ref, str) or not isinstance(turn_id, str):
+        return None
+    if turn_id in {"", ".", ".."} or Path(turn_id).name != turn_id or "/" in turn_id or "\\" in turn_id:
+        return None
+    project_root = project_root_for_run_projection(run_dir)
+    agent_sessions_root = (project_root / "runs" / "_agent_sessions").resolve()
+    try:
+        session_dir = Path(session_ref).resolve()
+        session_dir.relative_to(agent_sessions_root)
+    except (OSError, ValueError):
+        return None
+    log_path = session_dir / "turns" / turn_id / f"{stream}.log"
+    return str(log_path) if log_path.exists() and log_path.is_file() else None
+
+
+def project_root_for_run_projection(run_dir: Path) -> Path:
+    resolved = run_dir.resolve()
+    if resolved.parent.name == "nodes" and resolved.parent.parent.parent.name == "runs":
+        return resolved.parent.parent.parent.parent
+    if resolved.parent.name == "runs":
+        return resolved.parent.parent
+    return resolved.parent
 
 
 def _step_summary(payload: dict[str, Any]) -> str:

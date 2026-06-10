@@ -653,6 +653,13 @@ class AgentTurnService:
             raise AccError(f"Agent turn not found: {turn_id}")
         return {**self._turn_payload(turn_dir), "session_id": session_id}
 
+    def is_turn_terminal(self, session_id: str, turn_id: str) -> bool:
+        try:
+            turn = self.get_turn(session_id, turn_id)
+        except AccError:
+            return False
+        return str(turn.get("status") or "") in {"success", "failed", "cancelled", "timeout"}
+
     def validate_assistant_draft(self, session_id: str, *, expected_turn_id: str) -> dict[str, Any]:
         session_dir = self._find_session_dir(session_id)
         state = require_object(load_json(session_dir / "session.json"), "session.json")
@@ -1053,7 +1060,8 @@ class AgentTurnTaskManager:
         try:
             await service.execute_agent_turn(session_id, turn_id)
         except Exception as exc:
-            service.mark_turn_failed(session_id, turn_id, str(exc))
+            if not service.is_turn_terminal(session_id, turn_id):
+                service.mark_turn_failed(session_id, turn_id, str(exc))
         finally:
             current = self.tasks.get(key)
             if current is asyncio.current_task():

@@ -38,6 +38,7 @@ async def run_thread_start_turn_start(tmp_path: Path) -> None:
     writes = read_jsonl(tmp_path / "rpc_writes.jsonl")
     initialize = next(item for item in writes if item.get("method") == "initialize")
     assert initialize["params"]["clientInfo"]["name"] == "acc"
+    assert initialize["params"]["capabilities"]["experimentalApi"] is True
 
 
 def test_codex_app_server_adapter_resumes_prior_thread(tmp_path: Path) -> None:

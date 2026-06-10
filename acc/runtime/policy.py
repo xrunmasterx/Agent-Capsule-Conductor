@@ -7,6 +7,7 @@ from acc.domain import AccError
 HERMETIC_RUN_MODE = "hermetic"
 PRODUCTION_RUN_MODE = "production"
 DEFAULT_PRODUCTION_CODEX_TIMEOUT_SECONDS = 900
+DEFAULT_PRODUCTION_CODEX_APP_SERVER_TIMEOUT_SECONDS = 600
 TRUTHY_ENV_VALUES = {"1", "true", "yes"}
 FALSY_ENV_VALUES = {"0", "false", "no"}
 
@@ -62,3 +63,16 @@ def production_codex_timeout_seconds() -> int:
             raise AccError("ACC_CODEX_TIMEOUT_SECONDS must be positive")
         return value
     return DEFAULT_PRODUCTION_CODEX_TIMEOUT_SECONDS
+
+
+def production_codex_app_server_timeout_seconds() -> int:
+    raw_value = os.getenv("ACC_CODEX_APP_SERVER_TIMEOUT_SECONDS")
+    if raw_value:
+        try:
+            value = int(raw_value)
+        except ValueError as exc:
+            raise AccError("ACC_CODEX_APP_SERVER_TIMEOUT_SECONDS must be an integer") from exc
+        if value <= 0:
+            raise AccError("ACC_CODEX_APP_SERVER_TIMEOUT_SECONDS must be positive")
+        return value
+    return DEFAULT_PRODUCTION_CODEX_APP_SERVER_TIMEOUT_SECONDS

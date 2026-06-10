@@ -38,6 +38,15 @@ const runSummary = {
   ],
 };
 
+const longCodexInputTail = 'FULL_INPUT_TAIL_MARKER';
+const longCodexInput = `Company profile ${'Microsoft cloud productivity platform business context. '.repeat(14)}${longCodexInputTail}`;
+const codexOutputFixture = JSON.stringify({
+  status: 'success',
+  summary: 'Codex agent output fixture',
+  analysis: 'Readable analysis fixture extracted from output JSON.',
+  recommendations: ['Keep deterministic formatter coverage'],
+});
+
 const routes: Record<string, unknown> = {
   '/api/runs': { version: '2.0', runs: [runSummary] },
   '/api/runs/ui_acceptance_fake': runSummary,
@@ -345,15 +354,15 @@ const routes: Record<string, unknown> = {
     path: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_codex/input.json',
     name: 'input.json',
     type: 'json',
-    content: '{"topic":"Codex CLI","upstream":"真实上游输入"}',
-    size_bytes: 49,
+    content: JSON.stringify({ topic: 'Codex CLI', upstream: '真实上游输入', context: longCodexInput }),
+    size_bytes: 49 + longCodexInput.length,
   },
   '/api/artifacts/read?path=runs%2Fui_workflow_acc_workspace_canvas_fixture%2Fnodes%2FResearch_Flow%2Finternal%2Fresearch_codex%2Foutput.json': {
     path: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_codex/output.json',
     name: 'output.json',
     type: 'json',
-    content: '{"status":"success","summary":"Codex agent output fixture"}',
-    size_bytes: 59,
+    content: codexOutputFixture,
+    size_bytes: codexOutputFixture.length,
   },
   '/api/graphops/examples': {
     patches: [
@@ -464,6 +473,7 @@ function workspaceCanvasRunSummary(runId: string) {
         event_log: `runs/${runId}/nodes/Research_Flow/internal/research_codex/events.jsonl`,
         stdout_log: `runs/${runId}/nodes/Research_Flow/internal/research_codex/stdout.log`,
         stderr_log: `runs/${runId}/nodes/Research_Flow/internal/research_codex/stderr.log`,
+        log_excerpt: 'Codex live stream fixture line',
         output_preview: {
           status: 'success',
           summary: 'Codex agent output fixture',
@@ -953,8 +963,8 @@ beforeEach(() => {
             path: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_codex/input.json',
             name: 'input.json',
             type: 'json',
-            content: '{"topic":"Codex CLI","upstream":"真实上游输入"}',
-            size_bytes: 49,
+            content: JSON.stringify({ topic: 'Codex CLI', upstream: '真实上游输入', context: longCodexInput }),
+            size_bytes: 49 + longCodexInput.length,
           }),
           { status: 200, headers: { 'Content-Type': 'application/json' } },
         );
@@ -970,8 +980,8 @@ beforeEach(() => {
             path: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_codex/output.json',
             name: 'output.json',
             type: 'json',
-            content: '{"status":"success","summary":"Codex agent output fixture"}',
-            size_bytes: 59,
+            content: codexOutputFixture,
+            size_bytes: codexOutputFixture.length,
           }),
           { status: 200, headers: { 'Content-Type': 'application/json' } },
         );
@@ -1270,18 +1280,17 @@ describe('Agent Callable Workbench editable UI', () => {
     await loadWorkspaceDemo(user);
 
     const canvas = await screen.findByLabelText('任务画布');
-    expect(canvas).toHaveTextContent('Research_Flow');
-    expect(canvas).toHaveTextContent('Implementation_Flow');
-    expect(canvas).toHaveTextContent('Review_Flow');
-    expect(canvas).toHaveTextContent('Paper_Digest_Pipeline');
-    expect(canvas).toHaveTextContent('workflows/research');
+    expect(canvas).toHaveTextContent('美股标的识别');
+    expect(canvas).toHaveTextContent('公司基本面调研');
+    expect(canvas).toHaveTextContent('估值与情景分析');
+    expect(canvas).toHaveTextContent('风险与催化剂评估');
+    expect(canvas).toHaveTextContent('workflows/demo/company_research');
     const toolbar = await screen.findByLabelText('工作流工具栏');
     expect(within(toolbar).getByRole('button', { name: /^运行详情$/i })).toBeInTheDocument();
     await user.click(within(await screen.findByLabelText('连接模式')).getByRole('button', { name: '数据' }));
-    expect(canvas).toHaveTextContent('in_requirements');
-    expect(canvas).toHaveTextContent('out_report');
+    expect(canvas).toHaveTextContent('main');
     expect(canvas).toHaveTextContent('Codex CLI');
-    expect(canvas).toHaveTextContent('Merge');
+    expect(canvas).toHaveTextContent('基本面汇总');
   });
 
   test('Primary navigation shows readable Chinese icon labels', async () => {
@@ -1391,7 +1400,7 @@ describe('Agent Callable Workbench editable UI', () => {
 
     await user.click(within(workbench).getByRole('button', { name: '任务总览' }));
     const taskList = await screen.findByLabelText('任务列表');
-    await user.click(within(taskList).getByRole('button', { name: /选择任务 ACC Workspace Canvas/ }));
+    await user.click(within(taskList).getByRole('button', { name: /选择任务 股市调研控制流示例/ }));
     await user.click(within(workbench).getByRole('button', { name: '任务蓝图' }));
 
     const restoredWorkflow = await screen.findByTestId('workflow-container-Research_Flow');
@@ -1443,14 +1452,18 @@ describe('Agent Callable Workbench editable UI', () => {
 
     const agentNode = await screen.findByTestId('agent-tool-node-fake_agent_generic');
     fireEvent.click(agentNode);
-    expect(await screen.findByLabelText('选中对象详情')).toHaveTextContent('Fake Agent');
+    expect(screen.queryByLabelText('节点详情浮层')).not.toBeInTheDocument();
+    fireEvent.doubleClick(agentNode);
+    expect(await screen.findByLabelText('节点详情浮层')).toHaveTextContent('Fake Agent');
+    await user.click(screen.getByRole('button', { name: '关闭节点详情' }));
 
     const workspaceCanvas = await screen.findByLabelText('任务画布');
     const pane = workspaceCanvas.querySelector('.react-flow__pane');
     expect(pane).toBeInTheDocument();
     fireEvent.pointerDown(pane as Element);
     fireEvent.click(pane as Element);
-    expect(screen.getByLabelText('选中对象详情')).toHaveTextContent('任务画布');
+    expect(screen.getByLabelText('选中对象详情')).toHaveTextContent('任务 1');
+    expect(screen.queryByLabelText('节点详情浮层')).not.toBeInTheDocument();
     expect(workspaceCanvas.querySelector('.canvas-selection-frame')).not.toBeInTheDocument();
   });
 
@@ -1463,6 +1476,7 @@ describe('Agent Callable Workbench editable UI', () => {
 
     const agentNode = await screen.findByTestId('agent-tool-node-fake_agent_generic');
     fireEvent.click(agentNode);
+    fireEvent.doubleClick(agentNode);
     const promptEditor = await screen.findByLabelText('用户提示词');
     await user.clear(promptEditor);
     await user.type(promptEditor, 'abc');
@@ -2068,7 +2082,7 @@ describe('Agent Callable Workbench editable UI', () => {
       left: item.position.x,
       top: item.position.y,
       right: item.position.x + 276,
-      bottom: item.position.y + 132,
+      bottom: item.position.y + 158,
     }));
 
     for (let index = 0; index < rects.length; index += 1) {
@@ -2083,8 +2097,8 @@ describe('Agent Callable Workbench editable UI', () => {
       if (!item.position) {
         throw new Error(`Missing positioned node: ${item.id}`);
       }
-      expect(item.position.x).toBeGreaterThanOrEqual(96);
-      expect(item.position.y).toBeGreaterThanOrEqual(154);
+      expect(item.position.x).toBeGreaterThanOrEqual(64);
+      expect(item.position.y).toBeGreaterThanOrEqual(146);
     }
     expect(node('intake').position.x).toBeLessThan(node('architecture').position.x);
     expect(node('intake').position.x).toBeLessThan(node('risk').position.x);
@@ -2093,7 +2107,7 @@ describe('Agent Callable Workbench editable UI', () => {
     expect(Math.abs(node('risk').position.x - node('test').position.x)).toBeLessThanOrEqual(1);
     expect(node('synthesis').position.x).toBeGreaterThan(node('architecture').position.x);
     expect(node('review').position.x).toBeGreaterThan(node('synthesis').position.x);
-    expect(nextWorkflow.size.width).toBeGreaterThanOrEqual(node('review').position.x + 276 + 96);
+    expect(nextWorkflow.size.width).toBeGreaterThanOrEqual(node('review').position.x + 276 + 64);
   });
 
   test('Workflow auto layout uses boundary edges to rank input and output nodes', () => {
@@ -2193,13 +2207,13 @@ describe('Agent Callable Workbench editable UI', () => {
       ...nextWorkflow.internalNodes.map((node: any) => node.position.x + 276),
     );
     const maxChildY = Math.max(
-      ...nextWorkflow.internalNodes.map((node: any) => node.position.y + 132),
+      ...nextWorkflow.internalNodes.map((node: any) => node.position.y + 158),
     );
 
     expect(nextWorkflow.size.width).toBeLessThan(workflow.size.width);
     expect(nextWorkflow.size.height).toBeLessThan(workflow.size.height);
-    expect(nextWorkflow.size.width).toBeGreaterThanOrEqual(maxChildX + 96);
-    expect(nextWorkflow.size.height).toBeGreaterThanOrEqual(maxChildY + 72);
+    expect(nextWorkflow.size.width).toBeGreaterThanOrEqual(maxChildX + 64);
+    expect(nextWorkflow.size.height).toBeGreaterThanOrEqual(maxChildY + 56);
   });
 
   test('Workflow container expansion keeps child absolute position when expanding left or up', () => {
@@ -2273,7 +2287,7 @@ describe('Agent Callable Workbench editable UI', () => {
 
     expect(expanded.position).toEqual(workflow.position);
     expect(expanded.size.width).toBe(800);
-    expect(expanded.size.height).toBe(556);
+    expect(expanded.size.height).toBe(582);
   });
 
   test('Center-locked workflow expansion preserves child absolute position', () => {
@@ -2393,6 +2407,150 @@ describe('Agent Callable Workbench editable UI', () => {
     expect(merge.position.x).toBeGreaterThan(codex.position.x);
     expect(research.size.width).toBeGreaterThanOrEqual(430);
     expect(research.size.height).toBeGreaterThanOrEqual(328);
+  });
+
+  test('Workspace auto layout keeps stock research workflow containers from overlapping', () => {
+    const controlEdge = (source: string, target: string) => ({
+      id: `control_${source}_${target}`,
+      kind: 'control',
+      source: { workflowId: source },
+      target: { workflowId: target },
+    });
+    const internalNode = (id: string) => ({
+      id,
+      name: id,
+      task: 'fake-agent.generic',
+      kind: 'Agent',
+      status: 'not_run',
+      position: { x: 12, y: 12 },
+    });
+    const workflow = (id: string, internalNodes: any[], internalEdges: any[]) => ({
+      id,
+      title: id,
+      sourceKind: 'workflow',
+      directory: 'workspace',
+      status: 'not_run',
+      inputPorts: [],
+      outputPorts: [],
+      position: { x: 120, y: 120 },
+      size: { width: 430, height: 328 },
+      warnings: [],
+      internalNodes,
+      internalEdges,
+    });
+    const canvas: any = {
+      id: 'root_task',
+      name: 'Root Task',
+      rootWorkflowId: 'root_task',
+      layout: 'workspace-canvas',
+      workflows: [
+        {
+          id: 'target',
+          title: 'Target',
+          sourceKind: 'agent_session',
+          callableId: 'fake-agent.generic',
+          directory: 'workspace',
+          status: 'not_run',
+          inputPorts: [],
+          outputPorts: [],
+          internalNodes: [],
+          internalEdges: [],
+          position: { x: 120, y: 120 },
+          size: { width: 300, height: 150 },
+          warnings: [],
+        },
+        workflow(
+          'research',
+          [internalNode('business'), internalNode('financials'), internalNode('industry'), internalNode('merge')],
+          [controlEdge('business', 'merge'), controlEdge('financials', 'merge'), controlEdge('industry', 'merge')],
+        ),
+        workflow(
+          'valuation',
+          [internalNode('model'), internalNode('scenario'), internalNode('valuation_merge')],
+          [controlEdge('model', 'scenario'), controlEdge('scenario', 'valuation_merge')],
+        ),
+        workflow(
+          'risk',
+          [internalNode('macro'), internalNode('company'), internalNode('catalyst'), internalNode('risk_merge')],
+          [controlEdge('macro', 'risk_merge'), controlEdge('company', 'risk_merge'), controlEdge('catalyst', 'risk_merge')],
+        ),
+        workflow(
+          'final',
+          [internalNode('writer'), internalNode('publish')],
+          [controlEdge('writer', 'publish')],
+        ),
+      ],
+      edges: [
+        controlEdge('target', 'research'),
+        controlEdge('research', 'valuation'),
+        controlEdge('research', 'risk'),
+        controlEdge('valuation', 'final'),
+        controlEdge('risk', 'final'),
+      ],
+    };
+
+    const laidOut = __workflowViewerTestables.layoutWorkspaceCanvas(canvas);
+    const rootRects = laidOut.workflows.map((item: any) => ({
+      id: item.id,
+      left: item.position.x,
+      top: item.position.y,
+      right: item.position.x + item.size.width,
+      bottom: item.position.y + item.size.height,
+    }));
+    for (let index = 0; index < rootRects.length; index += 1) {
+      for (let otherIndex = index + 1; otherIndex < rootRects.length; otherIndex += 1) {
+        const a = rootRects[index];
+        const b = rootRects[otherIndex];
+        const overlap = a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+        expect(overlap, `${a.id} overlaps ${b.id}`).toBe(false);
+      }
+    }
+    for (const item of laidOut.workflows) {
+      for (const node of item.internalNodes || []) {
+        if (!node.position) {
+          throw new Error(`Missing positioned node: ${item.id}/${node.id}`);
+        }
+        expect(node.position.x + 276, `${item.id}/${node.id} overflows width`).toBeLessThanOrEqual(item.size.width);
+        expect(node.position.y + 158, `${item.id}/${node.id} overflows height`).toBeLessThanOrEqual(item.size.height);
+      }
+    }
+  });
+
+  test('Loaded workspace demo uses the global layout contract', () => {
+    const canvas = __workflowViewerTestables.layoutWorkspaceCanvas(
+      __workflowViewerTestables.workspaceDemoCanvas(),
+    );
+    const rootRects = canvas.workflows.map((item: any) => ({
+      id: item.id,
+      left: item.position.x,
+      top: item.position.y,
+      right: item.position.x + item.size.width,
+      bottom: item.position.y + item.size.height,
+    }));
+
+    for (let index = 0; index < rootRects.length; index += 1) {
+      for (let otherIndex = index + 1; otherIndex < rootRects.length; otherIndex += 1) {
+        const a = rootRects[index];
+        const b = rootRects[otherIndex];
+        const overlap = a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+        expect(overlap, `${a.id} overlaps ${b.id}`).toBe(false);
+      }
+    }
+    for (const workflow of canvas.workflows) {
+      for (const node of workflow.internalNodes || []) {
+        if (!node.position) {
+          throw new Error(`Missing positioned node: ${workflow.id}/${node.id}`);
+        }
+        expect(node.position.x, `${workflow.id}/${node.id} left overflow`).toBeGreaterThanOrEqual(0);
+        expect(node.position.y, `${workflow.id}/${node.id} top overflow`).toBeGreaterThanOrEqual(0);
+        expect(node.position.x + 276, `${workflow.id}/${node.id} right overflow`).toBeLessThanOrEqual(
+          workflow.size.width,
+        );
+        expect(node.position.y + 158, `${workflow.id}/${node.id} bottom overflow`).toBeLessThanOrEqual(
+          workflow.size.height,
+        );
+      }
+    }
   });
 
   test('Selected workflow auto layout only changes that workflow internals', () => {
@@ -2560,7 +2718,7 @@ describe('Agent Callable Workbench editable UI', () => {
     const savedPayload = JSON.parse(String(saveCall?.[1]?.body));
     expect(savedPayload.graph.policy).toEqual({
       failure_mode: 'fail_fast',
-      max_concurrency: 4,
+      max_concurrency: 8,
     });
   });
 
@@ -2580,11 +2738,16 @@ describe('Agent Callable Workbench editable UI', () => {
     expect(saveCall).toBeTruthy();
     const savedPayload = JSON.parse(String(saveCall?.[1]?.body));
     expect(savedPayload.graph.nodes).toHaveLength(5);
-    expect(savedPayload.graph.nodes[0].kind).toBe('workflow');
-    expect(savedPayload.graph.nodes[0].input_ports.length).toBeGreaterThan(0);
-    expect(savedPayload.graph.nodes[0].output_ports.length).toBeGreaterThan(0);
+    expect(savedPayload.graph.nodes.some((node: { kind?: string }) => node.kind === 'agent_session')).toBe(true);
+    expect(savedPayload.graph.nodes.some((node: { kind?: string }) => node.kind === 'workflow')).toBe(true);
+    expect(savedPayload.graph.nodes.every((node: { input_ports?: unknown[] }) => (node.input_ports || []).length > 0)).toBe(
+      true,
+    );
+    expect(
+      savedPayload.graph.nodes.every((node: { output_ports?: unknown[] }) => (node.output_ports || []).length > 0),
+    ).toBe(true);
     expect(savedPayload.graph.control_edges.length).toBeGreaterThan(0);
-    expect(savedPayload.graph.data_edges.length).toBeGreaterThan(0);
+    expect(savedPayload.graph.data_edges).toHaveLength(0);
     expect(savedPayload.graph.metadata.directory_display_only).toBe(true);
     expect(savedPayload.graph.nodes.every((node: { relative_cwd?: string }) => !node.relative_cwd)).toBe(true);
     expect(savedPayload.graph.workspace_policy).toEqual({
@@ -2678,8 +2841,9 @@ describe('Agent Callable Workbench editable UI', () => {
     const savedPayload = JSON.parse(String(saveCall?.[1]?.body));
     expect(savedPayload.graph.id).toBe('acc_workspace_canvas');
     expect(savedPayload.graph.nodes.length).toBeGreaterThan(0);
-    expect(savedPayload.graph.nodes[0].kind).toBe('workflow');
-    expect(savedPayload.graph.nodes[0].ui.internal_nodes.length).toBeGreaterThan(0);
+    const savedResearchFlow = savedPayload.graph.nodes.find((node: { id?: string }) => node.id === 'Research_Flow');
+    expect(savedResearchFlow?.kind).toBe('workflow');
+    expect(savedResearchFlow?.ui.internal_nodes.length).toBeGreaterThan(0);
     expect(savedPayload.graph.control_edges.length).toBeGreaterThan(0);
   });
 
@@ -2892,7 +3056,7 @@ describe('Agent Callable Workbench editable UI', () => {
     expect(researchFlow.position).toBeTruthy();
     expect(dropped.position.x + 260).toBeLessThanOrEqual(900);
     expect(JSON.stringify(researchFlow.ui.internal_nodes)).toContain('Wide Tool');
-    expect(getComputedStyle(await screen.findByLabelText('Research_Flow internal nodes')).overflow).not.toBe(
+    expect(getComputedStyle(await screen.findByLabelText('公司基本面调研 internal nodes')).overflow).not.toBe(
       'auto',
     );
   });
@@ -2945,8 +3109,8 @@ describe('Agent Callable Workbench editable UI', () => {
     await user.click(within(toolbar).getByRole('button', { name: /^运行详情$/i }));
     const detailsDock = await screen.findByLabelText('选中对象详情');
     expect(detailsDock).toBeInTheDocument();
-    expect(detailsDock).toHaveTextContent('输入 / 输出');
-    expect(detailsDock).toHaveTextContent('节点属性');
+    expect(detailsDock).not.toHaveTextContent('输入 / 输出');
+    expect(detailsDock).not.toHaveTextContent('节点属性');
     expect(screen.queryByRole('button', { name: /Connect Last Two/i })).not.toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: /\u4fdd\u5b58/i }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole('button', { name: /校验/i }).length).toBeGreaterThan(0);
@@ -2956,9 +3120,9 @@ describe('Agent Callable Workbench editable UI', () => {
     expect(screen.getByRole('button', { name: /显示控制边/i })).toBeInTheDocument();
     fireEvent.pointerDown(workspaceCanvas);
     fireEvent.click(workspaceCanvas);
-    expect(screen.getByLabelText('选中对象详情')).toHaveTextContent('任务画布');
+    expect(screen.getByLabelText('选中对象详情')).toHaveTextContent('任务 1');
     await user.click(within(detailsDock).getAllByRole('button')[0]);
-    await waitFor(() => expect(within(detailsDock).queryByText('输入 / 输出')).not.toBeInTheDocument());
+    expect(within(detailsDock).queryByText('输入 / 输出')).not.toBeInTheDocument();
   });
 
   test('Workbench AI assistant generates and applies a canvas-local proposal', async () => {
@@ -2971,21 +3135,33 @@ describe('Agent Callable Workbench editable UI', () => {
 
     const assistantMessages = await screen.findByLabelText('AI 助手消息');
     expect(assistantMessages).toHaveTextContent('等待输入需求');
+    expect(await screen.findByLabelText('AI 助手底部面板')).toBeInTheDocument();
+    expect(document.querySelector('.canvas-drawer.assistant-drawer')).toBeNull();
+    expect(screen.getByRole('button', { name: '对话模式' })).toHaveClass('active');
+    await user.click(screen.getByRole('button', { name: '修改模式' }));
 
     await user.type(
       screen.getByPlaceholderText('描述要生成或调整的 workflow 草稿'),
       'Create a research and review workflow',
     );
-    await user.click(screen.getByRole('button', { name: /提交 turn|生成 Proposal/u }));
+    await user.click(screen.getByRole('button', { name: /生成修改/u }));
 
     expect(await screen.findByLabelText('CanvasAuthoringProposal')).toHaveTextContent('canvas_proposal_backend');
-    await user.click(screen.getByRole('button', { name: '应用到当前画布' }));
+    const beforeNodeCount = screen.queryAllByTestId(/agent-tool-node-/).length;
+    await user.click(screen.getByRole('button', { name: '应用修改' }));
 
     await waitFor(() => {
       const nodes = screen.getAllByTestId(/agent-tool-node-/);
-      expect(nodes.length).toBeGreaterThanOrEqual(1);
+      expect(nodes.length).toBeGreaterThan(beforeNodeCount);
     });
     expect(screen.queryByLabelText('CanvasAuthoringProposal')).not.toBeInTheDocument();
+    const undoButton = screen.getByRole('button', { name: '撤回节点' });
+    expect(undoButton).toBeEnabled();
+    await user.click(undoButton);
+    await waitFor(() => {
+      expect(screen.queryAllByTestId(/agent-tool-node-/)).toHaveLength(beforeNodeCount);
+    });
+    expect(screen.getByLabelText('AI 助手消息')).toHaveTextContent('已撤回上一次 AI 应用到画布的修改。');
   });
 
   test('Workbench AI assistant resets conversation state when switching tasks', async () => {
@@ -2994,19 +3170,23 @@ describe('Agent Callable Workbench editable UI', () => {
 
     await openNavIndex(user, 0);
     await user.click(await screen.findByRole('button', { name: /AI \u52a9\u624b/i }));
+    await user.click(screen.getByRole('button', { name: '修改模式' }));
 
     const longPrompt = '这是一个很长的旧任务需求 '.repeat(24);
     fireEvent.change(
       screen.getByPlaceholderText('\u63cf\u8ff0\u8981\u751f\u6210\u6216\u8c03\u6574\u7684 workflow \u8349\u7a3f'),
       { target: { value: longPrompt } },
     );
-    await user.click(screen.getByRole('button', { name: /\u63d0\u4ea4 turn|\u751f\u6210 Proposal/u }));
+    await user.click(screen.getByRole('button', { name: /生成修改/u }));
     await waitFor(() => {
       expect(screen.getByLabelText('AI \u52a9\u624b\u6d88\u606f')).toHaveTextContent(longPrompt.slice(0, 16));
     });
 
     const workbench = await screen.findByLabelText('ACC Workbench');
     await user.click(within(workbench).getByRole('button', { name: '\u65b0\u5efa\u4efb\u52a1' }));
+    if (!screen.queryByLabelText('AI \u52a9\u624b\u6d88\u606f')) {
+      await user.click((await screen.findAllByRole('button', { name: /AI \u52a9\u624b/i }))[0]);
+    }
 
     await waitFor(() => {
       expect(screen.getByLabelText('AI \u52a9\u624b\u6d88\u606f')).not.toHaveTextContent(longPrompt.slice(0, 16));
@@ -3021,12 +3201,13 @@ describe('Agent Callable Workbench editable UI', () => {
 
     await openNavIndex(user, 0);
     await user.click(await screen.findByRole('button', { name: /AI 助手/i }));
+    await user.click(screen.getByRole('button', { name: '修改模式' }));
     await user.type(
       screen.getByPlaceholderText('描述要生成或调整的 workflow 草稿'),
       'create a new agent template for reporting',
     );
-    await user.click(screen.getByRole('button', { name: /提交 turn|生成 Proposal/u }));
-    await user.click(await screen.findByRole('button', { name: '应用到当前画布' }));
+    await user.click(screen.getByRole('button', { name: /生成修改/u }));
+    await user.click(await screen.findByRole('button', { name: '应用修改' }));
     await waitFor(() => {
       expect(window.localStorage.getItem('acc.workbench.tasks.v1') || '').toContain('tmp_agent_');
     });
@@ -3061,12 +3242,13 @@ describe('Agent Callable Workbench editable UI', () => {
 
     await openNavIndex(user, 0);
     await user.click(await screen.findByRole('button', { name: /AI \u52a9\u624b/i }));
+    await user.click(screen.getByRole('button', { name: '修改模式' }));
     await user.type(
       screen.getByPlaceholderText('\u63cf\u8ff0\u8981\u751f\u6210\u6216\u8c03\u6574\u7684 workflow \u8349\u7a3f'),
       'create a new agent template for reporting',
     );
-    await user.click(screen.getByRole('button', { name: /\u63d0\u4ea4 turn|\u751f\u6210 Proposal/u }));
-    await user.click(await screen.findByRole('button', { name: '\u5e94\u7528\u5230\u5f53\u524d\u753b\u5e03' }));
+    await user.click(screen.getByRole('button', { name: /生成修改/u }));
+    await user.click(await screen.findByRole('button', { name: '应用修改' }));
     vi.mocked(fetch).mockClear();
 
     await user.click(await screen.findByRole('button', { name: '保存为资源' }));
@@ -3140,7 +3322,7 @@ describe('Agent Callable Workbench editable UI', () => {
     const savedPayload = JSON.parse(String(saveCall?.[1]?.body));
     const runPayload = JSON.parse(String(runCall?.[1]?.body));
     expect(savedPayload.graph.nodes).toHaveLength(5);
-    expect(savedPayload.graph.data_edges.length).toBeGreaterThan(0);
+    expect(savedPayload.graph.data_edges).toHaveLength(0);
     expect(savedPayload.graph.control_edges.length).toBeGreaterThan(0);
     expect(workflowSaveCalls).toHaveLength(2);
     expect(runPayload.graph.id).toMatch(/^ui_workflow_acc_workspace_canvas_/);
@@ -3148,20 +3330,30 @@ describe('Agent Callable Workbench editable UI', () => {
       save_mode: 'local_binding',
       default_state_mode: 'stateful',
     });
+    expect(runPayload.graph.policy).toEqual({
+      failure_mode: 'fail_fast',
+      max_concurrency: 8,
+    });
     expect(await screen.findByText(/ui_workflow_acc_workspace_canvas_fixture: 成功/i)).toBeInTheDocument();
   });
 
-  test('Selected node runtime input is submitted as that node invocation input', async () => {
+  test('Selected node inspector keeps runtime input out of the middle properties panel', async () => {
     const user = userEvent.setup();
     render(<App />);
 
     await openNavIndex(user, 0);
     await loadWorkspaceDemo(user);
 
-    fireEvent.click(await screen.findByTestId('agent-tool-node-Research_Flow__internal__research_codex'));
-    const runtimeInput = await screen.findByLabelText('运行时输入 main');
-    await user.clear(runtimeInput);
-    await user.type(runtimeInput, '请分析新的技术方案评审需求');
+    const researchCodexNode = await screen.findByTestId('agent-tool-node-Research_Flow__internal__research_codex');
+    fireEvent.click(researchCodexNode);
+    fireEvent.doubleClick(researchCodexNode);
+    const nodeOverlay = await screen.findByLabelText('节点详情浮层');
+    expect(within(nodeOverlay).queryByLabelText('运行时输入 main')).not.toBeInTheDocument();
+    expect(within(nodeOverlay).queryByLabelText('运行输入 JSON')).not.toBeInTheDocument();
+    expect(nodeOverlay).not.toHaveTextContent('传给当前节点的输入');
+    const userPrompt = within(nodeOverlay).getByLabelText('用户提示词');
+    await user.clear(userPrompt);
+    await user.type(userPrompt, '请分析新的技术方案评审需求');
 
     await user.click(await screen.findByRole('button', { name: '运行当前任务' }));
 
@@ -3175,7 +3367,8 @@ describe('Agent Callable Workbench editable UI', () => {
     const targetNode = containerNode?.ui?.internal_nodes?.find(
       (node: { id?: string }) => node.id === 'research_codex',
     );
-    expect(targetNode?.input).toMatchObject({ main: '请分析新的技术方案评审需求' });
+    expect(targetNode?.input).toMatchObject({ user_prompt: '请分析新的技术方案评审需求' });
+    expect(targetNode?.input).not.toHaveProperty('main', '请分析新的技术方案评审需求');
   });
 
   test('Workflow node inspector shows real input and output evidence after a run', async () => {
@@ -3188,32 +3381,55 @@ describe('Agent Callable Workbench editable UI', () => {
     const codexNode = codexLabel.closest('[role="group"]');
     expect(codexNode).toBeTruthy();
     fireEvent.click(codexNode as HTMLElement);
+    expect(screen.queryByLabelText('节点详情浮层')).not.toBeInTheDocument();
+    fireEvent.doubleClick(codexNode as HTMLElement);
+    let nodeOverlay = await screen.findByLabelText('节点详情浮层');
+    expect(nodeOverlay).toHaveTextContent('输入');
+    expect(nodeOverlay).toHaveTextContent('节点属性');
+    expect(nodeOverlay).toHaveTextContent('输出');
 
     const toolbar = await screen.findByLabelText('工作流工具栏');
     await user.click(within(toolbar).getByRole('button', { name: /^运行$/i }));
     await screen.findByText(/ui_workflow_acc_workspace_canvas_fixture: 成功/i);
 
-    const detailsDock = await screen.findByLabelText('选中对象详情');
+    nodeOverlay = await screen.findByLabelText('节点详情浮层');
 
-    expect(detailsDock).toHaveTextContent('系统提示词');
-    expect(within(detailsDock).queryByRole('textbox', { name: /系统提示词/ })).not.toBeInTheDocument();
-    expect(detailsDock).toHaveTextContent('运行证据摘要');
-    expect(detailsDock).toHaveTextContent('控制线 main 传输');
-    expect(detailsDock).toHaveTextContent('Codex agent output fixture');
-    expect(within(detailsDock).getByRole('button', { name: /^output\.json$/i })).toBeEnabled();
+    expect(nodeOverlay).toHaveTextContent('系统提示词');
+    expect(within(nodeOverlay).queryByRole('textbox', { name: /系统提示词/ })).not.toBeInTheDocument();
+    expect(nodeOverlay).toHaveTextContent('User Prompt');
+    expect(nodeOverlay).toHaveTextContent('输出信息到下一节点');
+    expect(nodeOverlay).not.toHaveTextContent('通过控制线传递 main 输出');
+    expect(nodeOverlay).not.toHaveTextContent('运行状态');
+    expect(nodeOverlay).not.toHaveTextContent('Scope');
+    expect(nodeOverlay).not.toHaveTextContent('本次任务');
+    expect(nodeOverlay).not.toHaveTextContent('任务说明');
+    expect((nodeOverlay.textContent || '').indexOf('系统提示词')).toBeLessThan(
+      (nodeOverlay.textContent || '').indexOf('User Prompt'),
+    );
+    expect(nodeOverlay).not.toHaveTextContent('传给当前节点的输入');
+    expect(within(nodeOverlay).queryByLabelText('Agent chat composer')).not.toBeInTheDocument();
+    expect(within(nodeOverlay).queryByLabelText('Agent node chat message')).not.toBeInTheDocument();
+    expect(await screen.findByLabelText('Agent 输出状态')).toHaveTextContent('有待发布草稿');
+    expect(within(nodeOverlay).getByRole('button', { name: /^最终结果$/i })).toBeEnabled();
+    expect(nodeOverlay).toHaveTextContent('Codex live stream fixture line');
 
-    await user.click(within(detailsDock).getByRole('button', { name: /^输入$/i }));
     const evidencePane = await screen.findByLabelText('输入内容');
-    expect(evidencePane).toHaveTextContent('input.json');
+    expect(nodeOverlay).toHaveTextContent('input.json');
     expect(evidencePane).toHaveTextContent('Codex CLI');
     expect(evidencePane).toHaveTextContent('真实上游输入');
+    expect(evidencePane).toHaveTextContent(longCodexInputTail);
+    expect(evidencePane).not.toHaveTextContent(`${longCodexInput.slice(0, 420)}...`);
 
-    await user.click(within(detailsDock).getByRole('button', { name: /^输出$/i }));
-    await user.click(within(detailsDock).getByRole('button', { name: /^output\.json$/i }));
-    expect(await screen.findByLabelText('output.json 内容')).toHaveTextContent('Codex agent output fixture');
+    await user.click(within(nodeOverlay).getByRole('button', { name: /^最终结果$/i }));
+    const outputPane = await screen.findByLabelText('最终结果内容');
+    expect(outputPane).toHaveTextContent('摘要');
+    expect(outputPane).toHaveTextContent('Codex agent output fixture');
+    expect(outputPane).toHaveTextContent('分析');
+    expect(outputPane).toHaveTextContent('Readable analysis fixture extracted from output JSON.');
+    expect(outputPane).toHaveTextContent('查看原始 JSON');
   });
 
-  test('Selected agent node exposes bound session chat draft and publish controls', async () => {
+  test('Selected agent node exposes output draft publish controls without inline chat composer', async () => {
     const user = userEvent.setup();
     render(<App />);
 
@@ -3223,24 +3439,17 @@ describe('Agent Callable Workbench editable UI', () => {
     const codexNode = codexLabel.closest('[role="group"]');
     expect(codexNode).toBeTruthy();
     fireEvent.click(codexNode as HTMLElement);
+    fireEvent.doubleClick(codexNode as HTMLElement);
 
     const toolbar = await screen.findByLabelText('工作流工具栏');
     await user.click(within(toolbar).getByRole('button', { name: /^运行$/i }));
     await screen.findByText(/ui_workflow_acc_workspace_canvas_fixture: 成功/i);
 
-    expect(await screen.findByLabelText('Agent Session')).toHaveTextContent(
-      'agent_session_research_codex',
-    );
-    expect(screen.getByLabelText('Agent timeline')).toHaveTextContent('agent_output_draft');
+    const outputState = await screen.findByLabelText('Agent 输出状态');
+    expect(outputState).toHaveTextContent('有待发布草稿');
+    expect(screen.queryByLabelText('Agent chat composer')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Agent node chat message')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /发布为本节点输出/i })).toBeEnabled();
-
-    await user.type(screen.getByLabelText('Agent node chat message'), '请修订摘要');
-    await user.click(screen.getByRole('button', { name: /发送 turn/i }));
-
-    await waitFor(() => {
-      expect(screen.getByLabelText('Agent messages')).toHaveTextContent('请修订摘要');
-    });
-    expect(screen.getByLabelText('Agent messages')).toHaveTextContent('Hermetic agent turn completed.');
 
     await user.click(screen.getByRole('button', { name: /发布为本节点输出/i }));
 
@@ -3252,7 +3461,7 @@ describe('Agent Callable Workbench editable UI', () => {
       );
       expect(publishCall).toBeTruthy();
       const body = JSON.parse(String(publishCall?.[1]?.body));
-      expect(body).toEqual({ expected_turn_id: 'turn_chat_fixture' });
+      expect(body).toEqual({ expected_turn_id: 'turn_draft_fixture' });
       expect(JSON.stringify(body)).not.toContain('target_output_path');
     });
   });

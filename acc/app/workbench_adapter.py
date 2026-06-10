@@ -480,7 +480,7 @@ def workflow_container_child_draft(
         "exposed_outputs": node.get("output_ports") or [{"id": "main", "required": False}],
         "workflow_input_bindings": workflow_input_bindings,
         "workflow_output_bindings": workflow_output_bindings,
-        "policy": {"failure_mode": "fail_fast", "max_concurrency": 4},
+        "policy": {"failure_mode": "fail_fast", "max_concurrency": 8},
         "metadata": metadata,
     }
 

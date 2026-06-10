@@ -192,6 +192,7 @@ async def stream_run(run_id: str, request: Request) -> StreamingResponse:
 
     async def event_source():
         offsets: dict[tuple[str, str], int] = {}
+        agent_event_counts: dict[str, int] = {}
         while not await request.is_disconnected():
             for node_dir in iter_node_dirs(run_dir):
                 node_id = node_dir.name
@@ -219,6 +220,19 @@ async def stream_run(run_id: str, request: Request) -> StreamingResponse:
                         }
                         data = json.dumps(payload, ensure_ascii=False)
                         yield f"event: node_log_delta\ndata: {data}\n\n"
+
+                agent_event_log = effective_agent_event_log_path(run_dir, node_id)
+                if agent_event_log is not None:
+                    agent_event_key = str(agent_event_log)
+                    events = read_jsonl_tolerant(agent_event_log, limit=1000)
+                    seen_count = agent_event_counts.get(agent_event_key, 0)
+                    if seen_count > len(events):
+                        seen_count = 0
+                    for agent_event in events[seen_count:]:
+                        payload = project_agent_event(agent_event, run_id=run_id, node_id=node_id)
+                        data = json.dumps(payload, ensure_ascii=False)
+                        yield f"event: agent_event\ndata: {data}\n\n"
+                    agent_event_counts[agent_event_key] = len(events)
 
             summary_path = run_dir / "run_summary.json"
             if summary_path.exists():
@@ -290,7 +304,7 @@ def read_node_log_delta(
     offset: int,
     limit: int,
 ) -> dict[str, Any]:
-    log_path = run_dir / "nodes" / node_id / f"{stream}.log"
+    log_path = effective_node_log_path(run_dir, node_id, stream)
     if not log_path.exists():
         return {
             "type": "node_log_delta",
@@ -317,6 +331,34 @@ def read_node_log_delta(
         "text": chunk.decode("utf-8", errors="replace"),
         "eof": safe_offset + len(chunk) >= size,
     }
+
+
+def effective_node_log_path(run_dir: Path, node_id: str, stream: str) -> Path:
+    node_log_path = run_dir / "nodes" / node_id / f"{stream}.log"
+    node_dir = run_dir / "nodes" / node_id
+    runtime = load_json_tolerant(node_dir / "runtime.json")
+    session_ref = runtime.get("agent_session_ref")
+    turn_id = runtime.get("turn_id")
+    if not isinstance(session_ref, str) or not isinstance(turn_id, str):
+        return node_log_path
+    if not is_safe_path_component(turn_id):
+        return node_log_path
+    project_root = run_dir.parent.parent.resolve() if run_dir.parent.name == "runs" else run_dir.parent.resolve()
+    agent_sessions_root = (project_root / "runs" / "_agent_sessions").resolve()
+    try:
+        session_dir = Path(session_ref).resolve()
+    except OSError:
+        return node_log_path
+    if not is_relative_to(session_dir, agent_sessions_root):
+        return node_log_path
+    turn_log_path = session_dir / "turns" / turn_id / f"{stream}.log"
+    if turn_log_path.exists() and turn_log_path.is_file():
+        return turn_log_path
+    return node_log_path
+
+
+def is_safe_path_component(value: str) -> bool:
+    return value not in {"", ".", ".."} and Path(value).name == value and "/" not in value and "\\" not in value
 
 
 def iter_node_dirs(run_dir: Path) -> list[Path]:
@@ -410,20 +452,45 @@ def read_node_events_with_agent(
     for event in read_jsonl_tolerant(node_dir / "events.jsonl", limit=limit):
         ordered_events.append((event_sort_key(event), sequence, event))
         sequence += 1
-    runtime = load_json_tolerant(node_dir / "runtime.json")
-    session_ref = runtime.get("agent_session_ref")
-    turn_id = runtime.get("turn_id")
-    if isinstance(session_ref, str) and isinstance(turn_id, str):
-        agent_event_log = Path(session_ref) / "turns" / turn_id / "events.jsonl"
+    agent_event_log = effective_agent_event_log_path(run_dir, node_id)
+    if agent_event_log is not None:
         for event in read_jsonl_tolerant(agent_event_log, limit=limit):
-            projected = dict(event)
-            projected["source"] = "agent_session"
-            projected["agent_session_id"] = event.get("session_id")
-            projected["agent_turn_id"] = event.get("turn_id")
+            projected = project_agent_event(event, run_id=run_dir.name, node_id=node_id)
             ordered_events.append((event_sort_key(projected), sequence, projected))
             sequence += 1
     ordered_events.sort(key=lambda item: (item[0], item[1]))
     return [event for _, _, event in ordered_events[-limit:]]
+
+
+def effective_agent_event_log_path(run_dir: Path, node_id: str) -> Path | None:
+    node_dir = run_dir / "nodes" / node_id
+    runtime = load_json_tolerant(node_dir / "runtime.json")
+    session_ref = runtime.get("agent_session_ref")
+    turn_id = runtime.get("turn_id")
+    if not isinstance(session_ref, str) or not isinstance(turn_id, str):
+        return None
+    if not is_safe_path_component(turn_id):
+        return None
+    project_root = run_dir.parent.parent.resolve() if run_dir.parent.name == "runs" else run_dir.parent.resolve()
+    agent_sessions_root = (project_root / "runs" / "_agent_sessions").resolve()
+    try:
+        session_dir = Path(session_ref).resolve()
+    except OSError:
+        return None
+    if not is_relative_to(session_dir, agent_sessions_root):
+        return None
+    event_log = session_dir / "turns" / turn_id / "events.jsonl"
+    return event_log if event_log.exists() and event_log.is_file() else None
+
+
+def project_agent_event(event: dict[str, Any], *, run_id: str, node_id: str) -> dict[str, Any]:
+    projected = dict(event)
+    projected["source"] = "agent_session"
+    projected["run_id"] = projected.get("run_id") or run_id
+    projected["node_id"] = projected.get("node_id") or node_id
+    projected["agent_session_id"] = projected.get("session_id")
+    projected["agent_turn_id"] = projected.get("turn_id")
+    return projected
 
 
 def load_json_tolerant(path: Path) -> dict[str, Any]:
