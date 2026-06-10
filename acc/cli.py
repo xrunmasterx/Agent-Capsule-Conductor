@@ -28,12 +28,6 @@ from acc.debugger import (
     replay_workflow_events,
 )
 from acc.environment import create_workspace_binding, inspect_environment_run
-from acc.graphops import (
-    apply_patch_request,
-    dry_run_patch,
-    graphops_governance_payload,
-    validate_patch_file,
-)
 from acc.migration.graph_importer import (
     accflow_path_from_legacy_graph_path,
     legacy_graph_to_accflow_payload,
@@ -182,116 +176,6 @@ def session_inspect(run_dir: Path) -> None:
         log_stderr(str(exc))
         raise typer.Exit(1) from exc
     typer.echo(dump_json(summary))
-
-
-@graphops_app.command("validate-patch")
-def graphops_validate_patch(
-    patch_path: Path,
-    semantic: Annotated[
-        bool,
-        typer.Option("--semantic", help="Run semantic validation after dry-run materialization."),
-    ] = False,
-) -> None:
-    try:
-        patch = validate_patch_file(patch_path)
-        semantic_diff = None
-        if semantic:
-            from acc.graphops import semantic_diff_for_patch
-
-            semantic_diff = semantic_diff_for_patch(patch)
-    except AccError as exc:
-        log_stderr(str(exc))
-        raise typer.Exit(1) from exc
-    payload = {
-        "status": "valid",
-        "patch_id": patch["patch_id"],
-        "target_path": patch["target_path"],
-        "operations": len(patch["operations"]),
-        **graphops_governance_payload(),
-    }
-    if semantic_diff is not None:
-        payload["semantic_diff"] = semantic_diff
-        if semantic_diff["status"] == "invalid":
-            typer.echo(dump_json(payload))
-            raise typer.Exit(1)
-    typer.echo(json.dumps(payload, sort_keys=True))
-
-
-@graphops_app.command("validate")
-def graphops_validate(
-    patch_path: Path,
-    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
-    semantic: Annotated[
-        bool,
-        typer.Option("--semantic", help="Run semantic validation after dry-run materialization."),
-    ] = False,
-) -> None:
-    try:
-        patch = validate_patch_file(patch_path)
-        payload = {
-            "status": "valid",
-            "patch_id": patch["patch_id"],
-            "target_type": patch["target_type"],
-            "target_path": patch["target_path"],
-            "operations": len(patch["operations"]),
-            **graphops_governance_payload(),
-        }
-        if semantic:
-            from acc.graphops import semantic_diff_for_patch
-
-            payload["semantic_diff"] = semantic_diff_for_patch(patch)
-    except AccError as exc:
-        log_stderr(str(exc))
-        raise typer.Exit(1) from exc
-    if semantic and payload["semantic_diff"]["status"] == "invalid":
-        typer.echo(dump_json(payload) if json_output else dump_json(payload))
-        raise typer.Exit(1)
-    typer.echo(dump_json(payload) if json_output else dump_json(payload))
-
-
-@graphops_app.command("dry-run")
-def graphops_dry_run(
-    patch_path: Path,
-    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON output.")] = False,
-    semantic: Annotated[
-        bool,
-        typer.Option("--semantic", help="Run semantic validation after dry-run materialization."),
-    ] = False,
-) -> None:
-    try:
-        payload = dry_run_patch(validate_patch_file(patch_path), semantic=semantic)
-    except AccError as exc:
-        log_stderr(str(exc))
-        raise typer.Exit(1) from exc
-    typer.echo(dump_json(payload) if json_output else dump_json(payload))
-
-
-@graphops_app.command("apply-patch")
-def graphops_apply_patch(
-    patch_path: Path,
-    dry_run: Annotated[bool, typer.Option("--dry-run", help="Preview without mutation.")] = False,
-    apply: Annotated[bool, typer.Option("--apply", help="Perform a real apply.")] = False,
-    human_approved: Annotated[
-        bool,
-        typer.Option("--human-approved", help="Confirm human approval for real apply."),
-    ] = False,
-    semantic: Annotated[
-        bool,
-        typer.Option("--semantic", help="Run semantic validation after dry-run materialization."),
-    ] = False,
-) -> None:
-    try:
-        result = apply_patch_request(
-            patch_path,
-            dry_run=dry_run,
-            apply=apply,
-            human_approved=human_approved,
-            semantic=semantic,
-        )
-    except AccError as exc:
-        log_stderr(str(exc))
-        raise typer.Exit(1) from exc
-    typer.echo(dump_json(result))
 
 
 @app.command("server")

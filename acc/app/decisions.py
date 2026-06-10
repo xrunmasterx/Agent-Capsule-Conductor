@@ -3,8 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from acc.app.graphops_v3 import GRAPHOPS_PROPOSAL_ROOT
-from acc.graphops import graphops_governance_payload
+from acc.graphops import GRAPHOPS_PROPOSAL_ROOT
 from acc.run_index import load_or_rebuild_run_index
 from acc.session import utc_now_iso
 from acc.store import load_json
@@ -215,7 +214,6 @@ def graphops_v2_example_decision_items(project_root: Path, *, limit: int) -> lis
                     "target_type": str(patch.get("target_type") or ""),
                     "target_path": str(patch.get("target_path") or ""),
                     "operation_count": len(operations),
-                    **graphops_governance_payload(),
                 },
                 "evidence": [
                     {

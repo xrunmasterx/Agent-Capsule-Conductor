@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from acc.app.graphops_v3 import GraphOpsProposalService, validate_transaction
+from acc.graphops import GraphOpsService, validate_transaction
 from acc.models import AccError
 
 
@@ -64,7 +64,7 @@ def valid_transaction() -> dict:
 
 
 def test_graphops_v3_valid_create_transaction_dry_run_and_apply(tmp_path: Path) -> None:
-    service = GraphOpsProposalService(tmp_path)
+    service = GraphOpsService(tmp_path)
     created = service.create_proposal(valid_transaction())
 
     assert created["status"] == "drafted"
@@ -76,7 +76,7 @@ def test_graphops_v3_valid_create_transaction_dry_run_and_apply(tmp_path: Path) 
     assert not (tmp_path / "callables" / "agents" / "reviewer.codex.yaml").exists()
 
     with pytest.raises(AccError, match="approved"):
-        GraphOpsProposalService(tmp_path).apply("graphops_tx_create")
+        GraphOpsService(tmp_path).apply("graphops_tx_create")
 
     approval = service.approve(
         "graphops_tx_create",
@@ -160,13 +160,13 @@ def test_graphops_v3_create_rejects_invalid_or_stale_proposal(tmp_path: Path) ->
     stale_path.write_text("id: reviewer.codex\nruntime: codex_cli\n", encoding="utf-8")
 
     with pytest.raises(AccError, match="stale_base"):
-        GraphOpsProposalService(tmp_path).create_proposal(valid_transaction())
+        GraphOpsService(tmp_path).create_proposal(valid_transaction())
 
     assert not (tmp_path / "runs" / "_graphops_proposals" / "graphops_tx_create").exists()
 
 
 def test_graphops_v3_stale_target_blocks_apply_without_mutating(tmp_path: Path) -> None:
-    service = GraphOpsProposalService(tmp_path)
+    service = GraphOpsService(tmp_path)
     service.create_proposal(valid_transaction())
     dry_run = service.dry_run("graphops_tx_create")
     service.approve(

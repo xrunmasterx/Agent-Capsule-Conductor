@@ -8,7 +8,7 @@ from typing import Any
 from uuid import uuid4
 
 from acc.app.authoring import AuthoringSessionService
-from acc.app.graphops_v3 import GraphOpsProposalService
+from acc.graphops import GraphOpsService
 from acc.app.workbench_snapshots import WorkbenchCanvasSnapshotService
 from acc.control_plane import (
     list_callables_payload,
@@ -376,7 +376,7 @@ class AccMcpTools:
         next_proposal = copy.deepcopy(proposal)
         if not isinstance(next_proposal.get("source"), dict):
             next_proposal["source"] = {"kind": "mcp_tool", "id": request_id}
-        response = GraphOpsProposalService(self.project_root).create_proposal(next_proposal)
+        response = GraphOpsService(self.project_root).create_proposal(next_proposal)
         return tool_result(
             status="valid",
             summary=f"GraphOps proposal created: {response['proposal_id']}",
@@ -386,7 +386,7 @@ class AccMcpTools:
         )
 
     def _validate_graphops_proposal(self, proposal_id: str) -> McpToolResult:
-        validation = GraphOpsProposalService(self.project_root).validate(proposal_id)
+        validation = GraphOpsService(self.project_root).validate(proposal_id)
         return tool_result(
             status="valid" if validation.get("status") == "valid" else "invalid",
             summary=f"GraphOps proposal validation complete: {proposal_id}",
@@ -397,7 +397,7 @@ class AccMcpTools:
         )
 
     def _dry_run_graphops_proposal(self, proposal_id: str) -> McpToolResult:
-        dry_run = GraphOpsProposalService(self.project_root).dry_run(proposal_id)
+        dry_run = GraphOpsService(self.project_root).dry_run(proposal_id)
         return tool_result(
             status="dry_run",
             summary=f"GraphOps proposal dry-run ready: {proposal_id}",
@@ -437,7 +437,7 @@ class AccMcpTools:
             request_id=request_id,
             persistent_callable_id=persistent_callable_id,
         )
-        service = GraphOpsProposalService(self.project_root)
+        service = GraphOpsService(self.project_root)
         service.create_proposal(proposal)
         validation = service.validate(proposal["proposal_id"])
         dry_run = service.dry_run(proposal["proposal_id"])

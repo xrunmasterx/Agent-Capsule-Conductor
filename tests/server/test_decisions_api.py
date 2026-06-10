@@ -64,9 +64,8 @@ def test_decision_inbox_aggregates_graphops_proposals(client, project_root: Path
     assert response.status_code == 200, response.text
     item = response.json()["items"][0]
     assert item["kind"] == "graphops_proposal"
-    assert item["graphops"]["apply_requires_human_approval"] is True
-    assert item["graphops"]["apply_status"] == "not_implemented"
-    assert item["graphops"]["dry_run_only"] is True
+    assert item["graphops"]["patch_id"] == "proposal"
+    assert item["graphops"]["operation_count"] == 1
     assert {action["kind"] for action in item["actions"]} == {"validate_patch", "dry_run_patch"}
 
 
