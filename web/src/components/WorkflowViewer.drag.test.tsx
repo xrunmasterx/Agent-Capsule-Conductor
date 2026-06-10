@@ -96,10 +96,10 @@ const captureAuthoringSnapshot = _captureAuthoringSnapshot as unknown as (input:
   callables: Array<Record<string, unknown>>;
   workflows: Array<Record<string, unknown>>;
 }) => Record<string, unknown>;
-const buildDeterministicCanvasAuthoringProposal = __workflowViewerTestables.buildDeterministicCanvasAuthoringProposal as unknown as (
+const buildDeterministicCanvasAuthoringProposal = _buildDeterministicCanvasAuthoringProposal as unknown as (
   input: { message: string; snapshot: Record<string, unknown> },
 ) => { proposal: Record<string, unknown> | null; errors: string[]; warnings: string[] };
-const applyCanvasAuthoringProposal = __workflowViewerTestables.applyCanvasAuthoringProposal as unknown as (input: {
+const applyCanvasAuthoringProposal = _applyCanvasAuthoringProposal as unknown as (input: {
   canvas: Record<string, unknown>;
   taskId: string;
   proposal: Record<string, unknown>;
@@ -107,7 +107,7 @@ const applyCanvasAuthoringProposal = __workflowViewerTestables.applyCanvasAuthor
   callables: Array<Record<string, unknown>>;
   workflows: Array<Record<string, unknown>>;
 }) => { canvas: Record<string, unknown>; temporaryResources: Record<string, unknown>; selection: Record<string, unknown> };
-const validateCanvasAuthoringProposal = __workflowViewerTestables.validateCanvasAuthoringProposal as unknown as (
+const validateCanvasAuthoringProposal = _validateCanvasAuthoringProposal as unknown as (
   proposal: Record<string, unknown>,
   context: {
     canvas: Record<string, unknown>;
@@ -117,24 +117,24 @@ const validateCanvasAuthoringProposal = __workflowViewerTestables.validateCanvas
     workflows: Array<Record<string, unknown>>;
   },
 ) => { status: string; errors: string[]; warnings: string[] };
-const temporaryResourceIssueForCanvas = __workflowViewerTestables.temporaryResourceIssueForCanvas as unknown as (
+const temporaryResourceIssueForCanvas = _temporaryResourceIssueForCanvas as unknown as (
   canvas: Record<string, unknown>,
   authoring?: Record<string, unknown>,
 ) => string | null;
-const temporaryResourceIssueForGraph = __workflowViewerTestables.temporaryResourceIssueForGraph as unknown as (
+const temporaryResourceIssueForGraph = _temporaryResourceIssueForGraph as unknown as (
   graph: Record<string, unknown>,
 ) => string | null;
-const deleteSelectionFromCanvas = __workflowViewerTestables.deleteSelectionFromCanvas as unknown as (
+const deleteSelectionFromCanvas = _deleteSelectionFromCanvas as unknown as (
   canvas: ReturnType<typeof canvasFixture>,
   selection: Record<string, unknown>,
 ) => ReturnType<typeof canvasFixture>;
-const normalizeSelectionIntent = __workflowViewerTestables.normalizeSelectionIntent as unknown as (
+const normalizeSelectionIntent = _normalizeSelectionIntent as unknown as (
   visibleCanvas: Record<string, unknown>,
   baseCanvas: Record<string, unknown>,
   intent: Record<string, unknown>,
   focusedWorkflowId: string | null,
 ) => Record<string, unknown> | null;
-const isConnectionHandleForMode = __workflowViewerTestables.isConnectionHandleForMode as unknown as (
+const isConnectionHandleForMode = _isConnectionHandleForMode as unknown as (
   handle: HTMLElement,
   mode: string,
 ) => boolean;

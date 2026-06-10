@@ -17534,7 +17534,7 @@ function findCallableId(command: unknown): string {
   return typeof candidate === 'string' && candidate.includes('.') ? candidate : '';
 }
 
-export const __workflowViewerTestables = {
+export {
   AgentToolNode,
   WorkspaceCanvas,
   addCallableNodeFromPalette,
@@ -17579,8 +17579,7 @@ export const __workflowViewerTestables = {
   boundedLiveEvents,
   filterLiveEvents,
   liveEventFromAgentRunEvent,
-  // Re-export extracted modules so that consumers can access them
-  // from a single entry point during the migration period.
+  // Re-export extracted modules for migration period.
   AssistantDrawerExtracted,
   AssistantDockContentExtracted,
   AssistantControlRailExtracted,
