@@ -44,12 +44,41 @@ export type NodeLogDelta = {
   type: 'node_log_delta';
   run_id: string;
   node_id: string;
+  ui_node_id?: string;
+  parent_node_id?: string;
+  node_run_dir?: string;
   stream: 'stdout' | 'stderr';
   offset: number;
   next_offset: number;
   text: string;
   timestamp?: string;
   eof?: boolean;
+};
+
+export type WorkbenchLiveEvent = {
+  event_id: string;
+  seq: number;
+  source: 'run_node' | 'agent_turn' | 'assistant_turn';
+  run_id?: string;
+  node_id?: string;
+  ui_node_id?: string;
+  parent_node_id?: string;
+  node_run_dir?: string;
+  session_id?: string;
+  turn_id?: string;
+  type:
+    | 'node_log_delta'
+    | 'agent_event'
+    | 'agent_message'
+    | 'agent_status'
+    | 'artifact_ready'
+    | 'terminal'
+    | 'gap';
+  stream?: 'stdout' | 'stderr' | 'agent';
+  text?: string;
+  payload?: Record<string, unknown>;
+  timestamp: string;
+  truncated?: boolean;
 };
 
 export type RuntimeConfig = {

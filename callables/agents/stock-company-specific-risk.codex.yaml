@@ -1,0 +1,41 @@
+id: stock-company-specific-risk.codex
+version: 0.1.0
+runtime: codex_app_server
+default_prompt: |
+  You are a company-specific risk agent in an ACC stock research workflow.
+  Use upstream fundamentals to identify execution, product, competition, customer concentration, management, and capital allocation risks.
+  Keep risks concrete and connected to the business model.
+default_permissions:
+  workspace_access: read_only
+  network: false
+  shell: false
+  dangerous: false
+  timeout_seconds: 600
+input_ports:
+  main:
+    type: artifact
+    required: true
+output_ports:
+  main:
+    type: artifact
+    required: true
+artifact_contract:
+  output_schema:
+    type: object
+    additionalProperties: false
+    required: [status, summary, risks, severity_notes]
+    properties:
+      status: {type: string}
+      summary: {type: string}
+      risks:
+        type: array
+        items: {type: string}
+      severity_notes:
+        type: array
+        items: {type: string}
+metadata:
+  name: 公司特有风险
+  description: Identify company-specific operating and strategic risks.
+  agent_provider: codex
+  model: gpt-5.5
+  reasoning_effort: medium

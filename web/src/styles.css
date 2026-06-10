@@ -6043,6 +6043,58 @@ small {
   padding: 14px;
 }
 
+.graph-workbench-v2 .live-output-viewer {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.graph-workbench-v2 .live-output-header {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.graph-workbench-v2 .live-output-header span {
+  color: #8c9aaa;
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.graph-workbench-v2 .live-output-lines {
+  display: grid;
+  gap: 0;
+  padding: 6px 12px;
+}
+
+.graph-workbench-v2 .live-output-line {
+  border-bottom: 1px solid #1f2933;
+  display: grid;
+  gap: 3px;
+  padding: 6px 0;
+}
+
+.graph-workbench-v2 .live-output-line:last-child {
+  border-bottom: 0;
+}
+
+.graph-workbench-v2 .live-output-line > span {
+  color: #8c9aaa;
+  font-size: 11px;
+}
+
+.graph-workbench-v2 .live-output-line pre {
+  color: #dce5ec;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 .graph-workbench-v2 .selection-open-artifact {
   display: grid;
   gap: 10px;

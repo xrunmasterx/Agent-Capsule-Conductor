@@ -143,6 +143,28 @@ class AgentTurnService:
             session_dir,
             {"role": "user", "content": prompt, "turn_id": turn_id, "created_at": utc_now_iso()},
         )
+        runtime_binding = {
+            "runtime": streaming_runtime_name(template.runtime),
+            "adapter": streaming_runtime_name(template.runtime),
+            "command_argv_redacted": [
+                adapter_command(template) or "codex",
+                "app-server",
+                "--listen",
+                "stdio://",
+            ],
+            "workspace_dir": str(scope.workspace_root.resolve()),
+            "permissions_effective": {
+                "workspace_access": permissions.workspace_access,
+                "network": permissions.network,
+                "shell": permissions.shell,
+                "dangerous": permissions.dangerous,
+                "sandbox": codex_sandbox_for_permissions(permissions),
+            },
+            "agent_session_ref": str(session_dir.resolve()),
+            "turn_id": turn_id,
+            "binding_materializations": binding_materializations,
+        }
+        update_runtime_json(node_dir / "runtime.json", runtime_binding)
 
         if acc_run_mode() == HERMETIC_RUN_MODE:
             output = hermetic_stub_output(template, node, input_payload)
@@ -200,26 +222,7 @@ class AgentTurnService:
         update_runtime_json(
             node_dir / "runtime.json",
             {
-                "runtime": streaming_runtime_name(template.runtime),
-                "adapter": streaming_runtime_name(template.runtime),
-                "command_argv_redacted": [
-                    adapter_command(template) or "codex",
-                    "app-server",
-                    "--listen",
-                    "stdio://",
-                ],
-                "workspace_dir": str(scope.workspace_root.resolve()),
-                "permissions_effective": {
-                    "workspace_access": permissions.workspace_access,
-                    "network": permissions.network,
-                    "shell": permissions.shell,
-                    "dangerous": permissions.dangerous,
-                    "sandbox": codex_sandbox_for_permissions(permissions),
-                },
-                "agent_session_ref": str(session_dir.resolve()),
                 "provider_session_id": next_session.get("provider_session_id"),
-                "turn_id": turn_id,
-                "binding_materializations": binding_materializations,
             },
         )
         append_message(
@@ -266,10 +269,20 @@ class AgentTurnService:
         )
         return {**payload, "session_dir": str(session_dir.resolve())}
 
-    def create_session_from_run_node(self, *, run_id: str, node_id: str) -> dict[str, Any]:
+    def create_session_from_run_node(
+        self,
+        *,
+        run_id: str,
+        node_id: str,
+        node_run_dir: str | None = None,
+    ) -> dict[str, Any]:
         validate_segment(run_id, "run_id")
         validate_segment(node_id, "node_id")
-        node_dir = self.project_root / "runs" / run_id / "nodes" / node_id
+        node_dir = self._resolve_run_node_dir(
+            run_id=run_id,
+            node_id=node_id,
+            node_run_dir=node_run_dir,
+        )
         if not node_dir.exists() or not node_dir.is_dir():
             raise AccError(f"Run node not found: {run_id}/{node_id}")
         runtime_payload = load_optional_object(node_dir / "runtime.json")
@@ -309,6 +322,32 @@ class AgentTurnService:
             },
         )
         return {**payload, "session_dir": str(session_dir.resolve())}
+
+    def _resolve_run_node_dir(
+        self,
+        *,
+        run_id: str,
+        node_id: str,
+        node_run_dir: str | None,
+    ) -> Path:
+        run_dir = (self.project_root / "runs" / run_id).resolve()
+        runs_root = (self.project_root / "runs").resolve()
+        if not run_dir.is_relative_to(runs_root):
+            raise AccError(f"Invalid run_id: {run_id}")
+        if node_run_dir:
+            try:
+                candidate = Path(node_run_dir)
+                if not candidate.is_absolute():
+                    candidate = self.project_root / candidate
+                candidate = candidate.resolve()
+            except OSError as exc:
+                raise AccError("Invalid node_run_dir") from exc
+            if not candidate.is_relative_to(run_dir):
+                raise AccError("node_run_dir is outside the requested run")
+            if candidate.name != node_id:
+                raise AccError("node_run_dir does not match node_id")
+            return candidate
+        return run_dir / "nodes" / node_id
 
     def create_workbench_assistant_session(
         self,

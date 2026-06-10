@@ -79,6 +79,7 @@ import type {
   RunEvent,
   RuntimeConfig,
   RunSummary,
+  WorkbenchLiveEvent,
   WorkflowDataEdge,
   WorkflowBindingView,
   WorkflowDirectorySelection,
@@ -141,6 +142,20 @@ type CodexExecutionMode = 'default' | 'local_readonly_no_sandbox' | 'danger_full
 type EmptyInputPolicy = 'allow' | 'block';
 const CONTROL_SLOT_LIMIT = 10;
 const DEFAULT_WORKFLOW_MAX_CONCURRENCY = 8;
+const STOCK_TARGET_AGENT_ID = 'stock-target-selector.codex';
+const STOCK_BUSINESS_AGENT_ID = 'stock-business-model-research.codex';
+const STOCK_FINANCIALS_AGENT_ID = 'stock-financials-research.codex';
+const STOCK_INDUSTRY_AGENT_ID = 'stock-industry-position-research.codex';
+const STOCK_FUNDAMENTALS_SYNTHESIS_AGENT_ID = 'stock-fundamentals-synthesis.codex';
+const STOCK_VALUATION_MODEL_AGENT_ID = 'stock-valuation-model.codex';
+const STOCK_SCENARIO_AGENT_ID = 'stock-scenario-analysis.codex';
+const STOCK_VALUATION_SYNTHESIS_AGENT_ID = 'stock-valuation-synthesis.codex';
+const STOCK_MACRO_RISK_AGENT_ID = 'stock-macro-regulatory-risk.codex';
+const STOCK_COMPANY_RISK_AGENT_ID = 'stock-company-specific-risk.codex';
+const STOCK_CATALYST_AGENT_ID = 'stock-catalyst-scanner.codex';
+const STOCK_RISK_SYNTHESIS_AGENT_ID = 'stock-risk-catalyst-synthesis.codex';
+const STOCK_REPORT_WRITER_AGENT_ID = 'stock-investment-report-writer.codex';
+const STOCK_REPORT_PUBLISH_AGENT_ID = 'stock-report-publisher.codex';
 
 type InternalNodeView = {
   id: string;
@@ -402,6 +417,27 @@ type AgentSessionUiState = {
   events: RunEvent[];
   pendingTurn: AgentTurnRecord | null;
   interactions: InteractionRequest[];
+  error: string;
+};
+
+type WorkbenchLiveStreamScope =
+  | {
+      kind: 'run';
+      runId: string;
+      nodeId?: string;
+      uiNodeId?: string;
+      nodeRunDir?: string;
+    }
+  | {
+      kind: 'turn';
+      sessionId: string;
+      turnId: string;
+      source?: 'agent_turn' | 'assistant_turn';
+    };
+
+type WorkbenchLiveStreamState = {
+  events: WorkbenchLiveEvent[];
+  status: 'idle' | 'connecting' | 'live' | 'closed' | 'error';
   error: string;
 };
 
@@ -2375,7 +2411,9 @@ export function WorkflowViewer({
   const appendNodeLogDelta = useCallback((delta: NodeLogDelta) => {
     setRunLogsById((current) => {
       const runLogs = current[delta.run_id] || {};
-      const previous = runLogs[delta.node_id] || {
+      const logKeys = nodeLogDeltaKeys(delta);
+      const primaryKey = logKeys[0] || delta.node_id;
+      const previous = runLogs[primaryKey] || {
         stdout: '',
         stderr: '',
         stdoutOffset: 0,
@@ -2395,7 +2433,10 @@ export function WorkflowViewer({
             };
       return {
         ...current,
-        [delta.run_id]: { ...runLogs, [delta.node_id]: nextNodeLogs },
+        [delta.run_id]: {
+          ...runLogs,
+          ...Object.fromEntries(logKeys.map((key) => [key, nextNodeLogs])),
+        },
       };
     });
   }, []);
@@ -2954,10 +2995,56 @@ export function WorkflowViewer({
   const selectedAgentSessionContext = useMemo(
     () =>
       selectedRunId && selectedAgentNodeRun
-        ? { runId: selectedRunId, nodeId: selectedAgentNodeRun.node_id }
+        ? {
+            runId: selectedRunId,
+            nodeId: selectedAgentNodeRun.node_id,
+            uiNodeId: selectedAgentNodeRun.ui_node_id || '',
+            parentNodeId: selectedAgentNodeRun.parent_node_id || '',
+            nodeRunDir: selectedAgentNodeRun.run_dir || '',
+          }
         : null,
     [selectedAgentNodeRun, selectedRunId],
   );
+  const selectedAgentLiveScope = useMemo<WorkbenchLiveStreamScope | null>(
+    () =>
+      selectedAgentSessionContext
+        ? {
+            kind: 'run',
+            runId: selectedAgentSessionContext.runId,
+            nodeId: selectedAgentSessionContext.nodeId,
+            uiNodeId: selectedAgentSessionContext.uiNodeId,
+            nodeRunDir: selectedAgentSessionContext.nodeRunDir,
+          }
+        : null,
+    [selectedAgentSessionContext],
+  );
+  const selectedAgentLiveState = useWorkbenchLiveStream(selectedAgentLiveScope);
+  const selectedAgentTurnLiveScope = useMemo<WorkbenchLiveStreamScope | null>(
+    () =>
+      agentSessionState.session && agentSessionState.pendingTurn
+        ? {
+            kind: 'turn',
+            sessionId: agentSessionState.session.session_id,
+            turnId: agentSessionState.pendingTurn.turn_id,
+            source: 'agent_turn',
+          }
+        : null,
+    [agentSessionState.pendingTurn, agentSessionState.session],
+  );
+  const selectedAgentTurnLiveState = useWorkbenchLiveStream(selectedAgentTurnLiveScope);
+  const assistantLiveScope = useMemo<WorkbenchLiveStreamScope | null>(
+    () =>
+      assistantSessionId && assistantPendingTurn
+        ? {
+            kind: 'turn',
+            sessionId: assistantSessionId,
+            turnId: assistantPendingTurn.turn_id,
+            source: 'assistant_turn',
+          }
+        : null,
+    [assistantPendingTurn, assistantSessionId],
+  );
+  const assistantLiveState = useWorkbenchLiveStream(assistantLiveScope);
   const selectedAgentEvents =
     selectedAgentSessionContext && (agentSessionState.status === 'ready' || agentSessionState.status === 'loading')
       ? agentSessionState.events
@@ -3018,14 +3105,18 @@ export function WorkflowViewer({
       });
       return;
     }
-    const { runId, nodeId } = selectedAgentSessionContext;
+    const { runId, nodeId, nodeRunDir, uiNodeId, parentNodeId } = selectedAgentSessionContext;
     setAgentSessionState((current) => ({
       ...current,
       status: current.session ? 'ready' : 'loading',
       error: '',
     }));
     try {
-      const session = await api.createAgentSessionFromRunNode(runId, nodeId);
+      const session = await api.createAgentSessionFromRunNode(runId, nodeId, {
+        nodeRunDir,
+        uiNodeId,
+        parentNodeId,
+      });
       const [messages, nodeEvents, interactions] = await Promise.all([
         api.getAgentSessionMessages(session.session_id).catch(() => ({ messages: [] as AgentMessage[] })),
         api.nodeEvents(runId, nodeId).catch(() => ({ events: [] as RunEvent[] })),
@@ -4418,6 +4509,9 @@ export function WorkflowViewer({
             callableState={selectedCallableDetailState}
             runtimeConfig={runtimeConfig}
             agentSessionState={agentSessionState}
+            agentLiveState={
+              selectedAgentTurnLiveState.events.length ? selectedAgentTurnLiveState : selectedAgentLiveState
+            }
             artifactCacheByPath={artifactCacheByPath}
             onEnsureArtifactContent={ensureArtifactContent}
             onReadEvidence={readEvidence}
@@ -4511,6 +4605,7 @@ export function WorkflowViewer({
             agentSession={assistantAgentSession}
             sessionStatus={assistantSessionStatus}
             pendingTurn={assistantPendingTurn}
+            liveState={assistantLiveState}
             turnReason={assistantTurnReason}
             requiredActions={assistantRequiredActions}
             graphOpsReview={assistantGraphOpsReview}
@@ -5241,6 +5336,7 @@ function AssistantDockContent({
   agentSession,
   sessionStatus,
   pendingTurn,
+  liveState,
   turnReason,
   requiredActions,
   graphOpsReview,
@@ -5271,6 +5367,7 @@ function AssistantDockContent({
   agentSession: AgentSessionRecord | null;
   sessionStatus: string;
   pendingTurn: AgentTurnRecord | null;
+  liveState: WorkbenchLiveStreamState;
   turnReason: AssistantTurnReason;
   requiredActions: AuthoringRequiredAction[];
   graphOpsReview: AssistantGraphOpsReview | null;
@@ -5356,6 +5453,11 @@ function AssistantDockContent({
               <strong>{pendingTurn.turn_id}</strong>
             </header>
             <p>{pendingTurn.reason || turnReason} · {pendingTurn.status || 'queued'}</p>
+            <LiveOutputViewer
+              events={liveState.events}
+              status={liveState.status}
+              emptyText="AI 助手正在运行，等待实时输出。"
+            />
           </section>
         ) : null}
         <AssistantProposalSummary
@@ -8088,6 +8190,7 @@ function NodeDetailOverlay({
   callableState,
   runtimeConfig,
   agentSessionState,
+  agentLiveState,
   artifactCacheByPath,
   onEnsureArtifactContent,
   onClose,
@@ -8106,6 +8209,7 @@ function NodeDetailOverlay({
   callableState: CallableDetailLoadState;
   runtimeConfig: RuntimeConfig | null;
   agentSessionState: AgentSessionUiState;
+  agentLiveState: WorkbenchLiveStreamState;
   artifactCacheByPath: Record<string, ArtifactContent>;
   onEnsureArtifactContent: (path: string | null | undefined) => Promise<void>;
   onClose: () => void;
@@ -8147,6 +8251,7 @@ function NodeDetailOverlay({
           callableState={callableState}
           runtimeConfig={runtimeConfig}
           agentSessionState={agentSessionState}
+          agentLiveState={agentLiveState}
           onReadEvidence={onReadEvidence}
           onRefreshAgentSession={onRefreshAgentSession}
           onPublishAgentOutput={onPublishAgentOutput}
@@ -8160,6 +8265,7 @@ function NodeDetailOverlay({
         />
         <SelectionOutputPane
           model={model}
+          liveState={agentLiveState}
           artifactCacheByPath={artifactCacheByPath}
           onEnsureArtifactContent={onEnsureArtifactContent}
         />
@@ -8209,10 +8315,12 @@ function SelectionInputPane({
 
 function SelectionOutputPane({
   model,
+  liveState,
   artifactCacheByPath,
   onEnsureArtifactContent,
 }: {
   model: SelectedEntityDetailsModel;
+  liveState?: WorkbenchLiveStreamState;
   artifactCacheByPath: Record<string, ArtifactContent>;
   onEnsureArtifactContent: (path: string | null | undefined) => Promise<void>;
 }) {
@@ -8271,25 +8379,31 @@ function SelectionOutputPane({
       </div>
       {outputView === 'live' ? (
         <section className="selection-output-content" aria-label="实时输出内容">
-          <div className="selection-log-stream-tabs" role="tablist" aria-label="Live output stream">
-            {(['all', 'stdout', 'stderr'] as const).map((tab) => (
-              <button
-                key={tab}
-                type="button"
-                className={logStream === tab ? 'active' : ''}
-                onClick={() => setLogStream(tab)}
-              >
-                {tab === 'all' ? 'all' : tab}
-              </button>
-            ))}
-          </div>
-          <div className="selection-log-output selection-live-output" role="log" aria-live="polite">
-            {visibleLog.trim() ? (
-              <pre>{visibleLog}</pre>
-            ) : (
-              <p className="empty-state">当前节点还没有实时输出。</p>
-            )}
-          </div>
+          {liveState?.events.length ? (
+            <LiveOutputViewer events={liveState.events} status={liveState.status} emptyText="当前节点还没有实时输出。" />
+          ) : (
+            <>
+              <div className="selection-log-stream-tabs" role="tablist" aria-label="Live output stream">
+                {(['all', 'stdout', 'stderr'] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    type="button"
+                    className={logStream === tab ? 'active' : ''}
+                    onClick={() => setLogStream(tab)}
+                  >
+                    {tab === 'all' ? 'all' : tab}
+                  </button>
+                ))}
+              </div>
+              <div className="selection-log-output selection-live-output" role="log" aria-live="polite">
+                {visibleLog.trim() ? (
+                  <pre>{visibleLog}</pre>
+                ) : (
+                  <p className="empty-state">当前节点还没有实时输出。</p>
+                )}
+              </div>
+            </>
+          )}
         </section>
       ) : (
         <section className="selection-open-artifact inline selection-output-final" aria-label="最终结果内容">
@@ -8690,6 +8804,7 @@ function SelectionPropertiesPane({
   callableState,
   runtimeConfig,
   agentSessionState,
+  agentLiveState,
   onReadEvidence,
   onRefreshAgentSession,
   onPublishAgentOutput,
@@ -8705,6 +8820,7 @@ function SelectionPropertiesPane({
   callableState: CallableDetailLoadState;
   runtimeConfig: RuntimeConfig | null;
   agentSessionState: AgentSessionUiState;
+  agentLiveState: WorkbenchLiveStreamState;
   onReadEvidence: (path: string | null | undefined, title?: string) => void;
   onRefreshAgentSession: () => Promise<void>;
   onPublishAgentOutput: (expectedTurnId: string) => Promise<void>;
@@ -8730,6 +8846,7 @@ function SelectionPropertiesPane({
           callableState={callableState}
           runtimeConfig={runtimeConfig}
           agentSessionState={agentSessionState}
+          agentLiveState={agentLiveState}
           onReadEvidence={onReadEvidence}
           onRefreshAgentSession={onRefreshAgentSession}
           onPublishAgentOutput={onPublishAgentOutput}
@@ -8753,6 +8870,7 @@ function SelectionNodeProperties({
   callableState,
   runtimeConfig,
   agentSessionState,
+  agentLiveState,
   onUpdateInput,
   onUpdateLabel,
   onUpdateForwardMainOutput,
@@ -8768,6 +8886,7 @@ function SelectionNodeProperties({
   callableState: CallableDetailLoadState;
   runtimeConfig: RuntimeConfig | null;
   agentSessionState: AgentSessionUiState;
+  agentLiveState: WorkbenchLiveStreamState;
   onUpdateInput: (input: Record<string, unknown>) => void;
   onUpdateLabel: (label: string) => void;
   onUpdateForwardMainOutput: (value: boolean) => void;
@@ -8844,6 +8963,7 @@ function SelectionNodeProperties({
         node={node}
         state={agentSessionState}
         events={agentSessionState.events}
+        liveState={agentLiveState}
         onReadEvidence={onReadEvidence}
         onRefresh={onRefreshAgentSession}
         onPublish={onPublishAgentOutput}
@@ -8908,6 +9028,7 @@ function AgentSessionPanel({
   node,
   state,
   events,
+  liveState,
   onReadEvidence,
   onRefresh,
   onPublish,
@@ -8916,6 +9037,7 @@ function AgentSessionPanel({
   node: AgentNodeSettingsModel;
   state: AgentSessionUiState;
   events: RunEvent[];
+  liveState: WorkbenchLiveStreamState;
   onReadEvidence: (path: string | null | undefined, title?: string) => void;
   onRefresh: () => Promise<void>;
   onPublish: (expectedTurnId: string) => Promise<void>;
@@ -9013,6 +9135,12 @@ function AgentSessionPanel({
               <strong>{session.published_output_turn_id ? '已发布' : '未发布'}</strong>
             </div>
           </div>
+
+          <LiveOutputViewer
+            events={liveState.events}
+            status={liveState.status === 'idle' ? node.status : liveState.status}
+            emptyText="当前 Agent 还没有实时输出。"
+          />
 
           {state.interactions.length > 0 ? (
             <section className="agent-session-subsection" aria-label="Agent approval requests">
@@ -9325,6 +9453,323 @@ function mergeAgentEvents(base: RunEvent[], incoming: RunEvent[]): RunEvent[] {
   return merged.sort((left, right) =>
     String(left.timestamp || '').localeCompare(String(right.timestamp || '')),
   );
+}
+
+function useWorkbenchLiveStream(scope: WorkbenchLiveStreamScope | null): WorkbenchLiveStreamState {
+  const [state, setState] = useState<WorkbenchLiveStreamState>({
+    events: [],
+    status: 'idle',
+    error: '',
+  });
+  const latestSeqRef = useRef(0);
+  const scopeKey = liveStreamScopeKey(scope);
+
+  useEffect(() => {
+    let closed = false;
+    let connected = false;
+    latestSeqRef.current = 0;
+    setState({ events: [], status: scope ? 'connecting' : 'idle', error: '' });
+    if (!scope || typeof EventSource === 'undefined') {
+      return undefined;
+    }
+    const url =
+      scope.kind === 'run'
+        ? api.runStreamUrl(scope.runId, latestSeqRef.current)
+        : api.streamAgentTurnEventsUrl(scope.sessionId, scope.turnId, latestSeqRef.current);
+    const source = new EventSource(url);
+    source.onopen = () => {
+      connected = true;
+    };
+    source.addEventListener('live_event', (event) => {
+      try {
+        const payload = JSON.parse((event as MessageEvent).data) as WorkbenchLiveEvent;
+        if (scope.kind === 'run' && !liveEventMatchesRunScope(payload, scope)) {
+          return;
+        }
+        if (scope.kind === 'turn' && !liveEventMatchesTurnScope(payload, scope)) {
+          return;
+        }
+        latestSeqRef.current = Math.max(latestSeqRef.current, Number(payload.seq || 0));
+        setState((current) => ({
+          status: payload.type === 'terminal' ? 'closed' : 'live',
+          error: '',
+          events: boundedLiveEvents(current.events, [payload]),
+        }));
+        if (payload.type === 'gap') {
+          void refillLiveEvents(scope, latestSeqRef.current)
+            .then((events) => {
+              if (!closed && events.length) {
+                setState((current) => ({
+                  ...current,
+                  events: boundedLiveEvents(current.events, events),
+                }));
+              }
+            })
+            .catch((error) => {
+              if (!closed) {
+                setState((current) => ({
+                  ...current,
+                  error: error instanceof Error ? error.message : String(error),
+                }));
+              }
+            });
+        }
+      } catch (error) {
+        setState((current) => ({
+          ...current,
+          status: 'error',
+          error: error instanceof Error ? error.message : String(error),
+        }));
+      }
+    });
+    source.addEventListener('terminal', () => {
+      setState((current) => ({ ...current, status: 'closed' }));
+      source.close();
+    });
+    source.onerror = () => {
+      setState((current) => ({
+        ...current,
+        status: connected || current.events.length ? 'closed' : 'error',
+      }));
+      source.close();
+    };
+    return () => {
+      closed = true;
+      source.close();
+    };
+  }, [scopeKey]);
+
+  return state;
+}
+
+function liveStreamScopeKey(scope: WorkbenchLiveStreamScope | null): string {
+  if (!scope) {
+    return 'none';
+  }
+  if (scope.kind === 'run') {
+    return ['run', scope.runId, scope.nodeId || '', scope.uiNodeId || '', scope.nodeRunDir || ''].join(':');
+  }
+  return ['turn', scope.sessionId, scope.turnId, scope.source || ''].join(':');
+}
+
+function liveEventMatchesRunScope(event: WorkbenchLiveEvent, scope: Extract<WorkbenchLiveStreamScope, { kind: 'run' }>): boolean {
+  if (event.run_id && event.run_id !== scope.runId) {
+    return false;
+  }
+  if (scope.uiNodeId && event.ui_node_id === scope.uiNodeId) {
+    return true;
+  }
+  if (scope.nodeRunDir && sameRunDir(event.node_run_dir, scope.nodeRunDir)) {
+    return true;
+  }
+  return Boolean(scope.nodeId && event.node_id === scope.nodeId && !event.ui_node_id);
+}
+
+function liveEventMatchesTurnScope(
+  event: WorkbenchLiveEvent,
+  scope: Extract<WorkbenchLiveStreamScope, { kind: 'turn' }>,
+): boolean {
+  return event.session_id === scope.sessionId && event.turn_id === scope.turnId;
+}
+
+function nodeLogDeltaKeys(delta: NodeLogDelta): string[] {
+  return uniqueStrings([
+    delta.ui_node_id,
+    normalizeRunDirKey(delta.node_run_dir),
+    delta.node_run_dir,
+    delta.node_id,
+  ]);
+}
+
+function normalizeRunDirKey(value: string | null | undefined): string {
+  return value ? value.replaceAll('\\', '/').replace(/\/+$/u, '') : '';
+}
+
+function sameRunDir(left: string | null | undefined, right: string | null | undefined): boolean {
+  if (!left || !right) {
+    return false;
+  }
+  return normalizeRunDirKey(left) === normalizeRunDirKey(right);
+}
+
+function uniqueStrings(values: Array<string | null | undefined>): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    if (!value || seen.has(value)) {
+      continue;
+    }
+    seen.add(value);
+    result.push(value);
+  }
+  return result;
+}
+
+async function refillLiveEvents(
+  scope: WorkbenchLiveStreamScope,
+  afterSeq: number,
+): Promise<WorkbenchLiveEvent[]> {
+  if (scope.kind === 'run') {
+    return [];
+  }
+  const payload = await api.getAgentTurnEvents(scope.sessionId, scope.turnId);
+  return (payload.events || [])
+    .map((event, index) =>
+      liveEventFromAgentRunEvent(event, index + 1, scope.source || 'agent_turn'),
+    )
+    .filter((event) => event.seq > afterSeq);
+}
+
+function liveEventFromAgentRunEvent(
+  event: RunEvent,
+  seq: number,
+  source: 'agent_turn' | 'assistant_turn',
+): WorkbenchLiveEvent {
+  const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
+  const content = stringValue(payload.content);
+  const type = event.type === 'agent_message' || event.type === 'agent_status' ? event.type : 'agent_event';
+  const sessionId = stringValue(event.session_id);
+  const turnId = stringValue(event.turn_id);
+  return {
+    event_id: String(event.event_id || `refill_${sessionId}_${turnId}_${seq}`),
+    seq,
+    source,
+    run_id: stringValue(event.run_id),
+    node_id: stringValue(event.node_id),
+    session_id: sessionId,
+    turn_id: turnId,
+    type,
+    stream: 'agent',
+    text: event.type === 'agent_message' ? content : '',
+    payload,
+    timestamp: stringValue(event.timestamp),
+  };
+}
+
+function boundedLiveEvents(
+  base: WorkbenchLiveEvent[],
+  incoming: WorkbenchLiveEvent[],
+  maxEvents = 500,
+  maxTextBytes = 1024 * 1024,
+): WorkbenchLiveEvent[] {
+  const seen = new Set<string>();
+  const merged: WorkbenchLiveEvent[] = [];
+  for (const event of [...base, ...incoming]) {
+    const key = String(event.event_id || event.seq);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    merged.push(event);
+  }
+  merged.sort((left, right) => Number(left.seq || 0) - Number(right.seq || 0));
+  let textBytes = 0;
+  const bounded: WorkbenchLiveEvent[] = [];
+  for (const event of merged.slice(-maxEvents).reverse()) {
+    textBytes += event.text?.length || 0;
+    if (textBytes > maxTextBytes && bounded.length > 0) {
+      break;
+    }
+    bounded.push(event);
+  }
+  return bounded.reverse();
+}
+
+function LiveOutputViewer({
+  events,
+  status,
+  emptyText,
+}: {
+  events: WorkbenchLiveEvent[];
+  status: string;
+  emptyText: string;
+}) {
+  const [filter, setFilter] = useState<'all' | 'agent' | 'stdout' | 'stderr' | 'errors'>('all');
+  const visibleEvents = useMemo(() => filterLiveEvents(events, filter).slice(-160), [events, filter]);
+  const hasEvents = visibleEvents.length > 0;
+  return (
+    <section className="live-output-viewer" aria-label="实时输出">
+      <header className="live-output-header">
+        <div>
+          <span>实时输出</span>
+          <strong>{statusLabel(status || 'not_run')}</strong>
+        </div>
+        <div className="selection-log-stream-tabs" role="tablist" aria-label="Live output filters">
+          {(['all', 'agent', 'stdout', 'stderr', 'errors'] as const).map((item) => (
+            <button
+              key={item}
+              type="button"
+              className={filter === item ? 'active' : ''}
+              onClick={() => setFilter(item)}
+            >
+              {item}
+            </button>
+          ))}
+        </div>
+      </header>
+      <div className="selection-log-output selection-live-output" role="log" aria-live="polite">
+        {hasEvents ? (
+          <div className="live-output-lines">
+            {visibleEvents.map((event) => (
+              <article key={`${event.event_id}-${event.seq}`} className={`live-output-line stream-${event.stream || 'agent'}`}>
+                <span>{liveEventLabel(event)}</span>
+                <pre>{liveEventText(event)}</pre>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="empty-state">{emptyText}</p>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function filterLiveEvents(
+  events: WorkbenchLiveEvent[],
+  filter: 'all' | 'agent' | 'stdout' | 'stderr' | 'errors',
+): WorkbenchLiveEvent[] {
+  if (filter === 'all') {
+    return events;
+  }
+  if (filter === 'errors') {
+    return events.filter((event) =>
+      `${event.type} ${event.text || ''} ${stringValue(event.payload?.error)}`.toLowerCase().includes('error') ||
+      String(event.type).includes('failed'),
+    );
+  }
+  return events.filter((event) => event.stream === filter);
+}
+
+function liveEventLabel(event: WorkbenchLiveEvent): string {
+  const prefix = event.stream || 'agent';
+  const time = event.timestamp ? event.timestamp.split('T').pop()?.replace('Z', '') || event.timestamp : '';
+  return [time, prefix, event.type].filter(Boolean).join(' · ');
+}
+
+function liveEventText(event: WorkbenchLiveEvent): string {
+  if (event.text) {
+    return limitText(event.text, 2400);
+  }
+  if (event.payload) {
+    const content = stringValue(event.payload.content);
+    if (content) {
+      return limitText(assistantMessageDisplayContent(content), 2400);
+    }
+    const outputPath = stringValue(event.payload.output_path);
+    if (outputPath) {
+      return shortPath(outputPath);
+    }
+    const status = stringValue(event.payload.status);
+    if (status) {
+      return status;
+    }
+  }
+  return event.type;
+}
+
+function limitText(value: string, maxLength: number): string {
+  return value.length > maxLength ? `${value.slice(0, maxLength)}...` : value;
 }
 
 function agentSessionArtifactPath(session: AgentSessionRecord | null | undefined, ref: unknown): string {
@@ -13455,7 +13900,7 @@ function workspaceDemoCanvas(): WorkspaceCanvasModel {
         id: 'Stock_Target_Agent',
         title: '美股标的识别',
         sourceKind: 'agent_session',
-        callableId: 'fake-agent.generic',
+        callableId: STOCK_TARGET_AGENT_ID,
         codexExecutionMode: 'default',
         directory: 'workflows/demo/stock_target',
         status: 'not_run',
@@ -13495,15 +13940,55 @@ function workspaceDemoCanvas(): WorkspaceCanvasModel {
           port('main', '基本面调研结果', 'output', true),
         ],
         internalNodes: [
-          internalNode('research_codex', 'Codex CLI', '业务模式与收入结构', 'Agent'),
-          internalNode('research_financials', '财报摘要', '收入、利润率与现金流', 'Agent'),
-          internalNode('research_industry', '行业定位', '竞争格局与增长驱动', 'Agent'),
-          internalNode('research_merge', '基本面汇总', '整合业务、财务和行业判断', 'Tool'),
+          internalNode(
+            'research_business',
+            '业务模式研究',
+            '基于已确认标的，研究公司业务模式、收入结构、关键产品和客户结构。',
+            'Agent',
+            STOCK_BUSINESS_AGENT_ID,
+            fundamentalsComponentOutputSchema(),
+          ),
+          internalNode(
+            'research_financials',
+            '财报摘要',
+            '基于已确认标的，整理近年收入、利润率、现金流、资产负债表强弱项和财务质量。',
+            'Agent',
+            STOCK_FINANCIALS_AGENT_ID,
+            fundamentalsComponentOutputSchema(),
+          ),
+          internalNode(
+            'research_industry',
+            '行业定位',
+            '基于已确认标的，分析竞争格局、行业增长驱动、主要对手和公司相对位置。',
+            'Agent',
+            STOCK_INDUSTRY_AGENT_ID,
+            fundamentalsComponentOutputSchema(),
+          ),
+          internalNode(
+            'research_synthesis',
+            '基本面汇总',
+            '整合业务、财务和行业三路研究，输出基本面判断、关键证据和待验证假设。',
+            'Agent',
+            STOCK_FUNDAMENTALS_SYNTHESIS_AGENT_ID,
+            fundamentalsSynthesisOutputSchema(),
+            [
+              port('business', '业务模式研究', 'input', true),
+              port('financials', '财报摘要', 'input', true),
+              port('industry', '行业定位', 'input', true),
+            ],
+          ),
         ],
         internalEdges: [
-          controlEdge('research_codex', 'research_merge'),
-          controlEdge('research_financials', 'research_merge'),
-          controlEdge('research_industry', 'research_merge'),
+          dataEdge(workflowInputBoundaryId('Research_Flow'), 'main', 'research_business', 'main'),
+          dataEdge(workflowInputBoundaryId('Research_Flow'), 'main', 'research_financials', 'main'),
+          dataEdge(workflowInputBoundaryId('Research_Flow'), 'main', 'research_industry', 'main'),
+          controlEdge('research_business', 'research_synthesis'),
+          controlEdge('research_financials', 'research_synthesis'),
+          controlEdge('research_industry', 'research_synthesis'),
+          dataEdge('research_business', 'main', 'research_synthesis', 'business'),
+          dataEdge('research_financials', 'main', 'research_synthesis', 'financials'),
+          dataEdge('research_industry', 'main', 'research_synthesis', 'industry'),
+          dataEdge('research_synthesis', 'main', workflowOutputBoundaryId('Research_Flow'), 'main'),
         ],
         position: { x: 490, y: 170 },
         size: DEFAULT_CONTAINER_SIZE,
@@ -13518,13 +14003,43 @@ function workspaceDemoCanvas(): WorkspaceCanvasModel {
         inputPorts: [port('main', '基本面调研结果', 'input')],
         outputPorts: [port('main', '估值判断', 'output', true)],
         internalNodes: [
-          internalNode('valuation_model', '估值框架', '收入倍数、利润率和现金流假设', 'Agent'),
-          internalNode('valuation_scenario', '情景分析', '牛熊情景和关键敏感性', 'Agent'),
-          internalNode('valuation_merge', '估值结论', '生成估值区间与风险收益判断', 'Tool'),
+          internalNode(
+            'valuation_model',
+            '估值框架',
+            '基于基本面研究，建立适合该公司的估值框架、核心假设和估值区间。',
+            'Agent',
+            STOCK_VALUATION_MODEL_AGENT_ID,
+            valuationComponentOutputSchema(),
+          ),
+          internalNode(
+            'valuation_scenario',
+            '情景分析',
+            '基于基本面研究，构造牛/基准/熊三种情景和关键敏感性。',
+            'Agent',
+            STOCK_SCENARIO_AGENT_ID,
+            valuationComponentOutputSchema(),
+          ),
+          internalNode(
+            'valuation_synthesis',
+            '估值结论',
+            '整合估值框架和情景分析，输出估值判断、风险收益比和关键不确定性。',
+            'Agent',
+            STOCK_VALUATION_SYNTHESIS_AGENT_ID,
+            valuationSynthesisOutputSchema(),
+            [
+              port('valuation_model', '估值框架', 'input', true),
+              port('scenario_analysis', '情景分析', 'input', true),
+            ],
+          ),
         ],
         internalEdges: [
-          controlEdge('valuation_model', 'valuation_scenario'),
-          controlEdge('valuation_scenario', 'valuation_merge'),
+          dataEdge(workflowInputBoundaryId('Implementation_Flow'), 'main', 'valuation_model', 'main'),
+          dataEdge(workflowInputBoundaryId('Implementation_Flow'), 'main', 'valuation_scenario', 'main'),
+          controlEdge('valuation_model', 'valuation_synthesis'),
+          controlEdge('valuation_scenario', 'valuation_synthesis'),
+          dataEdge('valuation_model', 'main', 'valuation_synthesis', 'valuation_model'),
+          dataEdge('valuation_scenario', 'main', 'valuation_synthesis', 'scenario_analysis'),
+          dataEdge('valuation_synthesis', 'main', workflowOutputBoundaryId('Implementation_Flow'), 'main'),
         ],
         position: { x: 930, y: 80 },
         size: DEFAULT_CONTAINER_SIZE,
@@ -13539,15 +14054,55 @@ function workspaceDemoCanvas(): WorkspaceCanvasModel {
         inputPorts: [port('main', '基本面调研结果', 'input')],
         outputPorts: [port('main', '风险与催化剂', 'output', true)],
         internalNodes: [
-          internalNode('risk_macro', '宏观与监管风险', '利率、监管、汇率和政策变量', 'Agent'),
-          internalNode('risk_company', '公司特有风险', '竞争、执行、产品和客户集中度', 'Agent'),
-          internalNode('catalyst_scan', '催化剂扫描', '财报、产品、资本开支和新闻事件', 'Agent'),
-          internalNode('risk_collect', '风险汇总', '整合风险矩阵和催化剂清单', 'Tool'),
+          internalNode(
+            'risk_macro',
+            '宏观与监管风险',
+            '基于基本面研究，识别利率、监管、汇率、政策和周期风险。',
+            'Agent',
+            STOCK_MACRO_RISK_AGENT_ID,
+            riskComponentOutputSchema(),
+          ),
+          internalNode(
+            'risk_company',
+            '公司特有风险',
+            '基于基本面研究，识别竞争、执行、产品、客户集中度和治理风险。',
+            'Agent',
+            STOCK_COMPANY_RISK_AGENT_ID,
+            riskComponentOutputSchema(),
+          ),
+          internalNode(
+            'catalyst_scan',
+            '催化剂扫描',
+            '基于基本面研究，识别未来 6-12 个月可能改变市场预期的正负催化剂。',
+            'Agent',
+            STOCK_CATALYST_AGENT_ID,
+            catalystOutputSchema(),
+          ),
+          internalNode(
+            'risk_synthesis',
+            '风险汇总',
+            '整合宏观风险、公司风险和催化剂，输出风险矩阵与跟踪清单。',
+            'Agent',
+            STOCK_RISK_SYNTHESIS_AGENT_ID,
+            riskSynthesisOutputSchema(),
+            [
+              port('macro_risks', '宏观与监管风险', 'input', true),
+              port('company_risks', '公司特有风险', 'input', true),
+              port('catalysts', '催化剂扫描', 'input', true),
+            ],
+          ),
         ],
         internalEdges: [
-          controlEdge('risk_macro', 'risk_collect'),
-          controlEdge('risk_company', 'risk_collect'),
-          controlEdge('catalyst_scan', 'risk_collect'),
+          dataEdge(workflowInputBoundaryId('Review_Flow'), 'main', 'risk_macro', 'main'),
+          dataEdge(workflowInputBoundaryId('Review_Flow'), 'main', 'risk_company', 'main'),
+          dataEdge(workflowInputBoundaryId('Review_Flow'), 'main', 'catalyst_scan', 'main'),
+          controlEdge('risk_macro', 'risk_synthesis'),
+          controlEdge('risk_company', 'risk_synthesis'),
+          controlEdge('catalyst_scan', 'risk_synthesis'),
+          dataEdge('risk_macro', 'main', 'risk_synthesis', 'macro_risks'),
+          dataEdge('risk_company', 'main', 'risk_synthesis', 'company_risks'),
+          dataEdge('catalyst_scan', 'main', 'risk_synthesis', 'catalysts'),
+          dataEdge('risk_synthesis', 'main', workflowOutputBoundaryId('Review_Flow'), 'main'),
         ],
         position: { x: 930, y: 480 },
         size: DEFAULT_CONTAINER_SIZE,
@@ -13562,11 +14117,28 @@ function workspaceDemoCanvas(): WorkspaceCanvasModel {
         inputPorts: [port('main', '分支分析结果', 'input')],
         outputPorts: [port('main', '投资调研报告', 'output', true)],
         internalNodes: [
-          internalNode('report_writer', '报告撰写', '整合标的、基本面、估值、风险和催化剂', 'Agent'),
-          internalNode('root_publish', 'Artifact Collect', '发布最终调研报告', 'Tool'),
+          internalNode(
+            'report_writer',
+            '报告撰写',
+            '整合标的、基本面、估值、风险和催化剂，形成结构化投资调研报告。',
+            'Agent',
+            STOCK_REPORT_WRITER_AGENT_ID,
+            investmentReportOutputSchema(),
+          ),
+          internalNode(
+            'root_publish',
+            '报告发布检查',
+            '检查最终报告是否完整、证据是否可追溯、结论是否标注不确定性。',
+            'Agent',
+            STOCK_REPORT_PUBLISH_AGENT_ID,
+            reportPublishOutputSchema(),
+          ),
         ],
         internalEdges: [
+          dataEdge(workflowInputBoundaryId('Root_Pipeline'), 'main', 'report_writer', 'main'),
           controlEdge('report_writer', 'root_publish'),
+          dataEdge('report_writer', 'main', 'root_publish', 'main'),
+          dataEdge('root_publish', 'main', workflowOutputBoundaryId('Root_Pipeline'), 'main'),
         ],
         position: { x: 1370, y: 280 },
         size: DEFAULT_CONTAINER_SIZE,
@@ -13575,12 +14147,116 @@ function workspaceDemoCanvas(): WorkspaceCanvasModel {
     ],
     edges: [
       controlEdge('Stock_Target_Agent', 'Research_Flow'),
+      dataEdge('Stock_Target_Agent', 'main', 'Research_Flow', 'main'),
       controlEdge('Research_Flow', 'Implementation_Flow'),
+      dataEdge('Research_Flow', 'main', 'Implementation_Flow', 'main'),
       controlEdge('Research_Flow', 'Review_Flow'),
+      dataEdge('Research_Flow', 'main', 'Review_Flow', 'main'),
       controlEdge('Implementation_Flow', 'Root_Pipeline'),
+      dataEdge('Implementation_Flow', 'main', 'Root_Pipeline', 'main'),
       controlEdge('Review_Flow', 'Root_Pipeline'),
+      dataEdge('Review_Flow', 'main', 'Root_Pipeline', 'main'),
     ],
   };
+}
+
+function stringField(description: string): Record<string, unknown> {
+  return { type: 'string', description };
+}
+
+function stringArrayField(description: string): Record<string, unknown> {
+  return {
+    type: 'array',
+    description,
+    items: { type: 'string' },
+  };
+}
+
+function objectOutputSchema(
+  required: string[],
+  properties: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    type: 'object',
+    additionalProperties: false,
+    required,
+    properties: {
+      status: stringField('success 或 failed'),
+      summary: stringField('面向下游节点的简明结论'),
+      ...properties,
+    },
+  };
+}
+
+function fundamentalsComponentOutputSchema(): Record<string, unknown> {
+  return objectOutputSchema(['status', 'summary', 'findings', 'evidence'], {
+    findings: stringArrayField('关键发现'),
+    evidence: stringArrayField('引用的文件、数据或需外部验证的信息'),
+    assumptions: stringArrayField('需要在后续节点显式保留的不确定性'),
+  });
+}
+
+function fundamentalsSynthesisOutputSchema(): Record<string, unknown> {
+  return objectOutputSchema(['status', 'summary', 'business_quality', 'financial_quality', 'industry_position'], {
+    business_quality: stringField('业务模式质量判断'),
+    financial_quality: stringField('财务质量判断'),
+    industry_position: stringField('行业位置判断'),
+    open_questions: stringArrayField('后续估值和风险分析需要验证的问题'),
+  });
+}
+
+function valuationComponentOutputSchema(): Record<string, unknown> {
+  return objectOutputSchema(['status', 'summary', 'assumptions', 'valuation_view'], {
+    assumptions: stringArrayField('估值或情景假设'),
+    valuation_view: stringField('估值或情景判断'),
+    sensitivities: stringArrayField('关键敏感变量'),
+  });
+}
+
+function valuationSynthesisOutputSchema(): Record<string, unknown> {
+  return objectOutputSchema(['status', 'summary', 'valuation_range', 'risk_reward'], {
+    valuation_range: stringField('估值区间或相对估值判断'),
+    risk_reward: stringField('风险收益比判断'),
+    uncertainty: stringArrayField('主要不确定性'),
+  });
+}
+
+function riskComponentOutputSchema(): Record<string, unknown> {
+  return objectOutputSchema(['status', 'summary', 'risks'], {
+    risks: stringArrayField('风险项'),
+    severity_notes: stringArrayField('风险严重程度或触发条件'),
+  });
+}
+
+function catalystOutputSchema(): Record<string, unknown> {
+  return objectOutputSchema(['status', 'summary', 'positive_catalysts', 'negative_catalysts'], {
+    positive_catalysts: stringArrayField('正向催化剂'),
+    negative_catalysts: stringArrayField('负向催化剂'),
+    watchlist: stringArrayField('需要持续跟踪的事件'),
+  });
+}
+
+function riskSynthesisOutputSchema(): Record<string, unknown> {
+  return objectOutputSchema(['status', 'summary', 'risk_matrix', 'catalyst_watchlist'], {
+    risk_matrix: stringArrayField('整合后的风险矩阵'),
+    catalyst_watchlist: stringArrayField('催化剂跟踪清单'),
+    mitigation_notes: stringArrayField('风险缓释或验证方式'),
+  });
+}
+
+function investmentReportOutputSchema(): Record<string, unknown> {
+  return objectOutputSchema(['status', 'summary', 'thesis', 'report_sections'], {
+    thesis: stringField('投资论点'),
+    report_sections: stringArrayField('最终报告章节摘要'),
+    evidence_gaps: stringArrayField('证据缺口和免责声明'),
+  });
+}
+
+function reportPublishOutputSchema(): Record<string, unknown> {
+  return objectOutputSchema(['status', 'summary', 'readiness', 'required_followups'], {
+    readiness: stringField('报告是否可发布，以及原因'),
+    required_followups: stringArrayField('发布前仍需补充的检查项'),
+  });
 }
 
 function normalizeWorkflowGraph(graph: WorkflowGraph): WorkflowGraph {
@@ -13944,6 +14620,9 @@ function internalNode(
   name: string,
   task: string,
   kind: 'Agent' | 'Tool',
+  callableId?: string,
+  outputSchema?: Record<string, unknown>,
+  inputPorts?: WorkflowPortView[],
 ): InternalNodeView {
   return {
     id,
@@ -13951,8 +14630,11 @@ function internalNode(
     task,
     kind,
     status: 'not_run',
-    callableId: kind === 'Tool' ? 'merge' : 'fake-agent.generic',
-    input: { topic: task || name },
+    callableId: callableId || (kind === 'Tool' ? 'merge' : 'fake-agent.generic'),
+    input: { user_prompt: task || name },
+    outputSchema,
+    inputPorts: inputPorts || [port('main', '输入材料', 'input')],
+    outputPorts: [port('main', '输出产物', 'output', true)],
   };
 }
 
@@ -14860,7 +15542,18 @@ function nodeLiveLogsFor(
   if (!nodeRun) {
     return undefined;
   }
-  return liveLogs[nodeRun.node_id] || (nodeRun.ui_node_id ? liveLogs[nodeRun.ui_node_id] : undefined);
+  for (const key of uniqueStrings([
+    nodeRun.ui_node_id,
+    normalizeRunDirKey(nodeRun.run_dir),
+    nodeRun.run_dir,
+    nodeRun.node_id,
+  ])) {
+    const logs = liveLogs[key];
+    if (logs) {
+      return logs;
+    }
+  }
+  return undefined;
 }
 
 function nodeRunForInternalNode(
@@ -16863,6 +17556,8 @@ export const __workflowViewerTestables = {
   workspaceDemoCanvas,
   nextRootPalettePosition,
   nodeRunForInternalNode,
+  nodeLiveLogsFor,
+  nodeLogDeltaKeys,
   normalizeSelectionIntent,
   normalizeWorkbenchSelection,
   deleteSelectionFromCanvas,
@@ -16871,4 +17566,7 @@ export const __workflowViewerTestables = {
   promptFromInvocationInput,
   staticInputFromInvocationInput,
   workflowInvocationLabel,
+  boundedLiveEvents,
+  filterLiveEvents,
+  liveEventFromAgentRunEvent,
 };

@@ -1,0 +1,44 @@
+id: stock-catalyst-scanner.codex
+version: 0.1.0
+runtime: codex_app_server
+default_prompt: |
+  You are a catalyst scanning agent in an ACC stock research workflow.
+  Use upstream fundamentals to identify events that could change investor expectations over the next 6-12 months.
+  Include both positive and negative catalysts, and mark items requiring live calendar or news verification.
+default_permissions:
+  workspace_access: read_only
+  network: false
+  shell: false
+  dangerous: false
+  timeout_seconds: 600
+input_ports:
+  main:
+    type: artifact
+    required: true
+output_ports:
+  main:
+    type: artifact
+    required: true
+artifact_contract:
+  output_schema:
+    type: object
+    additionalProperties: false
+    required: [status, summary, positive_catalysts, negative_catalysts, watchlist]
+    properties:
+      status: {type: string}
+      summary: {type: string}
+      positive_catalysts:
+        type: array
+        items: {type: string}
+      negative_catalysts:
+        type: array
+        items: {type: string}
+      watchlist:
+        type: array
+        items: {type: string}
+metadata:
+  name: 催化剂扫描
+  description: Identify positive and negative catalysts.
+  agent_provider: codex
+  model: gpt-5.5
+  reasoning_effort: medium

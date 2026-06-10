@@ -1,0 +1,48 @@
+id: stock-fundamentals-synthesis.codex
+version: 0.1.0
+runtime: codex_app_server
+default_prompt: |
+  You are a fundamentals synthesis agent in an ACC stock research workflow.
+  Combine business model, financial quality, and industry positioning artifacts from upstream nodes.
+  Preserve disagreements and uncertainty instead of smoothing them away.
+  Output a downstream-ready fundamentals view for valuation and risk agents.
+default_permissions:
+  workspace_access: read_only
+  network: false
+  shell: false
+  dangerous: false
+  timeout_seconds: 600
+input_ports:
+  business:
+    type: artifact
+    required: true
+  financials:
+    type: artifact
+    required: true
+  industry:
+    type: artifact
+    required: true
+output_ports:
+  main:
+    type: artifact
+    required: true
+artifact_contract:
+  output_schema:
+    type: object
+    additionalProperties: false
+    required: [status, summary, business_quality, financial_quality, industry_position, open_questions]
+    properties:
+      status: {type: string}
+      summary: {type: string}
+      business_quality: {type: string}
+      financial_quality: {type: string}
+      industry_position: {type: string}
+      open_questions:
+        type: array
+        items: {type: string}
+metadata:
+  name: 基本面汇总
+  description: Synthesize business, financial, and industry research.
+  agent_provider: codex
+  model: gpt-5.5
+  reasoning_effort: medium

@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from acc.adapters.streaming import StreamingAgentTurnRequest, StreamingAgentTurnResult
 from acc.agent_events import append_agent_event
 from acc.app.agent_sessions import AgentTurnService, AgentTurnTaskManager
+from acc.server.live_events import WorkbenchLiveBus
 
 
 def test_agent_session_api_submits_async_turn(
@@ -148,8 +149,95 @@ def test_workbench_assistant_sse_stream_returns_canonical_events(
 
     assert response.status_code == 200
     assert "event: agent_event" in text
+    assert "event: live_event" in text
+    assert '"source": "assistant_turn"' in text
     assert "agent_output_draft" in text
     assert "provider_events" not in text
+
+
+def test_create_agent_session_from_nested_run_node_accepts_safe_node_run_dir(
+    client: TestClient,
+    project_root: Path,
+) -> None:
+    node_dir = (
+        project_root
+        / "runs"
+        / "server_run"
+        / "nodes"
+        / "workflow_parent"
+        / "nested_workflow"
+        / "nodes"
+        / "agent_node"
+    )
+    node_dir.mkdir(parents=True)
+    write_json(
+        node_dir / "runtime.json",
+        {"runtime": "codex_app_server", "workspace_dir": str(project_root)},
+    )
+    write_json(node_dir / "output_schema.json", output_schema())
+
+    response = client.post(
+        "/api/agent-sessions",
+        json={
+            "source": {
+                "type": "run_node",
+                "run_id": "server_run",
+                "node_id": "agent_node",
+                "node_run_dir": str(node_dir.resolve()),
+            }
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["bound_run_id"] == "server_run"
+    assert payload["bound_node_id"] == "agent_node"
+    runtime = json.loads((node_dir / "runtime.json").read_text(encoding="utf-8"))
+    assert runtime["agent_session_ref"] == payload["session_dir"]
+
+
+def test_create_agent_session_from_run_node_rejects_outside_node_run_dir(
+    client: TestClient,
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    outside_dir = tmp_path / "outside" / "agent_node"
+    outside_dir.mkdir(parents=True)
+
+    response = client.post(
+        "/api/agent-sessions",
+        json={
+            "source": {
+                "type": "run_node",
+                "run_id": "server_run",
+                "node_id": "agent_node",
+                "node_run_dir": str(outside_dir.resolve()),
+            }
+        },
+    )
+
+    assert response.status_code == 400
+    assert "outside" in response.json()["detail"]
+
+
+def test_workbench_live_bus_emits_gap_when_subscriber_queue_overflows() -> None:
+    asyncio.run(run_live_bus_gap_test())
+
+
+async def run_live_bus_gap_test() -> None:
+    bus = WorkbenchLiveBus()
+    async for queue in bus.subscribe("turn:test", max_queue_events=1):
+        bus.publish(
+            "turn:test",
+            {"event_id": "evt_1", "seq": bus.next_seq("turn:test"), "type": "agent_event"},
+        )
+        bus.publish(
+            "turn:test",
+            {"event_id": "evt_2", "seq": bus.next_seq("turn:test"), "type": "agent_event"},
+        )
+        event = await queue.get()
+        assert event["type"] == "gap"
+        break
 
 
 def test_agent_turn_task_manager_does_not_duplicate_adapter_failure_event(

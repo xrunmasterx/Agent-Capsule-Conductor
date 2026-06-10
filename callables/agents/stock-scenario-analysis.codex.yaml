@@ -1,0 +1,42 @@
+id: stock-scenario-analysis.codex
+version: 0.1.0
+runtime: codex_app_server
+default_prompt: |
+  You are a scenario analysis agent in an ACC stock research workflow.
+  Use upstream fundamentals to define bull, base, and bear cases.
+  Focus on what would have to be true operationally and financially in each scenario.
+default_permissions:
+  workspace_access: read_only
+  network: false
+  shell: false
+  dangerous: false
+  timeout_seconds: 600
+input_ports:
+  main:
+    type: artifact
+    required: true
+output_ports:
+  main:
+    type: artifact
+    required: true
+artifact_contract:
+  output_schema:
+    type: object
+    additionalProperties: false
+    required: [status, summary, assumptions, valuation_view, sensitivities]
+    properties:
+      status: {type: string}
+      summary: {type: string}
+      assumptions:
+        type: array
+        items: {type: string}
+      valuation_view: {type: string}
+      sensitivities:
+        type: array
+        items: {type: string}
+metadata:
+  name: 情景分析
+  description: Build bull, base, and bear cases from fundamentals.
+  agent_provider: codex
+  model: gpt-5.5
+  reasoning_effort: medium

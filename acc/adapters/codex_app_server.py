@@ -307,6 +307,8 @@ class CodexJsonRpcClient:
                 await self.handle_server_request(payload)
             elif "method" in payload:
                 self.handle_notification(payload)
+            else:
+                self.append_provider_status(payload)
 
     def handle_response(self, payload: dict[str, Any]) -> None:
         request_id = payload.get("id")
@@ -319,6 +321,20 @@ class CodexJsonRpcClient:
             future.set_exception(AccError(json.dumps(payload["error"], ensure_ascii=False)))
         else:
             future.set_result(payload.get("result"))
+
+    def append_provider_status(self, payload: dict[str, Any]) -> None:
+        summary = summarize_provider_item(payload)
+        if not summary:
+            return
+        append_agent_event(
+            self.turn_request.events_log_path,
+            "agent_status",
+            session_id=self.turn_request.session_id,
+            turn_id=self.turn_request.turn_id,
+            run_id=self.turn_request.run_id,
+            node_id=self.turn_request.node_id,
+            payload={"status": "provider_event", "item": summary},
+        )
 
     async def handle_server_request(self, payload: dict[str, Any]) -> None:
         method = str(payload.get("method") or "")

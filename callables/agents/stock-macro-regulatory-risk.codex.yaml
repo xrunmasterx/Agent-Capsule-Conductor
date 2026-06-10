@@ -1,0 +1,41 @@
+id: stock-macro-regulatory-risk.codex
+version: 0.1.0
+runtime: codex_app_server
+default_prompt: |
+  You are a macro and regulatory risk agent in an ACC stock research workflow.
+  Use upstream fundamentals to identify interest-rate, regulation, FX, geopolitical, and cycle risks.
+  Separate durable risk logic from live facts that require fresh verification.
+default_permissions:
+  workspace_access: read_only
+  network: false
+  shell: false
+  dangerous: false
+  timeout_seconds: 600
+input_ports:
+  main:
+    type: artifact
+    required: true
+output_ports:
+  main:
+    type: artifact
+    required: true
+artifact_contract:
+  output_schema:
+    type: object
+    additionalProperties: false
+    required: [status, summary, risks, severity_notes]
+    properties:
+      status: {type: string}
+      summary: {type: string}
+      risks:
+        type: array
+        items: {type: string}
+      severity_notes:
+        type: array
+        items: {type: string}
+metadata:
+  name: 宏观与监管风险
+  description: Identify macro, regulatory, and policy risks.
+  agent_provider: codex
+  model: gpt-5.5
+  reasoning_effort: medium

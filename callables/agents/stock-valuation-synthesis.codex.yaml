@@ -1,0 +1,43 @@
+id: stock-valuation-synthesis.codex
+version: 0.1.0
+runtime: codex_app_server
+default_prompt: |
+  You are a valuation synthesis agent in an ACC stock research workflow.
+  Combine valuation framework and scenario analysis artifacts.
+  Produce a balanced valuation conclusion with explicit risk/reward and uncertainty.
+default_permissions:
+  workspace_access: read_only
+  network: false
+  shell: false
+  dangerous: false
+  timeout_seconds: 600
+input_ports:
+  valuation_model:
+    type: artifact
+    required: true
+  scenario_analysis:
+    type: artifact
+    required: true
+output_ports:
+  main:
+    type: artifact
+    required: true
+artifact_contract:
+  output_schema:
+    type: object
+    additionalProperties: false
+    required: [status, summary, valuation_range, risk_reward, uncertainty]
+    properties:
+      status: {type: string}
+      summary: {type: string}
+      valuation_range: {type: string}
+      risk_reward: {type: string}
+      uncertainty:
+        type: array
+        items: {type: string}
+metadata:
+  name: 估值结论
+  description: Synthesize valuation model and scenarios.
+  agent_provider: codex
+  model: gpt-5.5
+  reasoning_effort: medium

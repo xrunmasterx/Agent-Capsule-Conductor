@@ -27,6 +27,11 @@ from acc.server.context import (
     is_relative_to,
     relative_project_path,
 )
+from acc.server.live_events import (
+    live_event_from_agent_event,
+    live_event_from_node_log,
+    sse_event,
+)
 from acc.server.run_projection import RunProjection
 from acc.session import utc_now_iso
 from acc.utils import AccError
@@ -187,19 +192,24 @@ def get_node_log_delta(
 
 
 @router.get("/{run_id}/stream")
-async def stream_run(run_id: str, request: Request) -> StreamingResponse:
+async def stream_run(
+    run_id: str,
+    request: Request,
+    after_seq: int = Query(0, ge=0),
+) -> StreamingResponse:
     run_dir = resolve_run_dir_or_404(run_id, request)
 
     async def event_source():
         offsets: dict[tuple[str, str], int] = {}
         agent_event_counts: dict[str, int] = {}
+        sequence = 0
         while not await request.is_disconnected():
-            for node_dir in iter_node_dirs(run_dir):
-                node_id = node_dir.name
+            for node_ref in iter_stream_node_refs(run_dir):
+                node_id = node_ref["node_id"]
                 for stream_name in ("stdout", "stderr"):
-                    key = (node_id, stream_name)
-                    delta = read_node_log_delta(
-                        run_dir,
+                    key = (str(node_ref["node_dir"]), stream_name)
+                    delta = read_node_log_delta_from_dir(
+                        Path(str(node_ref["node_dir"])),
                         run_id,
                         node_id,
                         stream_name,
@@ -212,6 +222,7 @@ async def stream_run(run_id: str, request: Request) -> StreamingResponse:
                             "type": "node_log_delta",
                             "run_id": run_id,
                             "node_id": node_id,
+                            **stream_node_identity(node_ref),
                             "stream": stream_name,
                             "offset": delta["offset"],
                             "next_offset": delta["next_offset"],
@@ -220,8 +231,14 @@ async def stream_run(run_id: str, request: Request) -> StreamingResponse:
                         }
                         data = json.dumps(payload, ensure_ascii=False)
                         yield f"event: node_log_delta\ndata: {data}\n\n"
+                        sequence += 1
+                        live_event = live_event_from_node_log(payload, sequence)
+                        if sequence > after_seq:
+                            yield sse_event("live_event", live_event)
 
-                agent_event_log = effective_agent_event_log_path(run_dir, node_id)
+                agent_event_log = effective_agent_event_log_path_for_dir(
+                    Path(str(node_ref["node_dir"]))
+                )
                 if agent_event_log is not None:
                     agent_event_key = str(agent_event_log)
                     events = read_jsonl_tolerant(agent_event_log, limit=1000)
@@ -230,8 +247,17 @@ async def stream_run(run_id: str, request: Request) -> StreamingResponse:
                         seen_count = 0
                     for agent_event in events[seen_count:]:
                         payload = project_agent_event(agent_event, run_id=run_id, node_id=node_id)
+                        payload.update(stream_node_identity(node_ref))
                         data = json.dumps(payload, ensure_ascii=False)
                         yield f"event: agent_event\ndata: {data}\n\n"
+                        sequence += 1
+                        live_event = live_event_from_agent_event(
+                            payload,
+                            sequence,
+                            source="run_node",
+                        )
+                        if sequence > after_seq:
+                            yield sse_event("live_event", live_event)
                     agent_event_counts[agent_event_key] = len(events)
 
             summary_path = run_dir / "run_summary.json"
@@ -305,6 +331,31 @@ def read_node_log_delta(
     limit: int,
 ) -> dict[str, Any]:
     log_path = effective_node_log_path(run_dir, node_id, stream)
+    return read_log_delta(log_path, run_id, node_id, stream, offset=offset, limit=limit)
+
+
+def read_node_log_delta_from_dir(
+    node_dir: Path,
+    run_id: str,
+    node_id: str,
+    stream: str,
+    *,
+    offset: int,
+    limit: int,
+) -> dict[str, Any]:
+    log_path = effective_node_log_path_for_dir(node_dir, stream)
+    return read_log_delta(log_path, run_id, node_id, stream, offset=offset, limit=limit)
+
+
+def read_log_delta(
+    log_path: Path,
+    run_id: str,
+    node_id: str,
+    stream: str,
+    *,
+    offset: int,
+    limit: int,
+) -> dict[str, Any]:
     if not log_path.exists():
         return {
             "type": "node_log_delta",
@@ -334,8 +385,11 @@ def read_node_log_delta(
 
 
 def effective_node_log_path(run_dir: Path, node_id: str, stream: str) -> Path:
-    node_log_path = run_dir / "nodes" / node_id / f"{stream}.log"
-    node_dir = run_dir / "nodes" / node_id
+    return effective_node_log_path_for_dir(run_dir / "nodes" / node_id, stream)
+
+
+def effective_node_log_path_for_dir(node_dir: Path, stream: str) -> Path:
+    node_log_path = node_dir / f"{stream}.log"
     runtime = load_json_tolerant(node_dir / "runtime.json")
     session_ref = runtime.get("agent_session_ref")
     turn_id = runtime.get("turn_id")
@@ -343,13 +397,11 @@ def effective_node_log_path(run_dir: Path, node_id: str, stream: str) -> Path:
         return node_log_path
     if not is_safe_path_component(turn_id):
         return node_log_path
-    project_root = run_dir.parent.parent.resolve() if run_dir.parent.name == "runs" else run_dir.parent.resolve()
-    agent_sessions_root = (project_root / "runs" / "_agent_sessions").resolve()
     try:
         session_dir = Path(session_ref).resolve()
     except OSError:
         return node_log_path
-    if not is_relative_to(session_dir, agent_sessions_root):
+    if not is_valid_agent_session_dir_for_node(node_dir, session_dir):
         return node_log_path
     turn_log_path = session_dir / "turns" / turn_id / f"{stream}.log"
     if turn_log_path.exists() and turn_log_path.is_file():
@@ -357,8 +409,28 @@ def effective_node_log_path(run_dir: Path, node_id: str, stream: str) -> Path:
     return node_log_path
 
 
+def is_valid_agent_session_dir_for_node(node_dir: Path, session_dir: Path) -> bool:
+    node_dir = node_dir.resolve()
+    candidates: list[Path] = []
+    current = node_dir
+    while current != current.parent:
+        if current.parent.name == "runs":
+            candidates.append((current.parent / "_agent_sessions").resolve())
+            candidates.append((current / "_agent_sessions").resolve())
+            break
+        if current.name == "nodes" and current.parent.name != "nested_workflow":
+            candidates.append((current.parent / "_agent_sessions").resolve())
+        current = current.parent
+    return any(is_relative_to(session_dir, candidate) for candidate in candidates)
+
+
 def is_safe_path_component(value: str) -> bool:
-    return value not in {"", ".", ".."} and Path(value).name == value and "/" not in value and "\\" not in value
+    return (
+        value not in {"", ".", ".."}
+        and Path(value).name == value
+        and "/" not in value
+        and "\\" not in value
+    )
 
 
 def iter_node_dirs(run_dir: Path) -> list[Path]:
@@ -366,6 +438,48 @@ def iter_node_dirs(run_dir: Path) -> list[Path]:
     if not nodes_dir.exists() or not nodes_dir.is_dir():
         return []
     return sorted(item for item in nodes_dir.iterdir() if item.is_dir())
+
+
+def iter_stream_node_refs(run_dir: Path) -> list[dict[str, Any]]:
+    refs: list[dict[str, Any]] = []
+    for node_dir in iter_node_dirs(run_dir):
+        refs.append({"node_id": node_dir.name, "node_dir": node_dir})
+        nested_run_dir = node_dir / "nested_workflow"
+        if nested_run_dir.exists() and nested_run_dir.is_dir():
+            refs.extend(iter_nested_stream_node_refs(nested_run_dir, node_dir.name))
+    return refs
+
+
+def iter_nested_stream_node_refs(
+    nested_run_dir: Path,
+    parent_ui_node_id: str,
+) -> list[dict[str, Any]]:
+    refs: list[dict[str, Any]] = []
+    for node_dir in iter_node_dirs(nested_run_dir):
+        node_id = node_dir.name
+        ui_node_id = f"{parent_ui_node_id}__internal__{node_id}"
+        refs.append(
+            {
+                "node_id": node_id,
+                "node_dir": node_dir,
+                "ui_node_id": ui_node_id,
+                "parent_node_id": parent_ui_node_id,
+                "node_run_dir": str(node_dir.resolve()),
+            }
+        )
+        nested_child_run_dir = node_dir / "nested_workflow"
+        if nested_child_run_dir.exists() and nested_child_run_dir.is_dir():
+            refs.extend(iter_nested_stream_node_refs(nested_child_run_dir, ui_node_id))
+    return refs
+
+
+def stream_node_identity(node_ref: dict[str, Any]) -> dict[str, Any]:
+    identity: dict[str, Any] = {}
+    for key in ("ui_node_id", "parent_node_id", "node_run_dir"):
+        value = node_ref.get(key)
+        if isinstance(value, str) and value:
+            identity[key] = value
+    return identity
 
 
 def _build_run_projection(run_dir: Path) -> RunProjection:
@@ -463,7 +577,10 @@ def read_node_events_with_agent(
 
 
 def effective_agent_event_log_path(run_dir: Path, node_id: str) -> Path | None:
-    node_dir = run_dir / "nodes" / node_id
+    return effective_agent_event_log_path_for_dir(run_dir / "nodes" / node_id)
+
+
+def effective_agent_event_log_path_for_dir(node_dir: Path) -> Path | None:
     runtime = load_json_tolerant(node_dir / "runtime.json")
     session_ref = runtime.get("agent_session_ref")
     turn_id = runtime.get("turn_id")
@@ -471,13 +588,11 @@ def effective_agent_event_log_path(run_dir: Path, node_id: str) -> Path | None:
         return None
     if not is_safe_path_component(turn_id):
         return None
-    project_root = run_dir.parent.parent.resolve() if run_dir.parent.name == "runs" else run_dir.parent.resolve()
-    agent_sessions_root = (project_root / "runs" / "_agent_sessions").resolve()
     try:
         session_dir = Path(session_ref).resolve()
     except OSError:
         return None
-    if not is_relative_to(session_dir, agent_sessions_root):
+    if not is_valid_agent_session_dir_for_node(node_dir, session_dir):
         return None
     event_log = session_dir / "turns" / turn_id / "events.jsonl"
     return event_log if event_log.exists() and event_log.is_file() else None

@@ -192,6 +192,7 @@ def test_run_stream_emits_agent_session_events(client, project_root) -> None:
 
     assert response.status_code == 200
     assert "event: agent_event" in text
+    assert "event: live_event" in text
     assert '"node_id": "server_node"' in text
     assert '"agent_turn_id": "turn_1"' in text
     assert "streamed" in text

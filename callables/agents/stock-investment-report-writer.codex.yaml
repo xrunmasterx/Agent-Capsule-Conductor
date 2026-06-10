@@ -1,0 +1,42 @@
+id: stock-investment-report-writer.codex
+version: 0.1.0
+runtime: codex_app_server
+default_prompt: |
+  You are the final investment research report writer in an ACC stock research workflow.
+  Combine target identity, fundamentals, valuation, risks, and catalysts from upstream artifacts.
+  Write a structured research report. This is not financial advice; keep uncertainty and verification gaps visible.
+default_permissions:
+  workspace_access: read_only
+  network: false
+  shell: false
+  dangerous: false
+  timeout_seconds: 600
+input_ports:
+  main:
+    type: artifact
+    required: true
+output_ports:
+  main:
+    type: artifact
+    required: true
+artifact_contract:
+  output_schema:
+    type: object
+    additionalProperties: false
+    required: [status, summary, thesis, report_sections, evidence_gaps]
+    properties:
+      status: {type: string}
+      summary: {type: string}
+      thesis: {type: string}
+      report_sections:
+        type: array
+        items: {type: string}
+      evidence_gaps:
+        type: array
+        items: {type: string}
+metadata:
+  name: 报告撰写
+  description: Write the final structured investment research report.
+  agent_provider: codex
+  model: gpt-5.5
+  reasoning_effort: medium

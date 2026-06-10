@@ -326,9 +326,20 @@ export const api = {
     getJson<NodeLogDelta>(
       `/api/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/logs/${encodeURIComponent(stream)}?offset=${encodeURIComponent(String(offset))}&limit=${encodeURIComponent(String(limit))}`,
     ),
-  createAgentSessionFromRunNode: (runId: string, nodeId: string) =>
+  createAgentSessionFromRunNode: (
+    runId: string,
+    nodeId: string,
+    options?: { nodeRunDir?: string | null; uiNodeId?: string | null; parentNodeId?: string | null },
+  ) =>
     sendJson<AgentSessionRecord>('POST', '/api/agent-sessions', {
-      source: { type: 'run_node', run_id: runId, node_id: nodeId },
+      source: {
+        type: 'run_node',
+        run_id: runId,
+        node_id: nodeId,
+        ...(options?.nodeRunDir ? { node_run_dir: options.nodeRunDir } : {}),
+        ...(options?.uiNodeId ? { ui_node_id: options.uiNodeId } : {}),
+        ...(options?.parentNodeId ? { parent_node_id: options.parentNodeId } : {}),
+      },
     }),
   createWorkbenchAssistantSession: (payload: {
     task_id: string;
@@ -388,8 +399,8 @@ export const api = {
     getJson<AgentTurnEventPayload>(
       `/api/agent-sessions/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(turnId)}/events`,
     ),
-  streamAgentTurnEventsUrl: (sessionId: string, turnId: string) =>
-    `/api/agent-sessions/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(turnId)}/stream`,
+  streamAgentTurnEventsUrl: (sessionId: string, turnId: string, afterSeq = 0) =>
+    `/api/agent-sessions/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(turnId)}/stream?after_seq=${encodeURIComponent(String(afterSeq))}`,
   validateAssistantDraft: (sessionId: string, expectedTurnId: string) =>
     sendJson<AgentAssistantDraftValidation>(
       'POST',
@@ -402,7 +413,8 @@ export const api = {
       `/api/agent-sessions/${encodeURIComponent(sessionId)}/output/publish`,
       { expected_turn_id: expectedTurnId },
     ),
-  runStreamUrl: (runId: string) => `/api/runs/${encodeURIComponent(runId)}/stream`,
+  runStreamUrl: (runId: string, afterSeq = 0) =>
+    `/api/runs/${encodeURIComponent(runId)}/stream?after_seq=${encodeURIComponent(String(afterSeq))}`,
   decisions: (limit = 100) =>
     getJson<DecisionInbox>(`/api/decisions?limit=${encodeURIComponent(String(limit))}`),
   replayRun: (runId: string, nodeId?: string) =>

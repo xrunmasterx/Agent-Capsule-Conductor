@@ -318,19 +318,19 @@ const routes: Record<string, unknown> = {
         stderr_log: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/stderr.log',
       },
       {
-        node_id: 'research_codex',
-        ui_node_id: 'Research_Flow__internal__research_codex',
+        node_id: 'research_business',
+        ui_node_id: 'Research_Flow__internal__research_business',
         parent_node_id: 'Research_Flow',
-        callable_id: 'fake-agent.generic',
+        callable_id: 'stock-business-model-research.codex',
         status: 'success',
-        run_dir: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_codex',
-        input_path: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_codex/input.json',
-        prompt_path: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_codex/resolved_prompt.md',
-        output_path: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_codex/output.json',
-        artifact_dir: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_codex/artifacts',
-        event_log: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_codex/events.jsonl',
-        stdout_log: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_codex/stdout.log',
-        stderr_log: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_codex/stderr.log',
+        run_dir: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_business',
+        input_path: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_business/input.json',
+        prompt_path: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_business/resolved_prompt.md',
+        output_path: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_business/output.json',
+        artifact_dir: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_business/artifacts',
+        event_log: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_business/events.jsonl',
+        stdout_log: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_business/stdout.log',
+        stderr_log: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_business/stderr.log',
       },
     ],
     edges: [],
@@ -350,15 +350,15 @@ const routes: Record<string, unknown> = {
     content: '{"status":"success","summary":"Research output fixture"}',
     size_bytes: 56,
   },
-  '/api/artifacts/read?path=runs%2Fui_workflow_acc_workspace_canvas_fixture%2Fnodes%2FResearch_Flow%2Finternal%2Fresearch_codex%2Finput.json': {
-    path: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_codex/input.json',
+  '/api/artifacts/read?path=runs%2Fui_workflow_acc_workspace_canvas_fixture%2Fnodes%2FResearch_Flow%2Finternal%2Fresearch_business%2Finput.json': {
+    path: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_business/input.json',
     name: 'input.json',
     type: 'json',
-    content: JSON.stringify({ topic: 'Codex CLI', upstream: '真实上游输入', context: longCodexInput }),
+    content: JSON.stringify({ topic: '业务模式研究', upstream: '真实上游输入', context: longCodexInput }),
     size_bytes: 49 + longCodexInput.length,
   },
-  '/api/artifacts/read?path=runs%2Fui_workflow_acc_workspace_canvas_fixture%2Fnodes%2FResearch_Flow%2Finternal%2Fresearch_codex%2Foutput.json': {
-    path: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_codex/output.json',
+  '/api/artifacts/read?path=runs%2Fui_workflow_acc_workspace_canvas_fixture%2Fnodes%2FResearch_Flow%2Finternal%2Fresearch_business%2Foutput.json': {
+    path: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_business/output.json',
     name: 'output.json',
     type: 'json',
     content: codexOutputFixture,
@@ -460,19 +460,19 @@ function workspaceCanvasRunSummary(runId: string) {
         stderr_log: `runs/${runId}/nodes/Research_Flow/stderr.log`,
       },
       {
-        node_id: 'research_codex',
-        ui_node_id: 'Research_Flow__internal__research_codex',
+        node_id: 'research_business',
+        ui_node_id: 'Research_Flow__internal__research_business',
         parent_node_id: 'Research_Flow',
-        callable_id: 'fake-agent.generic',
+        callable_id: 'stock-business-model-research.codex',
         status: 'success',
-        run_dir: `runs/${runId}/nodes/Research_Flow/internal/research_codex`,
-        input_path: `runs/${runId}/nodes/Research_Flow/internal/research_codex/input.json`,
-        prompt_path: `runs/${runId}/nodes/Research_Flow/internal/research_codex/resolved_prompt.md`,
-        output_path: `runs/${runId}/nodes/Research_Flow/internal/research_codex/output.json`,
-        artifact_dir: `runs/${runId}/nodes/Research_Flow/internal/research_codex/artifacts`,
-        event_log: `runs/${runId}/nodes/Research_Flow/internal/research_codex/events.jsonl`,
-        stdout_log: `runs/${runId}/nodes/Research_Flow/internal/research_codex/stdout.log`,
-        stderr_log: `runs/${runId}/nodes/Research_Flow/internal/research_codex/stderr.log`,
+        run_dir: `runs/${runId}/nodes/Research_Flow/internal/research_business`,
+        input_path: `runs/${runId}/nodes/Research_Flow/internal/research_business/input.json`,
+        prompt_path: `runs/${runId}/nodes/Research_Flow/internal/research_business/resolved_prompt.md`,
+        output_path: `runs/${runId}/nodes/Research_Flow/internal/research_business/output.json`,
+        artifact_dir: `runs/${runId}/nodes/Research_Flow/internal/research_business/artifacts`,
+        event_log: `runs/${runId}/nodes/Research_Flow/internal/research_business/events.jsonl`,
+        stdout_log: `runs/${runId}/nodes/Research_Flow/internal/research_business/stdout.log`,
+        stderr_log: `runs/${runId}/nodes/Research_Flow/internal/research_business/stderr.log`,
         log_excerpt: 'Codex live stream fixture line',
         output_preview: {
           status: 'success',
@@ -486,7 +486,7 @@ function workspaceCanvasRunSummary(runId: string) {
               binding_kind: 'control_main_default',
               source_node: 'Research_Flow',
               source_port: 'main',
-              target_node: 'research_codex',
+              target_node: 'research_business',
               target_port: 'main',
             },
           ],
@@ -505,8 +505,8 @@ function workspaceCanvasRunEvents(runId: string) {
       { type: 'node_completed', node_id: 'Research_Flow', status: 'success' },
       {
         type: 'node_completed',
-        node_id: 'research_codex',
-        ui_node_id: 'Research_Flow__internal__research_codex',
+        node_id: 'research_business',
+        ui_node_id: 'Research_Flow__internal__research_business',
         parent_node_id: 'Research_Flow',
         status: 'success',
       },
@@ -518,10 +518,10 @@ function workspaceCanvasRunEvents(runId: string) {
 function agentSessionFixture(runId = 'ui_workflow_acc_workspace_canvas_fixture_123') {
   return {
     schema_version: 'acc.agent_session.v1',
-    session_id: 'agent_session_research_codex',
+    session_id: 'agent_session_research_business',
     task_id: runId,
-    node_id: 'research_codex',
-    callable_ref: { kind: 'agent_class', id: 'fake-agent.generic' },
+    node_id: 'research_business',
+    callable_ref: { kind: 'agent_class', id: 'stock-business-model-research.codex' },
     runtime: 'codex_app_server',
     provider_session_id: 'provider_fixture',
     workspace_ref: 'E:/Agent Capsule Conductor/acc_codex',
@@ -529,14 +529,14 @@ function agentSessionFixture(runId = 'ui_workflow_acc_workspace_canvas_fixture_1
     current_output_ref: 'current_output.json',
     published_output_ref: 'published_output.json',
     bound_run_id: runId,
-    bound_node_id: 'research_codex',
-    bound_node_output_ref: `runs/${runId}/nodes/Research_Flow/internal/research_codex/output.json`,
+    bound_node_id: 'research_business',
+    bound_node_output_ref: `runs/${runId}/nodes/Research_Flow/internal/research_business/output.json`,
     current_output_turn_id: agentCurrentOutputTurnId,
     published_output_turn_id: 'turn_initial_fixture',
     last_turn_id: agentCurrentOutputTurnId,
     created_at: '2026-06-07T00:00:00Z',
     updated_at: '2026-06-07T00:00:01Z',
-    session_dir: `runs/_agent_sessions/${runId}/research_codex`,
+    session_dir: `runs/_agent_sessions/${runId}/research_business`,
     output_schema: { type: 'object', properties: { summary: { type: 'string' } } },
   };
 }
@@ -544,25 +544,25 @@ function agentSessionFixture(runId = 'ui_workflow_acc_workspace_canvas_fixture_1
 function agentNodeEventsFixture(runId: string) {
   return {
     run_id: runId,
-    node_id: 'research_codex',
-    event_log: `runs/${runId}/nodes/Research_Flow/internal/research_codex/events.jsonl`,
+    node_id: 'research_business',
+    event_log: `runs/${runId}/nodes/Research_Flow/internal/research_business/events.jsonl`,
     events: [
-      { type: 'node_completed', node_id: 'research_codex', status: 'success', timestamp: '2026-06-07T00:00:00Z' },
+      { type: 'node_completed', node_id: 'research_business', status: 'success', timestamp: '2026-06-07T00:00:00Z' },
       {
         type: 'agent_message',
-        node_id: 'research_codex',
-        session_id: 'agent_session_research_codex',
+        node_id: 'research_business',
+        session_id: 'agent_session_research_business',
         turn_id: agentCurrentOutputTurnId,
         timestamp: '2026-06-07T00:00:01Z',
         payload: { content: 'Agent session fixture message' },
       },
       {
         type: 'agent_output_draft',
-        node_id: 'research_codex',
-        session_id: 'agent_session_research_codex',
+        node_id: 'research_business',
+        session_id: 'agent_session_research_business',
         turn_id: agentCurrentOutputTurnId,
         timestamp: '2026-06-07T00:00:02Z',
-        payload: { output_path: `runs/_agent_sessions/${runId}/research_codex/current_output.json` },
+        payload: { output_path: `runs/_agent_sessions/${runId}/research_business/current_output.json` },
       },
     ],
   };
@@ -954,16 +954,16 @@ beforeEach(() => {
       }
       if (
         method === 'GET' &&
-        /^\/api\/artifacts\/read\?path=runs%2Fui_workflow_acc_workspace_canvas(?:_fixture)?_\d+%2Fnodes%2FResearch_Flow%2Finternal%2Fresearch_codex%2Finput\.json$/u.test(
+        /^\/api\/artifacts\/read\?path=runs%2Fui_workflow_acc_workspace_canvas(?:_fixture)?_\d+%2Fnodes%2FResearch_Flow%2Finternal%2Fresearch_business%2Finput\.json$/u.test(
           url,
         )
       ) {
         return new Response(
           JSON.stringify({
-            path: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_codex/input.json',
+            path: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_business/input.json',
             name: 'input.json',
             type: 'json',
-            content: JSON.stringify({ topic: 'Codex CLI', upstream: '真实上游输入', context: longCodexInput }),
+            content: JSON.stringify({ topic: '业务模式研究', upstream: '真实上游输入', context: longCodexInput }),
             size_bytes: 49 + longCodexInput.length,
           }),
           { status: 200, headers: { 'Content-Type': 'application/json' } },
@@ -971,13 +971,13 @@ beforeEach(() => {
       }
       if (
         method === 'GET' &&
-        /^\/api\/artifacts\/read\?path=runs%2Fui_workflow_acc_workspace_canvas(?:_fixture)?_\d+%2Fnodes%2FResearch_Flow%2Finternal%2Fresearch_codex%2Foutput\.json$/u.test(
+        /^\/api\/artifacts\/read\?path=runs%2Fui_workflow_acc_workspace_canvas(?:_fixture)?_\d+%2Fnodes%2FResearch_Flow%2Finternal%2Fresearch_business%2Foutput\.json$/u.test(
           url,
         )
       ) {
         return new Response(
           JSON.stringify({
-            path: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_codex/output.json',
+            path: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_business/output.json',
             name: 'output.json',
             type: 'json',
             content: codexOutputFixture,
@@ -1078,19 +1078,19 @@ beforeEach(() => {
           headers: { 'Content-Type': 'application/json' },
         });
       }
-      if (method === 'GET' && url === '/api/agent-sessions/agent_session_research_codex') {
+      if (method === 'GET' && url === '/api/agent-sessions/agent_session_research_business') {
         return new Response(JSON.stringify(agentSessionFixture()), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
       }
-      if (method === 'GET' && url === '/api/agent-sessions/agent_session_research_codex/messages') {
+      if (method === 'GET' && url === '/api/agent-sessions/agent_session_research_business/messages') {
         return new Response(
-          JSON.stringify({ session_id: 'agent_session_research_codex', messages: agentSessionMessages }),
+          JSON.stringify({ session_id: 'agent_session_research_business', messages: agentSessionMessages }),
           { status: 200, headers: { 'Content-Type': 'application/json' } },
         );
       }
-      if (method === 'POST' && url === '/api/agent-sessions/agent_session_research_codex/turns/submit') {
+      if (method === 'POST' && url === '/api/agent-sessions/agent_session_research_business/turns/submit') {
         const body = JSON.parse(String(init?.body || '{}'));
         agentCurrentOutputTurnId = 'turn_chat_fixture';
         agentSessionMessages.push(
@@ -1099,27 +1099,27 @@ beforeEach(() => {
         );
         return new Response(
           JSON.stringify({
-            session_id: 'agent_session_research_codex',
+            session_id: 'agent_session_research_business',
             turn_id: agentCurrentOutputTurnId,
             reason: body.reason || 'node_chat',
             status: 'queued',
-            events_url: '/api/agent-sessions/agent_session_research_codex/turns/turn_chat_fixture/events',
+            events_url: '/api/agent-sessions/agent_session_research_business/turns/turn_chat_fixture/events',
           }),
           { status: 200, headers: { 'Content-Type': 'application/json' } },
         );
       }
       if (
         method === 'GET' &&
-        url === '/api/agent-sessions/agent_session_research_codex/turns/turn_chat_fixture/events'
+        url === '/api/agent-sessions/agent_session_research_business/turns/turn_chat_fixture/events'
       ) {
         return new Response(
           JSON.stringify({
-            session_id: 'agent_session_research_codex',
+            session_id: 'agent_session_research_business',
             turn_id: 'turn_chat_fixture',
             events: [
               {
                 type: 'agent_message',
-                session_id: 'agent_session_research_codex',
+                session_id: 'agent_session_research_business',
                 turn_id: 'turn_chat_fixture',
                 timestamp: '2026-06-07T00:00:03Z',
                 payload: { content: 'Hermetic agent turn completed.' },
@@ -1129,21 +1129,21 @@ beforeEach(() => {
           { status: 200, headers: { 'Content-Type': 'application/json' } },
         );
       }
-      if (method === 'POST' && url === '/api/agent-sessions/agent_session_research_codex/output/publish') {
+      if (method === 'POST' && url === '/api/agent-sessions/agent_session_research_business/output/publish') {
         const body = JSON.parse(String(init?.body || '{}'));
         return new Response(
           JSON.stringify({
-            session_id: 'agent_session_research_codex',
+            session_id: 'agent_session_research_business',
             status: 'published',
-            published_output_path: 'runs/_agent_sessions/ui_workflow_acc_workspace_canvas_fixture_123/research_codex/published_output.json',
-            target_output_path: `runs/ui_workflow_acc_workspace_canvas_fixture_123/nodes/Research_Flow/internal/research_codex/output.json`,
+            published_output_path: 'runs/_agent_sessions/ui_workflow_acc_workspace_canvas_fixture_123/research_business/published_output.json',
+            target_output_path: `runs/ui_workflow_acc_workspace_canvas_fixture_123/nodes/Research_Flow/internal/research_business/output.json`,
             expected_turn_id: body.expected_turn_id,
           }),
           { status: 200, headers: { 'Content-Type': 'application/json' } },
         );
       }
       const dynamicNodeEvents = url.match(
-        /^\/api\/runs\/(ui_workflow_acc_workspace_canvas(?:_fixture)?_\d+)\/nodes\/research_codex\/events\?limit=\d+$/u,
+        /^\/api\/runs\/(ui_workflow_acc_workspace_canvas(?:_fixture)?_\d+)\/nodes\/research_business\/events\?limit=\d+$/u,
       );
       if (method === 'GET' && dynamicNodeEvents) {
         return new Response(JSON.stringify(agentNodeEventsFixture(dynamicNodeEvents[1])), {
@@ -1153,11 +1153,11 @@ beforeEach(() => {
       }
       if (
         method === 'GET' &&
-        /^\/api\/artifacts\/read\?path=runs%2F_agent_sessions%2Fui_workflow_acc_workspace_canvas(?:_fixture)?_\d+%2Fresearch_codex%2Fcurrent_output\.json$/u.test(url)
+        /^\/api\/artifacts\/read\?path=runs%2F_agent_sessions%2Fui_workflow_acc_workspace_canvas(?:_fixture)?_\d+%2Fresearch_business%2Fcurrent_output\.json$/u.test(url)
       ) {
         return new Response(
           JSON.stringify({
-            path: 'runs/_agent_sessions/ui_workflow_acc_workspace_canvas_fixture_123/research_codex/current_output.json',
+            path: 'runs/_agent_sessions/ui_workflow_acc_workspace_canvas_fixture_123/research_business/current_output.json',
             name: 'current_output.json',
             type: 'json',
             content: '{"summary":"Draft output fixture"}',
@@ -1289,7 +1289,7 @@ describe('Agent Callable Workbench editable UI', () => {
     expect(within(toolbar).getByRole('button', { name: /^运行详情$/i })).toBeInTheDocument();
     await user.click(within(await screen.findByLabelText('连接模式')).getByRole('button', { name: '数据' }));
     expect(canvas).toHaveTextContent('main');
-    expect(canvas).toHaveTextContent('Codex CLI');
+    expect(canvas).toHaveTextContent('业务模式研究');
     expect(canvas).toHaveTextContent('基本面汇总');
   });
 
@@ -1406,7 +1406,7 @@ describe('Agent Callable Workbench editable UI', () => {
     const restoredWorkflow = await screen.findByTestId('workflow-container-Research_Flow');
     await waitFor(() => expect(restoredWorkflow).toHaveClass('status-success'));
     await waitFor(() =>
-      expect(screen.getByTestId('agent-tool-node-Research_Flow__internal__research_codex')).toHaveClass(
+      expect(screen.getByTestId('agent-tool-node-Research_Flow__internal__research_business')).toHaveClass(
         'status-success',
       ),
     );
@@ -1521,15 +1521,15 @@ describe('Agent Callable Workbench editable UI', () => {
   test('Internal node run lookup maps node-scoped single-node run evidence', () => {
     const helpers = __workflowViewerTestables as any;
     const singleNodeRun = {
-      workflow_id: 'Research_Flow_research_codex_single_node',
+      workflow_id: 'Research_Flow_research_business_single_node',
       status: 'running',
-      run_dir: 'runs/ui_workflow_Research_Flow_research_codex_single_node',
+      run_dir: 'runs/ui_workflow_Research_Flow_research_business_single_node',
       nodes: [
         {
-          node_id: 'research_codex',
+          node_id: 'research_business',
           callable_id: 'fake-agent.generic',
           status: 'running',
-          run_dir: 'runs/ui_workflow_Research_Flow_research_codex_single_node/nodes/research_codex',
+          run_dir: 'runs/ui_workflow_Research_Flow_research_business_single_node/nodes/research_business',
         },
       ],
       edges: [],
@@ -1539,29 +1539,130 @@ describe('Agent Callable Workbench editable UI', () => {
     const nodeRun = helpers.nodeRunForInternalNode(
       singleNodeRun,
       'Research_Flow',
-      'research_codex',
+      'research_business',
       {
         scope: 'node',
-        targetId: 'research_codex',
+        targetId: 'research_business',
         parentWorkflowId: 'Research_Flow',
       },
     );
-    expect(nodeRun?.node_id).toBe('research_codex');
+    expect(nodeRun?.node_id).toBe('research_business');
 
     expect(
-      helpers.nodeRunForInternalNode(singleNodeRun, 'Other_Flow', 'research_codex', {
+      helpers.nodeRunForInternalNode(singleNodeRun, 'Other_Flow', 'research_business', {
         scope: 'node',
-        targetId: 'research_codex',
+        targetId: 'research_business',
         parentWorkflowId: 'Research_Flow',
       }),
     ).toBeUndefined();
     expect(
-      helpers.nodeRunForInternalNode(singleNodeRun, 'Research_Flow', 'research_codex', {
+      helpers.nodeRunForInternalNode(singleNodeRun, 'Research_Flow', 'research_business', {
         scope: 'workflow',
-        targetId: 'research_codex',
+        targetId: 'research_business',
         parentWorkflowId: 'Research_Flow',
       }),
     ).toBeUndefined();
+  });
+
+  test('Workbench live output store bounds, sorts, and dedupes events', () => {
+    const helpers = __workflowViewerTestables as any;
+    const events = helpers.boundedLiveEvents(
+      [
+        {
+          event_id: 'evt_2',
+          seq: 2,
+          source: 'agent_turn',
+          type: 'agent_message',
+          stream: 'agent',
+          text: 'two',
+          timestamp: '2026-06-10T00:00:02Z',
+        },
+      ],
+      [
+        {
+          event_id: 'evt_1',
+          seq: 1,
+          source: 'agent_turn',
+          type: 'node_log_delta',
+          stream: 'stdout',
+          text: 'one',
+          timestamp: '2026-06-10T00:00:01Z',
+        },
+        {
+          event_id: 'evt_2',
+          seq: 2,
+          source: 'agent_turn',
+          type: 'agent_message',
+          stream: 'agent',
+          text: 'duplicate',
+          timestamp: '2026-06-10T00:00:02Z',
+        },
+        {
+          event_id: 'evt_3',
+          seq: 3,
+          source: 'agent_turn',
+          type: 'node_log_delta',
+          stream: 'stderr',
+          text: 'three',
+          timestamp: '2026-06-10T00:00:03Z',
+        },
+      ],
+      2,
+      1024,
+    );
+
+    expect(events.map((event: any) => event.event_id)).toEqual(['evt_2', 'evt_3']);
+    expect(events[0].text).toBe('two');
+  });
+
+  test('Workbench live output filters stream and error events', () => {
+    const helpers = __workflowViewerTestables as any;
+    const events = [
+      { event_id: 'a', seq: 1, type: 'agent_message', stream: 'agent', text: 'ok' },
+      { event_id: 'b', seq: 2, type: 'node_log_delta', stream: 'stdout', text: 'out' },
+      { event_id: 'c', seq: 3, type: 'agent_event', stream: 'agent', text: 'error: bad' },
+    ];
+
+    expect(helpers.filterLiveEvents(events, 'stdout').map((event: any) => event.event_id)).toEqual([
+      'b',
+    ]);
+    expect(helpers.filterLiveEvents(events, 'errors').map((event: any) => event.event_id)).toEqual([
+      'c',
+    ]);
+  });
+
+  test('Nested workflow node live logs resolve by UI node id and run dir', () => {
+    const helpers = __workflowViewerTestables as any;
+    const delta = {
+      type: 'node_log_delta',
+      run_id: 'run_nested',
+      node_id: 'research_business',
+      ui_node_id: 'Research_Flow__internal__research_business',
+      parent_node_id: 'Research_Flow',
+      node_run_dir:
+        'runs/run_nested/nodes/Research_Flow/nested_workflow/nodes/research_business',
+      stream: 'stdout',
+      offset: 0,
+      next_offset: 15,
+      text: 'streamed line\n',
+    };
+    const keys = helpers.nodeLogDeltaKeys(delta);
+    const liveLogs = Object.fromEntries(
+      keys.map((key: string) => [
+        key,
+        { stdout: delta.text, stderr: '', stdoutOffset: delta.next_offset, stderrOffset: 0 },
+      ]),
+    );
+    const nodeRun = {
+      node_id: 'research_business',
+      ui_node_id: 'Research_Flow__internal__research_business',
+      parent_node_id: 'Research_Flow',
+      run_dir:
+        'runs/run_nested/nodes/Research_Flow/nested_workflow/nodes/research_business',
+    };
+
+    expect(keys).toContain('Research_Flow__internal__research_business');
+    expect(helpers.nodeLiveLogsFor(liveLogs, nodeRun)?.stdout).toBe('streamed line\n');
   });
 
   test('Internal node run lookup keeps full workflow scoped identity matching', () => {
@@ -1572,12 +1673,12 @@ describe('Agent Callable Workbench editable UI', () => {
       run_dir: 'runs/ui_workflow_acc_workspace_canvas_fixture',
       nodes: [
         {
-          node_id: 'research_codex',
-          ui_node_id: 'Research_Flow__internal__research_codex',
+          node_id: 'research_business',
+          ui_node_id: 'Research_Flow__internal__research_business',
           parent_node_id: 'Research_Flow',
           callable_id: 'fake-agent.generic',
           status: 'success',
-          run_dir: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_codex',
+          run_dir: 'runs/ui_workflow_acc_workspace_canvas_fixture/nodes/Research_Flow/internal/research_business',
         },
       ],
       edges: [],
@@ -1587,9 +1688,9 @@ describe('Agent Callable Workbench editable UI', () => {
     const nodeRun = helpers.nodeRunForInternalNode(
       workflowRun,
       'Research_Flow',
-      'research_codex',
+      'research_business',
     );
-    expect(nodeRun?.ui_node_id).toBe('Research_Flow__internal__research_codex');
+    expect(nodeRun?.ui_node_id).toBe('Research_Flow__internal__research_business');
   });
 
   test('Node create menu is dismissed when switching to a new task', async () => {
@@ -2747,7 +2848,22 @@ describe('Agent Callable Workbench editable UI', () => {
       savedPayload.graph.nodes.every((node: { output_ports?: unknown[] }) => (node.output_ports || []).length > 0),
     ).toBe(true);
     expect(savedPayload.graph.control_edges.length).toBeGreaterThan(0);
-    expect(savedPayload.graph.data_edges).toHaveLength(0);
+    expect(savedPayload.graph.data_edges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          from: { node: 'Stock_Target_Agent', port: 'main' },
+          to: { node: 'Research_Flow', port: 'main' },
+        }),
+        expect.objectContaining({
+          from: { node: 'Research_Flow', port: 'main' },
+          to: { node: 'Implementation_Flow', port: 'main' },
+        }),
+        expect.objectContaining({
+          from: { node: 'Research_Flow', port: 'main' },
+          to: { node: 'Review_Flow', port: 'main' },
+        }),
+      ]),
+    );
     expect(savedPayload.graph.metadata.directory_display_only).toBe(true);
     expect(savedPayload.graph.nodes.every((node: { relative_cwd?: string }) => !node.relative_cwd)).toBe(true);
     expect(savedPayload.graph.workspace_policy).toEqual({
@@ -2756,7 +2872,7 @@ describe('Agent Callable Workbench editable UI', () => {
     });
     expect(JSON.stringify(savedPayload.graph)).not.toContain('F:\\UE5_Project_A');
     expect(JSON.stringify(savedPayload.graph)).not.toContain('binding_ref');
-    expect(JSON.stringify(savedPayload.graph)).not.toContain('"status"');
+    expect(savedPayload.graph.nodes.every((node: { status?: unknown }) => node.status === undefined)).toBe(true);
   });
 
   test('Workflow binding dialog fills workspace root from native directory selection', async () => {
@@ -3082,10 +3198,24 @@ describe('Agent Callable Workbench editable UI', () => {
     expect(researchFlow.ui.internal_edges).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          from: 'research_codex',
-          to: 'research_merge',
+          from: 'research_business',
+          to: 'research_synthesis',
           context: 'none',
         }),
+        expect.objectContaining({
+          from: { node: 'research_business', port: 'main' },
+          to: { node: 'research_synthesis', port: 'business' },
+        }),
+      ]),
+    );
+    const researchSynthesis = researchFlow.ui.internal_nodes.find(
+      (node: { id: string }) => node.id === 'research_synthesis',
+    );
+    expect(researchSynthesis.inputPorts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'business' }),
+        expect.objectContaining({ id: 'financials' }),
+        expect.objectContaining({ id: 'industry' }),
       ]),
     );
   });
@@ -3322,7 +3452,7 @@ describe('Agent Callable Workbench editable UI', () => {
     const savedPayload = JSON.parse(String(saveCall?.[1]?.body));
     const runPayload = JSON.parse(String(runCall?.[1]?.body));
     expect(savedPayload.graph.nodes).toHaveLength(5);
-    expect(savedPayload.graph.data_edges).toHaveLength(0);
+    expect(savedPayload.graph.data_edges.length).toBeGreaterThan(0);
     expect(savedPayload.graph.control_edges.length).toBeGreaterThan(0);
     expect(workflowSaveCalls).toHaveLength(2);
     expect(runPayload.graph.id).toMatch(/^ui_workflow_acc_workspace_canvas_/);
@@ -3344,7 +3474,7 @@ describe('Agent Callable Workbench editable UI', () => {
     await openNavIndex(user, 0);
     await loadWorkspaceDemo(user);
 
-    const researchCodexNode = await screen.findByTestId('agent-tool-node-Research_Flow__internal__research_codex');
+    const researchCodexNode = await screen.findByTestId('agent-tool-node-Research_Flow__internal__research_business');
     fireEvent.click(researchCodexNode);
     fireEvent.doubleClick(researchCodexNode);
     const nodeOverlay = await screen.findByLabelText('节点详情浮层');
@@ -3365,7 +3495,7 @@ describe('Agent Callable Workbench editable UI', () => {
     expect(runPayload.input).toBeUndefined();
     const containerNode = runPayload.graph.nodes.find((node: { id?: string }) => node.id === 'Research_Flow');
     const targetNode = containerNode?.ui?.internal_nodes?.find(
-      (node: { id?: string }) => node.id === 'research_codex',
+      (node: { id?: string }) => node.id === 'research_business',
     );
     expect(targetNode?.input).toMatchObject({ user_prompt: '请分析新的技术方案评审需求' });
     expect(targetNode?.input).not.toHaveProperty('main', '请分析新的技术方案评审需求');
@@ -3377,7 +3507,7 @@ describe('Agent Callable Workbench editable UI', () => {
 
     await openNavIndex(user, 0);
     await loadWorkspaceDemo(user);
-    const codexLabel = (await screen.findAllByText('Codex CLI'))[0];
+    const codexLabel = (await screen.findAllByText('业务模式研究'))[0];
     const codexNode = codexLabel.closest('[role="group"]');
     expect(codexNode).toBeTruthy();
     fireEvent.click(codexNode as HTMLElement);
@@ -3415,7 +3545,7 @@ describe('Agent Callable Workbench editable UI', () => {
 
     const evidencePane = await screen.findByLabelText('输入内容');
     expect(nodeOverlay).toHaveTextContent('input.json');
-    expect(evidencePane).toHaveTextContent('Codex CLI');
+    expect(evidencePane).toHaveTextContent('业务模式研究');
     expect(evidencePane).toHaveTextContent('真实上游输入');
     expect(evidencePane).toHaveTextContent(longCodexInputTail);
     expect(evidencePane).not.toHaveTextContent(`${longCodexInput.slice(0, 420)}...`);
@@ -3435,7 +3565,7 @@ describe('Agent Callable Workbench editable UI', () => {
 
     await openNavIndex(user, 0);
     await loadWorkspaceDemo(user);
-    const codexLabel = (await screen.findAllByText('Codex CLI'))[0];
+    const codexLabel = (await screen.findAllByText('业务模式研究'))[0];
     const codexNode = codexLabel.closest('[role="group"]');
     expect(codexNode).toBeTruthy();
     fireEvent.click(codexNode as HTMLElement);
@@ -3456,7 +3586,7 @@ describe('Agent Callable Workbench editable UI', () => {
     await waitFor(() => {
       const publishCall = vi.mocked(fetch).mock.calls.find(
         ([url, init]) =>
-          url === '/api/agent-sessions/agent_session_research_codex/output/publish' &&
+          url === '/api/agent-sessions/agent_session_research_business/output/publish' &&
           init?.method === 'POST',
       );
       expect(publishCall).toBeTruthy();
