@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 
 import acc.app.core_v2_runtime as core_v2_runtime
+import acc.app.runtime.executor as _executor_module
+import acc.ledger_writer as _ledger_writer_module
 from acc.app.core_v2_runtime import run_core_v2_workflow_path
 from acc.app.human_gate_service import answer_human_gate
 from acc.app.interactions import list_interactions
@@ -134,7 +136,7 @@ def test_ready_queue_does_not_wait_for_unrelated_slow_branch(
             await asyncio.sleep(0.05)
         return {"status": "success", "producer_node_id": node.id}
 
-    monkeypatch.setattr(core_v2_runtime, "execute_core_v2_callable", fake_callable)
+    monkeypatch.setattr(_executor_module, "execute_core_v2_callable", fake_callable)
 
     record = asyncio.run(run_core_v2_workflow_path(workflow_path, tmp_path / "run"))
     events = read_jsonl(tmp_path / "run" / "events.jsonl")
@@ -219,7 +221,7 @@ def test_ready_queue_respects_workflow_max_concurrency(
             active -= 1
         return {"status": "success", "producer_node_id": node.id}
 
-    monkeypatch.setattr(core_v2_runtime, "execute_core_v2_callable", fake_callable)
+    monkeypatch.setattr(_executor_module, "execute_core_v2_callable", fake_callable)
 
     record = asyncio.run(run_core_v2_workflow_path(workflow_path, tmp_path / "run"))
 
@@ -255,7 +257,7 @@ def test_empty_input_policy_block_fails_before_callable(
         called = True
         return {"status": "success"}
 
-    monkeypatch.setattr(core_v2_runtime, "execute_core_v2_callable", fake_callable)
+    monkeypatch.setattr(_executor_module, "execute_core_v2_callable", fake_callable)
 
     record = asyncio.run(run_core_v2_workflow_path(workflow_path, tmp_path / "run"))
 
@@ -345,14 +347,14 @@ def test_ledger_failure_after_node_success_marks_run_crashed_not_node_failed(
             ],
         },
     )
-    real_append = core_v2_runtime.append_plan_step_transition
+    real_append = _ledger_writer_module.append_plan_step_transition
 
     def fail_on_success_transition(run_dir, transition):
         if transition.next_status == "success":
             raise OSError("audit sink unavailable")
         real_append(run_dir, transition)
 
-    monkeypatch.setattr(core_v2_runtime, "append_plan_step_transition", fail_on_success_transition)
+    monkeypatch.setattr(_ledger_writer_module, "append_plan_step_transition", fail_on_success_transition)
 
     record = asyncio.run(run_core_v2_workflow_path(workflow_path, tmp_path / "run"))
     session = json.loads(
