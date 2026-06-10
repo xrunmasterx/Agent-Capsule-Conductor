@@ -30,6 +30,7 @@ from acc.models import (
 from acc.runtime.policy import HERMETIC_RUN_MODE, acc_run_mode
 from acc.session import utc_now_iso
 from acc.store import load_json, write_json
+from acc.utils import validate_authoring_session_id
 
 AUTHORING_OUTPUT_SCHEMA_VERSION = "acc.authoring.output.v1"
 AUTHORING_PROMPT_VERSION = "acc.authoring.prompt.v1"
@@ -1109,7 +1110,7 @@ class AuthoringSessionService:
         return errors
 
     def _session_dir(self, session_id: str) -> Path:
-        validate_session_id(session_id)
+        validate_authoring_session_id(session_id)
         return self.project_root / AUTHORING_SESSION_ROOT / session_id
 
     def _require_session(self, session_id: str) -> Path:
@@ -2024,11 +2025,6 @@ def conversation_context_payload(
             }
         )
     return result
-
-
-def validate_session_id(session_id: str) -> None:
-    if not re.fullmatch(r"authoring_[A-Za-z0-9_-]+", session_id):
-        raise AccError("Invalid authoring session id")
 
 
 def relative_path(project_root: Path, path: Path | None) -> str | None:

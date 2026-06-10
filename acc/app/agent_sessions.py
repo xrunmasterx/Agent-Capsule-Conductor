@@ -982,6 +982,7 @@ class AgentTurnService:
             write_json(session_path, payload)
             self._session_index[str(payload["session_id"])] = session_dir
             return session_dir, payload
+        payload = {
             "schema_version": AGENT_SESSION_SCHEMA_VERSION,
             "session_id": f"agent_session_{uuid4().hex[:12]}",
             "task_id": task_id,
@@ -1020,7 +1021,12 @@ class AgentTurnService:
         )
 
     def _find_session_dir(self, session_id: str) -> Path:
-        validate_session_id(session_id)
+        validate_agent_session_id(session_id)
+        if session_id in self._session_index:
+            cached = self._session_index[session_id]
+            if (cached / "session.json").exists():
+                return cached
+            del self._session_index[session_id]
         root = self.project_root / AGENT_SESSIONS_ROOT
         if not root.exists():
             raise AccError(f"Agent session not found: {session_id}")
@@ -1029,7 +1035,10 @@ class AgentTurnService:
                 payload = require_object(load_json(session_path), "session.json")
             except AccError:
                 continue
-            if payload.get("session_id") == session_id:
+            found_id = payload.get("session_id")
+            if isinstance(found_id, str):
+                self._session_index[found_id] = session_path.parent
+            if found_id == session_id:
                 return session_path.parent
         raise AccError(f"Agent session not found: {session_id}")
 
@@ -1394,21 +1403,6 @@ def append_message(session_dir: Path, payload: dict[str, Any]) -> None:
         handle.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
 
 
-def read_jsonl(path: Path) -> list[dict[str, Any]]:
-    if not path.exists():
-        return []
-    result: list[dict[str, Any]] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        try:
-            payload = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(payload, dict):
-            result.append(payload)
-    return result
-
 
 def require_object(value: Any, context: str) -> dict[str, Any]:
     if not isinstance(value, dict):
@@ -1431,11 +1425,6 @@ def safe_segment(value: str) -> str:
 def validate_segment(value: str, label: str) -> None:
     if safe_segment(value) != value:
         raise AccError(f"Invalid {label}: {value}")
-
-
-def validate_session_id(session_id: str) -> None:
-    if not re.fullmatch(r"agent_session_[A-Za-z0-9_-]+", session_id):
-        raise AccError("Invalid agent session id")
 
 
 def permission_payload(profile: PermissionProfile) -> dict[str, Any]:
@@ -1477,19 +1466,6 @@ def approval_choice(answer: dict[str, Any]) -> str:
         if isinstance(value, str) and value.strip().lower() in {"approve", "reject"}:
             return value.strip().lower()
     return "reject"
-
-
-def update_runtime_json(path: Path, updates: dict[str, Any]) -> None:
-    payload: dict[str, Any] = {}
-    if path.exists():
-        try:
-            loaded = load_json(path)
-            if isinstance(loaded, dict):
-                payload = loaded
-        except AccError:
-            payload = {}
-    payload.update(updates)
-    write_json(path, payload)
 
 
 def copy_published_output(session_dir: Path, target: Path) -> None:
