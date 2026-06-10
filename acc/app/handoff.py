@@ -16,6 +16,7 @@ from acc.models import (
 from acc.serialization import control_ledger_to_dict
 from acc.engine.handoff import compile_handoff_to_plan_step
 from acc.session import utc_now_iso
+from acc.state_machine import transition_plan_step, transition_plan_step_initial
 from acc.store import load_json, safe_child_path, write_json
 from acc.store.control_ledger import (
     append_control_event,
@@ -82,19 +83,13 @@ def materialize_handoff_plan_step(
     emitted_step = None
     if compilation.new_step is not None:
         emitted_step = compilation.new_step
-        append_plan_step_transition(
-            run_dir,
-            PlanStepTransitionRecord(
-                sequence=sequence,
-                recorded_at=timestamp,
-                plan_step_id=emitted_step.plan_step_id,
-                previous_status=None,
-                next_status=emitted_step.status,
-                snapshot=emitted_step,
-                reason=f"handoff new_session {prepared_request.handoff_id}",
-                decision_id=compilation.decision.decision_id,
-            ),
+        record = transition_plan_step_initial(
+            emitted_step,
+            sequence=sequence,
+            reason=f"handoff new_session {prepared_request.handoff_id}",
+            recorded_at=timestamp,
         )
+        append_plan_step_transition(run_dir, record)
     elif compilation.route_step is not None:
         emitted_step = _materialize_route_only_selection(
             run_dir,
@@ -181,25 +176,15 @@ def _materialize_route_only_selection(
 ) -> PlanStep:
     if step.status == "ready":
         return step
-    updated = replace(
+    record, updated = transition_plan_step(
         step,
-        status="ready",
+        "ready",
+        sequence=sequence,
+        reason="handoff route_only selected existing target",
         decision_id=decision_id,
-        updated_at=timestamp,
+        context={"recorded_at": timestamp},
     )
-    append_plan_step_transition(
-        run_dir,
-        PlanStepTransitionRecord(
-            sequence=sequence,
-            recorded_at=timestamp,
-            plan_step_id=updated.plan_step_id,
-            previous_status=step.status,
-            next_status="ready",
-            snapshot=updated,
-            reason="handoff route_only selected existing target",
-            decision_id=decision_id,
-        ),
-    )
+    append_plan_step_transition(run_dir, record)
     return updated
 
 

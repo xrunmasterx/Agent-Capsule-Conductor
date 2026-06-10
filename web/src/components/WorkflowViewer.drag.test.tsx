@@ -2,7 +2,27 @@ import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import type { ComponentType, ReactNode } from 'react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
-import { __workflowViewerTestables } from './WorkflowViewer';
+import {
+  AgentToolNode as _AgentToolNode,
+  WorkspaceCanvas as _WorkspaceCanvas,
+  createDataEdgeCommand as _createDataEdgeCommand,
+  canvasEdgeToFlowEdge as _canvasEdgeToFlowEdge,
+  workflowInternalEdgePaths as _workflowInternalEdgePaths,
+  resolveScopedConnection as _resolveScopedConnection,
+  connectionCandidatesFromPendingEndpoint as _connectionCandidatesFromPendingEndpoint,
+  connectionFromPendingEndpoint as _connectionFromPendingEndpoint,
+  reverseConnection as _reverseConnection,
+  canvasToWorkflowGraph as _canvasToWorkflowGraph,
+  captureAuthoringSnapshot as _captureAuthoringSnapshot,
+  buildDeterministicCanvasAuthoringProposal as _buildDeterministicCanvasAuthoringProposal,
+  applyCanvasAuthoringProposal as _applyCanvasAuthoringProposal,
+  validateCanvasAuthoringProposal as _validateCanvasAuthoringProposal,
+  temporaryResourceIssueForCanvas as _temporaryResourceIssueForCanvas,
+  temporaryResourceIssueForGraph as _temporaryResourceIssueForGraph,
+  deleteSelectionFromCanvas as _deleteSelectionFromCanvas,
+  normalizeSelectionIntent as _normalizeSelectionIntent,
+  isConnectionHandleForMode as _isConnectionHandleForMode,
+} from './WorkflowViewer';
 import { applyRunOverlayToCanvas, liveWorkflowRunFromEvents, runOverlayFromRun } from './workflow-viewer/runState';
 
 const flowMock = vi.hoisted(() => ({
@@ -27,13 +47,13 @@ vi.mock('@xyflow/react', async () => {
   };
 });
 
-const WorkspaceCanvas = __workflowViewerTestables.WorkspaceCanvas as unknown as ComponentType<Record<string, unknown>>;
-const AgentToolNode = __workflowViewerTestables.AgentToolNode as unknown as ComponentType<Record<string, unknown>>;
-const createDataEdgeCommand = __workflowViewerTestables.createDataEdgeCommand as unknown as (
+const WorkspaceCanvas = _WorkspaceCanvas as unknown as ComponentType<Record<string, unknown>>;
+const AgentToolNode = _AgentToolNode as unknown as ComponentType<Record<string, unknown>>;
+const createDataEdgeCommand = _createDataEdgeCommand as unknown as (
   canvas: ReturnType<typeof canvasFixture>,
   request: Record<string, unknown>,
 ) => { canvas: ReturnType<typeof canvasFixture>; edge: Record<string, unknown>; autoAddedControlEdge: boolean };
-const canvasEdgeToFlowEdge = __workflowViewerTestables.canvasEdgeToFlowEdge as unknown as (
+const canvasEdgeToFlowEdge = _canvasEdgeToFlowEdge as unknown as (
   edge: Record<string, unknown>,
   scopeWorkflowId: string | null,
   selection: Record<string, unknown>,
@@ -43,33 +63,33 @@ const canvasEdgeToFlowEdge = __workflowViewerTestables.canvasEdgeToFlowEdge as u
   showDataPorts?: boolean,
   workflowContainerIds?: Set<string>,
 ) => Array<Record<string, unknown>>;
-const workflowInternalEdgePaths = __workflowViewerTestables.workflowInternalEdgePaths as unknown as (
+const workflowInternalEdgePaths = _workflowInternalEdgePaths as unknown as (
   workflow: Record<string, unknown>,
   selection: Record<string, unknown>,
   connectionMode: string,
   edgeViewMode: string,
   layoutOverlay?: Map<string, { x: number; y: number }>,
 ) => Array<{ address: { scopeWorkflowId: string | null; edgeId: string }; edge: Record<string, unknown>; path: string }>;
-const resolveScopedConnection = __workflowViewerTestables.resolveScopedConnection as unknown as (
+const resolveScopedConnection = _resolveScopedConnection as unknown as (
   canvas: ReturnType<typeof canvasFixture>,
   connection: Record<string, unknown>,
   connectionMode: string,
 ) => Record<string, unknown>;
-const connectionCandidatesFromPendingEndpoint = __workflowViewerTestables.connectionCandidatesFromPendingEndpoint as unknown as (
+const connectionCandidatesFromPendingEndpoint = _connectionCandidatesFromPendingEndpoint as unknown as (
   pending: Record<string, unknown>,
   connection: Record<string, unknown>,
 ) => Array<Record<string, unknown>>;
-const connectionFromPendingEndpoint = __workflowViewerTestables.connectionFromPendingEndpoint as unknown as (
+const connectionFromPendingEndpoint = _connectionFromPendingEndpoint as unknown as (
   pending: Record<string, unknown>,
   target: Record<string, unknown> | null,
 ) => Record<string, unknown> | null;
-const reverseConnection = __workflowViewerTestables.reverseConnection as unknown as (
+const reverseConnection = _reverseConnection as unknown as (
   connection: Record<string, unknown>,
 ) => Record<string, unknown> | null;
-const canvasToWorkflowGraph = __workflowViewerTestables.canvasToWorkflowGraph as unknown as (
+const canvasToWorkflowGraph = _canvasToWorkflowGraph as unknown as (
   canvas: Record<string, unknown>,
 ) => Record<string, unknown>;
-const captureAuthoringSnapshot = __workflowViewerTestables.captureAuthoringSnapshot as unknown as (input: {
+const captureAuthoringSnapshot = _captureAuthoringSnapshot as unknown as (input: {
   taskId: string;
   canvas: Record<string, unknown>;
   selection: Record<string, unknown>;

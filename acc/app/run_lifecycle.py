@@ -7,6 +7,7 @@ from typing import Any
 from acc.app.interactions import get_interaction
 from acc.models import AccError, PlanStep, PlanStepTransitionRecord
 from acc.session import utc_now_iso
+from acc.state_machine import transition_plan_step
 from acc.store import load_json, write_json
 from acc.store.control_ledger import (
     append_control_event,
@@ -144,22 +145,14 @@ def resume_waiting_run(
     next_sequence = next_plan_step_transition_sequence(run_dir)
     resumed_step_ids: list[str] = []
     for step in waiting_steps:
-        ready_step = replace(step, status="ready", updated_at=utc_now_iso())
-        if decision_id is not None:
-            ready_step = replace(ready_step, decision_id=decision_id)
-        append_plan_step_transition(
-            run_dir,
-            PlanStepTransitionRecord(
-                sequence=next_sequence,
-                recorded_at=ready_step.updated_at or utc_now_iso(),
-                plan_step_id=ready_step.plan_step_id,
-                previous_status=step.status,
-                next_status="ready",
-                snapshot=ready_step,
-                reason="human interaction answered",
-                decision_id=decision_id,
-            ),
+        record, _updated = transition_plan_step(
+            step,
+            "ready",
+            sequence=next_sequence,
+            reason="human interaction answered",
+            decision_id=decision_id,
         )
+        append_plan_step_transition(run_dir, record)
         next_sequence += 1
         resumed_step_ids.append(step.plan_step_id)
 
@@ -212,25 +205,14 @@ def reject_waiting_human_gate(
     next_sequence = next_plan_step_transition_sequence(run_dir)
     rejected_step_ids: list[str] = []
     for step in rejected_steps:
-        skipped_step = replace(
+        record, _updated = transition_plan_step(
             step,
-            status="skipped",
+            "skipped",
+            sequence=next_sequence,
+            reason="human interaction rejected",
             decision_id=decision_id,
-            updated_at=utc_now_iso(),
         )
-        append_plan_step_transition(
-            run_dir,
-            PlanStepTransitionRecord(
-                sequence=next_sequence,
-                recorded_at=skipped_step.updated_at or utc_now_iso(),
-                plan_step_id=skipped_step.plan_step_id,
-                previous_status=step.status,
-                next_status="skipped",
-                snapshot=skipped_step,
-                reason="human interaction rejected",
-                decision_id=decision_id,
-            ),
-        )
+        append_plan_step_transition(run_dir, record)
         next_sequence += 1
         rejected_step_ids.append(step.plan_step_id)
 

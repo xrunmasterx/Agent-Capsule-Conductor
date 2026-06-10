@@ -11,8 +11,12 @@
  * - mergeAuthoringValidation
  * - authoringValidationFromBackend
  *
- * Currently these remain in WorkflowViewer.tsx; this file reserves the
- * module path and provides type documentation.
+ * Currently these remain in WorkflowViewer.tsx; named imports provide access.
  */
 
-export { __workflowViewerTestables as _proposalInternals } from '../WorkflowViewer';
+export {
+  buildDeterministicCanvasAuthoringProposal,
+  validateCanvasAuthoringProposal,
+  applyCanvasAuthoringProposal,
+  captureAuthoringSnapshot,
+} from '../WorkflowViewer';

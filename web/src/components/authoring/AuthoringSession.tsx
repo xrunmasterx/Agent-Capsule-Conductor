@@ -8,20 +8,26 @@
  */
 
 // ---------------------------------------------------------------------------
-// Re-export the authoring pure functions from WorkflowViewer until the full
-// extraction is completed in step 7 of the refactoring plan.
+// Re-export the authoring pure functions from WorkflowViewer via named imports.
+// After the full extraction these will become direct exports from this module.
 // ---------------------------------------------------------------------------
 
-export { __workflowViewerTestables as _authoringInternals } from '../WorkflowViewer';
+export {
+  captureAuthoringSnapshot,
+  buildDeterministicCanvasAuthoringProposal,
+  validateCanvasAuthoringProposal,
+  applyCanvasAuthoringProposal,
+  temporaryResourceIssueForCanvas,
+  temporaryResourceIssueForGraph,
+} from '../WorkflowViewer';
 
 /**
- * Re-exported authoring function references.
+ * Re-exported authoring type references.
  *
- * After step 7 these will become direct named exports from this module.
- * For now, callers should continue to use them from WorkflowViewer.
+ * After full extraction these will be owned by this module.
+ * For now they remain inline in WorkflowViewer.tsx.
  */
 export type {
-  // These are the key authoring types that will be owned by this module:
   // - AuthoringContextSnapshot
   // - CanvasAuthoringOperation
   // - CanvasAuthoringProposal

@@ -3,7 +3,62 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { App } from './App';
-import { __workflowViewerTestables } from './components/WorkflowViewer';
+import {
+  addCallableNodeFromPalette,
+  addInternalNodeFromPalette,
+  addWorkflowFromPalette,
+  boundedLiveEvents,
+  canvasToWorkflowGraph,
+  deleteSelectionFromCanvas,
+  expandWorkflowToFitChildren,
+  expandWorkflowToFitChildrenCenterLocked,
+  filterLiveEvents,
+  graphToWorkspaceCanvas,
+  internalInvocationLabel,
+  isExecutableNodeWorkflow,
+  layoutCanvasForSelection,
+  layoutWorkspaceCanvas,
+  nextRootPalettePosition,
+  nodeLiveLogsFor,
+  nodeLogDeltaKeys,
+  nodeRunForInternalNode,
+  normalizeSelectionIntent,
+  promptFromInvocationInput,
+  selectionCanBeDeleted,
+  shouldDisconnectEdgeOnClick,
+  staticInputFromInvocationInput,
+  workspaceDemoCanvas,
+  workflowInvocationLabel,
+} from './components/WorkflowViewer';
+
+// Alias object so that existing `helpers.xxx` test patterns keep working.
+const helpers: Record<string, any> = {
+  addCallableNodeFromPalette,
+  addInternalNodeFromPalette,
+  addWorkflowFromPalette,
+  boundedLiveEvents,
+  canvasToWorkflowGraph,
+  deleteSelectionFromCanvas,
+  expandWorkflowToFitChildren,
+  expandWorkflowToFitChildrenCenterLocked,
+  filterLiveEvents,
+  graphToWorkspaceCanvas,
+  internalInvocationLabel,
+  isExecutableNodeWorkflow,
+  layoutCanvasForSelection,
+  layoutWorkspaceCanvas,
+  nextRootPalettePosition,
+  nodeLiveLogsFor,
+  nodeLogDeltaKeys,
+  nodeRunForInternalNode,
+  normalizeSelectionIntent,
+  promptFromInvocationInput,
+  selectionCanBeDeleted,
+  shouldDisconnectEdgeOnClick,
+  staticInputFromInvocationInput,
+  workspaceDemoCanvas,
+  workflowInvocationLabel,
+};
 
 const runSummary = {
   run_id: 'ui_acceptance_fake',
@@ -1490,7 +1545,7 @@ describe('Agent Callable Workbench editable UI', () => {
   });
 
   test('Alt left click maps to edge disconnect and removes the selected edge', () => {
-    const helpers = __workflowViewerTestables as any;
+    // helpers alias is at module scope
     const canvas = {
       id: 'root_task',
       name: 'Root Task',
@@ -1519,7 +1574,7 @@ describe('Agent Callable Workbench editable UI', () => {
   });
 
   test('Internal node run lookup maps node-scoped single-node run evidence', () => {
-    const helpers = __workflowViewerTestables as any;
+    // helpers alias is at module scope
     const singleNodeRun = {
       workflow_id: 'Research_Flow_research_business_single_node',
       status: 'running',
@@ -1565,7 +1620,7 @@ describe('Agent Callable Workbench editable UI', () => {
   });
 
   test('Workbench live output store bounds, sorts, and dedupes events', () => {
-    const helpers = __workflowViewerTestables as any;
+    // helpers alias is at module scope
     const events = helpers.boundedLiveEvents(
       [
         {
@@ -1616,7 +1671,7 @@ describe('Agent Callable Workbench editable UI', () => {
   });
 
   test('Workbench live output filters stream and error events', () => {
-    const helpers = __workflowViewerTestables as any;
+    // helpers alias is at module scope
     const events = [
       { event_id: 'a', seq: 1, type: 'agent_message', stream: 'agent', text: 'ok' },
       { event_id: 'b', seq: 2, type: 'node_log_delta', stream: 'stdout', text: 'out' },
@@ -1632,7 +1687,7 @@ describe('Agent Callable Workbench editable UI', () => {
   });
 
   test('Nested workflow node live logs resolve by UI node id and run dir', () => {
-    const helpers = __workflowViewerTestables as any;
+    // helpers alias is at module scope
     const delta = {
       type: 'node_log_delta',
       run_id: 'run_nested',
@@ -1666,7 +1721,7 @@ describe('Agent Callable Workbench editable UI', () => {
   });
 
   test('Internal node run lookup keeps full workflow scoped identity matching', () => {
-    const helpers = __workflowViewerTestables as any;
+    // helpers alias is at module scope
     const workflowRun = {
       workflow_id: 'ui_workflow_acc_workspace_canvas_fixture',
       status: 'success',
@@ -1712,7 +1767,7 @@ describe('Agent Callable Workbench editable UI', () => {
   });
 
   test('Workflow container with one internal agent keeps workflow semantics across graph roundtrip', () => {
-    const helpers = __workflowViewerTestables as any;
+    // helpers alias is at module scope
     const baseCanvas = {
       id: 'root_task',
       name: 'Root Task',
@@ -1752,7 +1807,7 @@ describe('Agent Callable Workbench editable UI', () => {
   });
 
   test('Deleting a workflow container removes its root edges and internal graph', () => {
-    const helpers = __workflowViewerTestables as any;
+    // helpers alias is at module scope
     const baseCanvas = {
       id: 'root_task',
       name: 'Root Task',
@@ -1799,7 +1854,7 @@ describe('Agent Callable Workbench editable UI', () => {
   });
 
   test('Deleting an internal agent keeps its workflow and removes touched internal edges only', () => {
-    const helpers = __workflowViewerTestables as any;
+    // helpers alias is at module scope
     const baseCanvas = {
       id: 'root_task',
       name: 'Root Task',
@@ -1863,7 +1918,7 @@ describe('Agent Callable Workbench editable UI', () => {
   });
 
   test('Deletion is blocked while the current task is running', () => {
-    const helpers = __workflowViewerTestables as any;
+    // helpers alias is at module scope
     const canvas = helpers.addCallableNodeFromPalette(
       {
         id: 'root_task',
@@ -1884,7 +1939,7 @@ describe('Agent Callable Workbench editable UI', () => {
   });
 
   test('Root resource add position avoids overlapping existing workflow containers', () => {
-    const helpers = __workflowViewerTestables as any;
+    // helpers alias is at module scope
     const canvas = {
       id: 'root_task',
       name: 'Root Task',
@@ -1915,7 +1970,7 @@ describe('Agent Callable Workbench editable UI', () => {
   });
 
   test('Root resource add keeps consecutive agents in the visible row before wrapping', () => {
-    const helpers = __workflowViewerTestables as any;
+    // helpers alias is at module scope
     const baseCanvas = {
       id: 'root_task',
       name: 'Root Task',
@@ -1948,7 +2003,7 @@ describe('Agent Callable Workbench editable UI', () => {
   });
 
   test('Chinese resource labels use stable callable ids instead of colliding node fallback ids', () => {
-    const helpers = __workflowViewerTestables as any;
+    // helpers alias is at module scope
     const baseCanvas = {
       id: 'root_task',
       name: 'Root Task',
@@ -1988,7 +2043,7 @@ describe('Agent Callable Workbench editable UI', () => {
   });
 
   test('Repeated callable instances get distinct invocation labels without changing callable identity', () => {
-    const helpers = __workflowViewerTestables as any;
+    // helpers alias is at module scope
     const baseCanvas = {
       id: 'root_task',
       name: 'Root Task',
@@ -2011,7 +2066,7 @@ describe('Agent Callable Workbench editable UI', () => {
   });
 
   test('Invocation input helpers keep user prompt separate from static input', () => {
-    const helpers = __workflowViewerTestables as any;
+    // helpers alias is at module scope
     const input = { user_prompt: 'write report', region: 'US', limit: 5 };
 
     expect(helpers.promptFromInvocationInput(input)).toBe('write report');
@@ -2019,7 +2074,7 @@ describe('Agent Callable Workbench editable UI', () => {
   });
 
   test('Repeated palette adds keep internal node positions bounded inside workflow', () => {
-    const helpers = __workflowViewerTestables as any;
+    // helpers alias is at module scope
     const baseCanvas = {
       id: 'root_task',
       name: 'Root Task',
@@ -2062,7 +2117,7 @@ describe('Agent Callable Workbench editable UI', () => {
   });
 
   test('Selected workflow auto layout ranks fan-out and fan-in by control edges', () => {
-    const helpers = __workflowViewerTestables as any;
+    // helpers alias is at module scope
     const edge = (from: string, to: string) => ({
       id: `control_${from}_${to}`,
       kind: 'control',
@@ -2165,7 +2220,7 @@ describe('Agent Callable Workbench editable UI', () => {
       edges: [],
     };
 
-    const laidOut = __workflowViewerTestables.layoutCanvasForSelection(canvas, {
+    const laidOut = layoutCanvasForSelection(canvas, {
       type: 'workflow',
       id: workflow.id,
     });
@@ -2251,7 +2306,7 @@ describe('Agent Callable Workbench editable UI', () => {
       size: { width: 430, height: 328 },
       warnings: [],
     };
-    const laidOut = __workflowViewerTestables.layoutCanvasForSelection(
+    const laidOut = layoutCanvasForSelection(
       {
         id: 'root_task',
         name: 'Root Task',
@@ -2292,7 +2347,7 @@ describe('Agent Callable Workbench editable UI', () => {
       size: { width: 1800, height: 920 },
       warnings: [],
     };
-    const laidOut = __workflowViewerTestables.layoutCanvasForSelection(
+    const laidOut = layoutCanvasForSelection(
       {
         id: 'root_task',
         name: 'Root Task',
@@ -2349,7 +2404,7 @@ describe('Agent Callable Workbench editable UI', () => {
       ],
     };
 
-    const expanded = __workflowViewerTestables.expandWorkflowToFitChildren(workflow);
+    const expanded = expandWorkflowToFitChildren(workflow);
     const firstNode = expanded.internalNodes[0];
 
     expect(expanded.position).toEqual({ x: 62, y: 52 });
@@ -2384,7 +2439,7 @@ describe('Agent Callable Workbench editable UI', () => {
       ],
     };
 
-    const expanded = __workflowViewerTestables.expandWorkflowToFitChildren(workflow);
+    const expanded = expandWorkflowToFitChildren(workflow);
 
     expect(expanded.position).toEqual(workflow.position);
     expect(expanded.size.width).toBe(800);
@@ -2415,7 +2470,7 @@ describe('Agent Callable Workbench editable UI', () => {
       ],
     };
 
-    const expanded = __workflowViewerTestables.expandWorkflowToFitChildrenCenterLocked(workflow);
+    const expanded = expandWorkflowToFitChildrenCenterLocked(workflow);
     const node = expanded.internalNodes[0];
     if (!node?.position) {
       throw new Error('center-locked expansion did not preserve node position');
@@ -2495,7 +2550,7 @@ describe('Agent Callable Workbench editable UI', () => {
       ],
     };
 
-    const laidOut = __workflowViewerTestables.layoutWorkspaceCanvas(canvas);
+    const laidOut = layoutWorkspaceCanvas(canvas);
     const research = laidOut.workflows.find((workflow: any) => workflow.id === 'research');
     const review = laidOut.workflows.find((workflow: any) => workflow.id === 'review');
     const codex = research?.internalNodes.find((node: any) => node.id === 'codex');
@@ -2590,7 +2645,7 @@ describe('Agent Callable Workbench editable UI', () => {
       ],
     };
 
-    const laidOut = __workflowViewerTestables.layoutWorkspaceCanvas(canvas);
+    const laidOut = layoutWorkspaceCanvas(canvas);
     const rootRects = laidOut.workflows.map((item: any) => ({
       id: item.id,
       left: item.position.x,
@@ -2618,8 +2673,8 @@ describe('Agent Callable Workbench editable UI', () => {
   });
 
   test('Loaded workspace demo uses the global layout contract', () => {
-    const canvas = __workflowViewerTestables.layoutWorkspaceCanvas(
-      __workflowViewerTestables.workspaceDemoCanvas(),
+    const canvas = layoutWorkspaceCanvas(
+      workspaceDemoCanvas(),
     );
     const rootRects = canvas.workflows.map((item: any) => ({
       id: item.id,
@@ -2735,7 +2790,7 @@ describe('Agent Callable Workbench editable UI', () => {
       ],
     };
 
-    const laidOut = __workflowViewerTestables.layoutCanvasForSelection(canvas, {
+    const laidOut = layoutCanvasForSelection(canvas, {
       type: 'workflow',
       id: 'research',
     });

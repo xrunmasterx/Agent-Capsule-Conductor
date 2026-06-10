@@ -38,6 +38,7 @@ from acc.engine.supervisor import (
     validate_supervisor_plan,
 )
 from acc.session import utc_now_iso
+from acc.state_machine import transition_plan_step_initial
 from acc.store import load_json, write_json
 from acc.store.control_ledger import (
     append_control_event,
@@ -179,19 +180,13 @@ def materialize_supervisor_plan_steps(
     )
     sequence = next_plan_step_transition_sequence(run_dir)
     for step in compilation.steps:
-        append_plan_step_transition(
-            run_dir,
-            PlanStepTransitionRecord(
-                sequence=sequence,
-                recorded_at=step.created_at or utc_now_iso(),
-                plan_step_id=step.plan_step_id,
-                previous_status=None,
-                next_status=step.status,
-                snapshot=step,
-                reason=f"approved SupervisorPlan {plan.plan_id}",
-                decision_id=compilation.decision.decision_id,
-            ),
+        record = transition_plan_step_initial(
+            step,
+            sequence=sequence,
+            reason=f"approved SupervisorPlan {plan.plan_id}",
+            recorded_at=step.created_at or utc_now_iso(),
         )
+        append_plan_step_transition(run_dir, record)
         sequence += 1
     return {
         "decision": control_ledger_to_dict(compilation.decision),

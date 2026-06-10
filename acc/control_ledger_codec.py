@@ -32,6 +32,10 @@ from acc.models import (
     RunPlanSource,
     RunPlanStatus,
 )
+from acc.state_machine import (
+    DISPATCH_TRANSITIONS,
+    PLAN_STEP_TRANSITIONS,
+)
 
 T = TypeVar("T", bound=str)
 
@@ -218,28 +222,8 @@ CONTROL_LEDGER_EXECUTABLE_METADATA_KEYS = EXECUTABLE_METADATA_KEYS | frozenset(
     }
 )
 
-PLAN_STEP_TRANSITIONS: dict[PlanStepStatus | None, frozenset[PlanStepStatus]] = {
-    None: frozenset({"pending", "ready", "waiting_interaction"}),
-    "pending": frozenset({"ready", "waiting_interaction", "failed", "skipped", "cancelled"}),
-    "ready": frozenset(
-        {"waiting_interaction", "dispatching", "failed", "skipped", "cancelled"}
-    ),
-    "waiting_interaction": frozenset({"ready", "skipped", "cancelled"}),
-    "dispatching": frozenset({"running", "failed", "cancelled"}),
-    "running": frozenset({"success", "failed", "cancelled"}),
-    "success": frozenset(),
-    "failed": frozenset(),
-    "skipped": frozenset(),
-    "cancelled": frozenset(),
-}
-DISPATCH_TRANSITIONS: dict[DispatchStatus | None, frozenset[DispatchStatus]] = {
-    None: frozenset({"pending", "started"}),
-    "pending": frozenset({"started", "failed", "cancelled"}),
-    "started": frozenset({"completed", "failed", "cancelled"}),
-    "completed": frozenset(),
-    "failed": frozenset(),
-    "cancelled": frozenset(),
-}
+# NOTE: PLAN_STEP_TRANSITIONS and DISPATCH_TRANSITIONS are imported from
+# acc.state_machine (single source of truth).
 
 def parse_control_policy(payload: dict[str, Any]) -> ControlPolicy:
     _reject_unknown_fields(payload, CONTROL_POLICY_FIELDS, "ControlPolicy")
