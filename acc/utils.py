@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import sys
 from pathlib import Path
@@ -21,6 +22,51 @@ def load_json(path: Path) -> Any:
         raise AccError(f"JSON file not found: {path}") from exc
     except json.JSONDecodeError as exc:
         raise AccError(f"Invalid JSON in {path}: {exc}") from exc
+
+
+def read_jsonl(path: Path) -> list[dict[str, Any]]:
+    """Read a JSONL file; return empty list if file does not exist."""
+    if not path.exists():
+        return []
+    result: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            result.append(payload)
+    return result
+
+
+def update_runtime_json(path: Path, updates: dict[str, Any]) -> None:
+    """Merge updates into a JSON file, creating it if absent."""
+    from acc.store import write_json as _write_json
+
+    payload: dict[str, Any] = {}
+    if path.exists():
+        try:
+            loaded = load_json(path)
+            if isinstance(loaded, dict):
+                payload = loaded
+        except AccError:
+            payload = {}
+    payload.update(updates)
+    _write_json(path, payload)
+
+
+def validate_agent_session_id(session_id: str) -> None:
+    """Validate agent session id format: agent_session_<alphanum>."""
+    if not re.fullmatch(r"agent_session_[A-Za-z0-9_-]+", session_id):
+        raise AccError("Invalid agent session id")
+
+
+def validate_authoring_session_id(session_id: str) -> None:
+    """Validate authoring session id format: authoring_<alphanum>."""
+    if not re.fullmatch(r"authoring_[A-Za-z0-9_-]+", session_id):
+        raise AccError("Invalid authoring session id")
 
 
 def log_stderr(message: str) -> None:

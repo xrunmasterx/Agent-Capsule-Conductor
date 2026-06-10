@@ -17,6 +17,11 @@ from acc.models import CORE_V2_SCHEMA_VERSION
 from acc.engine import is_clean_workflow_payload, parse_workflow_function_template
 from acc.engine.workflow_validation import collect_callable_validation_issues
 from acc.store import is_clean_workflow_path
+from acc.constants import (
+    CODEX_DANGER_FULL_ACCESS,
+    CODEX_EXECUTION_MODES,
+    CODEX_LOCAL_READONLY_NO_SANDBOX,
+)
 from acc.utils import AccError
 
 CANONICAL_TEMPLATE_KEYS = {
@@ -67,13 +72,6 @@ EXECUTABLE_UI_NODE_KEYS = {
     "position",
     "ui",
     "workflow_ref",
-}
-
-CODEX_LOCAL_READONLY_NO_SANDBOX = "local_readonly_no_sandbox"
-CODEX_DANGER_FULL_ACCESS = "danger_full_access"
-CODEX_EXECUTION_MODES = {
-    CODEX_LOCAL_READONLY_NO_SANDBOX,
-    CODEX_DANGER_FULL_ACCESS,
 }
 
 

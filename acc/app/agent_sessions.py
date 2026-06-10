@@ -47,6 +47,11 @@ from acc.models import (
     ScopeFrame,
     SessionInstance,
 )
+from acc.utils import (
+    read_jsonl,
+    update_runtime_json,
+    validate_agent_session_id,
+)
 from acc.runtime.policy import (
     HERMETIC_RUN_MODE,
     acc_run_mode,
@@ -77,6 +82,7 @@ class AgentTurnService:
     ) -> None:
         self.project_root = project_root.resolve()
         self.adapter = adapter
+        self._session_index: dict[str, Path] = {}
 
     async def run_workflow_node_turn(
         self,
@@ -974,8 +980,8 @@ class AgentTurnService:
                 **extra_payload,
             }
             write_json(session_path, payload)
+            self._session_index[str(payload["session_id"])] = session_dir
             return session_dir, payload
-        payload = {
             "schema_version": AGENT_SESSION_SCHEMA_VERSION,
             "session_id": f"agent_session_{uuid4().hex[:12]}",
             "task_id": task_id,
@@ -1002,6 +1008,7 @@ class AgentTurnService:
         }
         write_json(session_path, payload)
         (session_dir / "messages.jsonl").touch()
+        self._session_index[str(payload["session_id"])] = session_dir
         return session_dir, payload
 
     def _session_dir(self, task_id: str, node_id: str) -> Path:

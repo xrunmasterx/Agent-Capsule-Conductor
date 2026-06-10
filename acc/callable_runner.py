@@ -10,9 +10,14 @@ from jsonschema.exceptions import SchemaError
 from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
 
 from acc.adapters.base import AgentAdapter, AgentRunRequest
-from acc.adapters.claude_sdk import ClaudeSdkAdapter
 from acc.adapters.codex_cli import CodexCliAdapter, build_codex_command
 from acc.adapters.generic_cli import GenericCliAdapter
+from acc.constants import (
+    CODEX_DANGER_FULL_ACCESS,
+    CODEX_EXECUTION_MODE_METADATA_KEY,
+    CODEX_EXECUTION_MODES,
+    CODEX_LOCAL_READONLY_NO_SANDBOX,
+)
 from acc.callable_registry import CallableAsset
 from acc.models import (
     AccError,
@@ -31,14 +36,7 @@ from acc.runtime.policy import (
     production_codex_timeout_seconds,
 )
 from acc.store import write_json
-
-CODEX_EXECUTION_MODE_METADATA_KEY = "codex_execution_mode"
-CODEX_LOCAL_READONLY_NO_SANDBOX = "local_readonly_no_sandbox"
-CODEX_DANGER_FULL_ACCESS = "danger_full_access"
-CODEX_EXECUTION_MODES = {
-    CODEX_LOCAL_READONLY_NO_SANDBOX,
-    CODEX_DANGER_FULL_ACCESS,
-}
+from acc.utils import update_runtime_json
 
 
 class CallableClassRunner:
@@ -189,8 +187,6 @@ class AgentAdapterDispatcher:
             )
         if runtime == "generic_cli":
             return GenericCliAdapter()
-        if runtime == "claude_sdk":
-            return ClaudeSdkAdapter()
         raise AccError(f"Unsupported production agent runtime {runtime!r}")
 
 
@@ -710,16 +706,3 @@ def runtime_payload(
     if codex_mode is not None:
         payload["codex_execution_mode"] = codex_mode
     return payload
-
-
-def update_runtime_json(path: Path, updates: dict[str, Any]) -> None:
-    payload: dict[str, Any] = {}
-    if path.exists():
-        try:
-            loaded = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(loaded, dict):
-                payload = loaded
-        except json.JSONDecodeError:
-            payload = {}
-    payload.update(updates)
-    write_json(path, payload)

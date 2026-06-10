@@ -13,6 +13,10 @@ from acc.models import (
     RunPlan,
     WorkflowFunctionTemplate,
 )
+from acc.engine._ref_utils import (
+    callable_ref_key as _callable_ref_key,
+    callable_ref_payload as _callable_ref_payload,
+)
 
 
 @dataclass(frozen=True)
@@ -290,14 +294,6 @@ def _validate_callable_ref(ref: CallableRef) -> None:
         raise AccError(f"Unsupported handoff target callable kind: {ref.kind!r}")
     if not ref.id:
         raise AccError("Handoff target CallableRef.id is required")
-
-
-def _callable_ref_key(ref: CallableRef) -> tuple[str, str]:
-    return (ref.kind, ref.id)
-
-
-def _callable_ref_payload(ref: CallableRef) -> dict[str, str | None]:
-    return {"kind": ref.kind, "id": ref.id, "version": ref.version}
 
 
 def _control_policy_snapshot(policy: HandoffControlPolicy) -> dict[str, Any]:

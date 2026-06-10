@@ -19,6 +19,10 @@ from acc.models import (
     SupervisorPlan,
     SupervisorRoster,
 )
+from acc.engine._ref_utils import (
+    callable_ref_key as _callable_ref_key,
+    callable_ref_payload as _callable_ref_payload,
+)
 
 NODE_ID_SANITIZE_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 
@@ -259,14 +263,6 @@ def _unique_node_id(raw: str, used_node_ids: set[str]) -> str:
         candidate = f"{base}_{suffix}"
         suffix += 1
     return candidate
-
-
-def _callable_ref_key(ref: CallableRef) -> tuple[str, str]:
-    return (ref.kind, ref.id)
-
-
-def _callable_ref_payload(ref: CallableRef) -> dict[str, str | None]:
-    return {"kind": ref.kind, "id": ref.id, "version": ref.version}
 
 
 def _control_policy_snapshot(policy: ControlPolicy) -> dict[str, Any]:

@@ -125,6 +125,29 @@ import {
   type WorkflowStatus,
 } from './workflow-viewer/runState';
 
+// --- Extracted modules (Feature 01b) ---
+import {
+  AssistantDrawer as AssistantDrawerExtracted,
+  AssistantDockContent as AssistantDockContentExtracted,
+  AssistantControlRail as AssistantControlRailExtracted,
+  AssistantProposalSummary as AssistantProposalSummaryExtracted,
+  SelectedNodeRuntimePane as SelectedNodeRuntimePaneExtracted,
+} from './assistant';
+import { AssistantTurnList as AssistantTurnListExtracted } from './assistant/AssistantTurnList';
+import {
+  ExecutionDock as ExecutionDockExtracted,
+} from './execution';
+import { LiveOutputViewer as LiveOutputViewerExtracted } from './execution/RunOverlay';
+import {
+  NodeDetailOverlay as NodeDetailOverlayExtracted,
+} from './inspector/NodeDetailOverlay';
+import {
+  SelectionDetailsDock as SelectionDetailsDockExtracted,
+  evidenceContentForCurrentSelection as evidenceContentForCurrentSelectionExtracted,
+} from './inspector/SelectionDetailsDock';
+import { useAssistantTurnStream } from '../hooks/useAssistantStream';
+import { useRunStream } from '../hooks/useRunStream';
+
 type Props = {
   workflows: WorkflowSummary[];
   callables: CallableSummary[];
@@ -17556,4 +17579,15 @@ export const __workflowViewerTestables = {
   boundedLiveEvents,
   filterLiveEvents,
   liveEventFromAgentRunEvent,
+  // Re-export extracted modules so that consumers can access them
+  // from a single entry point during the migration period.
+  AssistantDrawerExtracted,
+  AssistantDockContentExtracted,
+  AssistantControlRailExtracted,
+  AssistantProposalSummaryExtracted,
+  SelectedNodeRuntimePaneExtracted,
+  ExecutionDockExtracted,
+  LiveOutputViewerExtracted,
+  NodeDetailOverlayExtracted,
+  SelectionDetailsDockExtracted,
 };
