@@ -56,7 +56,210 @@ export const zhCN = {
   debugger: '调试',
   graphOps: 'GraphOps',
   approvalRequired: 'GraphOps 当前为 proposal / validate / dry-run only；real apply 未实现。',
+
+  // --- InteractionPanel ---
+  interactionPanel: {
+    pending: '待处理',
+    pendingCount: (n: number) => `${n} 项待回复`,
+    noPending: '暂无待处理交互',
+    runLevel: '运行级',
+    submitAnswer: '提交',
+    answerPlaceholder: '输入回答...',
+    suggestionPlaceholder: '输入建议...',
+    kinds: {
+      approval: '审批',
+      ask: '追问',
+      confirm: '确认',
+      suggest: '建议',
+    },
+    actions: {
+      approve: '通过',
+      reject: '拒绝',
+      confirm: '确认',
+      cancel: '取消',
+    },
+  },
+
+  // --- ArtifactViewer ---
+  artifactViewer: {
+    title: '产物查看器',
+    noRun: '未选择运行',
+    noNode: '无节点',
+    noArtifacts: '暂无可用产物',
+    selectArtifact: '选择一个产物查看 Markdown、JSON、文本、日志或 Patch',
+    nodeSelector: '选择节点',
+    tabs: {
+      readable: '可读视图',
+      raw: '原始数据',
+    },
+    jsonSummary: {
+      title: '摘要',
+      conclusion: '结论',
+      status: '状态',
+      confidence: '置信度',
+      findings: '发现',
+      nextActions: '下一步',
+      namedOutputs: '命名输出',
+      moreFields: (n: number) => `还有 ${n} 个字段在原始数据中`,
+    },
+    log: {
+      title: '日志预览',
+      truncated: (n: number) => `日志较长，仅展示最后 ${n} 行`,
+    },
+    patch: {
+      additions: '新增行',
+      deletions: '删除行',
+      total: '总行数',
+    },
+    types: {
+      markdown: 'Markdown',
+      json: 'JSON',
+      log: '日志',
+      patch: 'Patch',
+      text: '文本',
+    },
+  },
+
+  // --- CallableBrowser ---
+  callableBrowser: {
+    title: '智能体工具资源库',
+    subtitle: (n: number) => `${n} 个可复用智能体与工具`,
+    localResources: '本地资源',
+    createAgent: '新建智能体',
+    loadFailed: '资源加载失败',
+    selectResource: '选择一个资源',
+    selectResourceHint: '查看智能体的默认提示词、模型偏好和固定 skills',
+    noResources: '还没有智能体资源',
+    noResourcesHint: '创建一个智能体后，它会出现在这里',
+    kinds: {
+      agent_class: '智能体',
+      tool_class: '工具',
+      default: '资源',
+    },
+    detail: {
+      agent: '使用的 Agent',
+      model: '模型',
+      thinkingLevel: '思考强度',
+      systemPrompt: '系统提示词',
+      noPrompt: '未填写系统提示词',
+      pinnedSkills: '固定 Skills',
+      noSkills: '未固定 skills',
+      noDescription: '未填写描述',
+      editAgent: '编辑智能体',
+    },
+    editor: {
+      createTitle: '创建智能体',
+      editTitle: '编辑智能体',
+      subtitle: '为工作区创建一个新的 AI 智能体',
+      close: '关闭',
+      namePlaceholder: '例如：深度研究智能体',
+      descriptionPlaceholder: '这个智能体做什么？',
+      promptPlaceholder: '写下这个智能体默认遵守的方法、边界和输出风格',
+      skillInputPlaceholder: '输入 skill 名称',
+      addSkill: '添加',
+      save: '保存',
+      create: '创建',
+      cancel: '取消',
+      delete: '删除',
+    },
+    deleteConfirm: {
+      title: '确认删除',
+      message: (name: string) => `确定要删除智能体「${name}」吗？此操作不可撤销。`,
+      confirm: '确认删除',
+      cancel: '取消',
+    },
+  },
+
+  // --- DecisionInboxPanel ---
+  decisionInbox: {
+    title: '决策收件箱',
+    subtitle: '聚合运行失败、人工确认和 GraphOps 提案',
+    loadError: 'Decision Inbox 错误',
+    loading: '正在加载决策事项...',
+    empty: '暂无需要处理的决策事项',
+    counts: {
+      open: '待处理',
+      failed: '失败',
+      graphops: 'GraphOps',
+    },
+    detail: {
+      status: '状态',
+      run: '运行',
+      node: '节点',
+      graphops: 'GraphOps',
+      evidence: '证据',
+    },
+    severity: {
+      high: '高',
+      medium: '中',
+      low: '低',
+    },
+    runPrefix: '运行 #',
+    proposalPrefix: '提案 #',
+  },
+
+  // --- RunInspector ---
+  runInspector: {
+    title: '运行检查器',
+    noRun: '未选择运行',
+    selectRun: '选择一个运行来检查它的 Session 和 Artifact Bundle',
+    runError: '运行错误',
+    nodeList: '运行节点列表',
+    session: 'Session',
+    duration: '耗时',
+    summary: '摘要',
+    artifacts: '产物',
+    noArtifacts: '暂无可见产物',
+    selectPath: '选择输入、输出、日志、事件或产物',
+    paths: {
+      input: '输入',
+      prompt: 'Prompt',
+      output: '输出',
+      events: 'Events',
+      stdout: 'Stdout',
+      stderr: 'Stderr',
+    },
+    debugger: {
+      title: '调试',
+      replay: '事件回放',
+    },
+  },
+
+  // --- ControlPlanePanel ---
+  controlPlane_section: {
+    title: '控制平面',
+    subtitle: '开发者工具：工作流、运行、产物与 GraphOps 操作',
+    workflowSection: '工作流与运行',
+    runSampleWorkflow: '运行示例工作流',
+    inspectCurrentRun: '检查当前运行',
+    readCurrentArtifact: '读取当前产物',
+    samplePatch: '示例 patch',
+    validatePatch: '校验 patch',
+    dryRunPatch: 'dry-run patch',
+  },
+
+  // --- EvidenceDock ---
+  evidenceDock: {
+    notRun: '未运行',
+    currentEvidence: '当前证据',
+    noEvidence: '暂无打开的证据',
+    recentEvents: '最近事件',
+    noEvents: '暂无事件',
+    failureNode: '失败节点',
+    failureReason: '原因',
+    failureEvidence: '证据',
+    statuses: {
+      success: '成功',
+      failed: '失败',
+      timeout: '超时',
+      schema_error: 'Schema 错误',
+      artifact_error: '产物错误',
+      running: '运行中',
+      scheduled: '已调度',
+      manual_review: '等待人工确认',
+      not_run: '未运行',
+    },
+  },
 };
 
 export type ZhKey = keyof typeof zhCN;
-

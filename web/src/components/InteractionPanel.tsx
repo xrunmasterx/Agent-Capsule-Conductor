@@ -18,6 +18,7 @@ export function InteractionPanel({ runId }: Props) {
   const [items, setItems] = useState<InteractionRequest[]>([]);
   const [busyId, setBusyId] = useState('');
   const [error, setError] = useState('');
+  const [answers, setAnswers] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (!runId) {
@@ -47,11 +48,20 @@ export function InteractionPanel({ runId }: Props) {
     try {
       await api.answerInteraction(runId, interaction.interaction_id, answer);
       setItems((current) => current.filter((item) => item.interaction_id !== interaction.interaction_id));
+      setAnswers((current) => {
+        const next = { ...current };
+        delete next[interaction.interaction_id];
+        return next;
+      });
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : String(requestError));
     } finally {
       setBusyId('');
     }
+  }
+
+  function updateAnswer(interactionId: string, text: string) {
+    setAnswers((current) => ({ ...current, [interactionId]: text }));
   }
 
   if (!runId) {
@@ -64,10 +74,10 @@ export function InteractionPanel({ runId }: Props) {
         <h3>待处理</h3>
         <p>{items.length ? `${items.length} 项待回复` : '暂无待处理交互'}</p>
       </header>
-      {error ? <p className="error-text">{error}</p> : null}
+      {error ? <p className="error-text" role="alert">{error}</p> : null}
       <div className="interaction-cards">
         {items.map((interaction) => (
-          <article key={interaction.interaction_id} className="interaction-card">
+          <article key={interaction.interaction_id} className="interaction-card" role="region" aria-label={`${kindLabels[interaction.kind]}: ${interaction.prompt}`}>
             <div className="interaction-card-head">
               <strong>{kindLabels[interaction.kind]}</strong>
               <span>{interaction.node_id || '运行级'}</span>
@@ -106,6 +116,42 @@ export function InteractionPanel({ runId }: Props) {
                   onClick={() => submitAnswer(interaction, { confirmed: false })}
                 >
                   取消
+                </button>
+              </div>
+            ) : null}
+            {interaction.kind === 'ask' ? (
+              <div className="interaction-actions">
+                <textarea
+                  aria-label={interaction.prompt}
+                  placeholder="输入回答..."
+                  rows={3}
+                  value={answers[interaction.interaction_id] || ''}
+                  onChange={(e) => updateAnswer(interaction.interaction_id, e.target.value)}
+                />
+                <button
+                  type="button"
+                  disabled={busyId === interaction.interaction_id || !(answers[interaction.interaction_id] || '').trim()}
+                  onClick={() => submitAnswer(interaction, { answer: (answers[interaction.interaction_id] || '').trim() })}
+                >
+                  提交
+                </button>
+              </div>
+            ) : null}
+            {interaction.kind === 'suggest' ? (
+              <div className="interaction-actions">
+                <textarea
+                  aria-label={interaction.prompt}
+                  placeholder="输入建议..."
+                  rows={3}
+                  value={answers[interaction.interaction_id] || ''}
+                  onChange={(e) => updateAnswer(interaction.interaction_id, e.target.value)}
+                />
+                <button
+                  type="button"
+                  disabled={busyId === interaction.interaction_id || !(answers[interaction.interaction_id] || '').trim()}
+                  onClick={() => submitAnswer(interaction, { suggestion: (answers[interaction.interaction_id] || '').trim() })}
+                >
+                  提交
                 </button>
               </div>
             ) : null}

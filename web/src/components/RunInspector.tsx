@@ -2,7 +2,7 @@ import { FileJson, FileText, ScrollText, Terminal } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import { api } from '../api';
-import { formatDuration, shortPath, statusTone } from '../format';
+import { formatBytes, formatDuration, statusTone } from '../format';
 import { zhCN as t } from '../i18n/zh-CN';
 import type {
   ArtifactContent,
@@ -241,7 +241,7 @@ function NodeDetail({ node, artifacts, content, onReadPath }: NodeDetailProps) {
             >
               <Icon aria-hidden="true" size={16} />
               <span>{item.label}</span>
-              <small>{shortPath(item.path)}</small>
+              <small>{item.path?.split('/').at(-1) ?? 'n/a'}</small>
             </button>
           );
         })}
@@ -257,7 +257,7 @@ function NodeDetail({ node, artifacts, content, onReadPath }: NodeDetailProps) {
             onClick={() => onReadPath(artifact.path)}
           >
             <span>{artifact.name}</span>
-            <small>{artifact.size_bytes} bytes</small>
+            <small>{formatBytes(artifact.size_bytes)}</small>
           </button>
         ))}
       </section>

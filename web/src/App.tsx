@@ -21,16 +21,25 @@ type ResourceState<T> = {
   error: string;
 };
 
-const navigation = [
+type NavItem = { key: ViewKey; label: string; icon: typeof ListChecks };
+
+const baseNavigation: NavItem[] = [
   { key: 'tasks', label: '任务', icon: ListChecks },
   { key: 'resources', label: '资源', icon: Boxes },
   { key: 'runs', label: t.runs, icon: Database },
   { key: 'artifacts', label: t.artifacts, icon: FileText },
   { key: 'decisions', label: '决策', icon: Inbox },
-  { key: 'control', label: t.controlPlane, icon: Layers },
-] as const;
+];
+
+function getNavigation(): NavItem[] {
+  const isDev = new URLSearchParams(window.location.search).has('dev');
+  return isDev
+    ? [...baseNavigation, { key: 'control', label: t.controlPlane, icon: Layers }]
+    : baseNavigation;
+}
 
 export function App() {
+  const navigation = getNavigation();
   const [view, setView] = useState<ViewKey>('tasks');
   const [runsResource, setRunsResource] = useState<ResourceState<RunSummary[]>>({
     status: 'loading',

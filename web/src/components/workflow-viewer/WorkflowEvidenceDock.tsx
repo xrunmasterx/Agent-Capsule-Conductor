@@ -51,7 +51,7 @@ export function WorkflowEvidenceDock({
         </span>
         <span className="evidence-dock-message">{message}</span>
         <span className="evidence-dock-current">{currentEvidenceTitle}</span>
-        {state.open ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+        {state.open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
       </button>
       {state.open ? (
         <div className="evidence-dock-body">

@@ -13,6 +13,7 @@ type Props = {
 };
 
 export function ControlPlanePanel({ runs, workflows, selectedRun }: Props) {
+  const isDev = new URLSearchParams(window.location.search).has('dev');
   const [patches, setPatches] = useState<GraphOpsExample[]>([]);
   const [selectedPatch, setSelectedPatch] = useState('');
   const [message, setMessage] = useState('');
@@ -20,6 +21,9 @@ export function ControlPlanePanel({ runs, workflows, selectedRun }: Props) {
   const [resultContent, setResultContent] = useState('{}');
 
   useEffect(() => {
+    if (!isDev) {
+      return;
+    }
     let ignore = false;
     api.graphopsExamples().then((payload) => {
       if (ignore) {
@@ -89,6 +93,10 @@ export function ControlPlanePanel({ runs, workflows, selectedRun }: Props) {
     const result = await api.graphopsDryRun(selectedPatch, true);
     setMessage(`已 dry-run ${selectedPatch}`);
     showJson('graphops.dry-run.json', result);
+  }
+
+  if (!isDev) {
+    return null;
   }
 
   return (

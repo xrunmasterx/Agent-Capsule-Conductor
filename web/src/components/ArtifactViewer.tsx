@@ -10,17 +10,28 @@ type Props = {
 };
 
 export function ArtifactViewer({ run }: Props) {
-  const firstNode = run?.nodes[0];
+  const [selectedNodeId, setSelectedNodeId] = useState<string>('');
   const [artifacts, setArtifacts] = useState<ArtifactLink[]>([]);
   const [content, setContent] = useState<ArtifactContent | null>(null);
 
+  const selectedNode = run?.nodes.find((n) => n.node_id === selectedNodeId) || run?.nodes[0];
+
   useEffect(() => {
-    if (!run?.run_id || !firstNode?.node_id) {
+    if (run?.nodes[0]?.node_id) {
+      setSelectedNodeId(run.nodes[0].node_id);
+    } else {
+      setSelectedNodeId('');
+    }
+    setContent(null);
+  }, [run?.run_id]);
+
+  useEffect(() => {
+    if (!run?.run_id || !selectedNode?.node_id) {
       setArtifacts([]);
       return;
     }
     let ignore = false;
-    api.nodeArtifacts(run.run_id, firstNode.node_id).then((result) => {
+    api.nodeArtifacts(run.run_id, selectedNode.node_id).then((result) => {
       if (!ignore) {
         setArtifacts(result.artifacts);
       }
@@ -28,10 +39,15 @@ export function ArtifactViewer({ run }: Props) {
     return () => {
       ignore = true;
     };
-  }, [run?.run_id, firstNode?.node_id]);
+  }, [run?.run_id, selectedNode?.node_id]);
 
   async function readArtifact(path: string) {
     setContent(await api.artifact(path));
+  }
+
+  function handleNodeChange(nodeId: string) {
+    setSelectedNodeId(nodeId);
+    setContent(null);
   }
 
   return (
@@ -39,10 +55,26 @@ export function ArtifactViewer({ run }: Props) {
       <header className="panel-header">
         <div>
           <h2>产物查看器</h2>
-          <p>{run ? `${run.run_id} / ${firstNode?.node_id || '无节点'}` : '未选择运行'}</p>
+          <p>{run ? `${run.run_id} / ${selectedNode?.node_id || '无节点'}` : '未选择运行'}</p>
         </div>
         <FileCode2 aria-hidden="true" size={20} />
       </header>
+      {run && run.nodes.length > 1 ? (
+        <div className="node-selector" role="tablist" aria-label="选择节点">
+          {run.nodes.map((node) => (
+            <button
+              key={node.node_id}
+              type="button"
+              role="tab"
+              aria-selected={selectedNode?.node_id === node.node_id}
+              className={selectedNode?.node_id === node.node_id ? 'node-tab active' : 'node-tab'}
+              onClick={() => handleNodeChange(node.node_id)}
+            >
+              {node.node_id}
+            </button>
+          ))}
+        </div>
+      ) : null}
       <div className="artifact-layout">
         <div className="artifact-list">
           {artifacts.map((artifact) => (
@@ -331,17 +363,8 @@ function briefValue(value: unknown): string {
       .join('；');
     return entries.length > 3 ? `${summary}；...` : summary;
   }
-  if (value === null || value === undefined) {
-    return '空';
-  }
   if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
     return String(value);
-  }
-  if (Array.isArray(value)) {
-    return `数组，${value.length} 项`;
-  }
-  if (typeof value === 'object') {
-    return `对象，${Object.keys(value as Record<string, unknown>).length} 个字段`;
   }
   return String(value);
 }

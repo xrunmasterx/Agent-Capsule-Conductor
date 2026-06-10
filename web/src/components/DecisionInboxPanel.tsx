@@ -80,11 +80,11 @@ export function DecisionInboxPanel({ onViewRun }: Props) {
           <aside className="decision-list" aria-label="决策事项列表">
             <div className="metric-strip compact">
               <div>
-                <span>Open</span>
+                <span>待处理</span>
                 <strong>{inbox.counts.open}</strong>
               </div>
               <div>
-                <span>Failed</span>
+                <span>失败</span>
                 <strong>{inbox.counts.failed_runs + inbox.counts.failed_nodes}</strong>
               </div>
               <div>
@@ -107,7 +107,7 @@ export function DecisionInboxPanel({ onViewRun }: Props) {
                   <strong>{item.title}</strong>
                   <small>{item.summary}</small>
                 </span>
-                <em className={`severity ${item.severity}`}>{item.severity}</em>
+                <em className={`severity ${item.severity}`}>{severityLabel(item.severity)}</em>
               </button>
             ))}
             {inbox.items.length === 0 ? <p className="empty-state">暂无需要处理的决策事项。</p> : null}
@@ -150,11 +150,11 @@ function DecisionDetail({
         <dt>状态</dt>
         <dd>{item.status}</dd>
         <dt>运行</dt>
-        <dd>{item.run?.run_id || 'n/a'}</dd>
+        <dd>{item.run?.run_id ? shortenId(item.run.run_id, '运行 #') : 'n/a'}</dd>
         <dt>节点</dt>
-        <dd>{item.node?.node_id || 'n/a'}</dd>
+        <dd>{item.node?.node_id ? friendlyNodeId(item.node.node_id) : 'n/a'}</dd>
         <dt>GraphOps</dt>
-        <dd>{item.graphops ? `${graphopsId} / ${item.graphops.operation_count} ops` : 'n/a'}</dd>
+        <dd>{item.graphops ? `${shortenId(graphopsId, '提案 #')} / ${item.graphops.operation_count} ops` : 'n/a'}</dd>
       </dl>
       <section className="decision-actions">
         {item.actions.map((action) => (
@@ -202,4 +202,33 @@ function decisionIcon(item: DecisionInboxItem) {
     return <ShieldCheck aria-hidden="true" size={16} />;
   }
   return <AlertTriangle aria-hidden="true" size={16} />;
+}
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isUuid(value: string): boolean {
+  return UUID_PATTERN.test(value);
+}
+
+function shortenId(id: string, prefix: string): string {
+  if (id === 'n/a') {
+    return id;
+  }
+  return `${prefix}${id.slice(-8)}`;
+}
+
+function friendlyNodeId(nodeId: string): string {
+  if (isUuid(nodeId)) {
+    return `节点 #${nodeId.slice(-8)}`;
+  }
+  return nodeId;
+}
+
+function severityLabel(severity: string): string {
+  const labels: Record<string, string> = {
+    high: '高',
+    medium: '中',
+    low: '低',
+  };
+  return labels[severity] || severity;
 }

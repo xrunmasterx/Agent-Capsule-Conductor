@@ -1297,7 +1297,7 @@ describe('Agent Callable Workbench editable UI', () => {
     render(<App />);
 
     const navigation = await screen.findByLabelText('Workbench navigation');
-    for (const label of ['任务', '资源', '运行记录', '产物', '决策', '控制平面']) {
+    for (const label of ['任务', '资源', '运行记录', '产物', '决策']) {
       expect(within(navigation).getByRole('button', { name: label })).toBeInTheDocument();
     }
     expect(navigation).not.toHaveTextContent('浠诲姟');
@@ -3610,6 +3610,11 @@ describe('Agent Callable Workbench editable UI', () => {
   });
 
   test('Control Plane renders GraphOps safety flow', async () => {
+    const originalSearch = window.location.search;
+    Object.defineProperty(window, 'location', {
+      value: { ...window.location, search: '?dev=true' },
+      writable: true,
+    });
     const user = userEvent.setup();
     render(<App />);
 
@@ -3621,6 +3626,11 @@ describe('Agent Callable Workbench editable UI', () => {
       'not_implemented',
     );
     expect(screen.getByText(/proposal \/ validate \/ dry-run only/)).toBeInTheDocument();
+
+    Object.defineProperty(window, 'location', {
+      value: { ...window.location, search: originalSearch },
+      writable: true,
+    });
   });
 
   test('Run Inspector renders pending interaction approval card', async () => {

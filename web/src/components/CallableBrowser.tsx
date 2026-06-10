@@ -333,6 +333,7 @@ function AgentClassEditor({
   onDelete?: () => Promise<void>;
 }) {
   const [skillInput, setSkillInput] = useState('');
+  const [pendingDelete, setPendingDelete] = useState(false);
 
   useEffect(() => {
     setSkillInput('');
@@ -498,7 +499,7 @@ function AgentClassEditor({
         </div>
         <footer className="agent-editor-footer">
           {onDelete ? (
-            <button type="button" className="agent-delete-action" onClick={() => void onDelete()}>
+            <button type="button" className="agent-delete-action" onClick={() => setPendingDelete(true)}>
               <Trash2 aria-hidden="true" size={16} />
               删除
             </button>
@@ -515,6 +516,37 @@ function AgentClassEditor({
             </button>
           </div>
         </footer>
+        {pendingDelete && onDelete ? (
+          <div className="agent-editor-backdrop" role="presentation" onClick={() => setPendingDelete(false)} onKeyDown={(e) => { if (e.key === 'Escape') setPendingDelete(false); }}>
+            <div
+              className="agent-editor-dialog"
+              role="alertdialog"
+              aria-modal="true"
+              aria-label="确认删除"
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => e.stopPropagation()}
+            >
+              <header className="agent-editor-header">
+                <h3>确认删除</h3>
+              </header>
+              <div className="agent-editor-body" style={{ padding: '1rem' }}>
+                <p>确定要删除智能体「{draft.name || draft.id}」吗？此操作不可撤销。</p>
+              </div>
+              <footer className="agent-editor-footer">
+                <span />
+                <div>
+                  <button type="button" className="agent-ghost-action" onClick={() => setPendingDelete(false)}>
+                    取消
+                  </button>
+                  <button type="button" className="agent-delete-action" onClick={() => { setPendingDelete(false); void onDelete(); }}>
+                    <Trash2 aria-hidden="true" size={16} />
+                    确认删除
+                  </button>
+                </div>
+              </footer>
+            </div>
+          </div>
+        ) : null}
       </section>
     </div>
   );
