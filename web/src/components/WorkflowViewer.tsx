@@ -6925,7 +6925,7 @@ function NodeCreateMenu({
   );
 }
 
-function WorkflowContainer({
+export function WorkflowContainer({
   id,
   data,
 }: NodeProps<WorkflowFlowNode>) {

@@ -9,4 +9,4 @@
  * WorkflowViewer.tsx.  Named imports provide access.
  */
 
-export { AgentToolNode } from '../WorkflowViewer';
+export { AgentToolNode, WorkflowContainer } from '../WorkflowViewer';

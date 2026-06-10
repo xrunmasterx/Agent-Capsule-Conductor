@@ -1,9 +1,15 @@
-/**
- * Authoring barrel export.
- *
- * Consumers import from `components/authoring` to access authoring session
- * logic and proposal review utilities.
- */
+export {
+  captureAuthoringSnapshot,
+  buildDeterministicCanvasAuthoringProposal,
+  validateCanvasAuthoringProposal,
+  applyCanvasAuthoringProposal,
+  temporaryResourceIssueForCanvas,
+  temporaryResourceIssueForGraph,
+} from './AuthoringSession';
 
-export { _authoringInternals } from './AuthoringSession';
-export { _proposalInternals } from './ProposalReview';
+export {
+  buildDeterministicCanvasAuthoringProposal as proposalBuilder,
+  validateCanvasAuthoringProposal as proposalValidator,
+  applyCanvasAuthoringProposal as proposalApplier,
+  captureAuthoringSnapshot as captureSnapshot,
+} from './ProposalReview';
