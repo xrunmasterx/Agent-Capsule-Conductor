@@ -4,7 +4,7 @@ import asyncio
 import json
 from pathlib import Path
 
-from acc.app.core_v2_runtime import run_core_v2_workflow_path
+from acc.app.runtime.orchestrator import run_core_v2_workflow_path
 from acc.models import CORE_V2_SCHEMA_VERSION
 
 

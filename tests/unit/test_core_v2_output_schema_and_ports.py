@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from acc.app.core_v2_runtime import MISSING_PORT_VALUE, output_value_for_port
+from acc.runtime.node_payload import MISSING_PORT_VALUE, output_value_for_port
 from acc.callable_runner import (
     codex_sandbox_for_permissions,
     effective_permission_profile,

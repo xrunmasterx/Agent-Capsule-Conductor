@@ -7,10 +7,8 @@ from pathlib import Path
 import pytest
 
 from acc.app.core_v2_loader import load_workflow_function_template
-from acc.app.core_v2_runtime import (
-    dispatch_ready_handoff_plan_steps,
-    run_core_v2_workflow_path,
-)
+from acc.app.runtime.dispatch_gate import dispatch_ready_handoff_plan_steps
+from acc.app.runtime.orchestrator import run_core_v2_workflow_path
 from acc.app.handoff import materialize_handoff_plan_step
 from acc.models import (
     AccError,

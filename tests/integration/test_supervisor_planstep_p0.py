@@ -6,10 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from acc.app.core_v2_runtime import (
-    dispatch_ready_supervisor_plan_steps,
-    run_core_v2_workflow_path,
-)
+from acc.app.runtime.dispatch_gate import dispatch_ready_supervisor_plan_steps
+from acc.app.runtime.orchestrator import run_core_v2_workflow_path
 from acc.app.supervisor import (
     materialize_supervisor_plan_steps,
     replay_supervisor_plan_from_recorded_decision,

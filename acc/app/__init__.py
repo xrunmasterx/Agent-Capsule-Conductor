@@ -289,7 +289,7 @@ async def run_clean_workflow_template(
         call_depth,
         node_executor,
     )
-    from acc.app.core_v2_runtime import run_core_v2_workflow_path
+    from acc.app.runtime.orchestrator import run_core_v2_workflow_path
 
     resolved_workspace = workspace
     resolved_binding_path = binding_path

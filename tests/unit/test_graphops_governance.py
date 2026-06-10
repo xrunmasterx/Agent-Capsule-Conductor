@@ -6,6 +6,7 @@ from pathlib import Path
 def test_runtime_dispatch_modules_do_not_call_graphops_apply() -> None:
     for path in (
         Path("acc/app/core_v2_runtime.py"),
+        Path("acc/app/runtime/orchestrator.py"),
         Path("acc/app/supervisor.py"),
         Path("acc/app/handoff.py"),
     ):

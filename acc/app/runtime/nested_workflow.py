@@ -31,7 +31,7 @@ async def execute_workflow_function_callable(
     callable_registry: CallableRegistry | None,
 ) -> dict[str, Any]:
     # Lazy import to avoid circular dependency
-    from acc.app.core_v2_runtime import run_core_v2_workflow_path
+    from acc.app.runtime.orchestrator import run_core_v2_workflow_path
 
     child_path = resolve_workflow_function_path(template, node.callable_ref.id)
     child_run_dir = node_dir / "nested_workflow"
