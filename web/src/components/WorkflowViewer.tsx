@@ -142,20 +142,7 @@ type CodexExecutionMode = 'default' | 'local_readonly_no_sandbox' | 'danger_full
 type EmptyInputPolicy = 'allow' | 'block';
 const CONTROL_SLOT_LIMIT = 10;
 const DEFAULT_WORKFLOW_MAX_CONCURRENCY = 8;
-const STOCK_TARGET_AGENT_ID = 'stock-target-selector.codex';
-const STOCK_BUSINESS_AGENT_ID = 'stock-business-model-research.codex';
-const STOCK_FINANCIALS_AGENT_ID = 'stock-financials-research.codex';
-const STOCK_INDUSTRY_AGENT_ID = 'stock-industry-position-research.codex';
-const STOCK_FUNDAMENTALS_SYNTHESIS_AGENT_ID = 'stock-fundamentals-synthesis.codex';
-const STOCK_VALUATION_MODEL_AGENT_ID = 'stock-valuation-model.codex';
-const STOCK_SCENARIO_AGENT_ID = 'stock-scenario-analysis.codex';
-const STOCK_VALUATION_SYNTHESIS_AGENT_ID = 'stock-valuation-synthesis.codex';
-const STOCK_MACRO_RISK_AGENT_ID = 'stock-macro-regulatory-risk.codex';
-const STOCK_COMPANY_RISK_AGENT_ID = 'stock-company-specific-risk.codex';
-const STOCK_CATALYST_AGENT_ID = 'stock-catalyst-scanner.codex';
-const STOCK_RISK_SYNTHESIS_AGENT_ID = 'stock-risk-catalyst-synthesis.codex';
-const STOCK_REPORT_WRITER_AGENT_ID = 'stock-investment-report-writer.codex';
-const STOCK_REPORT_PUBLISH_AGENT_ID = 'stock-report-publisher.codex';
+// STOCK_*_AGENT_ID demo constants removed — string literals inlined in workspaceDemoCanvas().
 
 type InternalNodeView = {
   id: string;
@@ -13900,7 +13887,7 @@ function workspaceDemoCanvas(): WorkspaceCanvasModel {
         id: 'Stock_Target_Agent',
         title: '美股标的识别',
         sourceKind: 'agent_session',
-        callableId: STOCK_TARGET_AGENT_ID,
+        callableId: 'stock-target-selector.codex',
         codexExecutionMode: 'default',
         directory: 'workflows/demo/stock_target',
         status: 'not_run',
@@ -13945,7 +13932,7 @@ function workspaceDemoCanvas(): WorkspaceCanvasModel {
             '业务模式研究',
             '基于已确认标的，研究公司业务模式、收入结构、关键产品和客户结构。',
             'Agent',
-            STOCK_BUSINESS_AGENT_ID,
+            'stock-business-model-research.codex',
             fundamentalsComponentOutputSchema(),
           ),
           internalNode(
@@ -13953,7 +13940,7 @@ function workspaceDemoCanvas(): WorkspaceCanvasModel {
             '财报摘要',
             '基于已确认标的，整理近年收入、利润率、现金流、资产负债表强弱项和财务质量。',
             'Agent',
-            STOCK_FINANCIALS_AGENT_ID,
+            'stock-financials-research.codex',
             fundamentalsComponentOutputSchema(),
           ),
           internalNode(
@@ -13961,7 +13948,7 @@ function workspaceDemoCanvas(): WorkspaceCanvasModel {
             '行业定位',
             '基于已确认标的，分析竞争格局、行业增长驱动、主要对手和公司相对位置。',
             'Agent',
-            STOCK_INDUSTRY_AGENT_ID,
+            'stock-industry-position-research.codex',
             fundamentalsComponentOutputSchema(),
           ),
           internalNode(
@@ -13969,7 +13956,7 @@ function workspaceDemoCanvas(): WorkspaceCanvasModel {
             '基本面汇总',
             '整合业务、财务和行业三路研究，输出基本面判断、关键证据和待验证假设。',
             'Agent',
-            STOCK_FUNDAMENTALS_SYNTHESIS_AGENT_ID,
+            'stock-fundamentals-synthesis.codex',
             fundamentalsSynthesisOutputSchema(),
             [
               port('business', '业务模式研究', 'input', true),
@@ -14008,7 +13995,7 @@ function workspaceDemoCanvas(): WorkspaceCanvasModel {
             '估值框架',
             '基于基本面研究，建立适合该公司的估值框架、核心假设和估值区间。',
             'Agent',
-            STOCK_VALUATION_MODEL_AGENT_ID,
+            'stock-valuation-model.codex',
             valuationComponentOutputSchema(),
           ),
           internalNode(
@@ -14016,7 +14003,7 @@ function workspaceDemoCanvas(): WorkspaceCanvasModel {
             '情景分析',
             '基于基本面研究，构造牛/基准/熊三种情景和关键敏感性。',
             'Agent',
-            STOCK_SCENARIO_AGENT_ID,
+            'stock-scenario-analysis.codex',
             valuationComponentOutputSchema(),
           ),
           internalNode(
@@ -14024,7 +14011,7 @@ function workspaceDemoCanvas(): WorkspaceCanvasModel {
             '估值结论',
             '整合估值框架和情景分析，输出估值判断、风险收益比和关键不确定性。',
             'Agent',
-            STOCK_VALUATION_SYNTHESIS_AGENT_ID,
+            'stock-valuation-synthesis.codex',
             valuationSynthesisOutputSchema(),
             [
               port('valuation_model', '估值框架', 'input', true),
@@ -14059,7 +14046,7 @@ function workspaceDemoCanvas(): WorkspaceCanvasModel {
             '宏观与监管风险',
             '基于基本面研究，识别利率、监管、汇率、政策和周期风险。',
             'Agent',
-            STOCK_MACRO_RISK_AGENT_ID,
+            'stock-macro-regulatory-risk.codex',
             riskComponentOutputSchema(),
           ),
           internalNode(
@@ -14067,7 +14054,7 @@ function workspaceDemoCanvas(): WorkspaceCanvasModel {
             '公司特有风险',
             '基于基本面研究，识别竞争、执行、产品、客户集中度和治理风险。',
             'Agent',
-            STOCK_COMPANY_RISK_AGENT_ID,
+            'stock-company-specific-risk.codex',
             riskComponentOutputSchema(),
           ),
           internalNode(
@@ -14075,7 +14062,7 @@ function workspaceDemoCanvas(): WorkspaceCanvasModel {
             '催化剂扫描',
             '基于基本面研究，识别未来 6-12 个月可能改变市场预期的正负催化剂。',
             'Agent',
-            STOCK_CATALYST_AGENT_ID,
+            'stock-catalyst-scanner.codex',
             catalystOutputSchema(),
           ),
           internalNode(
@@ -14083,7 +14070,7 @@ function workspaceDemoCanvas(): WorkspaceCanvasModel {
             '风险汇总',
             '整合宏观风险、公司风险和催化剂，输出风险矩阵与跟踪清单。',
             'Agent',
-            STOCK_RISK_SYNTHESIS_AGENT_ID,
+            'stock-risk-catalyst-synthesis.codex',
             riskSynthesisOutputSchema(),
             [
               port('macro_risks', '宏观与监管风险', 'input', true),
@@ -14122,7 +14109,7 @@ function workspaceDemoCanvas(): WorkspaceCanvasModel {
             '报告撰写',
             '整合标的、基本面、估值、风险和催化剂，形成结构化投资调研报告。',
             'Agent',
-            STOCK_REPORT_WRITER_AGENT_ID,
+            'stock-investment-report-writer.codex',
             investmentReportOutputSchema(),
           ),
           internalNode(
@@ -14130,7 +14117,7 @@ function workspaceDemoCanvas(): WorkspaceCanvasModel {
             '报告发布检查',
             '检查最终报告是否完整、证据是否可追溯、结论是否标注不确定性。',
             'Agent',
-            STOCK_REPORT_PUBLISH_AGENT_ID,
+            'stock-report-publisher.codex',
             reportPublishOutputSchema(),
           ),
         ],
