@@ -1,5 +1,11 @@
 # ACC v2 架构深度审计报告
 
+> **重构状态：✅ 已执行完毕 (2026-06-11)**  
+> 本报告描述重构前的架构问题。7个 feature 的重构已全部完成并合入 dev_v3 分支。  
+> 详见 `docs/refactoring-plan/` 了解具体执行内容。  
+> 重构成果：删减 6,366 行旧代码，God Module 2,422→97 行，domain.py 拆为 3 模块，  
+> 前端建立 6 个子目录 + Zustand store 模块边界。
+
 > 审计日期：2026-06-10  
 > 审计方法：15 agent 并行扫描 + 3 agent 深度验证 + 人工源码验证  
 > 代码基线：commit 0aece8d (dev_v2 branch)  

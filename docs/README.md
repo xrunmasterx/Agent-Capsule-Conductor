@@ -1,91 +1,60 @@
 # ACC Documentation Map
 
-This directory contains both current architecture docs and historical goal packages. Treat them
-differently.
-
 ## Current Entry Points
 
-Read these first when you need the current system contract:
+- `AGENTS.md`: project contract, module layout, stable invariants.
+- `docs/CURRENT_ARCHITECTURE.md`: data flow, runtime boundaries, callable concepts, evidence files.
+- `docs/concepts/`: first principles, capsule/template/session model, GraphOps control plane.
 
-- `AGENTS.md`: repository-level working rules and non-negotiable invariants.
-- `README.md`: current user-facing setup, CLI, server, Workbench, and evidence overview.
-- `docs/CURRENT_ARCHITECTURE.md`: current first-principles architecture and runtime boundaries.
-- `docs/concepts/FIRST_PRINCIPLES_ANALYSIS.md`: why ACC separates reusable definitions from runtime
-  executions and keeps GraphOps human-governed.
-- `docs/concepts/CAPSULE_TEMPLATE_SESSION.md`: class-template/session and callable runtime mental
-  model. The filename is historical; the content describes Core v2 concepts.
-- `docs/concepts/GRAPHOPS_CONTROL_PLANE.md`: controlled callable/workflow mutation path.
+## Refactoring (2026-06)
 
-## Current Implementation Goal Packages
+- `docs/refactoring-plan/`: 7 feature plans + master plan, executed 2026-06-11.
+- `docs/ACC_Architecture_Audit_2026.md`: full audit report with verification results.
 
-These packages describe work that is reflected in the current architecture:
+## Current Goal Packages
 
-- `docs/codex_goal_callable_semantics/`
-  - Current callable domain model, runtime evidence, migration boundary, and final acceptance.
-  - Prefer `DESIGN.md`, `DOMAIN_MODEL.md`, `EXECUTION_BOUNDARIES.md`, and `QUALITY_REPORT.md`.
-  - Some files in this package preserve the goal-run acceptance wording. Check `STATUS.md` before
-    treating old compatibility or manifest-file names as current runtime facts.
+These describe work reflected in the current architecture:
 
-- `docs/codex_goal_visual_workbench_ux_refactor/`
-  - Current Workbench UX, task persistence, resource/class vs node/instance boundary, and browser
-    evidence.
-  - Prefer `SPEC.md`, `DESIGN.md`, `ACCEPTANCE.md`, and `QUALITY_REPORT.md`.
+- `docs/codex_goal_callable_semantics/`: callable domain model, runtime evidence, migration boundary.
+  Prefer `DESIGN.md`, `DOMAIN_MODEL.md`, `EXECUTION_BOUNDARIES.md`.
+- `docs/codex_goal_visual_workbench_ux_refactor/`: Workbench UX, task persistence, resource/class
+  vs node/instance boundary. Prefer `SPEC.md`, `DESIGN.md`.
 
-## Human-Readable Explanations
+## Strategic Planning
 
-- `docs/human/ACC_CALLABLE_SEMANTICS_PLAIN_LANGUAGE.md` explains the callable model in plain
-  language.
-- `docs/human/ACC_WORKFLOW_ORCHESTRATION_COMPARISON.md` compares ACC with Multica, Paperclip,
-  LangGraph, Dify, Conductor, and related systems. It is explanatory; architecture facts still defer
-  to `docs/CURRENT_ARCHITECTURE.md`.
-- Other `docs/human/*_PLAIN_LANGUAGE.md` files may describe historical design phases using terms
-  such as `Capsule`, `WorkflowTemplate`, `NodeSpec`, or `EnvironmentFrame`. They remain useful for
-  rationale, but current product terminology is Core v2 callable-only unless the file states
-  otherwise.
+- `docs/codex_goals_next_stage/`: next-phase goal definitions.
+- `docs/requirements/`: supervisor and platform evolution phases.
+- `docs/workbench_authoring_agent/`: authoring agent roadmap (Phase 1-4).
 
-## Historical Goal Packages
+## Reference Material
 
-The other `docs/codex_goal*` directories are historical implementation packages. They remain useful
-for rationale, migrations, and old acceptance evidence, but their phase-specific non-goals do not
-override the current contract in `AGENTS.md` and `docs/CURRENT_ARCHITECTURE.md`.
+- `docs/human/`: plain-language explanations of callable semantics, workflow orchestration comparison.
+- `docs/research/`: agent orchestration comparison research.
+- `docs/concepts/`: architectural first principles.
+- `docs/Design/`: strategic design directions (runtime control ledger, dispatch, lifecycle, etc.).
+- `docs/problem/`: pre-refactoring architectural debt inventory. Many items resolved by 2026-06
+  refactoring — see `docs/refactoring-plan/` for completion status.
 
-Examples:
+## Historical Archive
 
-- Early docs that say "do not build visual UI" are historical. The Workbench now exists and is in
-  scope.
-- Early docs that describe only old capsule/session runtime are historical shorthand. The current
-  model is Core v2 callable-only; legacy concepts are accepted only as migration input or explicit
-  rejection evidence.
-- Old progress or findings files may describe failures that were later fixed. Check the relevant
-  `QUALITY_REPORT.md` before treating a finding as current.
-- `FINDINGS.md` files are usually baseline or audit snapshots. They are evidence of what was found
-  at that time, not proof that the issue still exists.
-- `PROGRESS.md` files are chronological logs. They may contain intermediate blockers that were later
-  resolved.
-- `GOAL_COMMAND.txt` and `USAGE_WITH_GOAL.md` are instructions for a historical goal run. They are
-  not current repository rules unless the active task explicitly names that goal package.
+`docs/historical/` contains archived material that is no longer current:
 
-## Current Workbench Runtime Facts
+- `codex_goals_completed/`: 10 completed goal packages (codex_goal, clean_core_refactor,
+  editable_workbench, environment_kernel, graph_workbench, ideal_layering, quality_audit,
+  workbench, workflow_kernel, workflow_message_routing).
+- `refactor_core_v2_phase0/`: pre-refactoring specs superseded by `docs/refactoring-plan/`.
+- `CONTROL_ARCHITECTURE_GAP_REVIEW.md`: pre-refactoring gap analysis (stale line numbers).
+- `ACC_WORKBENCH_PRODUCT_UI_ARCHITECTURE_BRANDKIT.md`: pre-refactoring UI architecture (stale refs).
+- `dev_v1_architecture_robustness_findings.md`: v1 baseline findings.
+- Legacy capsules, schemas, workflows, test fixtures, examples.
 
-The Workbench is no longer read-only.
+Historical docs remain useful for rationale and migration context, but their phase-specific
+constraints do not override `AGENTS.md` or `CURRENT_ARCHITECTURE.md`.
 
-- It edits task canvases and saves Core v2 workflow templates through server APIs.
-- It submits async runs through `POST /api/workflows/run-graph/submit`.
-- It observes runs through `GET /api/runs/{run_id}` and `GET /api/runs/{run_id}/events`.
-- It can cancel queued/running runs through `POST /api/runs/{run_id}/cancel`.
-- UI task state is a browser-local projection; run directories remain runtime evidence truth.
+## Workbench Runtime Facts
 
-## How To Update Docs
-
-Use these rules when changing documentation:
-
-1. Keep `AGENTS.md` short and normative. It should say what must be true now.
-2. Keep `docs/CURRENT_ARCHITECTURE.md` explanatory. It should explain why the current architecture is
-   shaped this way.
-3. Do not delete historical goal packages just because they are old; tests, migration notes, and
-   acceptance history may still reference them.
-4. When a historical doc conflicts with current implementation, either mark the conflict locally or
-   point readers to the current entry points.
-5. Do not claim acceptance or test results in docs unless the command was actually run.
-6. Fix mojibake or unreadable text in active docs and example READMEs when found.
-7. Prefer a small status note over rewriting an entire historical goal package.
+- Edits task canvases and saves Core v2 workflow templates through server APIs.
+- Submits async runs: `POST /api/workflows/run-graph/submit`.
+- Observes runs: `GET /api/runs/{run_id}`, `GET /api/runs/{run_id}/events`.
+- Cancels runs: `POST /api/runs/{run_id}/cancel`.
+- UI task state is a browser-local projection; run directories are evidence truth.

@@ -2,13 +2,8 @@
 
 ## Current Project Contract
 
-Agent Callable Conductor (`acc`) is a local-first workflow runtime and Workbench for wrapping mature
+Agent Capsule Conductor (`acc`) is a local-first workflow runtime and Workbench for wrapping mature
 external agents or local tools as reusable callable assets.
-
-Current cleanup work is problem-led, not phase-led. `docs/problem/*.md` contains the active
-architecture debt inventory. `docs/goal.md` defines the execution contract for closing that
-inventory. Older phase documents remain useful evidence, but they do not outrank this file,
-`docs/CURRENT_ARCHITECTURE.md`, or the verified problem list.
 
 Current architecture is Core v2 callable-only:
 
@@ -22,280 +17,161 @@ Current architecture is Core v2 callable-only:
 - `ArtifactBundle`: stable files produced by a session, node, or workflow invocation.
 - `GraphOps Control Plane`: proposal, validation, dry-run, human approval, then apply.
 
-Legacy runtime architecture is not an active product architecture:
+## Module Layout (post-refactoring 2026-06)
 
-- `AgentClassTemplate`, `ToolClassTemplate`, `WorkflowFunctionTemplate`, `NodeInvocationSpec`, and
-  `SessionInstance` are the active concepts.
-- Legacy `CapsuleSpec`, `CapsuleRegistry`, `CapsuleRunner`, `WorkflowTemplate`, `NodeSpec`,
-  `.graph.json`, old workflow graph schemas, and capsule YAML executable assets must not be used by
-  product runtime paths.
-- Legacy inputs may appear only as raw migration input, explicit rejection tests, or historical
-  archived evidence. Do not reintroduce a compatibility registry, old runner, old graph runtime, or
-  hidden fallback execution path.
+```text
+acc/
+  models.py            — frozen dataclass definitions (62 domain types)
+  serialization.py     — to_dict / from_dict functions
+  validation.py        — validate_core_v2_* functions
+  state_machine.py     — pure transition tables & helpers (PlanStep/Dispatch/Run)
+  ledger_writer.py     — FixedRunControlLedgerWriter (sole mutable writer)
+  graphops.py          — unified GraphOpsService with typed operation handlers
+  utils.py             — consolidated shared utilities
+  constants.py         — shared constants (no cross-module duplication)
+  engine/              — pure scheduling, normalization, dependency analysis
+  runtime/             — transfer policy, node payload, IO helpers
+  app/
+    runtime/           — orchestrator, scheduler, executor, dispatch_gate, workflow_io
+    agent_sessions.py  — session lifecycle + indexed lookup
+    authoring.py       — authoring session service
+    run_lifecycle.py   — run creation and lifecycle
+    handoff.py         — handoff execution
+    supervisor.py      — supervisor plan execution
+    decisions.py       — human gate and decision handling
+  server/              — FastAPI routes
+  cli.py               — CLI entry point
+  mcp_server/          — MCP tool server
 
-If product code cannot express a needed behavior with the current Core v2 objects, extend the
-canonical model and validation explicitly. Do not smuggle semantics through `raw`,
-`metadata.legacy_*`, compatibility registries, or hidden normalization branches.
+web/
+  src/
+    stores/            — Zustand (workbenchStore, runStore, assistantStore)
+    components/
+      WorkflowViewer.tsx  — thin shell importing sub-modules
+      canvas/          — ReactFlow canvas, node types, layout constants
+      authoring/       — AI authoring session, proposal review
+      assistant/       — chat drawer, turn list
+      execution/       — run dock, overlay
+      inspector/       — node detail, selection panels
+      workbench/       — shell layout, top bar, task rail, workspace switcher
+    hooks/             — useAssistantStream, useRunStream (SSE)
+    i18n/              — zh-CN.ts (UI language: Chinese)
+```
 
 ## Workflow Format
 
 - **Canonical on-disk template**: `workflows/<id>.accflow.json` (Workbench/API save default).
-- **Legacy import-only**: `*.graph.json` — convert with `acc workflow import-graph <path.graph.json>`.
-- **CLI discovery**: `acc workflows list/show` must not list `.graph.json` files as runnable
-  workflows.
-- **Runtime path**: canonical `.accflow.json` parses directly to `WorkflowFunctionTemplate`, compiles
-  to `ExecutionPlan`, and executes `CallableRef` as `SessionInstance` evidence. There is no
-  opt-in legacy or compatibility hot path.
-- **Active examples**: active `examples/` and `workflows/` assets must be canonical Core v2 assets.
-  Legacy runnable examples belong under `tests/fixtures/legacy/`, migration tests, or historical
-  docs only.
-
-## Disposable Local Assets
-
-The user has explicitly confirmed that the current workflow canvases, Workbench nodes, and
-agent/tool template assets created only for functional testing are disposable. They may be deleted
-or regenerated in cleanup work when doing so simplifies the architecture and no production contract
-depends on preserving those concrete assets.
-
-This authorization applies to temporary product-surface assets such as ad hoc
-`workflows/*.accflow.json` files and testing-only agent/tool templates after their role has been
-verified. It does not automatically apply to schemas, migration fixtures, explicit rejection tests,
-historical evidence under `docs/historical/`, or checked-in examples that are still referenced by
-tests, docs, CLI behavior, or server/API discovery contracts.
-
-Deletion still requires a current `git status --short`, code/search evidence for each asset class,
-focused tests for any changed discovery/runtime behavior, and an update to
-`docs/problem/RESOLUTION_MATRIX.md` when the deletion closes a problem finding.
-
-## Problem Repair Contract
-
-When working on the current architecture cleanup, use `docs/problem/RESOLUTION_MATRIX.md` as the
-required ledger. Every valid finding under `docs/problem/*.md` must end in exactly one of these
-states:
-
-- `fixed`: repaired with changed files and verification command recorded.
-- `stale`: current code no longer has the issue, with file/line evidence.
-- `deferred-with-reason`: real issue, but it needs ADR, profiling, contract change, or a separate
-  risk-bounded batch.
-- `blocked-with-evidence`: real issue, but progress is blocked; record the exact command/action,
-  error evidence, and missing condition.
-
-Repair order should follow the problem inventory's risk model:
-
-1. Dead code and patch scars that are locally provable.
-2. Legacy and compatibility boundary cleanup.
-3. Duplicate implementations and single-source-of-truth cleanup.
-4. Layering violations.
-5. Workbench/API run-model cleanup.
-6. Performance issues with evidence.
-7. Complexity hotspots and policy consolidation.
-
-Do not mix unrelated categories in one broad cleanup. For each batch, verify the current code facts
-first, make the smallest architecture-consistent change, run focused tests, then update the ledger.
-
-### Deletion Rules
-
-For active product paths, replace product callers and add Core v2 or rejection tests before deleting
-old code.
-
-For zero-import tombstones, deletion may happen first after full-repo `rg` confirms no product
-caller. Confirm whether any remaining test reference is historical evidence, an explicit rejection
-test, or a misleading dependency that should be removed.
-
-Allowed legacy hits are limited to:
-
-- `acc.migration.*` raw parser or migration provenance.
-- `tests/migration/*`.
-- Explicit rejection tests.
-- `tests/fixtures/legacy/*`.
-- Historical docs or archived fixtures.
-
-These locations must not participate in default discovery, default execution, Workbench lists,
-server lists, or active examples.
+- **Legacy import-only**: `*.graph.json` — convert with `acc workflow import-graph <path>`.
+- **Runtime path**: canonical `.accflow.json` parses to `WorkflowFunctionTemplate`, compiles to
+  `ExecutionPlan`, executes `CallableRef` as `SessionInstance` evidence.
 
 ## Stable Invariants
 
 These rules outrank older phase docs when there is a conflict.
 
-1. Preserve public CLI behavior that matters.
-   - `acc run ... --emit-conductor-json` stdout must contain exactly one JSON object.
-   - `acc workflow run ... --emit-json` stdout must contain exactly one JSON object.
-   - Logs go to stderr or files, not stdout, when a machine-readable JSON flag is used.
+1. **CLI machine-readable output**: `acc run ... --emit-conductor-json` / `--emit-json` stdout
+   contains exactly one JSON object. Logs go to stderr.
 
-2. Default tests must stay hermetic.
-   - No default test may require real Codex, Claude, Cursor, Gemini, Hermes, Conductor, network,
-     browser credentials, cloud services, or paid external services.
-   - Real external-agent/browser/network smoke tests must be opt-in.
+2. **Hermetic tests**: No default test may require real Codex, Claude, Cursor, Gemini, Hermes,
+   network, or paid services. External smoke tests are opt-in only.
 
-3. Do not implement a custom LLM reasoning or tool-calling loop.
-   - External mature agents own their internal loop.
-   - `acc` owns execution boundaries, manifests, inputs, outputs, and artifacts.
+3. **No custom LLM loop**: External agents own their internal reasoning. ACC owns execution
+   boundaries, manifests, inputs, outputs, and artifacts.
 
-4. Keep ACC lightweight and local-first.
-   - Do not add a database, cloud backend, Kubernetes, distributed worker system, marketplace, SaaS
-     surface, or team permission system unless a new explicit goal requires it.
+4. **Local-first**: No database, cloud backend, Kubernetes, or SaaS surface unless a new
+   explicit goal requires it.
 
-5. Keep template state separate from runtime state.
-   - Templates must not store run directories, local absolute workspace bindings, previous outputs,
-     session ids, or agent conversation memory.
-   - Runtime state belongs in run-scoped manifests, events, inboxes, outboxes, artifacts, and UI/API
-     projections.
+5. **Template ≠ runtime state**: Templates must not store run dirs, workspace bindings, session
+   ids, or conversation memory. Runtime state lives in run-scoped evidence.
 
-6. Keep data movement explicit.
-   - Upstream nodes must not write directly into downstream workspaces or inboxes.
-   - Use ports, inbox/outbox materialization, artifact references, and workflow-call bindings.
+6. **Explicit data movement**: No direct upstream→downstream workspace writes. Use ports,
+   inbox/outbox materialization, artifact references, and workflow-call bindings.
 
-7. Keep GraphOps human-governed.
-   - LLM-generated callable/workflow changes must default to proposal mode.
-   - Destructive or persistent apply requires validation, dry-run evidence, and explicit human
-     approval.
+7. **Human-governed GraphOps**: LLM-generated changes default to proposal mode. Destructive
+   apply requires validation + dry-run + human approval.
 
-8. Keep layer boundaries clear.
-   - `acc.domain` and `acc.engine` must remain pure: no filesystem IO, subprocesses, server/UI
-     imports, or host environment reads.
-   - `acc.store` owns filesystem manifests, inbox/outbox materialization, and path protection.
-   - `acc.runtime` owns process/workspace execution policy.
-   - `acc.app` coordinates use cases across engine/store/runtime.
-   - `acc.server` is a thin API layer: request parsing, service call, response shaping, and HTTP
-     error translation only.
-   - `web/` owns interaction state and visual projection, not runtime truth.
+8. **Layer boundaries**:
+   - `acc.models`, `acc.engine`, `acc.state_machine`: pure — no IO, no subprocesses.
+   - `acc.store`: filesystem manifests, path protection.
+   - `acc.runtime`, `acc.app.runtime`: process/workspace execution.
+   - `acc.app`: use-case coordination.
+   - `acc.server`: thin API layer.
+   - `web/`: interaction state and visual projection only.
 
-9. Keep runtime evidence auditable.
-   - `RunRecord`, `run_summary.json`, events, indexes, and UI projections must have explicit,
-     non-overlapping responsibilities.
-   - Runtime status should use canonical names such as `success`, `failed`, `cancelled`, and
-     `crashed`; do not write `succeeded` and normalize it on read as a permanent compatibility scar.
-   - `events.jsonl` must have one canonical event schema per evidence stream. Multiple writers may
-     exist only if they write that same schema.
+9. **Auditable evidence**: RunRecord, events.jsonl, and UI projections have non-overlapping
+   responsibilities. Status uses canonical names (`success`, `failed`, `cancelled`, `crashed`).
 
-10. Keep foundation helpers centralized.
-    - Do not add new ad hoc `write_json`, `copy_path`, JSON Schema validation, path-safety, or
-      event-writing helpers when an existing store/runtime primitive can be extended.
-    - If helper behavior differs by layer, document the boundary instead of copy-pasting a variant.
+10. **Centralized helpers**: No ad hoc `write_json`, `copy_path`, or JSON Schema validation
+    duplicates. Extend `acc/utils.py` or `acc/store` instead of copy-pasting.
 
-## Current Workbench Rules
+## Workbench Rules
 
-The visual Workbench exists and is in scope. Older docs that say "do not build UI" or "do not build
-visual canvas" are historical phase constraints, not current rules.
-
-Workbench must follow these boundaries:
-
-- Chinese is the default language for core user-visible labels.
+- Chinese is the default language for user-visible labels.
 - The graph canvas is the primary workflow editing surface.
-- UI task state is a user interaction projection; workflow templates and run artifacts remain the
-  durable runtime truth.
-- System prompts belong to reusable Agent/Tool class resources. Task canvas nodes are invocation
-  instances and may configure only invocation-scoped data such as user prompt, static input, and
-  bindings.
-- Node inspectors should show useful invocation config plus real input/output/artifact evidence from
-  the selected run.
-- Multiple Workbench runs may be submitted concurrently through run-scoped state. Do not reintroduce
-  one global UI run singleton.
+- UI task state is a projection; workflow templates and run artifacts are durable truth.
+- System prompts belong to Agent/Tool class resources. Task nodes configure invocation-scoped
+  data only (user prompt, static input, bindings).
+- Multiple concurrent runs are modeled by `run_id` + `task_id`. No global `isRunning` singleton.
 
 ## Workbench Async Run Model
 
-Workbench async runs use a lightweight server-scoped `WorkbenchRunManager`.
-
-- `/api/workflows/run-graph` remains the synchronous compatibility endpoint.
 - `/api/workflows/run-graph/submit` is the async Workbench submit path.
-- Run directories, summaries, events, and artifacts are the source of truth.
-- In-memory active-task maps are execution handles only; they must not be treated as durable facts.
-- Queued/running/terminal state must be scoped by `run_id` and associated with a `task_id` in UI
-  projections.
-- Do not delete or change `/api/workflows/run-graph` unless this file, `docs/CURRENT_ARCHITECTURE.md`,
-  server routes, web callers, and tests are updated in the same change. New Workbench behavior should
-  prefer async submit.
+- `/api/workflows/run-graph` remains for synchronous compatibility.
+- In-memory active-task maps are execution handles only, not durable facts.
 
 ## Documentation Source of Truth
 
-Read only the docs needed for the task. Do not blindly load every historical goal package.
+Start here:
 
-Start here for architecture or documentation work:
+- `AGENTS.md` (this file) — project contract and module layout
+- `docs/CURRENT_ARCHITECTURE.md` — data flow, callable concepts, evidence files
+- `docs/concepts/` — first principles, capsule/template/session, GraphOps control plane
 
-- `README.md`
-- `docs/README.md`
-- `docs/CURRENT_ARCHITECTURE.md`
-- `docs/concepts/FIRST_PRINCIPLES_ANALYSIS.md`
-- `docs/concepts/CAPSULE_TEMPLATE_SESSION.md`
-- `docs/concepts/GRAPHOPS_CONTROL_PLANE.md`
+For refactoring history and completion status:
 
-For the current architecture-debt cleanup, also read:
+- `docs/refactoring-plan/` — 7 feature plans + master plan (executed 2026-06)
+- `docs/ACC_Architecture_Audit_2026.md` — full audit with verification results
 
-- `docs/goal.md`
-- `docs/problem/README.md`
-- `docs/problem/RESOLUTION_MATRIX.md`
-- The specific `docs/problem/*.md` files relevant to the category being fixed.
-
-For callable runtime changes, also read:
+For callable runtime semantics:
 
 - `docs/codex_goal_callable_semantics/DESIGN.md`
 - `docs/codex_goal_callable_semantics/DOMAIN_MODEL.md`
-- `docs/codex_goal_callable_semantics/EXECUTION_BOUNDARIES.md`
-- `docs/codex_goal_callable_semantics/QUALITY_REPORT.md`
 
-For Workbench UI changes, also read:
+For Workbench UX:
 
 - `docs/codex_goal_visual_workbench_ux_refactor/DESIGN.md`
-- `docs/codex_goal_visual_workbench_ux_refactor/SPEC.md`
-- `docs/codex_goal_visual_workbench_ux_refactor/QUALITY_REPORT.md`
 
-Older `docs/codex_goal*` directories are historical goal packages unless a current task explicitly
-names one. They are useful for rationale and acceptance history, but their non-goals do not override
-the current architecture contract above.
+For strategic planning:
 
-Within historical goal packages, `FINDINGS.md` and `PROGRESS.md` are usually time-stamped evidence
-logs. Prefer the package's `QUALITY_REPORT.md` for final state when it exists.
+- `docs/requirements/` — supervisor and platform evolution phases
+- `docs/codex_goals_next_stage/` — next-stage goal definitions
+
+Historical goal packages and legacy material are in `docs/historical/`.
 
 ## Before Changing Files
 
-1. Inspect the current implementation first. Prefer `rg` / `rg --files` for search.
-2. Check `git status --short` and avoid overwriting unrelated user changes.
-3. Treat untracked generated artifacts cautiously. Files such as `progress.jsonl`,
-   `web/test-results/`, `tests/e2e/` artifacts, and timestamped Workbench `workflows/*.accflow.json`
-   may be user or test output. Do not promote them to active examples without confirming their role.
-   If the current goal invokes the disposable local asset authorization above, workflow/template
-   artifacts that are verified as test-only may be deleted, but the deletion scope must be explicit
-   and recorded.
-4. Identify the smallest architecture-consistent change. Do not stack patches on a wrong model.
-5. If the work targets `docs/problem`, update `docs/problem/RESOLUTION_MATRIX.md` as part of the
-   same batch.
-6. If a doc says one thing and the code proves another, update the doc or report the discrepancy.
+1. Inspect current implementation first. Use `rg` / `rg --files` for search.
+2. Check `git status --short` and avoid overwriting unrelated changes.
+3. Identify the smallest architecture-consistent change.
+4. If a doc says one thing and code proves another, update the doc.
 
-## Verification Expectations
-
-Run the smallest meaningful test set after each meaningful change.
-
-Default full regression commands:
+## Verification
 
 ```bash
+# Backend
+python -m pytest -q --ignore=tests/integration --ignore=tests/server
+# or with all deps:
 uv run pytest -q
-uv run ruff check .
-```
 
-When changing server/API/workflow behavior, include focused backend tests under `tests/server`,
-`tests/unit`, or `tests/integration`.
-
-When changing CLI behavior, run existing focused CLI/integration tests. If `tests/cli/` does not
-exist, do not treat the missing directory as a failure; use existing integration tests or add a
-minimal focused test for the changed behavior.
-
-When changing the Workbench, include:
-
-```bash
+# Frontend
 cd web
+npx tsc --noEmit
 npm run test -- --run
 npm run build
 ```
 
-When changing browser-facing behavior, run a browser journey when feasible and record screenshots,
-console errors, network errors, and the report path. If browser tooling is unavailable, state that
-gap and keep hermetic tests passing.
+## Disposable Local Assets
 
-## Reporting Blockers
-
-If blocked, do not guess. Report:
-
-- what failed,
-- the exact command or action,
-- evidence collected,
-- which external dependency or missing information is required.
+Temporary workflow canvases, Workbench nodes, and agent/tool templates created for testing are
+disposable. They may be deleted when doing so simplifies the architecture and no production
+contract depends on them. Historical evidence belongs under `docs/historical/`.

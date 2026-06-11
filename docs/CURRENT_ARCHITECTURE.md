@@ -44,8 +44,20 @@ nodes do not mutate downstream workspaces directly.
 ## Runtime Boundaries
 
 ```text
-acc.domain
-  pure types and domain records
+acc.models
+  pure frozen dataclass definitions grouped by domain concept
+
+acc.serialization
+  to_dict / from_dict conversion functions for all domain models
+
+acc.validation
+  validate_core_v2_* validation functions
+
+acc.state_machine
+  pure transition tables and helpers for PlanStep / Dispatch / Run status
+
+acc.ledger_writer
+  FixedRunControlLedgerWriter — the sole mutable writer for run state
 
 acc.engine
   pure validation, normalization, dependency analysis, scheduling shape
@@ -54,20 +66,49 @@ acc.store
   filesystem manifests, run directories, inbox/outbox, artifacts, path protection
 
 acc.runtime
-  process/workspace execution policy
+  transfer policy, node payload resolution, IO helpers
+
+acc.app.runtime
+  orchestrator, scheduler, executor, dispatch_gate, nested_workflow, workflow_io
 
 acc.app
   use-case coordination across engine/store/runtime
 
+acc.graphops
+  unified GraphOpsService with typed operation handler registry
+
 acc.server
   FastAPI routes over app/store/runtime services
 
-web/
-  Workbench UI state, graph projection, inspector views, browser-local task persistence
+acc.utils / acc.constants
+  consolidated shared utilities and constants (no duplication across modules)
+
+web/src/stores/
+  Zustand stores: workbenchStore, runStore, assistantStore
+
+web/src/components/
+  canvas/        — ReactFlow canvas rendering and node types
+  authoring/     — AI assistant authoring session and proposal review
+  assistant/     — assistant chat drawer and turn list
+  execution/     — run dock and overlay
+  inspector/     — node detail and selection panels
+  workbench/     — shell layout, top bar, task rail, workspace switcher
+
+web/src/hooks/
+  useAssistantStream, useRunStream — SSE streaming hooks
 ```
 
 `acc.engine` must not perform filesystem IO, spawn processes, import server/UI modules, or inspect
 the host environment. `web/` must not become runtime truth.
+
+### Module Migration Notes (2026-06)
+
+The following modules have been removed:
+- `acc/domain.py` → split into `acc/models.py`, `acc/serialization.py`, `acc/validation.py`
+- `acc/app/graphops_v3.py` → unified into `acc/graphops.py`
+- `acc/app/core_v2_runtime.py` → 97-line thin shim; logic moved to `acc/app/runtime/` package
+- `acc/binding/`, `acc/ports/`, `acc/migration/` → deleted (dead code)
+- `acc/adapters/claude_sdk.py` → deleted (always-failing adapter)
 
 ## Callable Concepts
 
