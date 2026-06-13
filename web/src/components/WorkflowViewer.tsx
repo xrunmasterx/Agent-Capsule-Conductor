@@ -51,6 +51,7 @@ import {
   type Dispatch,
   type DragEvent,
   type FormEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
@@ -92,6 +93,11 @@ import type {
   WorkflowSummary,
 } from '../types';
 import { CodeBlock } from './CodeBlock';
+import {
+  buildAccTranscript,
+  type AccTranscriptEntry,
+  type LiveOutputFilter,
+} from '../lib/runTranscript';
 import {
   outputSchemaFromArtifactContract,
   paletteItemFromCallable,
@@ -165,7 +171,10 @@ type CodexExecutionMode = 'default' | 'local_readonly_no_sandbox' | 'danger_full
 type EmptyInputPolicy = 'allow' | 'block';
 const CONTROL_SLOT_LIMIT = 10;
 const DEFAULT_WORKFLOW_MAX_CONCURRENCY = 8;
-// STOCK_*_AGENT_ID demo constants removed — string literals inlined in workspaceDemoCanvas().
+const DEMO_ANALYST_AGENT_ID = 'stock-research-analyst.codex';
+const DEMO_SYNTHESIS_AGENT_ID = 'stock-research-synthesis.codex';
+const DEMO_REPORT_AGENT_ID = 'stock-report-writer.codex';
+const DEMO_REVIEW_AGENT_ID = 'stock-publication-reviewer.codex';
 
 type InternalNodeView = {
   id: string;
@@ -636,6 +645,44 @@ type AssistantChatMessage = {
   id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
+  turnId?: string;
+  createdAt?: string;
+};
+
+type AssistantProcessEvent = {
+  id: string;
+  label: string;
+  detail?: string;
+  createdAt?: string;
+};
+
+type AssistantTranscriptItem =
+  | { kind: 'user_message'; id: string; content: string; turnId?: string; createdAt?: string }
+  | { kind: 'assistant_message'; id: string; content: string; turnId?: string; createdAt?: string }
+  | { kind: 'assistant_stream'; id: string; turnId: string; content: string; status: string }
+  | { kind: 'status'; id: string; label: string; detail?: string; createdAt?: string }
+  | { kind: 'tool_event'; id: string; label: string; detail?: string; createdAt?: string }
+  | {
+      kind: 'process_group';
+      id: string;
+      turnId: string;
+      label: string;
+      events: AssistantProcessEvent[];
+      createdAt?: string;
+      defaultOpen?: boolean;
+    }
+  | { kind: 'proposal'; id: string; proposalId?: string; status: 'draft' | 'valid' | 'invalid' }
+  | { kind: 'graphops_review'; id: string; status: 'ready' | 'blocked' }
+  | { kind: 'result_block'; id: string; createdAt?: string }
+  | { kind: 'error'; id: string; content: string; detail?: string; createdAt?: string };
+
+type AssistantDisplayStatus = {
+  label: string;
+  tone: string;
+  connecting: boolean;
+  runningTurn: boolean;
+  lastFailed: boolean;
+  submissionBlocked: boolean;
 };
 
 type AssistantGraphOpsReview = {
@@ -805,7 +852,7 @@ type CanvasPointerEvent =
   | ReactMouseEvent<Element>
   | ReactTouchEvent<Element>;
 const MAX_LOG_PREVIEW_LINES = 180;
-const TASK_STORE_KEY = 'acc.workbench.tasks.v1';
+const TASK_STORE_KEY = 'acc.workbench.tasks.v2';
 const DEFAULT_TASK_ID = 'task_canvas_default';
 const TEMPORARY_CALLABLE_ID_PREFIX = 'tmp_agent_';
 
@@ -2267,9 +2314,10 @@ export function WorkflowViewer({
     taskId: initialTask.canvas.id,
   });
   const [connectionMode, setConnectionMode] = useState<ConnectionMode>('control');
-  const [message, setMessage] = useState('已加载持久任务');
+  const [message, setMessage] = useState('已加载工作台');
   const [runsById, setRunsById] = useState<Record<string, RunProjection>>({});
   const [runLogsById, setRunLogsById] = useState<Record<string, Record<string, NodeLiveLogs>>>({});
+  const [runLiveEventsById, setRunLiveEventsById] = useState<Record<string, WorkbenchLiveEvent[]>>({});
   const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfig | null>(null);
   const [openedExternalWorkflow, setOpenedExternalWorkflow] = useState(false);
   const [focusedWorkflowId, setFocusedWorkflowId] = useState<string | null>(null);
@@ -2485,6 +2533,13 @@ export function WorkflowViewer({
     });
   }, []);
 
+  const appendRunLiveEvent = useCallback((runId: string, event: WorkbenchLiveEvent) => {
+    setRunLiveEventsById((current) => ({
+      ...current,
+      [runId]: boundedLiveEvents(current[runId] || [], [event]),
+    }));
+  }, []);
+
   useEffect(() => {
     let ignore = false;
     api
@@ -2538,7 +2593,11 @@ export function WorkflowViewer({
       setAssistantEvents((current) => mergeAgentEvents(current, eventPayload.events || []));
       const draftTurnId =
         typeof session.current_output_turn_id === 'string' ? session.current_output_turn_id : '';
-      const hasDraft = Boolean(draftTurnId);
+      const pendingTurnReason = assistantPendingTurn.reason || 'workbench_chat';
+      const hasDraft =
+        pendingTurnReason !== 'workbench_chat' &&
+        Boolean(draftTurnId) &&
+        draftTurnId === assistantPendingTurn.turn_id;
       if (hasDraft) {
         try {
           const draft = await api.validateAssistantDraft(session.session_id, draftTurnId);
@@ -2688,8 +2747,17 @@ export function WorkflowViewer({
         // Durable node event reads refresh the timeline if a live frame is malformed.
       }
     };
+    const onLiveEvent = (event: MessageEvent<string>) => {
+      try {
+        const payload = JSON.parse(event.data) as WorkbenchLiveEvent;
+        appendRunLiveEvent(selectedRunId, payload);
+      } catch {
+        // Live output is best-effort; run evidence and polling remain the durable fallback.
+      }
+    };
     source.addEventListener('node_log_delta', onLogDelta as EventListener);
     source.addEventListener('agent_event', onAgentEvent as EventListener);
+    source.addEventListener('live_event', onLiveEvent as EventListener);
     source.addEventListener('summary', onSummary as EventListener);
     source.onerror = () => {
       source.close();
@@ -2697,7 +2765,7 @@ export function WorkflowViewer({
     return () => {
       source.close();
     };
-  }, [appendNodeLogDelta, appendRunAgentEvent, selectedRunId, updateRunProjection]);
+  }, [appendNodeLogDelta, appendRunAgentEvent, appendRunLiveEvent, selectedRunId, updateRunProjection]);
 
   useEffect(() => {
     saveTaskStore({ version: 1, activeTaskId, tasks });
@@ -2928,6 +2996,7 @@ export function WorkflowViewer({
       ? selectedWorkflow?.internalNodes.find((node) => node.id === selection.nodeId)
       : undefined;
   const selectedLiveLogs = selectedRunId ? runLogsById[selectedRunId] || {} : {};
+  const selectedRunLiveEvents = selectedRunId ? runLiveEventsById[selectedRunId] || [] : [];
   const selectedNodeRunLookup = useMemo<NodeRunLookupContext>(
     () => ({
       scope: selectedRunProjection?.scope,
@@ -3015,20 +3084,10 @@ export function WorkflowViewer({
         : null,
     [selectedAgentNodeRun, selectedRunId],
   );
-  const selectedAgentLiveScope = useMemo<WorkbenchLiveStreamScope | null>(
-    () =>
-      selectedAgentSessionContext
-        ? {
-            kind: 'run',
-            runId: selectedAgentSessionContext.runId,
-            nodeId: selectedAgentSessionContext.nodeId,
-            uiNodeId: selectedAgentSessionContext.uiNodeId,
-            nodeRunDir: selectedAgentSessionContext.nodeRunDir,
-          }
-        : null,
-    [selectedAgentSessionContext],
+  const selectedAgentLiveState = useMemo(
+    () => liveStateForNodeRun(selectedRunLiveEvents, selectedAgentNodeRun),
+    [selectedAgentNodeRun, selectedRunLiveEvents],
   );
-  const selectedAgentLiveState = useWorkbenchLiveStream(selectedAgentLiveScope);
   const selectedAgentTurnLiveScope = useMemo<WorkbenchLiveStreamScope | null>(
     () =>
       agentSessionState.session && agentSessionState.pendingTurn
@@ -3283,7 +3342,7 @@ export function WorkflowViewer({
     resetCanvas(nextCanvas);
     setSelection({ type: 'task_canvas', taskId: nextCanvas.id });
     setOpenedExternalWorkflow(false);
-    setMessage('已重置为股市调研控制流示例');
+    setMessage('已加载 Core v2 股市调研示例');
   }
 
   function openWorkflow(workflowId: string) {
@@ -4114,10 +4173,7 @@ export function WorkflowViewer({
         { id: authoringId('assistant_msg'), role: 'system', content: text },
       ]);
       setMessage(text);
-    } finally {
-      if (!assistantPendingTurn) {
-        setAssistantBusy(false);
-      }
+      setAssistantBusy(false);
     }
   }
 
@@ -4408,7 +4464,7 @@ export function WorkflowViewer({
     <WorkbenchShell>
       <TopBar
         title={canvas.name}
-        subtitle="Workflow Template / EnvironmentFrame / Port / Artifact 统一视图"
+        subtitle="WorkflowFunctionTemplate / ScopeFrame / SessionInstance / ArtifactBundle 统一视图"
         isRunning={isRunning}
         onNew={newTask}
         onLoadDemo={createDemo}
@@ -4615,6 +4671,7 @@ export function WorkflowViewer({
             agentSession={assistantAgentSession}
             sessionStatus={assistantSessionStatus}
             pendingTurn={assistantPendingTurn}
+            assistantEvents={assistantEvents}
             liveState={assistantLiveState}
             turnReason={assistantTurnReason}
             requiredActions={assistantRequiredActions}
@@ -5334,6 +5391,584 @@ function graphOpsStringList(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }
 
+function buildAssistantTranscriptItems({
+  messages,
+  pendingTurn,
+  assistantEvents,
+  liveState,
+  proposal,
+  validation,
+  graphOpsReview,
+  hasResultBlock = false,
+  currentOutputTurnId = null,
+}: {
+  messages: AssistantChatMessage[];
+  pendingTurn: AgentTurnRecord | null;
+  assistantEvents: RunEvent[];
+  liveState: WorkbenchLiveStreamState;
+  proposal: CanvasAuthoringProposal | null;
+  validation: CanvasAuthoringValidationResult | null;
+  graphOpsReview: AssistantGraphOpsReview | null;
+  hasResultBlock?: boolean;
+  currentOutputTurnId?: string | null;
+}): AssistantTranscriptItem[] {
+  const items: AssistantTranscriptItem[] = messages.map((message) => {
+    const content =
+      message.role === 'assistant' ? assistantMessageDisplayContent(message.content) : message.content;
+    if (message.role === 'user') {
+      return {
+        kind: 'user_message',
+        id: `message_${message.id}`,
+        content,
+        turnId: message.turnId,
+        createdAt: message.createdAt,
+      };
+    }
+    if (message.role === 'assistant') {
+      return {
+        kind: 'assistant_message',
+        id: `message_${message.id}`,
+        content,
+        turnId: message.turnId,
+        createdAt: message.createdAt,
+      };
+    }
+    return {
+      kind: 'error',
+      id: `message_${message.id}`,
+      content,
+      createdAt: message.createdAt,
+    };
+  });
+  const liveEvents = assistantTranscriptLiveEvents(assistantEvents, liveState.events);
+  const pendingTurnId = pendingTurn?.turn_id || '';
+  const assistantMessageTurnIds = new Set(
+    messages
+      .filter((message) => message.role === 'assistant' && message.turnId)
+      .map((message) => message.turnId as string),
+  );
+  const streamText = pendingTurnId ? assistantStreamTextForTurn(liveEvents, pendingTurnId) : '';
+  if (pendingTurn && streamText && !assistantMessageTurnIds.has(pendingTurn.turn_id)) {
+    items.push({
+      kind: 'assistant_stream',
+      id: `stream_${pendingTurn.turn_id}`,
+      turnId: pendingTurn.turn_id,
+      content: streamText,
+      status: pendingTurn.status || liveState.status || 'running',
+    });
+  }
+  const processEventsByTurn = new Map<string, AssistantProcessEvent[]>();
+  for (const event of liveEvents) {
+    if (event.type === 'agent_message_delta' || event.type === 'agent_message') {
+      continue;
+    }
+    const eventItem = assistantTranscriptItemFromLiveEvent(event);
+    if (eventItem) {
+      if (eventItem.kind === 'status' || eventItem.kind === 'tool_event') {
+        const groupKey = assistantProcessGroupKey(event);
+        const currentEvents = processEventsByTurn.get(groupKey) || [];
+        currentEvents.push({
+          id: eventItem.id,
+          label: eventItem.label,
+          detail: eventItem.detail,
+          createdAt: eventItem.createdAt,
+        });
+        processEventsByTurn.set(groupKey, currentEvents);
+      } else {
+        items.push(eventItem);
+      }
+    }
+  }
+  for (const [turnId, processEvents] of processEventsByTurn) {
+    items.push({
+      kind: 'process_group',
+      id: `process_${turnId}`,
+      turnId,
+      label: assistantProcessGroupLabel(processEvents, pendingTurnId === turnId),
+      events: processEvents,
+      createdAt: assistantProcessGroupTimestamp(processEvents),
+      defaultOpen: false,
+    });
+  }
+  if (!proposal && !graphOpsReview) {
+    for (const error of validation?.errors || []) {
+      items.push({ kind: 'error', id: `validation_error_${error}`, content: error });
+    }
+    for (const warning of validation?.warnings || []) {
+      items.push({ kind: 'status', id: `validation_warning_${warning}`, label: 'Validation warning', detail: warning });
+    }
+  }
+  if (hasResultBlock) {
+    items.push({
+      kind: 'result_block',
+      id: assistantResultBlockId({ proposal, graphOpsReview, currentOutputTurnId }),
+      createdAt: assistantResultBlockTimestamp(liveEvents, currentOutputTurnId),
+    });
+  }
+  return sortAssistantTranscriptItems(dedupeAssistantTranscriptItems(items));
+}
+
+function assistantStreamTextForTurn(events: WorkbenchLiveEvent[], turnId: string): string {
+  const turnMessageEvents = events.filter(
+    (event) =>
+      event.turn_id === turnId &&
+      (event.type === 'agent_message_delta' || event.type === 'agent_message'),
+  );
+  const completedMessages = turnMessageEvents
+    .filter((event) => event.type === 'agent_message')
+    .map(assistantLiveEventText)
+    .filter(Boolean)
+    .map(assistantMessageDisplayContent);
+  if (completedMessages.length > 0) {
+    return completedMessages.join('\n').trim();
+  }
+  return turnMessageEvents
+    .filter((event) => event.type === 'agent_message_delta')
+    .map(assistantLiveEventText)
+    .filter(Boolean)
+    .join('')
+    .trim();
+}
+
+function assistantTranscriptLiveEvents(
+  assistantEvents: RunEvent[],
+  liveEvents: WorkbenchLiveEvent[],
+): WorkbenchLiveEvent[] {
+  const refilled = assistantEvents.map((event, index) =>
+    liveEventFromAgentRunEvent(event, index + 1, 'assistant_turn'),
+  );
+  return boundedLiveEvents(refilled, liveEvents);
+}
+
+function assistantTranscriptItemFromLiveEvent(event: WorkbenchLiveEvent): AssistantTranscriptItem | null {
+  const id = `event_${event.event_id || event.seq || event.timestamp || event.type}`;
+  const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
+  const projection = supportedTranscriptProjection(event.projection);
+  if (projection) {
+    if (projection.visibility === 'hidden' || projection.visibility === 'technical') {
+      return null;
+    }
+    const detail = compactText(
+      stringValue(projection.summary) ||
+        assistantLiveEventText(event) ||
+        assistantLiveEventPayloadSummary(event.payload),
+    );
+    if (projection.category === 'error' || projection.severity === 'error') {
+      const userSummary = compactText(stringValue(payload.user_summary));
+      const technicalDetail = assistantFailureTechnicalDetail(payload);
+      return {
+        kind: 'error',
+        id,
+        content: userSummary || detail || 'AI 助手 turn 执行失败。',
+        detail: technicalDetail,
+        createdAt: event.timestamp,
+      };
+    }
+    if (
+      projection.category === 'tool' ||
+      projection.category === 'artifact' ||
+      projection.category === 'proposal' ||
+      projection.category === 'approval' ||
+      projection.category === 'decision'
+    ) {
+      return {
+        kind: 'tool_event',
+        id,
+        label: assistantProjectionLabel(projection),
+        detail,
+        createdAt: event.timestamp,
+      };
+    }
+    if (projection.category === 'status') {
+      return {
+        kind: 'status',
+        id,
+        label: assistantProjectionLabel(projection),
+        detail,
+        createdAt: event.timestamp,
+      };
+    }
+    return null;
+  }
+  const rawType = assistantLiveEventRawType(event);
+  const detail = assistantLiveEventText(event) || assistantLiveEventPayloadSummary(event.payload);
+  if (rawType === 'agent_turn_failed') {
+    const errorText = compactText(
+      stringValue(payload.user_summary) ||
+        stringValue(payload.error) ||
+        stringValue(payload.message) ||
+        detail,
+    );
+    return {
+      kind: 'error',
+      id,
+      content: errorText || detail || 'AI 助手 turn 执行失败。',
+      detail: assistantFailureTechnicalDetail(payload),
+      createdAt: event.timestamp,
+    };
+  }
+  if (event.type === 'gap') {
+    return { kind: 'error', id, content: detail || '实时输出存在缺口，已回退到轮询刷新。', createdAt: event.timestamp };
+  }
+  if (
+    event.type === 'agent_tool_use' ||
+    event.type === 'agent_tool_result' ||
+    event.type === 'artifact_ready' ||
+    rawType === 'artifact_ready'
+  ) {
+    return {
+      kind: 'tool_event',
+      id,
+      label: assistantLiveEventLabel(event),
+      detail,
+      createdAt: event.timestamp,
+    };
+  }
+  return null;
+}
+
+function assistantProcessGroupKey(event: WorkbenchLiveEvent): string {
+  const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
+  return event.turn_id || stringValue(payload.acc_turn_id) || stringValue(payload.turn_id) || 'session';
+}
+
+function assistantProcessGroupLabel(events: AssistantProcessEvent[], isRunning: boolean): string {
+  const hasDraft = events.some((event) => event.label === '生成草稿');
+  const hasTool = events.some((event) => event.label === '调用工具' || event.label === '工具结果');
+  if (isRunning) {
+    return events.length ? `执行中 · ${events.length} 个过程事件` : '执行中';
+  }
+  if (hasDraft) {
+    return events.length > 1 ? `生成草稿 · ${events.length} 个过程事件` : '生成草稿';
+  }
+  if (hasTool) {
+    return events.length > 1 ? `工具调用 · ${events.length} 个过程事件` : '工具调用';
+  }
+  return events.length > 1 ? `过程详情 · ${events.length} 条` : '过程详情';
+}
+
+function assistantProcessGroupTimestamp(events: AssistantProcessEvent[]): string | undefined {
+  let first: { timestamp: string; time: number } | null = null;
+  for (const event of events) {
+    if (!event.createdAt) {
+      continue;
+    }
+    const time = Date.parse(event.createdAt);
+    if (!Number.isFinite(time)) {
+      continue;
+    }
+    if (!first || time < first.time) {
+      first = { timestamp: event.createdAt, time };
+    }
+  }
+  return first?.timestamp;
+}
+
+function supportedTranscriptProjection(
+  projection: WorkbenchLiveEvent['projection'],
+): WorkbenchLiveEvent['projection'] | null {
+  return projection?.schema_version === 'acc.transcript_projection.v1' ? projection : null;
+}
+
+function assistantProjectionLabel(projection: NonNullable<WorkbenchLiveEvent['projection']>): string {
+  if (projection.display_kind === 'tool_call') {
+    return '调用工具';
+  }
+  if (projection.display_kind === 'tool_result') {
+    return '工具结果';
+  }
+  if (projection.category === 'artifact' || projection.category === 'proposal') {
+    return '生成草稿';
+  }
+  if (projection.category === 'approval') {
+    return '等待批准';
+  }
+  if (projection.category === 'decision') {
+    return '审批结果';
+  }
+  return projection.category === 'status' ? '状态' : projection.category || '状态';
+}
+
+function assistantResultBlockId({
+  proposal,
+  graphOpsReview,
+  currentOutputTurnId,
+}: {
+  proposal: CanvasAuthoringProposal | null;
+  graphOpsReview: AssistantGraphOpsReview | null;
+  currentOutputTurnId?: string | null;
+}): string {
+  if (graphOpsReview?.proposal.proposal_id) {
+    return `assistant_result_graphops_${graphOpsReview.proposal.proposal_id}`;
+  }
+  if (proposal?.proposal_id) {
+    return `assistant_result_proposal_${proposal.proposal_id}`;
+  }
+  if (currentOutputTurnId) {
+    return `assistant_result_turn_${currentOutputTurnId}`;
+  }
+  return 'assistant_result_current';
+}
+
+function assistantResultBlockTimestamp(
+  events: WorkbenchLiveEvent[],
+  currentOutputTurnId?: string | null,
+): string | undefined {
+  const relatedEvents = events.filter((event) => {
+    const rawType = assistantLiveEventRawType(event);
+    const isResultEvent =
+      rawType === 'agent_output_draft' ||
+      rawType === 'agent_output_published' ||
+      rawType === 'artifact_ready';
+    if (!isResultEvent) {
+      return false;
+    }
+    return currentOutputTurnId ? event.turn_id === currentOutputTurnId : true;
+  });
+  return latestWorkbenchEventTimestamp(relatedEvents);
+}
+
+function latestWorkbenchEventTimestamp(events: WorkbenchLiveEvent[]): string | undefined {
+  let latest: { timestamp: string; time: number } | null = null;
+  for (const event of events) {
+    const time = Date.parse(event.timestamp);
+    if (!Number.isFinite(time)) {
+      continue;
+    }
+    if (!latest || time > latest.time) {
+      latest = { timestamp: event.timestamp, time };
+    }
+  }
+  return latest?.timestamp;
+}
+
+function assistantLiveEventRawType(event: WorkbenchLiveEvent): string {
+  const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
+  return stringValue(payload.event_type) || event.type;
+}
+
+function assistantLiveEventLabel(event: WorkbenchLiveEvent): string {
+  const rawType = assistantLiveEventRawType(event);
+  if (event.type === 'agent_tool_use') {
+    return '调用工具';
+  }
+  if (event.type === 'agent_tool_result') {
+    return '工具结果';
+  }
+  if (event.type === 'artifact_ready' || rawType === 'artifact_ready') {
+    return '生成草稿';
+  }
+  if (event.type === 'agent_usage') {
+    return '用量';
+  }
+  if (event.type === 'agent_status') {
+    return '状态';
+  }
+  return event.type;
+}
+
+function assistantLiveEventText(event: WorkbenchLiveEvent): string {
+  const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
+  return (
+    event.text ||
+    stringValue(payload.error) ||
+    stringValue(payload.content) ||
+    stringValue(payload.delta) ||
+    stringValue(payload.message) ||
+    stringValue(payload.summary) ||
+    stringValue(payload.name) ||
+    stringValue(payload.tool) ||
+    stringValue(payload.status)
+  );
+}
+
+function assistantLiveEventPayloadSummary(payload: Record<string, unknown> | undefined): string {
+  if (!payload) {
+    return '';
+  }
+  const summary =
+    stringValue(payload.error) ||
+    stringValue(payload.summary) ||
+    stringValue(payload.message) ||
+    stringValue(payload.status);
+  if (summary) {
+    return summary;
+  }
+  const outputPath = stringValue(payload.output_path) || stringValue(payload.path);
+  return outputPath ? shortPath(outputPath) : '';
+}
+
+function assistantFailureTechnicalDetail(payload: Record<string, unknown>): string {
+  const details = [
+    stringValue(payload.technical_detail),
+    stringValue(payload.error),
+    stringValue(payload.raw_error_ref),
+  ].filter((value, index, values) => value && values.indexOf(value) === index);
+  return details.join('\n');
+}
+
+function dedupeAssistantTranscriptItems(items: AssistantTranscriptItem[]): AssistantTranscriptItem[] {
+  const seen = new Set<string>();
+  const result: AssistantTranscriptItem[] = [];
+  for (const item of items) {
+    const key = assistantTranscriptDedupeKey(item);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    result.push(item);
+  }
+  return result;
+}
+
+function assistantTranscriptDedupeKey(item: AssistantTranscriptItem): string {
+  if (item.kind === 'assistant_stream') {
+    return `assistant_stream_${item.turnId}`;
+  }
+  if (
+    (item.kind === 'assistant_message' || item.kind === 'user_message') &&
+    item.turnId &&
+    item.content
+  ) {
+    return `${item.kind}_${item.turnId}_${item.content}`;
+  }
+  return item.id;
+}
+
+function sortAssistantTranscriptItems(items: AssistantTranscriptItem[]): AssistantTranscriptItem[] {
+  return items
+    .map((item, index) => ({ item, index }))
+    .sort((left, right) => {
+      const leftTime = assistantTranscriptItemTime(left.item);
+      const rightTime = assistantTranscriptItemTime(right.item);
+      if (leftTime === rightTime) {
+        if (leftTime === null) {
+          const leftRank = assistantUntimedItemRank(left.item);
+          const rightRank = assistantUntimedItemRank(right.item);
+          if (leftRank !== rightRank) {
+            return leftRank - rightRank;
+          }
+        }
+        return left.index - right.index;
+      }
+      if (leftTime === null) {
+        return 1;
+      }
+      if (rightTime === null) {
+        return -1;
+      }
+      return leftTime - rightTime;
+    })
+    .map(({ item }) => item);
+}
+
+function assistantUntimedItemRank(item: AssistantTranscriptItem): number {
+  if (item.kind === 'result_block' || item.kind === 'proposal' || item.kind === 'graphops_review') {
+    return 1;
+  }
+  if (
+    item.kind === 'status' ||
+    item.kind === 'tool_event' ||
+    item.kind === 'process_group' ||
+    item.kind === 'error'
+  ) {
+    return 2;
+  }
+  return 3;
+}
+
+function assistantTranscriptItemTime(item: AssistantTranscriptItem): number | null {
+  const createdAt =
+    'createdAt' in item && typeof item.createdAt === 'string' ? Date.parse(item.createdAt) : NaN;
+  return Number.isFinite(createdAt) ? createdAt : null;
+}
+
+function assistantDisplayStatus({
+  sessionStatus,
+  busy,
+  pendingTurn,
+  agentSession,
+}: {
+  sessionStatus: string;
+  busy: boolean;
+  pendingTurn: AgentTurnRecord | null;
+  agentSession?: AgentSessionRecord | null;
+}): AssistantDisplayStatus {
+  const pendingStatus = String(pendingTurn?.status || '');
+  if (pendingTurn && (!pendingStatus || pendingStatus === 'queued' || pendingStatus === 'running')) {
+    return {
+      label: pendingStatus === 'queued' ? '排队中' : '执行中',
+      tone: pendingStatus || 'running',
+      connecting: false,
+      runningTurn: true,
+      lastFailed: false,
+      submissionBlocked: false,
+    };
+  }
+  if (
+    busy &&
+    !pendingTurn &&
+    (!sessionStatus ||
+      sessionStatus === 'idle' ||
+      sessionStatus === 'creating' ||
+      sessionStatus === 'connecting' ||
+      sessionStatus === 'loading')
+  ) {
+    return {
+      label: '连接中',
+      tone: 'connecting',
+      connecting: true,
+      runningTurn: false,
+      lastFailed: false,
+      submissionBlocked: false,
+    };
+  }
+  if (busy && !pendingTurn && sessionStatus !== 'failed') {
+    return {
+      label: '执行中',
+      tone: 'running',
+      connecting: false,
+      runningTurn: true,
+      lastFailed: false,
+      submissionBlocked: false,
+    };
+  }
+  if (sessionStatus === 'failed') {
+    const canSubmitNextTurn = agentSession?.can_submit_next_turn;
+    const recoverability = stringValue(agentSession?.last_recoverability);
+    if (canSubmitNextTurn === false || recoverability === 'blocked') {
+      return {
+        label: '需处理 · 上轮失败',
+        tone: 'failed',
+        connecting: false,
+        runningTurn: false,
+        lastFailed: true,
+        submissionBlocked: true,
+      };
+    }
+    return {
+      label:
+        recoverability === 'user_action_required'
+          ? '需处理 · 可继续对话'
+          : '可继续 · 上轮失败',
+      tone: 'failed',
+      connecting: false,
+      runningTurn: false,
+      lastFailed: true,
+      submissionBlocked: false,
+    };
+  }
+  const normalizedStatus = sessionStatus || 'idle';
+  return {
+    label: normalizedStatus,
+    tone: normalizedStatus,
+    connecting: false,
+    runningTurn: false,
+    lastFailed: false,
+    submissionBlocked: false,
+  };
+}
+
 function AssistantDockContent({
   input,
   messages,
@@ -5346,6 +5981,7 @@ function AssistantDockContent({
   agentSession,
   sessionStatus,
   pendingTurn,
+  assistantEvents,
   liveState,
   turnReason,
   requiredActions,
@@ -5377,6 +6013,7 @@ function AssistantDockContent({
   agentSession: AgentSessionRecord | null;
   sessionStatus: string;
   pendingTurn: AgentTurnRecord | null;
+  assistantEvents: RunEvent[];
   liveState: WorkbenchLiveStreamState;
   turnReason: AssistantTurnReason;
   requiredActions: AuthoringRequiredAction[];
@@ -5409,122 +6046,451 @@ function AssistantDockContent({
       ? graphOpsStringList(graphOpsDiff.created_files)
       : graphOpsReview?.dryRun.target_paths || [];
   const graphOpsWarnings = graphOpsStringList(graphOpsDiff.warnings);
+  const assistantEmptyText = modificationMode
+    ? '描述要生成或调整的 workflow 草稿。'
+    : '等待输入需求';
+  const [nodeContextOpen, setNodeContextOpen] = useState(false);
+  const canShowNodeContext = model.kind !== 'canvas' && model.kind !== 'empty';
+  const hasAssistantResult = Boolean(
+    proposal || temporaryDrafts.length || requiredActions.length || graphOpsReview,
+  );
+  const displayStatus = assistantDisplayStatus({ sessionStatus, busy, pendingTurn, agentSession });
+  const transcriptItems = useMemo(
+    () =>
+      buildAssistantTranscriptItems({
+        messages,
+        pendingTurn,
+        assistantEvents,
+        liveState,
+        proposal,
+        validation,
+        graphOpsReview,
+        hasResultBlock: hasAssistantResult,
+        currentOutputTurnId:
+          typeof agentSession?.current_output_turn_id === 'string'
+            ? agentSession.current_output_turn_id
+            : null,
+      }),
+    [
+      agentSession?.current_output_turn_id,
+      assistantEvents,
+      graphOpsReview,
+      hasAssistantResult,
+      liveState,
+      messages,
+      pendingTurn,
+      proposal,
+      validation,
+    ],
+  );
+  const assistantResultBlock = hasAssistantResult ? (
+    <AssistantProposalSummary
+      proposal={proposal}
+      validationErrors={validationErrors}
+      validationWarnings={validationWarnings}
+      temporaryDrafts={temporaryDrafts}
+      requiredActions={requiredActions}
+      graphOpsReview={graphOpsReview}
+      graphOpsCreatedFiles={graphOpsCreatedFiles}
+      graphOpsWarnings={graphOpsWarnings}
+      busy={busy}
+      onDiscard={onDiscard}
+      onPersistTemporaryResource={onPersistTemporaryResource}
+      onApplyGraphOpsReview={onApplyGraphOpsReview}
+      onDiscardGraphOpsReview={onDiscardGraphOpsReview}
+    />
+  ) : null;
 
   return (
-    <section className="assistant-bottom-dock-body" aria-label="AI 助手底部面板">
-      <div className="assistant-bottom-chat">
-        <header className="assistant-bottom-header">
+    <section className="assistant-bottom-dock-body assistant-console" aria-label="AI 助手底部面板">
+      <div className="assistant-console-main">
+        <header className="assistant-console-header">
           <div>
-            <span>AI 助手</span>
+            <span>AI Console</span>
             <strong>{targetLabel}</strong>
           </div>
-          <small>{hasSelectedRunNode ? '已聚焦选中节点' : '画布级对话'}</small>
-        </header>
-        <div className="assistant-session-row compact">
-          <label>
-            <span>Agent</span>
-            <select
-              value={selectedAuthoringAgentId}
-              onChange={(event) => onAgentChange(event.target.value)}
-              disabled={busy}
-            >
-              {authoringAgents.length ? (
-                authoringAgents.map((agent) => (
-                  <option key={agent.id} value={agent.id}>
-                    {agent.name || agent.id} · {agent.runtime}
-                  </option>
-                ))
-              ) : (
-                <option value="">未连接</option>
-              )}
-            </select>
-          </label>
-          <small>
-            {sessionId ? `${sessionStatus} · ${sessionId}` : sessionStatus}
-            {agentSession?.provider_session_id ? ` · provider ${agentSession.provider_session_id}` : ''}
-          </small>
-        </div>
-        <div className="assistant-message-list assistant-bottom-messages" aria-label="AI 助手消息">
-          {messages.length ? (
-            messages.map((message) => (
-              <article key={message.id} className={`assistant-message ${message.role}`}>
-                <span>{message.role}</span>
-                <p>{message.content}</p>
-              </article>
-            ))
-          ) : (
-            <p className="assistant-empty">等待输入需求</p>
-          )}
-        </div>
-        {pendingTurn ? (
-          <section className="assistant-proposal-panel compact" aria-label="AI assistant pending turn">
-            <header>
-              <span>Running turn</span>
-              <strong>{pendingTurn.turn_id}</strong>
-            </header>
-            <p>{pendingTurn.reason || turnReason} · {pendingTurn.status || 'queued'}</p>
-            <LiveOutputViewer
-              events={liveState.events}
-              status={liveState.status}
-              emptyText="AI 助手正在运行，等待实时输出。"
-            />
-          </section>
-        ) : null}
-        <AssistantProposalSummary
-          proposal={proposal}
-          validationErrors={validationErrors}
-          validationWarnings={validationWarnings}
-          temporaryDrafts={temporaryDrafts}
-          requiredActions={requiredActions}
-          graphOpsReview={graphOpsReview}
-          graphOpsCreatedFiles={graphOpsCreatedFiles}
-          graphOpsWarnings={graphOpsWarnings}
-          busy={busy}
-          onDiscard={onDiscard}
-          onPersistTemporaryResource={onPersistTemporaryResource}
-          onApplyGraphOpsReview={onApplyGraphOpsReview}
-          onDiscardGraphOpsReview={onDiscardGraphOpsReview}
-        />
-        <form className="assistant-compose assistant-bottom-compose" onSubmit={onSubmit}>
-          <textarea
-            value={input}
-            onChange={(event) => onInput(event.target.value)}
-            placeholder={
-              modificationMode
-                ? '描述要生成或调整的 workflow 草稿'
-                : '像 Codex CLI 一样和当前画布助手对话'
-            }
-            rows={2}
-          />
-          <div className="assistant-compose-actions">
-            {modificationMode && proposal ? (
+          <div className="assistant-console-context" aria-label="当前上下文">
+            <span className="assistant-context-chip">{modificationMode ? '修改模式' : '对话模式'}</span>
+            <span className="assistant-context-chip">{hasSelectedRunNode ? '选中节点上下文' : '画布级上下文'}</span>
+            <span className={`assistant-context-chip status-${displayStatus.tone || 'idle'}`}>
+              {displayStatus.label}
+            </span>
+            {canShowNodeContext ? (
               <button
                 type="button"
-                className="primary-action"
-                onClick={onApply}
-                disabled={busy || validation?.status === 'invalid'}
+                className="assistant-context-chip button"
+                onClick={() => setNodeContextOpen((current) => !current)}
+                aria-expanded={nodeContextOpen}
               >
-                应用修改
+                {nodeContextOpen ? '收起节点输出' : '选中节点输出'}
               </button>
             ) : null}
-            <button type="submit" className="secondary-action" disabled={busy || Boolean(pendingTurn)}>
-              {busy || pendingTurn ? '执行中...' : modificationMode ? (proposal ? '继续微调' : '生成修改') : '发送'}
-            </button>
           </div>
-        </form>
+        </header>
+
+        <details className="assistant-technical-details">
+          <summary>技术详情</summary>
+          <div className="assistant-session-row compact assistant-session-strip">
+            <label>
+              <span>Agent</span>
+              <select
+                value={selectedAuthoringAgentId}
+                onChange={(event) => onAgentChange(event.target.value)}
+                disabled={busy}
+              >
+                {authoringAgents.length ? (
+                  authoringAgents.map((agent) => (
+                    <option key={agent.id} value={agent.id}>
+                      {agent.name || agent.id} · {agent.runtime}
+                    </option>
+                  ))
+                ) : (
+                  <option value="">未连接</option>
+                )}
+              </select>
+            </label>
+            <small>
+              {sessionId ? `${sessionStatus} · ${sessionId}` : sessionStatus}
+              {agentSession?.provider_session_id ? ` · provider ${agentSession.provider_session_id}` : ''}
+            </small>
+          </div>
+        </details>
+
+        {nodeContextOpen && canShowNodeContext ? (
+          <div className="assistant-context-panel">
+            <SelectedNodeRuntimePane model={model} />
+          </div>
+        ) : null}
+
+        <AssistantTranscriptView
+          items={transcriptItems}
+          emptyText={assistantEmptyText}
+          resultBlock={assistantResultBlock}
+        />
+
+        <AssistantComposer
+          input={input}
+          modificationMode={modificationMode}
+          displayStatus={displayStatus}
+          proposalReady={Boolean(proposal)}
+          canUndoApply={canUndoApply}
+          validationStatus={validation?.status}
+          onInput={onInput}
+          onSubmit={onSubmit}
+          onApply={onApply}
+          onUndoApply={onUndoApply}
+          onModeChange={(nextModificationMode) =>
+            onTurnReasonChange(nextModificationMode ? 'canvas_revision' : 'workbench_chat')
+          }
+        />
       </div>
-      <AssistantControlRail
-        modificationMode={modificationMode}
-        canUndoApply={canUndoApply}
-        busy={busy}
-        pendingTurn={Boolean(pendingTurn)}
-        onModeChange={(nextModificationMode) =>
-          onTurnReasonChange(nextModificationMode ? 'canvas_revision' : 'workbench_chat')
-        }
-        onUndoApply={onUndoApply}
-      />
-      <SelectedNodeRuntimePane model={model} />
     </section>
+  );
+}
+
+function AssistantTranscriptView({
+  items,
+  emptyText,
+  resultBlock,
+}: {
+  items: AssistantTranscriptItem[];
+  emptyText: string;
+  resultBlock: ReactNode;
+}) {
+  const [isPinnedToBottom, setIsPinnedToBottom] = useState(true);
+  const transcriptRef = useRef<HTMLDivElement | null>(null);
+  const hasContent = items.length > 0;
+  const latestContentSignature = useMemo(() => assistantTranscriptContentSignature(items), [items]);
+
+  const scrollToBottom = useCallback(() => {
+    const element = transcriptRef.current;
+    if (!element) {
+      return;
+    }
+    element.scrollTop = element.scrollHeight;
+  }, []);
+
+  useEffect(() => {
+    if (!isPinnedToBottom) {
+      return;
+    }
+    const frame = window.requestAnimationFrame(scrollToBottom);
+    return () => window.cancelAnimationFrame(frame);
+  }, [isPinnedToBottom, latestContentSignature, scrollToBottom]);
+
+  const onScroll = useCallback(() => {
+    const element = transcriptRef.current;
+    if (!element) {
+      return;
+    }
+    const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
+    setIsPinnedToBottom(distanceFromBottom <= 48);
+  }, []);
+
+  const jumpToLatest = useCallback(() => {
+    setIsPinnedToBottom(true);
+    window.requestAnimationFrame(scrollToBottom);
+  }, [scrollToBottom]);
+
+  return (
+    <section className="assistant-transcript-shell" aria-label="AI 助手对话时间线">
+      <div
+        ref={transcriptRef}
+        className="assistant-transcript"
+        role="log"
+        aria-label="AI 助手消息"
+        aria-live="polite"
+        aria-relevant="additions text"
+        onScroll={onScroll}
+      >
+        {hasContent ? (
+          <>
+            {items.map((item) =>
+              item.kind === 'result_block' ? (
+                resultBlock ? (
+                  <div key={item.id} className="assistant-transcript-result">
+                    {resultBlock}
+                  </div>
+                ) : null
+              ) : (
+                <AssistantTranscriptEntry key={item.id} item={item} />
+              ),
+            )}
+          </>
+        ) : (
+          <p className="assistant-empty">{emptyText}</p>
+        )}
+      </div>
+      {hasContent && !isPinnedToBottom ? (
+        <button type="button" className="assistant-transcript-jump" onClick={jumpToLatest}>
+          跳到底部
+        </button>
+      ) : null}
+    </section>
+  );
+}
+
+function assistantTranscriptContentSignature(items: AssistantTranscriptItem[]): string {
+  return items
+    .map((item) => {
+      if (item.kind === 'assistant_stream') {
+        return `${item.id}:${item.content}:${item.status}`;
+      }
+      if (item.kind === 'assistant_message' || item.kind === 'user_message' || item.kind === 'error') {
+        return `${item.id}:${item.content}`;
+      }
+      if (item.kind === 'process_group') {
+        return `${item.id}:${item.events.map((event) => `${event.id}:${event.detail || ''}`).join(',')}`;
+      }
+      return item.id;
+    })
+    .join('|');
+}
+
+function AssistantTranscriptEntry({ item }: { item: AssistantTranscriptItem }) {
+  if (item.kind === 'result_block') {
+    return null;
+  }
+  if (item.kind === 'proposal' || item.kind === 'graphops_review') {
+    return (
+      <article className={`assistant-transcript-entry ${item.kind}`}>
+        <span>{item.kind === 'proposal' ? 'proposal' : 'graphops'}</span>
+        <p>{item.kind === 'proposal' ? `${item.proposalId || '草稿'} · ${item.status}` : item.status}</p>
+      </article>
+    );
+  }
+  if (item.kind === 'process_group') {
+    return (
+      <article className="assistant-transcript-entry process_group">
+        <details className="assistant-process-group" {...(item.defaultOpen ? { open: true } : {})}>
+          <summary>
+            <span>过程</span>
+            <strong>{item.label}</strong>
+          </summary>
+          <div className="assistant-process-events">
+            {item.events.map((event) => (
+              <div key={event.id} className="assistant-process-event">
+                <span>{event.label}</span>
+                {event.detail ? <p>{event.detail}</p> : null}
+              </div>
+            ))}
+          </div>
+        </details>
+      </article>
+    );
+  }
+  if (item.kind === 'status' || item.kind === 'tool_event') {
+    return (
+      <article className={`assistant-transcript-entry ${item.kind}`}>
+        <span>{item.label}</span>
+        {item.detail ? <p>{item.detail}</p> : null}
+      </article>
+    );
+  }
+  const roleLabel =
+    item.kind === 'user_message'
+      ? 'user'
+      : item.kind === 'assistant_stream'
+        ? `assistant · ${item.status}`
+        : item.kind === 'error'
+          ? 'assistant · failure'
+          : 'assistant';
+  return (
+    <article
+      className={`assistant-transcript-entry ${item.kind}`}
+      role={item.kind === 'error' ? 'alert' : undefined}
+      aria-live={item.kind === 'assistant_stream' ? 'polite' : undefined}
+    >
+      <span>{roleLabel}</span>
+      <p>{item.content}</p>
+      {item.kind === 'error' && item.detail ? (
+        <details className="assistant-error-detail">
+          <summary>技术细节</summary>
+          <pre>{item.detail}</pre>
+        </details>
+      ) : null}
+    </article>
+  );
+}
+
+function AssistantComposer({
+  input,
+  modificationMode,
+  displayStatus,
+  proposalReady,
+  canUndoApply,
+  validationStatus,
+  onInput,
+  onSubmit,
+  onApply,
+  onUndoApply,
+  onModeChange,
+}: {
+  input: string;
+  modificationMode: boolean;
+  displayStatus: AssistantDisplayStatus;
+  proposalReady: boolean;
+  canUndoApply: boolean;
+  validationStatus?: CanvasAuthoringValidationResult['status'];
+  onInput: (value: string) => void;
+  onSubmit: (event?: FormEvent<HTMLFormElement>) => void;
+  onApply: () => void;
+  onUndoApply: () => void;
+  onModeChange: (modificationMode: boolean) => void;
+}) {
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const composingRef = useRef(false);
+  const submitDisabled =
+    displayStatus.connecting || displayStatus.runningTurn || displayStatus.submissionBlocked;
+  const submitLabel = displayStatus.connecting
+    ? '连接中...'
+    : displayStatus.runningTurn
+      ? '执行中...'
+      : displayStatus.submissionBlocked
+        ? '需处理'
+      : modificationMode
+        ? proposalReady
+          ? '继续微调'
+          : '生成修改'
+        : '发送';
+
+  const focusComposer = useCallback(() => {
+    window.requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+    });
+  }, []);
+
+  const handleSubmit = useCallback(
+    (event?: FormEvent<HTMLFormElement>) => {
+      if (submitDisabled) {
+        event?.preventDefault();
+        return;
+      }
+      onSubmit(event);
+      focusComposer();
+    },
+    [focusComposer, onSubmit, submitDisabled],
+  );
+
+  const submitFromKeyboard = useCallback(
+    (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+      const nativeEvent = event.nativeEvent as KeyboardEvent & { isComposing?: boolean; keyCode?: number };
+      const isComposing = composingRef.current || nativeEvent.isComposing || nativeEvent.keyCode === 229;
+      if (event.key !== 'Enter' || event.shiftKey || isComposing) {
+        return;
+      }
+      event.preventDefault();
+      handleSubmit();
+    },
+    [handleSubmit],
+  );
+
+  return (
+    <form className="assistant-compose assistant-console-compose" onSubmit={handleSubmit}>
+      <div className="assistant-composer-toolbar">
+        <div className="assistant-mode-segment" role="group" aria-label="AI 助手模式">
+          <button
+            type="button"
+            className={!modificationMode ? 'active' : ''}
+            aria-pressed={!modificationMode}
+            onClick={() => onModeChange(false)}
+          >
+            对话模式
+          </button>
+          <button
+            type="button"
+            className={modificationMode ? 'active' : ''}
+            aria-pressed={modificationMode}
+            onClick={() => onModeChange(true)}
+          >
+            修改模式
+          </button>
+        </div>
+        <button
+          type="button"
+          className="assistant-tertiary-action"
+          onClick={onUndoApply}
+          disabled={!canUndoApply || submitDisabled}
+        >
+          撤回节点
+        </button>
+      </div>
+      <div className="assistant-console-input-row">
+        <textarea
+          ref={textareaRef}
+          value={input}
+          onChange={(event) => onInput(event.target.value)}
+          onKeyDown={submitFromKeyboard}
+          onCompositionStart={() => {
+            composingRef.current = true;
+          }}
+          onCompositionEnd={() => {
+            composingRef.current = false;
+          }}
+          placeholder={
+            modificationMode
+              ? '描述要生成或调整的 workflow 草稿'
+              : '像 Codex CLI 一样和当前画布助手对话'
+          }
+          rows={2}
+        />
+        <div className="assistant-compose-actions">
+          {modificationMode && proposalReady ? (
+            <button
+              type="button"
+              className="primary-action"
+              onClick={onApply}
+              disabled={submitDisabled || validationStatus === 'invalid'}
+            >
+              应用修改
+            </button>
+          ) : null}
+          <button type="submit" className="secondary-action" disabled={submitDisabled}>
+            {submitLabel}
+          </button>
+        </div>
+      </div>
+    </form>
   );
 }
 
@@ -8454,7 +9420,9 @@ function SelectionDetailsDock({
     selectedRunId,
   });
   const currentEvidenceTitle =
-    mode === 'assistant' ? 'AI 助手' : openedArtifact?.name || state.title || '未打开证据';
+    mode === 'assistant' ? 'AI Console' : openedArtifact?.name || state.title || '未打开证据';
+  const bodyClassName =
+    mode === 'assistant' ? 'selection-details-body assistant-console-body' : 'selection-details-body';
   return (
     <footer className={state.open ? 'evidence-dock selection-details-dock open' : 'evidence-dock selection-details-dock'} aria-label="选中对象详情">
       <button type="button" className="evidence-dock-toggle selection-details-toggle" onClick={onToggle}>
@@ -8465,12 +9433,12 @@ function SelectionDetailsDock({
           <strong>{mode === 'assistant' ? 'AI 助手' : model.title}</strong>
           <small>{mode === 'assistant' ? model.title : model.subtitle || model.scopeLabel}</small>
         </span>
-        <span className="evidence-dock-message">{mode === 'assistant' ? '对话、修改与选中节点输出' : message}</span>
+        <span className="evidence-dock-message">{mode === 'assistant' ? 'AI Console' : message}</span>
         <span className="evidence-dock-current">{currentEvidenceTitle}</span>
         {state.open ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
       </button>
       {state.open ? (
-        <div className="selection-details-body">
+        <div className={bodyClassName}>
           {mode === 'assistant' ? (
             assistantContent
           ) : (
@@ -8973,7 +9941,6 @@ function SelectionNodeProperties({
         node={node}
         state={agentSessionState}
         events={agentSessionState.events}
-        liveState={agentLiveState}
         onReadEvidence={onReadEvidence}
         onRefresh={onRefreshAgentSession}
         onPublish={onPublishAgentOutput}
@@ -9038,7 +10005,6 @@ function AgentSessionPanel({
   node,
   state,
   events,
-  liveState,
   onReadEvidence,
   onRefresh,
   onPublish,
@@ -9047,7 +10013,6 @@ function AgentSessionPanel({
   node: AgentNodeSettingsModel;
   state: AgentSessionUiState;
   events: RunEvent[];
-  liveState: WorkbenchLiveStreamState;
   onReadEvidence: (path: string | null | undefined, title?: string) => void;
   onRefresh: () => Promise<void>;
   onPublish: (expectedTurnId: string) => Promise<void>;
@@ -9145,12 +10110,6 @@ function AgentSessionPanel({
               <strong>{session.published_output_turn_id ? '已发布' : '未发布'}</strong>
             </div>
           </div>
-
-          <LiveOutputViewer
-            events={liveState.events}
-            status={liveState.status === 'idle' ? node.status : liveState.status}
-            emptyText="当前 Agent 还没有实时输出。"
-          />
 
           {state.interactions.length > 0 ? (
             <section className="agent-session-subsection" aria-label="Agent approval requests">
@@ -9359,6 +10318,8 @@ function agentMessagesToAssistantMessages(messages: AgentMessage[]): AssistantCh
           ? message.role
           : 'system',
       content: assistantMessageDisplayContent(message.content),
+      turnId: typeof message.turn_id === 'string' ? message.turn_id : undefined,
+      createdAt: typeof message.created_at === 'string' ? message.created_at : undefined,
     }));
 }
 
@@ -9575,6 +10536,32 @@ function liveEventMatchesRunScope(event: WorkbenchLiveEvent, scope: Extract<Work
   return Boolean(scope.nodeId && event.node_id === scope.nodeId && !event.ui_node_id);
 }
 
+function liveStateForNodeRun(
+  events: WorkbenchLiveEvent[],
+  nodeRun?: NodeRunSummary,
+): WorkbenchLiveStreamState {
+  if (!nodeRun) {
+    return { events: [], status: 'idle', error: '' };
+  }
+  const scopedEvents = events.filter((event) => liveEventMatchesNodeRun(event, nodeRun));
+  return {
+    events: scopedEvents,
+    status: scopedEvents.length ? 'live' : 'idle',
+    error: '',
+  };
+}
+
+function liveEventMatchesNodeRun(event: WorkbenchLiveEvent, nodeRun: NodeRunSummary): boolean {
+  if (nodeRun.ui_node_id && event.ui_node_id === nodeRun.ui_node_id) {
+    return true;
+  }
+  if (nodeRun.run_dir && sameRunDir(event.node_run_dir, nodeRun.run_dir)) {
+    return true;
+  }
+  const isRootNodeRun = !nodeRun.ui_node_id && !nodeRun.parent_node_id;
+  return Boolean(isRootNodeRun && nodeRun.node_id && event.node_id === nodeRun.node_id && !event.ui_node_id);
+}
+
 function liveEventMatchesTurnScope(
   event: WorkbenchLiveEvent,
   scope: Extract<WorkbenchLiveStreamScope, { kind: 'turn' }>,
@@ -9636,13 +10623,15 @@ function liveEventFromAgentRunEvent(
   source: 'agent_turn' | 'assistant_turn',
 ): WorkbenchLiveEvent {
   const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
-  const content = stringValue(payload.content);
-  const type = event.type === 'agent_message' || event.type === 'agent_status' ? event.type : 'agent_event';
+  const eventPayload = { ...payload, event_type: stringValue(payload.event_type) || event.type };
+  const content = stringValue(payload.content) || stringValue(payload.delta);
+  const type = workbenchLiveEventType(event.type);
   const sessionId = stringValue(event.session_id);
   const turnId = stringValue(event.turn_id);
   return {
     event_id: String(event.event_id || `refill_${sessionId}_${turnId}_${seq}`),
     seq,
+    event_seq: typeof event.event_seq === 'number' ? event.event_seq : undefined,
     source,
     run_id: stringValue(event.run_id),
     node_id: stringValue(event.node_id),
@@ -9650,10 +10639,31 @@ function liveEventFromAgentRunEvent(
     turn_id: turnId,
     type,
     stream: 'agent',
-    text: event.type === 'agent_message' ? content : '',
-    payload,
+    text: event.type === 'agent_message' || event.type === 'agent_message_delta' ? content : '',
+    payload: eventPayload,
+    projection: event.projection,
     timestamp: stringValue(event.timestamp),
   };
+}
+
+function workbenchLiveEventType(type: unknown): WorkbenchLiveEvent['type'] {
+  if (
+    type === 'agent_message' ||
+    type === 'agent_message_delta' ||
+    type === 'agent_status' ||
+    type === 'agent_tool_use' ||
+    type === 'agent_tool_result' ||
+    type === 'agent_approval_requested' ||
+    type === 'agent_usage' ||
+    type === 'agent_output_draft' ||
+    type === 'agent_output_published' ||
+    type === 'agent_turn_failed' ||
+    type === 'agent_turn_cancelled' ||
+    type === 'artifact_ready'
+  ) {
+    return type;
+  }
+  return 'agent_event';
 }
 
 function boundedLiveEvents(
@@ -9694,9 +10704,58 @@ function LiveOutputViewer({
   status: string;
   emptyText: string;
 }) {
-  const [filter, setFilter] = useState<'all' | 'agent' | 'stdout' | 'stderr' | 'errors'>('all');
-  const visibleEvents = useMemo(() => filterLiveEvents(events, filter).slice(-160), [events, filter]);
-  const hasEvents = visibleEvents.length > 0;
+  const [filter, setFilter] = useState<LiveOutputFilter>('all');
+  const [isPinnedToBottom, setIsPinnedToBottom] = useState(true);
+  const outputRef = useRef<HTMLDivElement | null>(null);
+  const visibleEntries = useMemo(() => {
+    const entries = buildAccTranscript(events, filter);
+    if (filter === 'all' && entries.length === 0) {
+      return buildAccTranscript(events, 'logs').slice(-160);
+    }
+    return entries.slice(-160);
+  }, [events, filter]);
+  const hasEvents = visibleEntries.length > 0;
+  const shouldShowJump = hasEvents && !isPinnedToBottom;
+
+  const scrollToBottom = useCallback(() => {
+    const element = outputRef.current;
+    if (!element) {
+      return;
+    }
+    element.scrollTop = element.scrollHeight;
+  }, []);
+
+  useEffect(() => {
+    if (!isPinnedToBottom) {
+      return;
+    }
+    const frame = window.requestAnimationFrame(scrollToBottom);
+    return () => window.cancelAnimationFrame(frame);
+  }, [filter, isPinnedToBottom, scrollToBottom, visibleEntries.length]);
+
+  const onOutputScroll = useCallback(() => {
+    const element = outputRef.current;
+    if (!element) {
+      return;
+    }
+    const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
+    setIsPinnedToBottom(distanceFromBottom <= 40);
+  }, []);
+
+  const selectFilter = useCallback((nextFilter: LiveOutputFilter) => {
+    const element = outputRef.current;
+    if (element) {
+      const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
+      setIsPinnedToBottom(distanceFromBottom <= 40);
+    }
+    setFilter(nextFilter);
+  }, []);
+
+  const jumpToLatest = useCallback(() => {
+    setIsPinnedToBottom(true);
+    window.requestAnimationFrame(scrollToBottom);
+  }, [scrollToBottom]);
+
   return (
     <section className="live-output-viewer" aria-label="实时输出">
       <header className="live-output-header">
@@ -9705,25 +10764,31 @@ function LiveOutputViewer({
           <strong>{statusLabel(status || 'not_run')}</strong>
         </div>
         <div className="selection-log-stream-tabs" role="tablist" aria-label="Live output filters">
-          {(['all', 'agent', 'stdout', 'stderr', 'errors'] as const).map((item) => (
+          {(['all', 'logs', 'stdout', 'stderr', 'errors', 'raw'] as const).map((item) => (
             <button
               key={item}
               type="button"
               className={filter === item ? 'active' : ''}
-              onClick={() => setFilter(item)}
+              onClick={() => selectFilter(item)}
             >
-              {item}
+              {liveOutputFilterLabel(item)}
             </button>
           ))}
         </div>
       </header>
-      <div className="selection-log-output selection-live-output" role="log" aria-live="polite">
+      <div
+        ref={outputRef}
+        className="selection-log-output selection-live-output"
+        role="log"
+        aria-live="polite"
+        onScroll={onOutputScroll}
+      >
         {hasEvents ? (
           <div className="live-output-lines">
-            {visibleEvents.map((event) => (
-              <article key={`${event.event_id}-${event.seq}`} className={`live-output-line stream-${event.stream || 'agent'}`}>
-                <span>{liveEventLabel(event)}</span>
-                <pre>{liveEventText(event)}</pre>
+            {visibleEntries.map((entry) => (
+              <article key={entry.id} className={`live-output-line stream-${entry.stream}`}>
+                <span>{transcriptEntryLabel(entry)}</span>
+                <pre>{entry.text}</pre>
               </article>
             ))}
           </div>
@@ -9731,16 +10796,21 @@ function LiveOutputViewer({
           <p className="empty-state">{emptyText}</p>
         )}
       </div>
+      {shouldShowJump ? (
+        <button type="button" className="live-output-jump" onClick={jumpToLatest}>
+          跳到最新
+        </button>
+      ) : null}
     </section>
   );
 }
 
 function filterLiveEvents(
   events: WorkbenchLiveEvent[],
-  filter: 'all' | 'agent' | 'stdout' | 'stderr' | 'errors',
+  filter: LiveOutputFilter,
 ): WorkbenchLiveEvent[] {
-  if (filter === 'all') {
-    return events;
+  if (filter === 'stdout' || filter === 'stderr') {
+    return events.filter((event) => event.stream === filter);
   }
   if (filter === 'errors') {
     return events.filter((event) =>
@@ -9748,34 +10818,24 @@ function filterLiveEvents(
       String(event.type).includes('failed'),
     );
   }
-  return events.filter((event) => event.stream === filter);
+  return buildAccTranscript(events, filter).map((entry) => entry.sourceEvent);
 }
 
-function liveEventLabel(event: WorkbenchLiveEvent): string {
-  const prefix = event.stream || 'agent';
-  const time = event.timestamp ? event.timestamp.split('T').pop()?.replace('Z', '') || event.timestamp : '';
-  return [time, prefix, event.type].filter(Boolean).join(' · ');
+function liveOutputFilterLabel(filter: LiveOutputFilter): string {
+  const labels: Record<LiveOutputFilter, string> = {
+    all: '输出',
+    logs: '日志',
+    stdout: 'stdout',
+    stderr: 'stderr',
+    errors: '错误',
+    raw: 'raw',
+  };
+  return labels[filter];
 }
 
-function liveEventText(event: WorkbenchLiveEvent): string {
-  if (event.text) {
-    return limitText(event.text, 2400);
-  }
-  if (event.payload) {
-    const content = stringValue(event.payload.content);
-    if (content) {
-      return limitText(assistantMessageDisplayContent(content), 2400);
-    }
-    const outputPath = stringValue(event.payload.output_path);
-    if (outputPath) {
-      return shortPath(outputPath);
-    }
-    const status = stringValue(event.payload.status);
-    if (status) {
-      return status;
-    }
-  }
-  return event.type;
+function transcriptEntryLabel(entry: AccTranscriptEntry): string {
+  const time = entry.timestamp ? entry.timestamp.split('T').pop()?.replace('Z', '') || entry.timestamp : '';
+  return [time, entry.stream, entry.label].filter(Boolean).join(' · ');
 }
 
 function limitText(value: string, maxLength: number): string {
@@ -13444,6 +14504,8 @@ function internalWorkflowToGraph(workflow: WorkflowContainerModel): WorkflowGrap
     data_edges: dataEdges,
     exposed_inputs: workflow.inputPorts.map(portViewToGraphPort),
     exposed_outputs: workflow.outputPorts.map(portViewToGraphPort),
+    workflow_input_bindings: workflowInputBindingsFromBoundaryEdges(workflow.id, boundaryEdges),
+    workflow_output_bindings: workflowOutputBindingsFromBoundaryEdges(workflow.id, boundaryEdges),
     workspace_policy: {
       save_mode: 'local_binding',
       default_state_mode: 'stateful',
@@ -13455,6 +14517,62 @@ function internalWorkflowToGraph(workflow: WorkflowContainerModel): WorkflowGrap
       workflow_port_edges: boundaryEdges.map(canvasEdgeToGraphMetadataEdge),
     },
   };
+}
+
+function workflowInputBindingsFromBoundaryEdges(
+  workflowId: string,
+  edges: WorkflowCanvasEdge[],
+): NonNullable<WorkflowGraph['workflow_input_bindings']> {
+  const inputBoundaryId = workflowInputBoundaryId(workflowId);
+  const bindings: NonNullable<WorkflowGraph['workflow_input_bindings']> = [];
+  const seen = new Set<string>();
+  edges.forEach((edge) => {
+    if (edge.kind !== 'data' || edge.source.workflowId !== inputBoundaryId) {
+      return;
+    }
+    const sourcePort = edge.source.portId || 'main';
+    const targetPort = edge.target.portId || 'main';
+    const key = `${sourcePort}->${edge.target.workflowId}.${targetPort}`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    bindings.push({
+      source_port: sourcePort,
+      target: { node: edge.target.workflowId, port: targetPort },
+      materialization: edge.materialization || 'copy',
+      required: false,
+    });
+  });
+  return bindings;
+}
+
+function workflowOutputBindingsFromBoundaryEdges(
+  workflowId: string,
+  edges: WorkflowCanvasEdge[],
+): NonNullable<WorkflowGraph['workflow_output_bindings']> {
+  const outputBoundaryId = workflowOutputBoundaryId(workflowId);
+  const bindings: NonNullable<WorkflowGraph['workflow_output_bindings']> = [];
+  const seen = new Set<string>();
+  edges.forEach((edge) => {
+    if (edge.kind !== 'data' || edge.target.workflowId !== outputBoundaryId) {
+      return;
+    }
+    const sourcePort = edge.source.portId || 'main';
+    const targetPort = edge.target.portId || 'main';
+    const key = `${edge.source.workflowId}.${sourcePort}->${targetPort}`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    bindings.push({
+      source: { node: edge.source.workflowId, port: sourcePort },
+      target_port: targetPort,
+      materialization: edge.materialization || 'copy',
+      required: true,
+    });
+  });
+  return bindings;
 }
 
 function internalNodeToGraphNode(node: InternalNodeView): WorkflowGraphNode {
@@ -13682,9 +14800,9 @@ function codexInvocationPolicyForMode(
 
 function emptyWorkspaceCanvas(taskId = DEFAULT_TASK_ID, title = '任务 1'): WorkspaceCanvasModel {
   return {
-    ...workspaceDemoCanvas(),
     id: taskId,
     name: title,
+    layout: 'workspace-canvas',
     rootWorkflowId: taskId,
     workflows: [],
     edges: [],
@@ -13900,141 +15018,237 @@ function isActiveCanvasObjectStatus(status: string): boolean {
 }
 
 function workspaceDemoCanvas(): WorkspaceCanvasModel {
+  const agentNode = (
+    id: string,
+    title: string,
+    task: string,
+    inputPorts: WorkflowPortView[],
+    outputPorts: WorkflowPortView[],
+    outputSchema: Record<string, unknown>,
+    position: { x: number; y: number },
+    callableId = DEMO_ANALYST_AGENT_ID,
+  ): WorkflowContainerModel => ({
+    id,
+    title,
+    sourceKind: 'agent_session',
+    callableId,
+    codexExecutionMode: 'default',
+    directory: `workflows/demo/${id}`,
+    status: 'not_run',
+    sourceInput: { user_prompt: task },
+    outputSchema,
+    inputPorts,
+    outputPorts,
+    internalNodes: [],
+    internalEdges: [],
+    position,
+    size: { width: 310, height: 150 },
+    warnings: [],
+  });
+
+  const inlineWorkflow = (
+    id: string,
+    title: string,
+    directory: string,
+    inputPorts: WorkflowPortView[],
+    outputPorts: WorkflowPortView[],
+    internalNodes: InternalNodeView[],
+    internalEdges: WorkflowCanvasEdge[],
+    position: { x: number; y: number },
+  ): WorkflowContainerModel => ({
+    id,
+    title,
+    workflowBodyKind: 'inline_container',
+    directory,
+    status: 'not_run',
+    inputPorts,
+    outputPorts,
+    internalNodes,
+    internalEdges,
+    position,
+    size: DEFAULT_CONTAINER_SIZE,
+    warnings: [],
+  });
+
+  const analysisSchema = (name: string) =>
+    objectOutputSchema(['status', 'summary', 'findings', 'evidence'], {
+      findings: stringArrayField(`${name} 的关键发现`),
+      evidence: stringArrayField('证据、假设和需要后续验证的信息'),
+    });
+  const synthesisSchema = (name: string) =>
+    objectOutputSchema(['status', 'summary', 'decision_factors', 'open_questions'], {
+      decision_factors: stringArrayField(`${name} 输出给下游 workflow 的判断因子`),
+      open_questions: stringArrayField('下游仍需处理的不确定性'),
+    });
+  const reportSchema = objectOutputSchema(['status', 'summary', 'report_sections', 'evidence_map'], {
+    report_sections: stringArrayField('最终报告章节'),
+    evidence_map: stringArrayField('章节到上游产物的追踪关系'),
+    action_items: stringArrayField('发布前行动项'),
+  });
+
+  const fundamentalsWorkflowId = 'Fundamentals_Workflow';
+  const valuationWorkflowId = 'Valuation_Workflow';
+  const riskWorkflowId = 'Risk_Catalyst_Workflow';
+  const reportWorkflowId = 'Report_Workflow';
+
   return {
-    id: 'acc_workspace_canvas',
-    name: '股市调研控制流示例',
+    id: 'core_v2_stock_research_canvas',
+    name: 'Core v2 股市调研分析示例',
     layout: 'workspace-canvas',
-    rootWorkflowId: 'Root_Pipeline',
+    rootWorkflowId: 'Final_Review_Agent',
     workflows: [
-      {
-        id: 'Stock_Target_Agent',
-        title: '美股标的识别',
-        sourceKind: 'agent_session',
-        callableId: 'stock-target-selector.codex',
-        codexExecutionMode: 'default',
-        directory: 'workflows/demo/stock_target',
-        status: 'not_run',
-        sourceInput: {
-          user_prompt:
-            '从用户给定的主题、新闻线索或候选公司中确定一个可调研的美股标的。若没有明确输入，使用 Microsoft Corporation / MSFT 作为可运行示例，并说明这是演示默认值。',
-        },
-        outputSchema: {
-          type: 'object',
-          required: ['ticker', 'company_name', 'selection_rationale'],
-          properties: {
-            ticker: { type: 'string' },
-            company_name: { type: 'string' },
-            industry: { type: 'string' },
-            core_business: { type: 'string' },
-            selection_rationale: { type: 'string' },
-          },
-        },
-        inputPorts: [port('main', '用户主题或候选公司', 'input')],
-        outputPorts: [port('main', '已确认调研标的', 'output', true)],
-        internalNodes: [],
-        internalEdges: [],
-        position: { x: 90, y: 380 },
-        size: { width: 300, height: 150 },
-        warnings: [],
-      },
-      {
-        id: 'Research_Flow',
-        title: '公司基本面调研',
-        workflowBodyKind: 'inline_container',
-        directory: 'workflows/demo/company_research',
-        status: 'not_run',
-        inputPorts: [
-          port('main', '调研标的', 'input'),
+      agentNode(
+        'Market_Context_Agent',
+        '市场上下文采集',
+        '读取用户关注的市场主题，输出研究范围、候选行业、数据口径和约束。',
+        [port('main', '用户主题', 'input')],
+        [
+          port('main', '市场上下文', 'output', true),
+          port('watchlist', '候选关注点', 'output', true),
         ],
-        outputPorts: [
-          port('main', '基本面调研结果', 'output', true),
+        objectOutputSchema(['status', 'summary', 'findings', 'evidence', 'watchlist'], {
+          findings: stringArrayField('市场主题、候选行业和调研边界'),
+          evidence: stringArrayField('用户输入、假设和需外部验证的信息'),
+          watchlist: stringArrayField('后续风险与催化剂 workflow 需要持续关注的事项'),
+        }),
+        { x: 80, y: 260 },
+      ),
+      agentNode(
+        'Target_Profile_Agent',
+        '标的画像确认',
+        '基于市场上下文确认一个可研究的美股标的，并输出公司身份、业务边界和验证缺口。',
+        [port('context', '市场上下文', 'input', true)],
+        [
+          port('main', '标的画像', 'output', true),
+          port('constraints', '研究约束', 'output', true),
         ],
-        internalNodes: [
+        objectOutputSchema(['status', 'summary', 'ticker', 'company_name', 'verification_gaps'], {
+          ticker: stringField('股票代码'),
+          company_name: stringField('公司名称'),
+          constraints: stringArrayField('研究范围、数据边界和下游限制条件'),
+          verification_gaps: stringArrayField('需要外部数据源验证的信息'),
+        }),
+        { x: 460, y: 260 },
+      ),
+      inlineWorkflow(
+        fundamentalsWorkflowId,
+        '基本面工作流',
+        'workflows/demo/core_v2/fundamentals',
+        [
+          port('target', '标的画像', 'input', true),
+          port('context', '市场上下文', 'input', true),
+        ],
+        [
+          port('main', '基本面结论', 'output', true),
+          port('evidence_pack', '基本面证据包', 'output', true),
+        ],
+        [
           internalNode(
-            'research_business',
-            '业务模式研究',
-            '基于已确认标的，研究公司业务模式、收入结构、关键产品和客户结构。',
+            'business_model_agent',
+            '业务模式分析',
+            '分析收入来源、客户、产品线和商业模式韧性。',
             'Agent',
-            'stock-business-model-research.codex',
-            fundamentalsComponentOutputSchema(),
+            DEMO_ANALYST_AGENT_ID,
+            analysisSchema('业务模式分析'),
+            [port('target', '标的画像', 'input', true), port('context', '市场上下文', 'input', true)],
           ),
           internalNode(
-            'research_financials',
-            '财报摘要',
-            '基于已确认标的，整理近年收入、利润率、现金流、资产负债表强弱项和财务质量。',
+            'financial_quality_agent',
+            '财务质量分析',
+            '分析收入质量、利润率、现金流、资产负债表和需验证的财报数据。',
             'Agent',
-            'stock-financials-research.codex',
-            fundamentalsComponentOutputSchema(),
+            DEMO_ANALYST_AGENT_ID,
+            analysisSchema('财务质量分析'),
+            [port('target', '标的画像', 'input', true)],
           ),
           internalNode(
-            'research_industry',
-            '行业定位',
-            '基于已确认标的，分析竞争格局、行业增长驱动、主要对手和公司相对位置。',
+            'industry_position_agent',
+            '行业位置分析',
+            '分析行业结构、竞争对手、增长驱动和公司相对位置。',
             'Agent',
-            'stock-industry-position-research.codex',
-            fundamentalsComponentOutputSchema(),
+            DEMO_ANALYST_AGENT_ID,
+            analysisSchema('行业位置分析'),
+            [port('target', '标的画像', 'input', true), port('context', '市场上下文', 'input', true)],
           ),
           internalNode(
-            'research_synthesis',
+            'fundamentals_synthesis_agent',
             '基本面汇总',
-            '整合业务、财务和行业三路研究，输出基本面判断、关键证据和待验证假设。',
+            '并行汇总业务、财务、行业三路结果，形成下游估值和风险可消费的结论。',
             'Agent',
-            'stock-fundamentals-synthesis.codex',
-            fundamentalsSynthesisOutputSchema(),
+            DEMO_SYNTHESIS_AGENT_ID,
+            synthesisSchema('基本面汇总'),
             [
-              port('business', '业务模式研究', 'input', true),
-              port('financials', '财报摘要', 'input', true),
-              port('industry', '行业定位', 'input', true),
+              port('business', '业务模式分析', 'input', true),
+              port('financials', '财务质量分析', 'input', true),
+              port('industry', '行业位置分析', 'input', true),
             ],
           ),
-        ],
-        internalEdges: [
-          dataEdge(workflowInputBoundaryId('Research_Flow'), 'main', 'research_business', 'main'),
-          dataEdge(workflowInputBoundaryId('Research_Flow'), 'main', 'research_financials', 'main'),
-          dataEdge(workflowInputBoundaryId('Research_Flow'), 'main', 'research_industry', 'main'),
-          controlEdge('research_business', 'research_synthesis'),
-          controlEdge('research_financials', 'research_synthesis'),
-          controlEdge('research_industry', 'research_synthesis'),
-          dataEdge('research_business', 'main', 'research_synthesis', 'business'),
-          dataEdge('research_financials', 'main', 'research_synthesis', 'financials'),
-          dataEdge('research_industry', 'main', 'research_synthesis', 'industry'),
-          dataEdge('research_synthesis', 'main', workflowOutputBoundaryId('Research_Flow'), 'main'),
-        ],
-        position: { x: 490, y: 170 },
-        size: DEFAULT_CONTAINER_SIZE,
-        warnings: [],
-      },
-      {
-        id: 'Implementation_Flow',
-        title: '估值与情景分析',
-        workflowBodyKind: 'inline_container',
-        directory: 'workflows/demo/valuation',
-        status: 'not_run',
-        inputPorts: [port('main', '基本面调研结果', 'input')],
-        outputPorts: [port('main', '估值判断', 'output', true)],
-        internalNodes: [
           internalNode(
-            'valuation_model',
+            'fundamentals_evidence_agent',
+            '证据包整理',
+            '从基本面汇总中整理证据、假设和验证缺口，供最终报告追踪。',
+            'Agent',
+            DEMO_SYNTHESIS_AGENT_ID,
+            synthesisSchema('证据包整理'),
+            [port('main', '基本面汇总', 'input', true)],
+          ),
+        ],
+        [
+          dataEdge(workflowInputBoundaryId(fundamentalsWorkflowId), 'target', 'business_model_agent', 'target'),
+          dataEdge(workflowInputBoundaryId(fundamentalsWorkflowId), 'context', 'business_model_agent', 'context'),
+          dataEdge(workflowInputBoundaryId(fundamentalsWorkflowId), 'target', 'financial_quality_agent', 'target'),
+          dataEdge(workflowInputBoundaryId(fundamentalsWorkflowId), 'target', 'industry_position_agent', 'target'),
+          dataEdge(workflowInputBoundaryId(fundamentalsWorkflowId), 'context', 'industry_position_agent', 'context'),
+          controlEdge('business_model_agent', 'fundamentals_synthesis_agent'),
+          controlEdge('financial_quality_agent', 'fundamentals_synthesis_agent'),
+          controlEdge('industry_position_agent', 'fundamentals_synthesis_agent'),
+          dataEdge('business_model_agent', 'main', 'fundamentals_synthesis_agent', 'business'),
+          dataEdge('financial_quality_agent', 'main', 'fundamentals_synthesis_agent', 'financials'),
+          dataEdge('industry_position_agent', 'main', 'fundamentals_synthesis_agent', 'industry'),
+          controlEdge('fundamentals_synthesis_agent', 'fundamentals_evidence_agent'),
+          dataEdge('fundamentals_synthesis_agent', 'main', 'fundamentals_evidence_agent', 'main'),
+          dataEdge('fundamentals_synthesis_agent', 'main', workflowOutputBoundaryId(fundamentalsWorkflowId), 'main'),
+          dataEdge('fundamentals_evidence_agent', 'main', workflowOutputBoundaryId(fundamentalsWorkflowId), 'evidence_pack'),
+        ],
+        { x: 860, y: 80 },
+      ),
+      inlineWorkflow(
+        valuationWorkflowId,
+        '估值与情景工作流',
+        'workflows/demo/core_v2/valuation',
+        [
+          port('fundamentals', '基本面结论', 'input', true),
+          port('constraints', '研究约束', 'input', true),
+        ],
+        [
+          port('main', '估值结论', 'output', true),
+          port('scenario_table', '情景表', 'output', true),
+        ],
+        [
+          internalNode(
+            'valuation_model_agent',
             '估值框架',
-            '基于基本面研究，建立适合该公司的估值框架、核心假设和估值区间。',
+            '基于基本面结论选择估值框架、关键假设和敏感变量。',
             'Agent',
-            'stock-valuation-model.codex',
+            DEMO_ANALYST_AGENT_ID,
             valuationComponentOutputSchema(),
+            [port('fundamentals', '基本面结论', 'input', true)],
           ),
           internalNode(
-            'valuation_scenario',
+            'scenario_agent',
             '情景分析',
-            '基于基本面研究，构造牛/基准/熊三种情景和关键敏感性。',
+            '并行构造 bull/base/bear 情景，说明每个情景成立条件。',
             'Agent',
-            'stock-scenario-analysis.codex',
+            DEMO_ANALYST_AGENT_ID,
             valuationComponentOutputSchema(),
+            [port('fundamentals', '基本面结论', 'input', true), port('constraints', '研究约束', 'input', true)],
           ),
           internalNode(
-            'valuation_synthesis',
-            '估值结论',
-            '整合估值框架和情景分析，输出估值判断、风险收益比和关键不确定性。',
+            'valuation_synthesis_agent',
+            '估值汇总',
+            '串行整合估值框架和情景分析，输出风险收益判断。',
             'Agent',
-            'stock-valuation-synthesis.codex',
+            DEMO_SYNTHESIS_AGENT_ID,
             valuationSynthesisOutputSchema(),
             [
               port('valuation_model', '估值框架', 'input', true),
@@ -14042,130 +15256,192 @@ function workspaceDemoCanvas(): WorkspaceCanvasModel {
             ],
           ),
         ],
-        internalEdges: [
-          dataEdge(workflowInputBoundaryId('Implementation_Flow'), 'main', 'valuation_model', 'main'),
-          dataEdge(workflowInputBoundaryId('Implementation_Flow'), 'main', 'valuation_scenario', 'main'),
-          controlEdge('valuation_model', 'valuation_synthesis'),
-          controlEdge('valuation_scenario', 'valuation_synthesis'),
-          dataEdge('valuation_model', 'main', 'valuation_synthesis', 'valuation_model'),
-          dataEdge('valuation_scenario', 'main', 'valuation_synthesis', 'scenario_analysis'),
-          dataEdge('valuation_synthesis', 'main', workflowOutputBoundaryId('Implementation_Flow'), 'main'),
+        [
+          dataEdge(workflowInputBoundaryId(valuationWorkflowId), 'fundamentals', 'valuation_model_agent', 'fundamentals'),
+          dataEdge(workflowInputBoundaryId(valuationWorkflowId), 'fundamentals', 'scenario_agent', 'fundamentals'),
+          dataEdge(workflowInputBoundaryId(valuationWorkflowId), 'constraints', 'scenario_agent', 'constraints'),
+          controlEdge('valuation_model_agent', 'valuation_synthesis_agent'),
+          controlEdge('scenario_agent', 'valuation_synthesis_agent'),
+          dataEdge('valuation_model_agent', 'main', 'valuation_synthesis_agent', 'valuation_model'),
+          dataEdge('scenario_agent', 'main', 'valuation_synthesis_agent', 'scenario_analysis'),
+          dataEdge('valuation_synthesis_agent', 'main', workflowOutputBoundaryId(valuationWorkflowId), 'main'),
+          dataEdge('scenario_agent', 'main', workflowOutputBoundaryId(valuationWorkflowId), 'scenario_table'),
         ],
-        position: { x: 930, y: 80 },
-        size: DEFAULT_CONTAINER_SIZE,
-        warnings: [],
-      },
-      {
-        id: 'Review_Flow',
-        title: '风险与催化剂评估',
-        workflowBodyKind: 'inline_container',
-        directory: 'workflows/demo/risk_catalyst',
-        status: 'not_run',
-        inputPorts: [port('main', '基本面调研结果', 'input')],
-        outputPorts: [port('main', '风险与催化剂', 'output', true)],
-        internalNodes: [
+        { x: 1360, y: 40 },
+      ),
+      inlineWorkflow(
+        riskWorkflowId,
+        '风险与催化剂工作流',
+        'workflows/demo/core_v2/risk_catalyst',
+        [
+          port('fundamentals', '基本面结论', 'input', true),
+          port('watchlist', '候选关注点', 'input', true),
+        ],
+        [
+          port('main', '风险结论', 'output', true),
+          port('watchlist', '催化剂跟踪清单', 'output', true),
+        ],
+        [
           internalNode(
-            'risk_macro',
+            'macro_risk_agent',
             '宏观与监管风险',
-            '基于基本面研究，识别利率、监管、汇率、政策和周期风险。',
+            '并行识别利率、监管、汇率、政策和周期风险。',
             'Agent',
-            'stock-macro-regulatory-risk.codex',
+            DEMO_ANALYST_AGENT_ID,
             riskComponentOutputSchema(),
+            [port('fundamentals', '基本面结论', 'input', true)],
           ),
           internalNode(
-            'risk_company',
+            'company_risk_agent',
             '公司特有风险',
-            '基于基本面研究，识别竞争、执行、产品、客户集中度和治理风险。',
+            '并行识别竞争、执行、客户集中度、管理层和资本配置风险。',
             'Agent',
-            'stock-company-specific-risk.codex',
+            DEMO_ANALYST_AGENT_ID,
             riskComponentOutputSchema(),
+            [port('fundamentals', '基本面结论', 'input', true)],
           ),
           internalNode(
-            'catalyst_scan',
+            'catalyst_agent',
             '催化剂扫描',
-            '基于基本面研究，识别未来 6-12 个月可能改变市场预期的正负催化剂。',
+            '并行识别未来 6-12 个月可能改变预期的正负催化剂。',
             'Agent',
-            'stock-catalyst-scanner.codex',
+            DEMO_ANALYST_AGENT_ID,
             catalystOutputSchema(),
+            [port('fundamentals', '基本面结论', 'input', true), port('watchlist', '候选关注点', 'input', true)],
           ),
           internalNode(
-            'risk_synthesis',
-            '风险汇总',
-            '整合宏观风险、公司风险和催化剂，输出风险矩阵与跟踪清单。',
+            'risk_synthesis_agent',
+            '风险催化剂汇总',
+            '汇总风险与催化剂，形成最终报告需要的风险矩阵。',
             'Agent',
-            'stock-risk-catalyst-synthesis.codex',
+            DEMO_SYNTHESIS_AGENT_ID,
             riskSynthesisOutputSchema(),
             [
-              port('macro_risks', '宏观与监管风险', 'input', true),
-              port('company_risks', '公司特有风险', 'input', true),
-              port('catalysts', '催化剂扫描', 'input', true),
+              port('macro_risks', '宏观风险', 'input', true),
+              port('company_risks', '公司风险', 'input', true),
+              port('catalysts', '催化剂', 'input', true),
             ],
           ),
         ],
-        internalEdges: [
-          dataEdge(workflowInputBoundaryId('Review_Flow'), 'main', 'risk_macro', 'main'),
-          dataEdge(workflowInputBoundaryId('Review_Flow'), 'main', 'risk_company', 'main'),
-          dataEdge(workflowInputBoundaryId('Review_Flow'), 'main', 'catalyst_scan', 'main'),
-          controlEdge('risk_macro', 'risk_synthesis'),
-          controlEdge('risk_company', 'risk_synthesis'),
-          controlEdge('catalyst_scan', 'risk_synthesis'),
-          dataEdge('risk_macro', 'main', 'risk_synthesis', 'macro_risks'),
-          dataEdge('risk_company', 'main', 'risk_synthesis', 'company_risks'),
-          dataEdge('catalyst_scan', 'main', 'risk_synthesis', 'catalysts'),
-          dataEdge('risk_synthesis', 'main', workflowOutputBoundaryId('Review_Flow'), 'main'),
+        [
+          dataEdge(workflowInputBoundaryId(riskWorkflowId), 'fundamentals', 'macro_risk_agent', 'fundamentals'),
+          dataEdge(workflowInputBoundaryId(riskWorkflowId), 'fundamentals', 'company_risk_agent', 'fundamentals'),
+          dataEdge(workflowInputBoundaryId(riskWorkflowId), 'fundamentals', 'catalyst_agent', 'fundamentals'),
+          dataEdge(workflowInputBoundaryId(riskWorkflowId), 'watchlist', 'catalyst_agent', 'watchlist'),
+          controlEdge('macro_risk_agent', 'risk_synthesis_agent'),
+          controlEdge('company_risk_agent', 'risk_synthesis_agent'),
+          controlEdge('catalyst_agent', 'risk_synthesis_agent'),
+          dataEdge('macro_risk_agent', 'main', 'risk_synthesis_agent', 'macro_risks'),
+          dataEdge('company_risk_agent', 'main', 'risk_synthesis_agent', 'company_risks'),
+          dataEdge('catalyst_agent', 'main', 'risk_synthesis_agent', 'catalysts'),
+          dataEdge('risk_synthesis_agent', 'main', workflowOutputBoundaryId(riskWorkflowId), 'main'),
+          dataEdge('catalyst_agent', 'main', workflowOutputBoundaryId(riskWorkflowId), 'watchlist'),
         ],
-        position: { x: 930, y: 480 },
-        size: DEFAULT_CONTAINER_SIZE,
-        warnings: [],
-      },
-      {
-        id: 'Root_Pipeline',
-        title: '生成投资调研报告',
-        workflowBodyKind: 'inline_container',
-        directory: 'workflows/demo/final_report',
-        status: 'not_run',
-        inputPorts: [port('main', '分支分析结果', 'input')],
-        outputPorts: [port('main', '投资调研报告', 'output', true)],
-        internalNodes: [
+        { x: 1360, y: 480 },
+      ),
+      inlineWorkflow(
+        reportWorkflowId,
+        '报告生成工作流',
+        'workflows/demo/core_v2/report',
+        [
+          port('fundamentals', '基本面结论', 'input', true),
+          port('valuation', '估值结论', 'input', true),
+          port('risk', '风险结论', 'input', true),
+          port('evidence_pack', '证据包', 'input', true),
+        ],
+        [
+          port('main', '投资调研报告', 'output', true),
+          port('appendix', '证据附录', 'output', true),
+        ],
+        [
           internalNode(
-            'report_writer',
-            '报告撰写',
-            '整合标的、基本面、估值、风险和催化剂，形成结构化投资调研报告。',
+            'thesis_writer_agent',
+            '投资论点撰写',
+            '整合基本面、估值和风险，撰写核心投资论点。',
             'Agent',
-            'stock-investment-report-writer.codex',
+            DEMO_REPORT_AGENT_ID,
             investmentReportOutputSchema(),
+            [
+              port('fundamentals', '基本面结论', 'input', true),
+              port('valuation', '估值结论', 'input', true),
+              port('risk', '风险结论', 'input', true),
+            ],
           ),
           internalNode(
-            'root_publish',
-            '报告发布检查',
-            '检查最终报告是否完整、证据是否可追溯、结论是否标注不确定性。',
+            'evidence_mapper_agent',
+            '证据追踪整理',
+            '并行整理证据包和报告章节之间的追踪关系。',
             'Agent',
-            'stock-report-publisher.codex',
-            reportPublishOutputSchema(),
+            DEMO_REPORT_AGENT_ID,
+            reportSchema,
+            [port('evidence_pack', '证据包', 'input', true)],
+          ),
+          internalNode(
+            'report_compiler_agent',
+            '报告合成',
+            '串行合成投资论点和证据追踪，输出可评审报告。',
+            'Agent',
+            DEMO_REPORT_AGENT_ID,
+            reportSchema,
+            [port('thesis', '投资论点', 'input', true), port('evidence', '证据追踪', 'input', true)],
           ),
         ],
-        internalEdges: [
-          dataEdge(workflowInputBoundaryId('Root_Pipeline'), 'main', 'report_writer', 'main'),
-          controlEdge('report_writer', 'root_publish'),
-          dataEdge('report_writer', 'main', 'root_publish', 'main'),
-          dataEdge('root_publish', 'main', workflowOutputBoundaryId('Root_Pipeline'), 'main'),
+        [
+          dataEdge(workflowInputBoundaryId(reportWorkflowId), 'fundamentals', 'thesis_writer_agent', 'fundamentals'),
+          dataEdge(workflowInputBoundaryId(reportWorkflowId), 'valuation', 'thesis_writer_agent', 'valuation'),
+          dataEdge(workflowInputBoundaryId(reportWorkflowId), 'risk', 'thesis_writer_agent', 'risk'),
+          dataEdge(workflowInputBoundaryId(reportWorkflowId), 'evidence_pack', 'evidence_mapper_agent', 'evidence_pack'),
+          controlEdge('thesis_writer_agent', 'report_compiler_agent'),
+          controlEdge('evidence_mapper_agent', 'report_compiler_agent'),
+          dataEdge('thesis_writer_agent', 'main', 'report_compiler_agent', 'thesis'),
+          dataEdge('evidence_mapper_agent', 'main', 'report_compiler_agent', 'evidence'),
+          dataEdge('report_compiler_agent', 'main', workflowOutputBoundaryId(reportWorkflowId), 'main'),
+          dataEdge('evidence_mapper_agent', 'main', workflowOutputBoundaryId(reportWorkflowId), 'appendix'),
         ],
-        position: { x: 1370, y: 280 },
-        size: DEFAULT_CONTAINER_SIZE,
-        warnings: [],
-      },
+        { x: 1860, y: 260 },
+      ),
+      agentNode(
+        'Final_Review_Agent',
+        '最终发布评审',
+        '接收多个 workflow 输出，检查报告、估值、风险和证据链是否一致。',
+        [
+          port('report', '投资调研报告', 'input', true),
+          port('valuation', '估值结论', 'input', true),
+          port('risk_watchlist', '风险催化剂清单', 'input', true),
+          port('evidence_appendix', '证据附录', 'input', true),
+        ],
+        [
+          port('main', '发布评审结论', 'output', true),
+          port('action_items', '后续行动项', 'output', true),
+        ],
+        reportPublishOutputSchema(),
+        { x: 2360, y: 300 },
+        DEMO_REVIEW_AGENT_ID,
+      ),
     ],
     edges: [
-      controlEdge('Stock_Target_Agent', 'Research_Flow'),
-      dataEdge('Stock_Target_Agent', 'main', 'Research_Flow', 'main'),
-      controlEdge('Research_Flow', 'Implementation_Flow'),
-      dataEdge('Research_Flow', 'main', 'Implementation_Flow', 'main'),
-      controlEdge('Research_Flow', 'Review_Flow'),
-      dataEdge('Research_Flow', 'main', 'Review_Flow', 'main'),
-      controlEdge('Implementation_Flow', 'Root_Pipeline'),
-      dataEdge('Implementation_Flow', 'main', 'Root_Pipeline', 'main'),
-      controlEdge('Review_Flow', 'Root_Pipeline'),
-      dataEdge('Review_Flow', 'main', 'Root_Pipeline', 'main'),
+      controlEdge('Market_Context_Agent', 'Target_Profile_Agent'),
+      dataEdge('Market_Context_Agent', 'main', 'Target_Profile_Agent', 'context'),
+      controlEdge('Target_Profile_Agent', fundamentalsWorkflowId),
+      dataEdge('Target_Profile_Agent', 'main', fundamentalsWorkflowId, 'target'),
+      dataEdge('Market_Context_Agent', 'main', fundamentalsWorkflowId, 'context'),
+      controlEdge(fundamentalsWorkflowId, valuationWorkflowId),
+      controlEdge(fundamentalsWorkflowId, riskWorkflowId),
+      dataEdge(fundamentalsWorkflowId, 'main', valuationWorkflowId, 'fundamentals'),
+      dataEdge('Target_Profile_Agent', 'constraints', valuationWorkflowId, 'constraints'),
+      dataEdge(fundamentalsWorkflowId, 'main', riskWorkflowId, 'fundamentals'),
+      dataEdge('Market_Context_Agent', 'watchlist', riskWorkflowId, 'watchlist'),
+      controlEdge(valuationWorkflowId, reportWorkflowId),
+      controlEdge(riskWorkflowId, reportWorkflowId),
+      dataEdge(fundamentalsWorkflowId, 'main', reportWorkflowId, 'fundamentals'),
+      dataEdge(fundamentalsWorkflowId, 'evidence_pack', reportWorkflowId, 'evidence_pack'),
+      dataEdge(valuationWorkflowId, 'main', reportWorkflowId, 'valuation'),
+      dataEdge(riskWorkflowId, 'main', reportWorkflowId, 'risk'),
+      controlEdge(reportWorkflowId, 'Final_Review_Agent'),
+      dataEdge(reportWorkflowId, 'main', 'Final_Review_Agent', 'report'),
+      dataEdge(valuationWorkflowId, 'main', 'Final_Review_Agent', 'valuation'),
+      dataEdge(riskWorkflowId, 'watchlist', 'Final_Review_Agent', 'risk_watchlist'),
+      dataEdge(reportWorkflowId, 'appendix', 'Final_Review_Agent', 'evidence_appendix'),
     ],
   };
 }
@@ -14266,6 +15542,7 @@ function reportPublishOutputSchema(): Record<string, unknown> {
   return objectOutputSchema(['status', 'summary', 'readiness', 'required_followups'], {
     readiness: stringField('报告是否可发布，以及原因'),
     required_followups: stringArrayField('发布前仍需补充的检查项'),
+    action_items: stringArrayField('发布前后需要执行的行动项'),
   });
 }
 
@@ -17578,7 +18855,10 @@ export {
   workflowInvocationLabel,
   boundedLiveEvents,
   filterLiveEvents,
+  liveStateForNodeRun,
   liveEventFromAgentRunEvent,
+  assistantDisplayStatus,
+  buildAssistantTranscriptItems,
   // Re-export extracted modules for migration period.
   AssistantDrawerExtracted,
   AssistantDockContentExtracted,

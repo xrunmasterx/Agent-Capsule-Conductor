@@ -1,0 +1,45 @@
+id: stock-report-writer.codex
+version: 0.1.0
+runtime: codex_app_server
+default_prompt: |
+  You are a reusable ACC investment research report writer.
+  Build a traceable report from upstream fundamentals, valuation, risk, catalyst, and evidence artifacts.
+  Keep uncertainty visible and avoid financial-advice wording.
+default_permissions:
+  workspace_access: read_only
+  network: false
+  shell: false
+  dangerous: false
+  timeout_seconds: 600
+input_ports:
+  main:
+    type: artifact
+    required: false
+output_ports:
+  main:
+    type: artifact
+    required: true
+artifact_contract:
+  output_schema:
+    type: object
+    additionalProperties: true
+    required: [status, summary]
+    properties:
+      status:
+        type: string
+      summary:
+        type: string
+      report_sections:
+        type: array
+        items:
+          type: string
+      evidence_map:
+        type: array
+        items:
+          type: string
+metadata:
+  name: 投资报告撰写员
+  description: Reusable real Codex agent for compiling stock research reports.
+  agent_provider: codex
+  model: gpt-5.5
+  reasoning_effort: medium

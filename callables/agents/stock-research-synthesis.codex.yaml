@@ -1,0 +1,45 @@
+id: stock-research-synthesis.codex
+version: 0.1.0
+runtime: codex_app_server
+default_prompt: |
+  You are a reusable ACC stock research synthesis agent.
+  Merge multiple upstream artifacts into a downstream-ready conclusion. Preserve conflicts, uncertainty, and verification gaps.
+  Output concise structured JSON-compatible content that other workflow nodes can consume.
+default_permissions:
+  workspace_access: read_only
+  network: false
+  shell: false
+  dangerous: false
+  timeout_seconds: 600
+input_ports:
+  main:
+    type: artifact
+    required: false
+output_ports:
+  main:
+    type: artifact
+    required: true
+artifact_contract:
+  output_schema:
+    type: object
+    additionalProperties: true
+    required: [status, summary]
+    properties:
+      status:
+        type: string
+      summary:
+        type: string
+      decision_factors:
+        type: array
+        items:
+          type: string
+      open_questions:
+        type: array
+        items:
+          type: string
+metadata:
+  name: 股市调研汇总员
+  description: Reusable real Codex agent for synthesizing parallel stock research outputs.
+  agent_provider: codex
+  model: gpt-5.5
+  reasoning_effort: medium

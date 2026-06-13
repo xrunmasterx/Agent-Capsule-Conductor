@@ -6,6 +6,7 @@ from collections import deque
 from contextlib import suppress
 from typing import Any
 
+from acc.agent_events import ensure_agent_event_projection
 from acc.session import utc_now_iso
 
 MAX_QUEUE_EVENTS = 256
@@ -123,30 +124,39 @@ def live_event_from_agent_event(
     *,
     source: str,
 ) -> dict[str, Any]:
-    event_type = str(payload.get("type") or payload.get("event") or "agent_event")
-    event_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else {}
+    projected_payload = ensure_agent_event_projection(payload)
+    event_type = str(projected_payload.get("type") or projected_payload.get("event") or "agent_event")
+    event_payload = (
+        projected_payload.get("payload")
+        if isinstance(projected_payload.get("payload"), dict)
+        else {}
+    )
     text = ""
-    if event_type == "agent_message":
+    if event_type in {"agent_message", "agent_message_delta"}:
         content = event_payload.get("content")
+        if not isinstance(content, str) and event_type == "agent_message_delta":
+            content = event_payload.get("delta")
         text = content if isinstance(content, str) else ""
     event_id = (
-        payload.get("event_id")
-        or f"live_{payload.get('session_id')}_{payload.get('turn_id')}_{seq}"
+        projected_payload.get("event_id")
+        or f"live_{projected_payload.get('session_id')}_{projected_payload.get('turn_id')}_{seq}"
     )
     return {
         "event_id": str(event_id),
         "seq": seq,
+        "event_seq": projected_payload.get("event_seq"),
         "source": source,
-        "run_id": payload.get("run_id"),
-        "node_id": payload.get("node_id"),
-        "ui_node_id": payload.get("ui_node_id"),
-        "parent_node_id": payload.get("parent_node_id"),
-        "node_run_dir": payload.get("node_run_dir"),
-        "session_id": payload.get("session_id") or payload.get("agent_session_id"),
-        "turn_id": payload.get("turn_id") or payload.get("agent_turn_id"),
-        "type": event_type if event_type in {"agent_message", "agent_status"} else "agent_event",
+        "run_id": projected_payload.get("run_id"),
+        "node_id": projected_payload.get("node_id"),
+        "ui_node_id": projected_payload.get("ui_node_id"),
+        "parent_node_id": projected_payload.get("parent_node_id"),
+        "node_run_dir": projected_payload.get("node_run_dir"),
+        "session_id": projected_payload.get("session_id") or projected_payload.get("agent_session_id"),
+        "turn_id": projected_payload.get("turn_id") or projected_payload.get("agent_turn_id"),
+        "type": event_type if event_type.startswith("agent_") else "agent_event",
         "stream": "agent",
         "text": text,
         "payload": event_payload,
-        "timestamp": payload.get("timestamp") or utc_now_iso(),
+        "projection": projected_payload.get("projection"),
+        "timestamp": projected_payload.get("timestamp") or utc_now_iso(),
     }

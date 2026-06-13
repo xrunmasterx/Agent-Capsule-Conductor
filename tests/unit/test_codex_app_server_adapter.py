@@ -90,19 +90,79 @@ async def run_chat_mode_accepts_plain_message(tmp_path: Path) -> None:
     assert not request.output_json_path.exists()
 
 
-def test_codex_app_server_authoring_mode_accepts_plain_message(tmp_path: Path) -> None:
-    asyncio.run(run_authoring_mode_accepts_plain_message(tmp_path))
+def test_codex_app_server_chat_mode_keeps_json_as_text(tmp_path: Path) -> None:
+    asyncio.run(run_chat_mode_keeps_json_as_text(tmp_path))
 
 
-async def run_authoring_mode_accepts_plain_message(tmp_path: Path) -> None:
-    command = fake_codex_command(tmp_path, message="plain authoring reply")
-    request = make_request(tmp_path, command, response_mode="authoring_optional_proposal")
+async def run_chat_mode_keeps_json_as_text(tmp_path: Path) -> None:
+    message = (
+        "Here is an example:\n"
+        "```json\n"
+        '{"schema_version":"test.output.v1","summary":"text only"}'
+        "\n```"
+    )
+    command = fake_codex_command(tmp_path, message=message)
+    request = make_request(tmp_path, command, response_mode="chat_optional_output")
 
     result = await CodexAppServerAdapter().run_turn(request)
 
     assert result.status == "success"
     assert result.output_json_path is None
-    assert result.assistant_messages == ("plain authoring reply",)
+    assert result.assistant_messages == (message,)
+    assert not request.output_json_path.exists()
+    assert "agent_output_draft" not in [
+        event["type"] for event in read_jsonl(request.events_log_path)
+    ]
+
+
+def test_codex_app_server_records_agent_message_delta(tmp_path: Path) -> None:
+    asyncio.run(run_records_agent_message_delta(tmp_path))
+
+
+async def run_records_agent_message_delta(tmp_path: Path) -> None:
+    command = fake_codex_command(tmp_path, message="模型", emit_delta=True)
+    request = make_request(tmp_path, command, response_mode="chat_optional_output")
+
+    result = await CodexAppServerAdapter().run_turn(request)
+
+    assert result.status == "success"
+    events = read_jsonl(request.events_log_path)
+    delta_events = [event for event in events if event["type"] == "agent_message_delta"]
+    assert [event["payload"]["delta"] for event in delta_events] == ["模", "型"]
+    assert delta_events[0]["payload"]["item_id"] == "msg_1"
+    assert delta_events[0]["payload"]["source"] == "codex_app_server"
+    assert "item/agentMessage/delta" in request.stdout_log_path.read_text(encoding="utf-8")
+
+
+def test_codex_app_server_reads_large_provider_line(tmp_path: Path) -> None:
+    asyncio.run(run_reads_large_provider_line(tmp_path))
+
+
+async def run_reads_large_provider_line(tmp_path: Path) -> None:
+    command = fake_codex_command(tmp_path, emit_large_provider_item=True)
+    request = make_request(tmp_path, command)
+
+    result = await CodexAppServerAdapter().run_turn(request)
+
+    assert result.status == "success"
+    assert request.stdout_log_path.stat().st_size > 70_000
+    events = read_jsonl(request.events_log_path)
+    assert any(event["type"] == "agent_message" for event in events)
+
+
+def test_codex_app_server_structured_mode_rejects_plain_message(tmp_path: Path) -> None:
+    asyncio.run(run_structured_mode_rejects_plain_message(tmp_path))
+
+
+async def run_structured_mode_rejects_plain_message(tmp_path: Path) -> None:
+    command = fake_codex_command(tmp_path, message="plain authoring reply")
+    request = make_request(tmp_path, command, response_mode="structured_required")
+
+    result = await CodexAppServerAdapter().run_turn(request)
+
+    assert result.status == "failed"
+    assert result.output_json_path is None
+    assert "did not produce a JSON object" in (result.error or result.summary)
     assert not request.output_json_path.exists()
 
 
@@ -118,7 +178,7 @@ async def run_extracts_json_object_from_markdown_message(tmp_path: Path) -> None
         "\n```"
     )
     command = fake_codex_command(tmp_path, message=message)
-    request = make_request(tmp_path, command, response_mode="authoring_optional_proposal")
+    request = make_request(tmp_path, command, response_mode="structured_required")
 
     result = await CodexAppServerAdapter().run_turn(request)
 
@@ -235,6 +295,8 @@ def fake_codex_command(
     message: str | None = None,
     wait_forever: bool = False,
     request_approval: bool = False,
+    emit_delta: bool = False,
+    emit_large_provider_item: bool = False,
 ) -> str:
     script = tmp_path / "fake_codex.py"
     script_text = """
@@ -248,6 +310,8 @@ log = pathlib.Path(__file__).with_name("rpc_writes.jsonl")
 MESSAGE = __MESSAGE_LITERAL__
 WAIT_FOREVER = __WAIT_FOREVER_LITERAL__
 REQUEST_APPROVAL = __REQUEST_APPROVAL_LITERAL__
+EMIT_DELTA = __EMIT_DELTA_LITERAL__
+EMIT_LARGE_PROVIDER_ITEM = __EMIT_LARGE_PROVIDER_ITEM_LITERAL__
 
 def emit(payload):
     print(json.dumps(payload), flush=True)
@@ -293,6 +357,31 @@ for line in sys.stdin:
             approval = json.loads(sys.stdin.readline())
             with log.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(approval, sort_keys=True) + "\\n")
+        if EMIT_DELTA:
+            message_text = MESSAGE or "ok"
+            for char in message_text:
+                emit({
+                    "jsonrpc": "2.0",
+                    "method": "item/agentMessage/delta",
+                    "params": {
+                        "threadId": "thread_1",
+                        "turnId": "turn_test",
+                        "itemId": "msg_1",
+                        "delta": char,
+                    },
+                })
+        if EMIT_LARGE_PROVIDER_ITEM:
+            emit({
+                "jsonrpc": "2.0",
+                "method": "item/started",
+                "params": {
+                    "item": {
+                        "type": "userMessage",
+                        "id": "large_user_message",
+                        "content": [{"type": "text", "text": "x" * 70000}],
+                    },
+                },
+            })
         emit({
             "jsonrpc": "2.0",
             "method": "item/completed",
@@ -316,7 +405,9 @@ for line in sys.stdin:
     script.write_text(
         script_text.replace("__MESSAGE_LITERAL__", repr(message))
         .replace("__WAIT_FOREVER_LITERAL__", "True" if wait_forever else "False")
-        .replace("__REQUEST_APPROVAL_LITERAL__", "True" if request_approval else "False"),
+        .replace("__REQUEST_APPROVAL_LITERAL__", "True" if request_approval else "False")
+        .replace("__EMIT_DELTA_LITERAL__", "True" if emit_delta else "False")
+        .replace("__EMIT_LARGE_PROVIDER_ITEM_LITERAL__", "True" if emit_large_provider_item else "False"),
         encoding="utf-8",
     )
     if sys.platform.startswith("win"):

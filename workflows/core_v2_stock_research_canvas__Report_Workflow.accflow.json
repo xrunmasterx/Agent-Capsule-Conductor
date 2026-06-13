@@ -1,0 +1,414 @@
+{
+  "control_edges": [
+    {
+      "context": "none",
+      "from": "thesis_writer_agent",
+      "to": "report_compiler_agent"
+    },
+    {
+      "context": "none",
+      "from": "evidence_mapper_agent",
+      "to": "report_compiler_agent"
+    }
+  ],
+  "data_edges": [
+    {
+      "materialization": "copy",
+      "source": {
+        "node": "thesis_writer_agent",
+        "port": "main"
+      },
+      "target": {
+        "node": "report_compiler_agent",
+        "port": "thesis"
+      }
+    },
+    {
+      "materialization": "copy",
+      "source": {
+        "node": "evidence_mapper_agent",
+        "port": "main"
+      },
+      "target": {
+        "node": "report_compiler_agent",
+        "port": "evidence"
+      }
+    }
+  ],
+  "description": "Child workflow compiled from Workbench container Report_Workflow.",
+  "exposed_inputs": {
+    "evidence_pack": {
+      "cardinality": "one",
+      "required": true,
+      "type": "artifact"
+    },
+    "fundamentals": {
+      "cardinality": "one",
+      "required": true,
+      "type": "artifact"
+    },
+    "risk": {
+      "cardinality": "one",
+      "required": true,
+      "type": "artifact"
+    },
+    "valuation": {
+      "cardinality": "one",
+      "required": true,
+      "type": "artifact"
+    }
+  },
+  "exposed_outputs": {
+    "appendix": {
+      "cardinality": "one",
+      "required": true,
+      "type": "artifact"
+    },
+    "main": {
+      "cardinality": "one",
+      "required": true,
+      "type": "artifact"
+    }
+  },
+  "id": "core_v2_stock_research_canvas__Report_Workflow",
+  "metadata": {
+    "canonical_format": "accflow",
+    "compiled_child_path": "core_v2_stock_research_canvas__Report_Workflow.accflow.json",
+    "compiled_from_workbench_container": "Report_Workflow",
+    "ui_layout": {
+      "layout": null,
+      "nodes": [
+        {
+          "id": "thesis_writer_agent",
+          "label": "投资论点撰写",
+          "position": {
+            "x": 137.0,
+            "y": 146.0
+          }
+        },
+        {
+          "id": "evidence_mapper_agent",
+          "label": "证据追踪整理",
+          "position": {
+            "x": 137.0,
+            "y": 332.0
+          }
+        },
+        {
+          "id": "report_compiler_agent",
+          "label": "报告合成",
+          "position": {
+            "x": 485.0,
+            "y": 156.0
+          }
+        }
+      ],
+      "root_workflow_id": null
+    },
+    "workbench_draft": true
+  },
+  "name": "报告生成工作流",
+  "nodes": [
+    {
+      "callable_ref": {
+        "id": "stock-report-writer.codex",
+        "kind": "agent_class"
+      },
+      "id": "thesis_writer_agent",
+      "metadata": {
+        "label": "投资论点撰写",
+        "ui_label": "投资论点撰写",
+        "workbench_kind": "agent_session"
+      },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence_gaps": {
+            "description": "证据缺口和免责声明",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "report_sections": {
+            "description": "最终报告章节摘要",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "status": {
+            "description": "success 或 failed",
+            "type": "string"
+          },
+          "summary": {
+            "description": "面向下游节点的简明结论",
+            "type": "string"
+          },
+          "thesis": {
+            "description": "投资论点",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "summary",
+          "thesis",
+          "report_sections"
+        ],
+        "type": "object"
+      },
+      "overrides": {
+        "static_input": {}
+      },
+      "ports": {
+        "inputs": {
+          "fundamentals": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          },
+          "risk": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          },
+          "valuation": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          }
+        },
+        "outputs": {
+          "main": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          }
+        }
+      },
+      "prompt_policy": {
+        "user_prompt": "整合基本面、估值和风险，撰写核心投资论点。"
+      }
+    },
+    {
+      "callable_ref": {
+        "id": "stock-report-writer.codex",
+        "kind": "agent_class"
+      },
+      "id": "evidence_mapper_agent",
+      "metadata": {
+        "label": "证据追踪整理",
+        "ui_label": "证据追踪整理",
+        "workbench_kind": "agent_session"
+      },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "action_items": {
+            "description": "发布前行动项",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "evidence_map": {
+            "description": "章节到上游产物的追踪关系",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "report_sections": {
+            "description": "最终报告章节",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "status": {
+            "description": "success 或 failed",
+            "type": "string"
+          },
+          "summary": {
+            "description": "面向下游节点的简明结论",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "summary",
+          "report_sections",
+          "evidence_map"
+        ],
+        "type": "object"
+      },
+      "overrides": {
+        "static_input": {}
+      },
+      "ports": {
+        "inputs": {
+          "evidence_pack": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          }
+        },
+        "outputs": {
+          "main": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          }
+        }
+      },
+      "prompt_policy": {
+        "user_prompt": "并行整理证据包和报告章节之间的追踪关系。"
+      }
+    },
+    {
+      "callable_ref": {
+        "id": "stock-report-writer.codex",
+        "kind": "agent_class"
+      },
+      "id": "report_compiler_agent",
+      "metadata": {
+        "label": "报告合成",
+        "ui_label": "报告合成",
+        "workbench_kind": "agent_session"
+      },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "action_items": {
+            "description": "发布前行动项",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "evidence_map": {
+            "description": "章节到上游产物的追踪关系",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "report_sections": {
+            "description": "最终报告章节",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "status": {
+            "description": "success 或 failed",
+            "type": "string"
+          },
+          "summary": {
+            "description": "面向下游节点的简明结论",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "summary",
+          "report_sections",
+          "evidence_map"
+        ],
+        "type": "object"
+      },
+      "overrides": {
+        "static_input": {}
+      },
+      "ports": {
+        "inputs": {
+          "evidence": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          },
+          "thesis": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          }
+        },
+        "outputs": {
+          "main": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          }
+        }
+      },
+      "prompt_policy": {
+        "user_prompt": "串行合成投资论点和证据追踪，输出可评审报告。"
+      }
+    }
+  ],
+  "policies": {
+    "failure_mode": "fail_fast",
+    "max_concurrency": 8
+  },
+  "schema_version": "acc.core.v2",
+  "version": "0.1.0",
+  "workflow_input_bindings": [
+    {
+      "materialization": "copy",
+      "required": false,
+      "source_port": "fundamentals",
+      "target": {
+        "node": "thesis_writer_agent",
+        "port": "fundamentals"
+      }
+    },
+    {
+      "materialization": "copy",
+      "required": false,
+      "source_port": "valuation",
+      "target": {
+        "node": "thesis_writer_agent",
+        "port": "valuation"
+      }
+    },
+    {
+      "materialization": "copy",
+      "required": false,
+      "source_port": "risk",
+      "target": {
+        "node": "thesis_writer_agent",
+        "port": "risk"
+      }
+    },
+    {
+      "materialization": "copy",
+      "required": false,
+      "source_port": "evidence_pack",
+      "target": {
+        "node": "evidence_mapper_agent",
+        "port": "evidence_pack"
+      }
+    }
+  ],
+  "workflow_output_bindings": [
+    {
+      "materialization": "copy",
+      "required": true,
+      "source": {
+        "node": "report_compiler_agent",
+        "port": "main"
+      },
+      "target_port": "main"
+    },
+    {
+      "materialization": "copy",
+      "required": true,
+      "source": {
+        "node": "evidence_mapper_agent",
+        "port": "main"
+      },
+      "target_port": "appendix"
+    }
+  ]
+}

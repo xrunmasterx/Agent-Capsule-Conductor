@@ -9,6 +9,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
+from acc.agent_events import ensure_agent_event_projection
 from acc.app.control_projection import (
     load_control_ledger_projection,
     load_decisions_projection,
@@ -16,6 +17,7 @@ from acc.app.control_projection import (
     load_plan_steps_projection,
     load_run_plan_projection,
 )
+from acc.app.run_events import RunEventProjectionService
 from acc.app.run_projection import build_node_run_projection
 from acc.control_plane import SecretLikePathError, reject_secret_like_path
 from acc.result_store.filesystem import FilesystemResultStore
@@ -149,10 +151,11 @@ def get_run_events(
             "events": [],
         }
     event_log = run_dir / "events.jsonl"
+    event_projection = RunEventProjectionService(run_dir)
     return {
         "run_id": run_id,
         "event_log": relative_project_path(project_root, event_log),
-        "events": read_run_events_with_nested(run_dir, limit=limit),
+        "events": event_projection.read_run_events_with_nested(limit=limit),
     }
 
 
@@ -167,11 +170,12 @@ def get_node_events(
     run_dir = resolve_run_dir_or_404(run_id, request)
     validate_path_component(node_id, "node_id")
     event_log = run_dir / "nodes" / node_id / "events.jsonl"
+    event_projection = RunEventProjectionService(run_dir)
     return {
         "run_id": run_id,
         "node_id": node_id,
         "event_log": relative_project_path(project_root, event_log),
-        "events": read_node_events_with_agent(run_dir, node_id, limit=limit),
+        "events": event_projection.read_node_events_with_agent(node_id, limit=limit),
     }
 
 
@@ -188,7 +192,12 @@ def get_node_log_delta(
     validate_path_component(node_id, "node_id")
     if stream not in {"stdout", "stderr"}:
         raise HTTPException(status_code=400, detail=f"Invalid log stream: {stream}")
-    return read_node_log_delta(run_dir, run_id, node_id, stream, offset=offset, limit=limit)
+    return RunEventProjectionService(run_dir).read_node_log_delta(
+        node_id,
+        stream,
+        offset=offset,
+        limit=limit,
+    )
 
 
 @router.get("/{run_id}/stream")
@@ -198,37 +207,26 @@ async def stream_run(
     after_seq: int = Query(0, ge=0),
 ) -> StreamingResponse:
     run_dir = resolve_run_dir_or_404(run_id, request)
+    event_projection = RunEventProjectionService(run_dir)
 
     async def event_source():
         offsets: dict[tuple[str, str], int] = {}
         agent_event_counts: dict[str, int] = {}
         sequence = 0
         while not await request.is_disconnected():
-            for node_ref in iter_stream_node_refs(run_dir):
-                node_id = node_ref["node_id"]
+            for node_identity in event_projection.iter_node_identities():
+                node_id = node_identity.node_id
                 for stream_name in ("stdout", "stderr"):
-                    key = (str(node_ref["node_dir"]), stream_name)
-                    delta = read_node_log_delta_from_dir(
-                        Path(str(node_ref["node_dir"])),
-                        run_id,
-                        node_id,
+                    key = (node_identity.node_run_dir, stream_name)
+                    payload = event_projection.read_node_log_delta_from_identity(
+                        node_identity,
                         stream_name,
                         offset=offsets.get(key, 0),
                         limit=65536,
                     )
-                    offsets[key] = int(delta["next_offset"])
-                    if delta["text"]:
-                        payload = {
-                            "type": "node_log_delta",
-                            "run_id": run_id,
-                            "node_id": node_id,
-                            **stream_node_identity(node_ref),
-                            "stream": stream_name,
-                            "offset": delta["offset"],
-                            "next_offset": delta["next_offset"],
-                            "text": delta["text"],
-                            "timestamp": utc_now_iso(),
-                        }
+                    offsets[key] = int(payload["next_offset"])
+                    if payload["text"]:
+                        payload["timestamp"] = utc_now_iso()
                         data = json.dumps(payload, ensure_ascii=False)
                         yield f"event: node_log_delta\ndata: {data}\n\n"
                         sequence += 1
@@ -236,8 +234,8 @@ async def stream_run(
                         if sequence > after_seq:
                             yield sse_event("live_event", live_event)
 
-                agent_event_log = effective_agent_event_log_path_for_dir(
-                    Path(str(node_ref["node_dir"]))
+                agent_event_log = event_projection.resolve_agent_turn_event_log(
+                    node_identity.node_dir
                 )
                 if agent_event_log is not None:
                     agent_event_key = str(agent_event_log)
@@ -245,9 +243,15 @@ async def stream_run(
                     seen_count = agent_event_counts.get(agent_event_key, 0)
                     if seen_count > len(events):
                         seen_count = 0
-                    for agent_event in events[seen_count:]:
-                        payload = project_agent_event(agent_event, run_id=run_id, node_id=node_id)
-                        payload.update(stream_node_identity(node_ref))
+                    for event_index, agent_event in enumerate(
+                        events[seen_count:],
+                        start=seen_count + 1,
+                    ):
+                        payload = event_projection.project_agent_event(
+                            agent_event,
+                            node_identity,
+                            fallback_event_seq=event_index,
+                        )
                         data = json.dumps(payload, ensure_ascii=False)
                         yield f"event: agent_event\ndata: {data}\n\n"
                         sequence += 1
@@ -330,8 +334,12 @@ def read_node_log_delta(
     offset: int,
     limit: int,
 ) -> dict[str, Any]:
-    log_path = effective_node_log_path(run_dir, node_id, stream)
-    return read_log_delta(log_path, run_id, node_id, stream, offset=offset, limit=limit)
+    return RunEventProjectionService(run_dir).read_node_log_delta(
+        node_id,
+        stream,
+        offset=offset,
+        limit=limit,
+    )
 
 
 def read_node_log_delta_from_dir(
@@ -343,8 +351,14 @@ def read_node_log_delta_from_dir(
     offset: int,
     limit: int,
 ) -> dict[str, Any]:
-    log_path = effective_node_log_path_for_dir(node_dir, stream)
-    return read_log_delta(log_path, run_id, node_id, stream, offset=offset, limit=limit)
+    run_dir = root_run_dir_for_node_dir(node_dir)
+    return RunEventProjectionService(run_dir).read_node_log_delta(
+        node_id,
+        stream,
+        offset=offset,
+        limit=limit,
+        node_run_dir=str(node_dir.resolve()),
+    )
 
 
 def read_log_delta(
@@ -389,39 +403,16 @@ def effective_node_log_path(run_dir: Path, node_id: str, stream: str) -> Path:
 
 
 def effective_node_log_path_for_dir(node_dir: Path, stream: str) -> Path:
-    node_log_path = node_dir / f"{stream}.log"
-    runtime = load_json_tolerant(node_dir / "runtime.json")
-    session_ref = runtime.get("agent_session_ref")
-    turn_id = runtime.get("turn_id")
-    if not isinstance(session_ref, str) or not isinstance(turn_id, str):
-        return node_log_path
-    if not is_safe_path_component(turn_id):
-        return node_log_path
-    try:
-        session_dir = Path(session_ref).resolve()
-    except OSError:
-        return node_log_path
-    if not is_valid_agent_session_dir_for_node(node_dir, session_dir):
-        return node_log_path
-    turn_log_path = session_dir / "turns" / turn_id / f"{stream}.log"
-    if turn_log_path.exists() and turn_log_path.is_file():
-        return turn_log_path
-    return node_log_path
+    return RunEventProjectionService(root_run_dir_for_node_dir(node_dir)).resolve_effective_log(
+        node_dir,
+        stream,
+    )
 
 
 def is_valid_agent_session_dir_for_node(node_dir: Path, session_dir: Path) -> bool:
-    node_dir = node_dir.resolve()
-    candidates: list[Path] = []
-    current = node_dir
-    while current != current.parent:
-        if current.parent.name == "runs":
-            candidates.append((current.parent / "_agent_sessions").resolve())
-            candidates.append((current / "_agent_sessions").resolve())
-            break
-        if current.name == "nodes" and current.parent.name != "nested_workflow":
-            candidates.append((current.parent / "_agent_sessions").resolve())
-        current = current.parent
-    return any(is_relative_to(session_dir, candidate) for candidate in candidates)
+    return RunEventProjectionService(
+        root_run_dir_for_node_dir(node_dir)
+    ).is_valid_agent_session_dir_for_node(node_dir, session_dir)
 
 
 def is_safe_path_component(value: str) -> bool:
@@ -442,11 +433,14 @@ def iter_node_dirs(run_dir: Path) -> list[Path]:
 
 def iter_stream_node_refs(run_dir: Path) -> list[dict[str, Any]]:
     refs: list[dict[str, Any]] = []
-    for node_dir in iter_node_dirs(run_dir):
-        refs.append({"node_id": node_dir.name, "node_dir": node_dir})
-        nested_run_dir = node_dir / "nested_workflow"
-        if nested_run_dir.exists() and nested_run_dir.is_dir():
-            refs.extend(iter_nested_stream_node_refs(nested_run_dir, node_dir.name))
+    for identity in RunEventProjectionService(run_dir).iter_node_identities():
+        refs.append(
+            {
+                "node_id": identity.node_id,
+                "node_dir": identity.node_dir,
+                **identity.stream_identity(),
+            }
+        )
     return refs
 
 
@@ -454,22 +448,18 @@ def iter_nested_stream_node_refs(
     nested_run_dir: Path,
     parent_ui_node_id: str,
 ) -> list[dict[str, Any]]:
+    run_dir = root_run_dir_for_node_dir(nested_run_dir)
+    prefix = f"{parent_ui_node_id}__internal__"
     refs: list[dict[str, Any]] = []
-    for node_dir in iter_node_dirs(nested_run_dir):
-        node_id = node_dir.name
-        ui_node_id = f"{parent_ui_node_id}__internal__{node_id}"
-        refs.append(
-            {
-                "node_id": node_id,
-                "node_dir": node_dir,
-                "ui_node_id": ui_node_id,
-                "parent_node_id": parent_ui_node_id,
-                "node_run_dir": str(node_dir.resolve()),
-            }
-        )
-        nested_child_run_dir = node_dir / "nested_workflow"
-        if nested_child_run_dir.exists() and nested_child_run_dir.is_dir():
-            refs.extend(iter_nested_stream_node_refs(nested_child_run_dir, ui_node_id))
+    for identity in RunEventProjectionService(run_dir).iter_node_identities():
+        if identity.ui_node_id and identity.ui_node_id.startswith(prefix):
+            refs.append(
+                {
+                    "node_id": identity.node_id,
+                    "node_dir": identity.node_dir,
+                    **identity.stream_identity(),
+                }
+            )
     return refs
 
 
@@ -487,6 +477,15 @@ def _build_run_projection(run_dir: Path) -> RunProjection:
         result_store=FilesystemResultStore(run_dir.parent),
         run_dir=run_dir,
     )
+
+
+def root_run_dir_for_node_dir(path: Path) -> Path:
+    current = path.resolve()
+    while current != current.parent:
+        if current.parent.name == "runs":
+            return current
+        current = current.parent
+    return path.resolve()
 
 
 def project_events_ref(payload: dict[str, Any], request: Request) -> dict[str, Any]:
@@ -541,18 +540,7 @@ def read_jsonl_tolerant(path: Path, limit: int = 200) -> list[dict[str, Any]]:
 
 
 def read_run_events_with_nested(run_dir: Path, limit: int = 200) -> list[dict[str, Any]]:
-    ordered_events: list[tuple[str, int, dict[str, Any]]] = []
-    sequence = 0
-    for event in read_jsonl_tolerant(run_dir / "events.jsonl", limit=limit):
-        ordered_events.append((event_sort_key(event), sequence, event))
-        sequence += 1
-
-    for nested_event in read_nested_workflow_events(run_dir, parent_ui_node_id=None, limit=limit):
-        ordered_events.append((event_sort_key(nested_event), sequence, nested_event))
-        sequence += 1
-
-    ordered_events.sort(key=lambda item: (item[0], item[1]))
-    return [event for _, _, event in ordered_events[-limit:]]
+    return RunEventProjectionService(run_dir).read_run_events_with_nested(limit=limit)
 
 
 def read_node_events_with_agent(
@@ -560,20 +548,10 @@ def read_node_events_with_agent(
     node_id: str,
     limit: int,
 ) -> list[dict[str, Any]]:
-    node_dir = run_dir / "nodes" / node_id
-    ordered_events: list[tuple[str, int, dict[str, Any]]] = []
-    sequence = 0
-    for event in read_jsonl_tolerant(node_dir / "events.jsonl", limit=limit):
-        ordered_events.append((event_sort_key(event), sequence, event))
-        sequence += 1
-    agent_event_log = effective_agent_event_log_path(run_dir, node_id)
-    if agent_event_log is not None:
-        for event in read_jsonl_tolerant(agent_event_log, limit=limit):
-            projected = project_agent_event(event, run_id=run_dir.name, node_id=node_id)
-            ordered_events.append((event_sort_key(projected), sequence, projected))
-            sequence += 1
-    ordered_events.sort(key=lambda item: (item[0], item[1]))
-    return [event for _, _, event in ordered_events[-limit:]]
+    return RunEventProjectionService(run_dir).read_node_events_with_agent(
+        node_id,
+        limit=limit,
+    )
 
 
 def effective_agent_event_log_path(run_dir: Path, node_id: str) -> Path | None:
@@ -581,25 +559,19 @@ def effective_agent_event_log_path(run_dir: Path, node_id: str) -> Path | None:
 
 
 def effective_agent_event_log_path_for_dir(node_dir: Path) -> Path | None:
-    runtime = load_json_tolerant(node_dir / "runtime.json")
-    session_ref = runtime.get("agent_session_ref")
-    turn_id = runtime.get("turn_id")
-    if not isinstance(session_ref, str) or not isinstance(turn_id, str):
-        return None
-    if not is_safe_path_component(turn_id):
-        return None
-    try:
-        session_dir = Path(session_ref).resolve()
-    except OSError:
-        return None
-    if not is_valid_agent_session_dir_for_node(node_dir, session_dir):
-        return None
-    event_log = session_dir / "turns" / turn_id / "events.jsonl"
-    return event_log if event_log.exists() and event_log.is_file() else None
+    return RunEventProjectionService(
+        root_run_dir_for_node_dir(node_dir)
+    ).resolve_agent_turn_event_log(node_dir)
 
 
-def project_agent_event(event: dict[str, Any], *, run_id: str, node_id: str) -> dict[str, Any]:
-    projected = dict(event)
+def project_agent_event(
+    event: dict[str, Any],
+    *,
+    run_id: str,
+    node_id: str,
+    fallback_event_seq: int | None = None,
+) -> dict[str, Any]:
+    projected = ensure_agent_event_projection(event, fallback_event_seq=fallback_event_seq)
     projected["source"] = "agent_session"
     projected["run_id"] = projected.get("run_id") or run_id
     projected["node_id"] = projected.get("node_id") or node_id
@@ -623,31 +595,17 @@ def read_nested_workflow_events(
     parent_ui_node_id: str | None,
     limit: int,
 ) -> list[dict[str, Any]]:
-    nested_events: list[dict[str, Any]] = []
-    nodes_dir = run_dir / "nodes"
-    if not nodes_dir.exists() or not nodes_dir.is_dir():
-        return nested_events
-    for node_dir in sorted(item for item in nodes_dir.iterdir() if item.is_dir()):
-        nested_run_dir = node_dir / "nested_workflow"
-        if not nested_run_dir.exists() or not nested_run_dir.is_dir():
-            continue
-        nested_parent_ui_node_id = (
-            f"{parent_ui_node_id}__internal__{node_dir.name}"
-            if parent_ui_node_id
-            else node_dir.name
-        )
-        for event in read_jsonl_tolerant(nested_run_dir / "events.jsonl", limit=limit):
-            nested_events.append(
-                annotate_nested_event(event, nested_parent_ui_node_id, nested_run_dir)
-            )
-        nested_events.extend(
-            read_nested_workflow_events(
-                nested_run_dir,
-                parent_ui_node_id=nested_parent_ui_node_id,
-                limit=limit,
-            )
-        )
-    return nested_events
+    events = RunEventProjectionService(root_run_dir_for_node_dir(run_dir)).read_nested_workflow_events(
+        limit=limit,
+    )
+    if parent_ui_node_id is None:
+        return events
+    return [
+        event
+        for event in events
+        if isinstance(event.get("parent_node_id"), str)
+        and str(event["parent_node_id"]).startswith(parent_ui_node_id)
+    ]
 
 
 def annotate_nested_event(

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from acc.runtime.node_payload import MISSING_PORT_VALUE, output_value_for_port
 from acc.callable_runner import (
     codex_sandbox_for_permissions,
     effective_permission_profile,
@@ -9,6 +8,7 @@ from acc.callable_runner import (
     render_agent_prompt,
     structured_output_schema_errors,
 )
+from acc.engine.workflow_validation import collect_callable_validation_issues
 from acc.models import (
     AgentClassTemplate,
     CallableRef,
@@ -23,7 +23,7 @@ from acc.models import (
     WorkflowInputBinding,
     WorkflowOutputBinding,
 )
-from acc.engine.workflow_validation import collect_callable_validation_issues
+from acc.runtime.node_payload import MISSING_PORT_VALUE, output_value_for_port
 
 
 def test_node_output_schema_overrides_template_output_schema() -> None:
@@ -291,12 +291,12 @@ def test_workflow_input_main_can_fan_out_to_multiple_nodes() -> None:
             "left": NodeInvocationSpec(
                 id="left",
                 callable_ref=CallableRef(kind="agent_class", id="left.codex"),
-                input_ports={"main": PortContract(id="main", direction="input")},
+                input_ports={"main": PortContract(id="main", direction="input", required=True)},
             ),
             "right": NodeInvocationSpec(
                 id="right",
                 callable_ref=CallableRef(kind="agent_class", id="right.codex"),
-                input_ports={"main": PortContract(id="main", direction="input")},
+                input_ports={"main": PortContract(id="main", direction="input", required=True)},
             ),
         },
         control_edges=[],
@@ -316,6 +316,7 @@ def test_workflow_input_main_can_fan_out_to_multiple_nodes() -> None:
     issues = collect_callable_validation_issues(template)
 
     assert not [issue for issue in issues if issue.code == "unbound_workflow_input"]
+    assert not [issue for issue in issues if issue.code == "unbound_input_port"]
 
 
 def test_workflow_exposed_output_without_binding_is_allowed() -> None:

@@ -55,9 +55,33 @@ export type NodeLogDelta = {
   eof?: boolean;
 };
 
+export type TranscriptProjection = {
+  schema_version: 'acc.transcript_projection.v1' | string;
+  visibility: 'primary' | 'folded' | 'technical' | 'hidden' | string;
+  category:
+    | 'assistant_text'
+    | 'tool'
+    | 'approval'
+    | 'proposal'
+    | 'artifact'
+    | 'status'
+    | 'error'
+    | 'usage'
+    | 'provider'
+    | 'decision'
+    | string;
+  severity?: 'info' | 'warning' | 'error' | string;
+  display_kind?: string;
+  summary?: string;
+  source?: 'authored' | 'computed' | 'computed_legacy' | string;
+  requires_action?: boolean;
+  [key: string]: unknown;
+};
+
 export type WorkbenchLiveEvent = {
   event_id: string;
   seq: number;
+  event_seq?: number;
   source: 'run_node' | 'agent_turn' | 'assistant_turn';
   run_id?: string;
   node_id?: string;
@@ -70,13 +94,23 @@ export type WorkbenchLiveEvent = {
     | 'node_log_delta'
     | 'agent_event'
     | 'agent_message'
+    | 'agent_message_delta'
     | 'agent_status'
+    | 'agent_tool_use'
+    | 'agent_tool_result'
+    | 'agent_approval_requested'
+    | 'agent_usage'
+    | 'agent_output_draft'
+    | 'agent_output_published'
+    | 'agent_turn_failed'
+    | 'agent_turn_cancelled'
     | 'artifact_ready'
     | 'terminal'
     | 'gap';
   stream?: 'stdout' | 'stderr' | 'agent';
   text?: string;
   payload?: Record<string, unknown>;
+  projection?: TranscriptProjection;
   timestamp: string;
   truncated?: boolean;
 };
@@ -95,6 +129,15 @@ export type AgentSessionRecord = {
   callable_ref?: Record<string, unknown>;
   runtime?: string;
   provider_session_id?: string | null;
+  provider_session_health?: string | null;
+  provider_session_policy?: string | null;
+  last_failure_kind?: string | null;
+  last_recoverability?: string | null;
+  last_failure_user_summary?: string | null;
+  last_failure_technical_detail?: string | null;
+  last_failure_turn_id?: string | null;
+  last_failure_at?: string | null;
+  can_submit_next_turn?: boolean | null;
   workspace_ref?: string;
   status?: string;
   current_output_ref?: string | null;
@@ -130,6 +173,16 @@ export type AgentTurnRecord = {
   input_ref?: string;
   draft_output_ref?: string;
   usage_ref?: string;
+  failure_kind?: string;
+  failure_origin?: string;
+  failed_stage?: string;
+  recoverability?: string;
+  provider_session_policy?: string;
+  provider_session_health?: string;
+  can_submit_next_turn?: boolean;
+  user_summary?: string;
+  technical_detail?: string;
+  raw_error_ref?: string;
   started_at?: string | null;
   ended_at?: string | null;
   events_url?: string;
@@ -219,6 +272,7 @@ export type InteractionList = {
 
 export type RunEvent = {
   event_id?: string;
+  event_seq?: number;
   type?: string;
   event?: string;
   timestamp?: string;
@@ -228,6 +282,7 @@ export type RunEvent = {
   level?: number;
   status?: string;
   payload?: Record<string, unknown>;
+  projection?: TranscriptProjection;
   [key: string]: unknown;
 };
 
@@ -413,6 +468,18 @@ export type WorkflowGraph = {
   };
   exposed_inputs?: WorkflowPort[];
   exposed_outputs?: WorkflowPort[];
+  workflow_input_bindings?: Array<{
+    source_port: string;
+    target: { node: string; port: string };
+    materialization?: string;
+    required?: boolean;
+  }>;
+  workflow_output_bindings?: Array<{
+    source: { node: string; port: string };
+    target_port: string;
+    materialization?: string;
+    required?: boolean;
+  }>;
   policy?: {
     failure_mode?: string;
     max_concurrency?: number;

@@ -1,0 +1,576 @@
+{
+  "control_edges": [
+    {
+      "context": "none",
+      "from": "business_model_agent",
+      "to": "fundamentals_synthesis_agent"
+    },
+    {
+      "context": "none",
+      "from": "financial_quality_agent",
+      "to": "fundamentals_synthesis_agent"
+    },
+    {
+      "context": "none",
+      "from": "industry_position_agent",
+      "to": "fundamentals_synthesis_agent"
+    },
+    {
+      "context": "none",
+      "from": "fundamentals_synthesis_agent",
+      "to": "fundamentals_evidence_agent"
+    }
+  ],
+  "data_edges": [
+    {
+      "materialization": "copy",
+      "source": {
+        "node": "business_model_agent",
+        "port": "main"
+      },
+      "target": {
+        "node": "fundamentals_synthesis_agent",
+        "port": "business"
+      }
+    },
+    {
+      "materialization": "copy",
+      "source": {
+        "node": "financial_quality_agent",
+        "port": "main"
+      },
+      "target": {
+        "node": "fundamentals_synthesis_agent",
+        "port": "financials"
+      }
+    },
+    {
+      "materialization": "copy",
+      "source": {
+        "node": "industry_position_agent",
+        "port": "main"
+      },
+      "target": {
+        "node": "fundamentals_synthesis_agent",
+        "port": "industry"
+      }
+    }
+  ],
+  "description": "Child workflow compiled from Workbench container Fundamentals_Workflow.",
+  "exposed_inputs": {
+    "context": {
+      "cardinality": "one",
+      "required": true,
+      "type": "artifact"
+    },
+    "target": {
+      "cardinality": "one",
+      "required": true,
+      "type": "artifact"
+    }
+  },
+  "exposed_outputs": {
+    "evidence_pack": {
+      "cardinality": "one",
+      "required": true,
+      "type": "artifact"
+    },
+    "main": {
+      "cardinality": "one",
+      "required": true,
+      "type": "artifact"
+    }
+  },
+  "id": "core_v2_stock_research_canvas__Fundamentals_Workflow",
+  "metadata": {
+    "canonical_format": "accflow",
+    "compiled_child_path": "core_v2_stock_research_canvas__Fundamentals_Workflow.accflow.json",
+    "compiled_from_workbench_container": "Fundamentals_Workflow",
+    "ui_layout": {
+      "layout": null,
+      "nodes": [
+        {
+          "id": "business_model_agent",
+          "label": "业务模式分析",
+          "position": {
+            "x": 137.0,
+            "y": 146.0
+          }
+        },
+        {
+          "id": "financial_quality_agent",
+          "label": "财务质量分析",
+          "position": {
+            "x": 137.0,
+            "y": 332.0
+          }
+        },
+        {
+          "id": "industry_position_agent",
+          "label": "行业位置分析",
+          "position": {
+            "x": 137.0,
+            "y": 518.0
+          }
+        },
+        {
+          "id": "fundamentals_synthesis_agent",
+          "label": "基本面汇总",
+          "position": {
+            "x": 485.0,
+            "y": 332.0
+          }
+        },
+        {
+          "id": "fundamentals_evidence_agent",
+          "label": "证据包整理",
+          "position": {
+            "x": 833.0,
+            "y": 384.0
+          }
+        }
+      ],
+      "root_workflow_id": null
+    },
+    "workbench_draft": true
+  },
+  "name": "基本面工作流",
+  "nodes": [
+    {
+      "callable_ref": {
+        "id": "stock-research-analyst.codex",
+        "kind": "agent_class"
+      },
+      "id": "business_model_agent",
+      "metadata": {
+        "label": "业务模式分析",
+        "ui_label": "业务模式分析",
+        "workbench_kind": "agent_session"
+      },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {
+            "description": "证据、假设和需要后续验证的信息",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "findings": {
+            "description": "业务模式分析 的关键发现",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "status": {
+            "description": "success 或 failed",
+            "type": "string"
+          },
+          "summary": {
+            "description": "面向下游节点的简明结论",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "summary",
+          "findings",
+          "evidence"
+        ],
+        "type": "object"
+      },
+      "overrides": {
+        "static_input": {}
+      },
+      "ports": {
+        "inputs": {
+          "context": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          },
+          "target": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          }
+        },
+        "outputs": {
+          "main": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          }
+        }
+      },
+      "prompt_policy": {
+        "user_prompt": "分析收入来源、客户、产品线和商业模式韧性。"
+      }
+    },
+    {
+      "callable_ref": {
+        "id": "stock-research-analyst.codex",
+        "kind": "agent_class"
+      },
+      "id": "financial_quality_agent",
+      "metadata": {
+        "label": "财务质量分析",
+        "ui_label": "财务质量分析",
+        "workbench_kind": "agent_session"
+      },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {
+            "description": "证据、假设和需要后续验证的信息",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "findings": {
+            "description": "财务质量分析 的关键发现",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "status": {
+            "description": "success 或 failed",
+            "type": "string"
+          },
+          "summary": {
+            "description": "面向下游节点的简明结论",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "summary",
+          "findings",
+          "evidence"
+        ],
+        "type": "object"
+      },
+      "overrides": {
+        "static_input": {}
+      },
+      "ports": {
+        "inputs": {
+          "target": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          }
+        },
+        "outputs": {
+          "main": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          }
+        }
+      },
+      "prompt_policy": {
+        "user_prompt": "分析收入质量、利润率、现金流、资产负债表和需验证的财报数据。"
+      }
+    },
+    {
+      "callable_ref": {
+        "id": "stock-research-analyst.codex",
+        "kind": "agent_class"
+      },
+      "id": "industry_position_agent",
+      "metadata": {
+        "label": "行业位置分析",
+        "ui_label": "行业位置分析",
+        "workbench_kind": "agent_session"
+      },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {
+            "description": "证据、假设和需要后续验证的信息",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "findings": {
+            "description": "行业位置分析 的关键发现",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "status": {
+            "description": "success 或 failed",
+            "type": "string"
+          },
+          "summary": {
+            "description": "面向下游节点的简明结论",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "summary",
+          "findings",
+          "evidence"
+        ],
+        "type": "object"
+      },
+      "overrides": {
+        "static_input": {}
+      },
+      "ports": {
+        "inputs": {
+          "context": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          },
+          "target": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          }
+        },
+        "outputs": {
+          "main": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          }
+        }
+      },
+      "prompt_policy": {
+        "user_prompt": "分析行业结构、竞争对手、增长驱动和公司相对位置。"
+      }
+    },
+    {
+      "callable_ref": {
+        "id": "stock-research-synthesis.codex",
+        "kind": "agent_class"
+      },
+      "control": {
+        "forward_main_output_on_control": true
+      },
+      "id": "fundamentals_synthesis_agent",
+      "metadata": {
+        "label": "基本面汇总",
+        "ui_label": "基本面汇总",
+        "workbench_kind": "agent_session"
+      },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "decision_factors": {
+            "description": "基本面汇总 输出给下游 workflow 的判断因子",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "open_questions": {
+            "description": "下游仍需处理的不确定性",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "status": {
+            "description": "success 或 failed",
+            "type": "string"
+          },
+          "summary": {
+            "description": "面向下游节点的简明结论",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "summary",
+          "decision_factors",
+          "open_questions"
+        ],
+        "type": "object"
+      },
+      "overrides": {
+        "static_input": {}
+      },
+      "ports": {
+        "inputs": {
+          "business": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          },
+          "financials": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          },
+          "industry": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          }
+        },
+        "outputs": {
+          "main": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          }
+        }
+      },
+      "prompt_policy": {
+        "user_prompt": "并行汇总业务、财务、行业三路结果，形成下游估值和风险可消费的结论。"
+      }
+    },
+    {
+      "callable_ref": {
+        "id": "stock-research-synthesis.codex",
+        "kind": "agent_class"
+      },
+      "id": "fundamentals_evidence_agent",
+      "metadata": {
+        "label": "证据包整理",
+        "ui_label": "证据包整理",
+        "workbench_kind": "agent_session"
+      },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "decision_factors": {
+            "description": "证据包整理 输出给下游 workflow 的判断因子",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "open_questions": {
+            "description": "下游仍需处理的不确定性",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "status": {
+            "description": "success 或 failed",
+            "type": "string"
+          },
+          "summary": {
+            "description": "面向下游节点的简明结论",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "summary",
+          "decision_factors",
+          "open_questions"
+        ],
+        "type": "object"
+      },
+      "overrides": {
+        "static_input": {}
+      },
+      "ports": {
+        "inputs": {
+          "main": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          }
+        },
+        "outputs": {
+          "main": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          }
+        }
+      },
+      "prompt_policy": {
+        "user_prompt": "从基本面汇总中整理证据、假设和验证缺口，供最终报告追踪。"
+      }
+    }
+  ],
+  "policies": {
+    "failure_mode": "fail_fast",
+    "max_concurrency": 8
+  },
+  "schema_version": "acc.core.v2",
+  "version": "0.1.0",
+  "workflow_input_bindings": [
+    {
+      "materialization": "copy",
+      "required": false,
+      "source_port": "target",
+      "target": {
+        "node": "business_model_agent",
+        "port": "target"
+      }
+    },
+    {
+      "materialization": "copy",
+      "required": false,
+      "source_port": "context",
+      "target": {
+        "node": "business_model_agent",
+        "port": "context"
+      }
+    },
+    {
+      "materialization": "copy",
+      "required": false,
+      "source_port": "target",
+      "target": {
+        "node": "financial_quality_agent",
+        "port": "target"
+      }
+    },
+    {
+      "materialization": "copy",
+      "required": false,
+      "source_port": "target",
+      "target": {
+        "node": "industry_position_agent",
+        "port": "target"
+      }
+    },
+    {
+      "materialization": "copy",
+      "required": false,
+      "source_port": "context",
+      "target": {
+        "node": "industry_position_agent",
+        "port": "context"
+      }
+    }
+  ],
+  "workflow_output_bindings": [
+    {
+      "materialization": "copy",
+      "required": true,
+      "source": {
+        "node": "fundamentals_synthesis_agent",
+        "port": "main"
+      },
+      "target_port": "main"
+    },
+    {
+      "materialization": "copy",
+      "required": true,
+      "source": {
+        "node": "fundamentals_evidence_agent",
+        "port": "main"
+      },
+      "target_port": "evidence_pack"
+    }
+  ]
+}

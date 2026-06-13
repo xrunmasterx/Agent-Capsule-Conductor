@@ -1,0 +1,381 @@
+{
+  "control_edges": [
+    {
+      "context": "none",
+      "from": "valuation_model_agent",
+      "to": "valuation_synthesis_agent"
+    },
+    {
+      "context": "none",
+      "from": "scenario_agent",
+      "to": "valuation_synthesis_agent"
+    }
+  ],
+  "data_edges": [
+    {
+      "materialization": "copy",
+      "source": {
+        "node": "valuation_model_agent",
+        "port": "main"
+      },
+      "target": {
+        "node": "valuation_synthesis_agent",
+        "port": "valuation_model"
+      }
+    },
+    {
+      "materialization": "copy",
+      "source": {
+        "node": "scenario_agent",
+        "port": "main"
+      },
+      "target": {
+        "node": "valuation_synthesis_agent",
+        "port": "scenario_analysis"
+      }
+    }
+  ],
+  "description": "Child workflow compiled from Workbench container Valuation_Workflow.",
+  "exposed_inputs": {
+    "constraints": {
+      "cardinality": "one",
+      "required": true,
+      "type": "artifact"
+    },
+    "fundamentals": {
+      "cardinality": "one",
+      "required": true,
+      "type": "artifact"
+    }
+  },
+  "exposed_outputs": {
+    "main": {
+      "cardinality": "one",
+      "required": true,
+      "type": "artifact"
+    },
+    "scenario_table": {
+      "cardinality": "one",
+      "required": true,
+      "type": "artifact"
+    }
+  },
+  "id": "core_v2_stock_research_canvas__Valuation_Workflow",
+  "metadata": {
+    "canonical_format": "accflow",
+    "compiled_child_path": "core_v2_stock_research_canvas__Valuation_Workflow.accflow.json",
+    "compiled_from_workbench_container": "Valuation_Workflow",
+    "ui_layout": {
+      "layout": null,
+      "nodes": [
+        {
+          "id": "valuation_model_agent",
+          "label": "估值框架",
+          "position": {
+            "x": 137.0,
+            "y": 146.0
+          }
+        },
+        {
+          "id": "scenario_agent",
+          "label": "情景分析",
+          "position": {
+            "x": 137.0,
+            "y": 332.0
+          }
+        },
+        {
+          "id": "valuation_synthesis_agent",
+          "label": "估值汇总",
+          "position": {
+            "x": 485.0,
+            "y": 156.0
+          }
+        }
+      ],
+      "root_workflow_id": null
+    },
+    "workbench_draft": true
+  },
+  "name": "估值与情景工作流",
+  "nodes": [
+    {
+      "callable_ref": {
+        "id": "stock-research-analyst.codex",
+        "kind": "agent_class"
+      },
+      "id": "valuation_model_agent",
+      "metadata": {
+        "label": "估值框架",
+        "ui_label": "估值框架",
+        "workbench_kind": "agent_session"
+      },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "assumptions": {
+            "description": "估值或情景假设",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "sensitivities": {
+            "description": "关键敏感变量",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "status": {
+            "description": "success 或 failed",
+            "type": "string"
+          },
+          "summary": {
+            "description": "面向下游节点的简明结论",
+            "type": "string"
+          },
+          "valuation_view": {
+            "description": "估值或情景判断",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "summary",
+          "assumptions",
+          "valuation_view"
+        ],
+        "type": "object"
+      },
+      "overrides": {
+        "static_input": {}
+      },
+      "ports": {
+        "inputs": {
+          "fundamentals": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          }
+        },
+        "outputs": {
+          "main": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          }
+        }
+      },
+      "prompt_policy": {
+        "user_prompt": "基于基本面结论选择估值框架、关键假设和敏感变量。"
+      }
+    },
+    {
+      "callable_ref": {
+        "id": "stock-research-analyst.codex",
+        "kind": "agent_class"
+      },
+      "id": "scenario_agent",
+      "metadata": {
+        "label": "情景分析",
+        "ui_label": "情景分析",
+        "workbench_kind": "agent_session"
+      },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "assumptions": {
+            "description": "估值或情景假设",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "sensitivities": {
+            "description": "关键敏感变量",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "status": {
+            "description": "success 或 failed",
+            "type": "string"
+          },
+          "summary": {
+            "description": "面向下游节点的简明结论",
+            "type": "string"
+          },
+          "valuation_view": {
+            "description": "估值或情景判断",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "summary",
+          "assumptions",
+          "valuation_view"
+        ],
+        "type": "object"
+      },
+      "overrides": {
+        "static_input": {}
+      },
+      "ports": {
+        "inputs": {
+          "constraints": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          },
+          "fundamentals": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          }
+        },
+        "outputs": {
+          "main": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          }
+        }
+      },
+      "prompt_policy": {
+        "user_prompt": "并行构造 bull/base/bear 情景，说明每个情景成立条件。"
+      }
+    },
+    {
+      "callable_ref": {
+        "id": "stock-research-synthesis.codex",
+        "kind": "agent_class"
+      },
+      "id": "valuation_synthesis_agent",
+      "metadata": {
+        "label": "估值汇总",
+        "ui_label": "估值汇总",
+        "workbench_kind": "agent_session"
+      },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "risk_reward": {
+            "description": "风险收益比判断",
+            "type": "string"
+          },
+          "status": {
+            "description": "success 或 failed",
+            "type": "string"
+          },
+          "summary": {
+            "description": "面向下游节点的简明结论",
+            "type": "string"
+          },
+          "uncertainty": {
+            "description": "主要不确定性",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "valuation_range": {
+            "description": "估值区间或相对估值判断",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "summary",
+          "valuation_range",
+          "risk_reward"
+        ],
+        "type": "object"
+      },
+      "overrides": {
+        "static_input": {}
+      },
+      "ports": {
+        "inputs": {
+          "scenario_analysis": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          },
+          "valuation_model": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          }
+        },
+        "outputs": {
+          "main": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          }
+        }
+      },
+      "prompt_policy": {
+        "user_prompt": "串行整合估值框架和情景分析，输出风险收益判断。"
+      }
+    }
+  ],
+  "policies": {
+    "failure_mode": "fail_fast",
+    "max_concurrency": 8
+  },
+  "schema_version": "acc.core.v2",
+  "version": "0.1.0",
+  "workflow_input_bindings": [
+    {
+      "materialization": "copy",
+      "required": false,
+      "source_port": "fundamentals",
+      "target": {
+        "node": "valuation_model_agent",
+        "port": "fundamentals"
+      }
+    },
+    {
+      "materialization": "copy",
+      "required": false,
+      "source_port": "fundamentals",
+      "target": {
+        "node": "scenario_agent",
+        "port": "fundamentals"
+      }
+    },
+    {
+      "materialization": "copy",
+      "required": false,
+      "source_port": "constraints",
+      "target": {
+        "node": "scenario_agent",
+        "port": "constraints"
+      }
+    }
+  ],
+  "workflow_output_bindings": [
+    {
+      "materialization": "copy",
+      "required": true,
+      "source": {
+        "node": "valuation_synthesis_agent",
+        "port": "main"
+      },
+      "target_port": "main"
+    },
+    {
+      "materialization": "copy",
+      "required": true,
+      "source": {
+        "node": "scenario_agent",
+        "port": "main"
+      },
+      "target_port": "scenario_table"
+    }
+  ]
+}

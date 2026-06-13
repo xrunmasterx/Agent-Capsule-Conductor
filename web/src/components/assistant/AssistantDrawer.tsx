@@ -843,6 +843,9 @@ export function AssistantDockContent({
       ? graphOpsStringList(graphOpsDiff.created_files)
       : graphOpsReview?.dryRun.target_paths || [];
   const graphOpsWarnings = graphOpsStringList(graphOpsDiff.warnings);
+  const assistantEmptyText = modificationMode
+    ? '描述要生成或调整的 workflow 草稿。'
+    : '等待输入需求';
 
   return (
     <section className="assistant-bottom-dock-body" aria-label="AI 助手底部面板">
@@ -852,9 +855,21 @@ export function AssistantDockContent({
             <span>AI 助手</span>
             <strong>{targetLabel}</strong>
           </div>
-          <small>{hasSelectedRunNode ? '已聚焦选中节点' : '画布级对话'}</small>
+          <div className="assistant-bottom-header-actions">
+            <small>{hasSelectedRunNode ? '已聚焦选中节点' : '画布级对话'}</small>
+            <AssistantControlRail
+              modificationMode={modificationMode}
+              canUndoApply={canUndoApply}
+              busy={busy}
+              pendingTurn={Boolean(pendingTurn)}
+              onModeChange={(nextModificationMode) =>
+                onTurnReasonChange(nextModificationMode ? 'canvas_revision' : 'workbench_chat')
+              }
+              onUndoApply={onUndoApply}
+            />
+          </div>
         </header>
-        <div className="assistant-session-row compact">
+        <div className="assistant-session-row compact assistant-session-strip">
           <label>
             <span>Agent</span>
             <select
@@ -878,7 +893,11 @@ export function AssistantDockContent({
             {agentSession?.provider_session_id ? ` · provider ${agentSession.provider_session_id}` : ''}
           </small>
         </div>
-        <AssistantTurnList messages={messages} className="assistant-bottom-messages" />
+        <AssistantTurnList
+          messages={messages}
+          className="assistant-bottom-messages"
+          emptyText={assistantEmptyText}
+        />
         {pendingTurn ? (
           <section className="assistant-proposal-panel compact" aria-label="AI assistant pending turn">
             <header>
@@ -932,16 +951,6 @@ export function AssistantDockContent({
           </div>
         </form>
       </div>
-      <AssistantControlRail
-        modificationMode={modificationMode}
-        canUndoApply={canUndoApply}
-        busy={busy}
-        pendingTurn={Boolean(pendingTurn)}
-        onModeChange={(nextModificationMode) =>
-          onTurnReasonChange(nextModificationMode ? 'canvas_revision' : 'workbench_chat')
-        }
-        onUndoApply={onUndoApply}
-      />
       <SelectedNodeRuntimePane model={model} />
     </section>
   );

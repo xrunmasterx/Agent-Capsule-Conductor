@@ -1,0 +1,490 @@
+{
+  "control_edges": [
+    {
+      "context": "none",
+      "from": "macro_risk_agent",
+      "to": "risk_synthesis_agent"
+    },
+    {
+      "context": "none",
+      "from": "company_risk_agent",
+      "to": "risk_synthesis_agent"
+    },
+    {
+      "context": "none",
+      "from": "catalyst_agent",
+      "to": "risk_synthesis_agent"
+    }
+  ],
+  "data_edges": [
+    {
+      "materialization": "copy",
+      "source": {
+        "node": "macro_risk_agent",
+        "port": "main"
+      },
+      "target": {
+        "node": "risk_synthesis_agent",
+        "port": "macro_risks"
+      }
+    },
+    {
+      "materialization": "copy",
+      "source": {
+        "node": "company_risk_agent",
+        "port": "main"
+      },
+      "target": {
+        "node": "risk_synthesis_agent",
+        "port": "company_risks"
+      }
+    },
+    {
+      "materialization": "copy",
+      "source": {
+        "node": "catalyst_agent",
+        "port": "main"
+      },
+      "target": {
+        "node": "risk_synthesis_agent",
+        "port": "catalysts"
+      }
+    }
+  ],
+  "description": "Child workflow compiled from Workbench container Risk_Catalyst_Workflow.",
+  "exposed_inputs": {
+    "fundamentals": {
+      "cardinality": "one",
+      "required": true,
+      "type": "artifact"
+    },
+    "watchlist": {
+      "cardinality": "one",
+      "required": true,
+      "type": "artifact"
+    }
+  },
+  "exposed_outputs": {
+    "main": {
+      "cardinality": "one",
+      "required": true,
+      "type": "artifact"
+    },
+    "watchlist": {
+      "cardinality": "one",
+      "required": true,
+      "type": "artifact"
+    }
+  },
+  "id": "core_v2_stock_research_canvas__Risk_Catalyst_Workflow",
+  "metadata": {
+    "canonical_format": "accflow",
+    "compiled_child_path": "core_v2_stock_research_canvas__Risk_Catalyst_Workflow.accflow.json",
+    "compiled_from_workbench_container": "Risk_Catalyst_Workflow",
+    "ui_layout": {
+      "layout": null,
+      "nodes": [
+        {
+          "id": "macro_risk_agent",
+          "label": "宏观与监管风险",
+          "position": {
+            "x": 137.0,
+            "y": 146.0
+          }
+        },
+        {
+          "id": "company_risk_agent",
+          "label": "公司特有风险",
+          "position": {
+            "x": 137.0,
+            "y": 332.0
+          }
+        },
+        {
+          "id": "catalyst_agent",
+          "label": "催化剂扫描",
+          "position": {
+            "x": 137.0,
+            "y": 518.0
+          }
+        },
+        {
+          "id": "risk_synthesis_agent",
+          "label": "风险催化剂汇总",
+          "position": {
+            "x": 485.0,
+            "y": 332.0
+          }
+        }
+      ],
+      "root_workflow_id": null
+    },
+    "workbench_draft": true
+  },
+  "name": "风险与催化剂工作流",
+  "nodes": [
+    {
+      "callable_ref": {
+        "id": "stock-research-analyst.codex",
+        "kind": "agent_class"
+      },
+      "id": "macro_risk_agent",
+      "metadata": {
+        "label": "宏观与监管风险",
+        "ui_label": "宏观与监管风险",
+        "workbench_kind": "agent_session"
+      },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "risks": {
+            "description": "风险项",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "severity_notes": {
+            "description": "风险严重程度或触发条件",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "status": {
+            "description": "success 或 failed",
+            "type": "string"
+          },
+          "summary": {
+            "description": "面向下游节点的简明结论",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "summary",
+          "risks"
+        ],
+        "type": "object"
+      },
+      "overrides": {
+        "static_input": {}
+      },
+      "ports": {
+        "inputs": {
+          "fundamentals": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          }
+        },
+        "outputs": {
+          "main": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          }
+        }
+      },
+      "prompt_policy": {
+        "user_prompt": "并行识别利率、监管、汇率、政策和周期风险。"
+      }
+    },
+    {
+      "callable_ref": {
+        "id": "stock-research-analyst.codex",
+        "kind": "agent_class"
+      },
+      "id": "company_risk_agent",
+      "metadata": {
+        "label": "公司特有风险",
+        "ui_label": "公司特有风险",
+        "workbench_kind": "agent_session"
+      },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "risks": {
+            "description": "风险项",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "severity_notes": {
+            "description": "风险严重程度或触发条件",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "status": {
+            "description": "success 或 failed",
+            "type": "string"
+          },
+          "summary": {
+            "description": "面向下游节点的简明结论",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "summary",
+          "risks"
+        ],
+        "type": "object"
+      },
+      "overrides": {
+        "static_input": {}
+      },
+      "ports": {
+        "inputs": {
+          "fundamentals": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          }
+        },
+        "outputs": {
+          "main": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          }
+        }
+      },
+      "prompt_policy": {
+        "user_prompt": "并行识别竞争、执行、客户集中度、管理层和资本配置风险。"
+      }
+    },
+    {
+      "callable_ref": {
+        "id": "stock-research-analyst.codex",
+        "kind": "agent_class"
+      },
+      "id": "catalyst_agent",
+      "metadata": {
+        "label": "催化剂扫描",
+        "ui_label": "催化剂扫描",
+        "workbench_kind": "agent_session"
+      },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "negative_catalysts": {
+            "description": "负向催化剂",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "positive_catalysts": {
+            "description": "正向催化剂",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "status": {
+            "description": "success 或 failed",
+            "type": "string"
+          },
+          "summary": {
+            "description": "面向下游节点的简明结论",
+            "type": "string"
+          },
+          "watchlist": {
+            "description": "需要持续跟踪的事件",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "status",
+          "summary",
+          "positive_catalysts",
+          "negative_catalysts"
+        ],
+        "type": "object"
+      },
+      "overrides": {
+        "static_input": {}
+      },
+      "ports": {
+        "inputs": {
+          "fundamentals": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          },
+          "watchlist": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          }
+        },
+        "outputs": {
+          "main": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          }
+        }
+      },
+      "prompt_policy": {
+        "user_prompt": "并行识别未来 6-12 个月可能改变预期的正负催化剂。"
+      }
+    },
+    {
+      "callable_ref": {
+        "id": "stock-research-synthesis.codex",
+        "kind": "agent_class"
+      },
+      "id": "risk_synthesis_agent",
+      "metadata": {
+        "label": "风险催化剂汇总",
+        "ui_label": "风险催化剂汇总",
+        "workbench_kind": "agent_session"
+      },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "catalyst_watchlist": {
+            "description": "催化剂跟踪清单",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "mitigation_notes": {
+            "description": "风险缓释或验证方式",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "risk_matrix": {
+            "description": "整合后的风险矩阵",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "status": {
+            "description": "success 或 failed",
+            "type": "string"
+          },
+          "summary": {
+            "description": "面向下游节点的简明结论",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "summary",
+          "risk_matrix",
+          "catalyst_watchlist"
+        ],
+        "type": "object"
+      },
+      "overrides": {
+        "static_input": {}
+      },
+      "ports": {
+        "inputs": {
+          "catalysts": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          },
+          "company_risks": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          },
+          "macro_risks": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          }
+        },
+        "outputs": {
+          "main": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          }
+        }
+      },
+      "prompt_policy": {
+        "user_prompt": "汇总风险与催化剂，形成最终报告需要的风险矩阵。"
+      }
+    }
+  ],
+  "policies": {
+    "failure_mode": "fail_fast",
+    "max_concurrency": 8
+  },
+  "schema_version": "acc.core.v2",
+  "version": "0.1.0",
+  "workflow_input_bindings": [
+    {
+      "materialization": "copy",
+      "required": false,
+      "source_port": "fundamentals",
+      "target": {
+        "node": "macro_risk_agent",
+        "port": "fundamentals"
+      }
+    },
+    {
+      "materialization": "copy",
+      "required": false,
+      "source_port": "fundamentals",
+      "target": {
+        "node": "company_risk_agent",
+        "port": "fundamentals"
+      }
+    },
+    {
+      "materialization": "copy",
+      "required": false,
+      "source_port": "fundamentals",
+      "target": {
+        "node": "catalyst_agent",
+        "port": "fundamentals"
+      }
+    },
+    {
+      "materialization": "copy",
+      "required": false,
+      "source_port": "watchlist",
+      "target": {
+        "node": "catalyst_agent",
+        "port": "watchlist"
+      }
+    }
+  ],
+  "workflow_output_bindings": [
+    {
+      "materialization": "copy",
+      "required": true,
+      "source": {
+        "node": "risk_synthesis_agent",
+        "port": "main"
+      },
+      "target_port": "main"
+    },
+    {
+      "materialization": "copy",
+      "required": true,
+      "source": {
+        "node": "catalyst_agent",
+        "port": "main"
+      },
+      "target_port": "watchlist"
+    }
+  ]
+}

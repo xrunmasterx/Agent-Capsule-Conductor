@@ -114,6 +114,10 @@ def test_node_events_include_agent_session_timeline(client, project_root) -> Non
     assert events[1]["source"] == "agent_session"
     assert events[1]["agent_session_id"] == "agent_session_test"
     assert events[1]["agent_turn_id"] == "turn_1"
+    assert events[1]["projection"]["schema_version"] == "acc.transcript_projection.v1"
+    assert events[1]["projection"]["source"] == "computed_legacy"
+    assert events[1]["projection"]["visibility"] == "primary"
+    assert events[1]["projection"]["category"] == "assistant_text"
 
 
 def test_get_node_uses_agent_turn_log_projection(client, project_root) -> None:
@@ -195,7 +199,114 @@ def test_run_stream_emits_agent_session_events(client, project_root) -> None:
     assert "event: live_event" in text
     assert '"node_id": "server_node"' in text
     assert '"agent_turn_id": "turn_1"' in text
+    assert '"projection":' in text
+    assert '"event_seq":' in text
     assert "streamed" in text
+
+
+def test_run_stream_projects_agent_message_delta_live_event(client, project_root) -> None:
+    run_dir = project_root / "runs" / "server_delta_run"
+    node_dir = run_dir / "nodes" / "server_node"
+    session_dir = project_root / "runs" / "_agent_sessions" / "server_delta_run" / "server_node"
+    turn_dir = session_dir / "turns" / "turn_1"
+    node_dir.mkdir(parents=True, exist_ok=True)
+    turn_dir.mkdir(parents=True)
+    (node_dir / "runtime.json").write_text(
+        json.dumps({"agent_session_ref": str(session_dir.resolve()), "turn_id": "turn_1"}),
+        encoding="utf-8",
+    )
+    (turn_dir / "events.jsonl").write_text(
+        json.dumps(
+            {
+                "event_id": "agent_delta_evt_1",
+                "type": "agent_message_delta",
+                "timestamp": "2026-06-05T00:00:01Z",
+                "session_id": "agent_session_test",
+                "turn_id": "turn_1",
+                "payload": {"delta": "模", "item_id": "msg_1"},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "run_summary.json").write_text(
+        json.dumps(
+            {
+                "run_id": "server_delta_run",
+                "status": "success",
+                "run_dir": str(run_dir.resolve()),
+                "node_count": 1,
+                "nodes": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with client.stream("GET", "/api/runs/server_delta_run/stream") as response:
+        text = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    assert "event: live_event" in text
+    assert '"type": "agent_message_delta"' in text
+    assert '"stream": "agent"' in text
+    assert '"text": "模"' in text
+
+
+def test_run_stream_emits_nested_agent_session_events(client, project_root) -> None:
+    node_dir = (
+        project_root
+        / "runs"
+        / "server_run"
+        / "nodes"
+        / "workflow_parent"
+        / "nested_workflow"
+        / "nodes"
+        / "agent_node"
+    )
+    session_dir = (
+        project_root
+        / "runs"
+        / "server_run"
+        / "nodes"
+        / "workflow_parent"
+        / "runs"
+        / "_agent_sessions"
+        / "nested_workflow"
+        / "agent_node"
+    )
+    turn_dir = session_dir / "turns" / "turn_nested"
+    node_dir.mkdir(parents=True, exist_ok=True)
+    turn_dir.mkdir(parents=True)
+    (node_dir / "runtime.json").write_text(
+        json.dumps({"agent_session_ref": str(session_dir.resolve()), "turn_id": "turn_nested"}),
+        encoding="utf-8",
+    )
+    (turn_dir / "events.jsonl").write_text(
+        json.dumps(
+            {
+                "event_id": "nested_agent_evt_1",
+                "type": "agent_message",
+                "timestamp": "2026-06-05T00:00:01Z",
+                "session_id": "nested_agent_session_test",
+                "turn_id": "turn_nested",
+                "payload": {"content": "nested streamed"},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with client.stream("GET", "/api/runs/server_run/stream") as response:
+        text = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    assert "event: agent_event" in text
+    assert "event: live_event" in text
+    assert '"node_id": "agent_node"' in text
+    assert '"parent_node_id": "workflow_parent"' in text
+    assert '"ui_node_id": "workflow_parent__internal__agent_node"' in text
+    assert '"agent_turn_id": "turn_nested"' in text
+    assert "nested streamed" in text
 
 
 def test_run_events_include_recursive_nested_workflow_scope(client, project_root) -> None:

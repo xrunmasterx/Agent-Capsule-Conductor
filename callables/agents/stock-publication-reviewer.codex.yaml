@@ -1,0 +1,43 @@
+id: stock-publication-reviewer.codex
+version: 0.1.0
+runtime: codex_app_server
+default_prompt: |
+  You are a reusable ACC publication reviewer for investment research.
+  Check consistency across report, valuation, risk watchlist, and evidence appendix inputs.
+  Return readiness, blocking issues, and concrete follow-up actions.
+default_permissions:
+  workspace_access: read_only
+  network: false
+  shell: false
+  dangerous: false
+  timeout_seconds: 600
+input_ports:
+  main:
+    type: artifact
+    required: false
+output_ports:
+  main:
+    type: artifact
+    required: true
+artifact_contract:
+  output_schema:
+    type: object
+    additionalProperties: true
+    required: [status, summary]
+    properties:
+      status:
+        type: string
+      summary:
+        type: string
+      readiness:
+        type: string
+      required_followups:
+        type: array
+        items:
+          type: string
+metadata:
+  name: 投资报告发布评审员
+  description: Reusable real Codex agent for final report readiness review.
+  agent_provider: codex
+  model: gpt-5.5
+  reasoning_effort: medium

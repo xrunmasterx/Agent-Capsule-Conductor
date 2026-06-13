@@ -12,11 +12,12 @@ from uuid import uuid4
 from acc.adapters.codex_app_server import CodexAppServerAdapter
 from acc.adapters.streaming import (
     AgentApprovalDecision,
+    AgentTurnResponseMode,
     StreamingAgentAdapter,
     StreamingAgentTurnRequest,
     StreamingAgentTurnResult,
 )
-from acc.agent_events import append_agent_event
+from acc.agent_events import append_agent_event, ensure_agent_event_projection, project_agent_event
 from acc.app.authoring import (
     AUTHORING_CORE_RULES,
     AUTHORING_OUTPUT_SCHEMA,
@@ -71,6 +72,213 @@ WORKBENCH_ASSISTANT_REASONS = frozenset(
     {"workbench_chat", "canvas_revision", "selected_node_revision"}
 )
 NODE_CHAT_REASONS = frozenset({"node_chat", "output_revision"})
+WORKBENCH_AUTHORING_METADATA_DEFAULTS: dict[str, Any] = {
+    "questions": [],
+    "risk_notes": [],
+    "confidence": "medium",
+}
+
+CHAT_RESPONSE_MODE: AgentTurnResponseMode = "chat_optional_output"
+STRUCTURED_RESPONSE_MODE: AgentTurnResponseMode = "structured_required"
+PRIMARY_CHANNEL_TEXT = "messages"
+PRIMARY_CHANNEL_DRAFT = "output_draft"
+
+
+def classify_agent_turn_failure(
+    error: str,
+    *,
+    reason: str,
+    stage: str,
+    provider_session_id: str | None,
+) -> dict[str, Any]:
+    detail = error.strip() or "Agent turn failed"
+    lower = detail.lower()
+    is_structured_turn = reason in {"canvas_revision", "selected_node_revision", "workflow_node"}
+    failed_at = utc_now_iso()
+    payload: dict[str, Any] = {
+        "failure_kind": "unknown",
+        "failure_origin": "acc_runtime",
+        "failed_stage": stage,
+        "recoverability": "retry_allowed",
+        "provider_session_policy": "reuse_allowed",
+        "provider_session_health": "unknown",
+        "can_submit_next_turn": True,
+        "user_summary": "本轮执行失败，已保留对话。你可以继续输入，必要时我会重新尝试。",
+        "technical_detail": detail,
+        "raw_error_ref": None,
+        "failed_at": failed_at,
+        "previous_provider_session_id": provider_session_id,
+        "next_provider_session_id": None,
+    }
+    if "stale" in lower and "provider_session_id" in lower:
+        payload.update(
+            {
+                "failure_kind": "stale_provider_session",
+                "failure_origin": "provider_protocol",
+                "recoverability": "user_action_required",
+                "provider_session_policy": "reuse_allowed",
+                "provider_session_health": "unknown",
+                "can_submit_next_turn": False,
+                "user_summary": "当前 AI 会话状态已过期，请刷新后再继续。",
+            }
+        )
+    elif "cancel" in lower or stage == "provider_cancelled":
+        payload.update(
+            {
+                "failure_kind": "cancelled",
+                "failure_origin": "user_cancel",
+                "recoverability": "continue_allowed",
+                "provider_session_policy": "clear_before_next_structured_turn",
+                "provider_session_health": "poisoned_for_structured_output",
+                "user_summary": "本轮已取消，已保留对话。你可以继续输入。",
+            }
+        )
+    elif "timeout" in lower or "timed out" in lower or stage == "provider_timeout":
+        payload.update(
+            {
+                "failure_kind": "timeout",
+                "failure_origin": "provider_transport",
+                "provider_session_policy": "clear_before_next_turn",
+                "provider_session_health": "poisoned",
+                "user_summary": "本轮等待 AI 响应超时，已保留对话。你可以重试或继续输入。",
+            }
+        )
+    elif "permission" in lower or "denied" in lower or "approval denied" in lower:
+        payload.update(
+            {
+                "failure_kind": "permission_denied",
+                "failure_origin": "policy",
+                "recoverability": "user_action_required",
+                "provider_session_policy": "reuse_allowed",
+                "provider_session_health": "healthy",
+                "user_summary": "本轮需要权限或审批处理，已保留对话。处理后可以继续。",
+            }
+        )
+    elif (
+        "authoring agent output" in lower
+        or "acc.authoring.output" in lower
+        or "output_draft.json" in lower
+    ) and is_structured_turn:
+        payload.update(
+            {
+                "failure_kind": "invalid_authoring_output",
+                "failure_origin": "acc_authoring_validation",
+                "failed_stage": "post_provider_result_validation",
+                "provider_session_policy": "clear_before_next_structured_turn",
+                "provider_session_health": "poisoned_for_structured_output",
+                "user_summary": (
+                    "本轮结构化输出无效，已保留对话。你可以继续输入；如果要修改画布，"
+                    "下一轮会使用干净的 AI 上下文重新生成草稿。"
+                ),
+            }
+        )
+    elif "schema" in lower or "validation" in lower or "validat" in lower:
+        payload.update(
+            {
+                "failure_kind": "validation_failed",
+                "failure_origin": "acc_output_validation",
+                "provider_session_policy": "clear_before_next_structured_turn"
+                if is_structured_turn
+                else "reuse_allowed",
+                "provider_session_health": "poisoned_for_structured_output"
+                if is_structured_turn
+                else "unknown",
+                "user_summary": "本轮输出校验失败，已保留对话。你可以调整要求后继续。",
+            }
+        )
+    elif any(token in lower for token in ("crash", "exit code", "connection", "transport")):
+        payload.update(
+            {
+                "failure_kind": "transport_error",
+                "failure_origin": "provider_transport",
+                "provider_session_policy": "clear_immediately",
+                "provider_session_health": "poisoned",
+                "user_summary": "AI 运行通道异常中断，已保留对话。你可以重试或继续输入。",
+            }
+        )
+    elif stage.startswith("provider"):
+        payload.update(
+            {
+                "failure_kind": "provider_error",
+                "failure_origin": "provider_transport",
+                "provider_session_policy": "clear_before_next_turn",
+                "provider_session_health": "unknown",
+                "user_summary": "AI provider 返回失败，已保留对话。你可以重试或继续输入。",
+            }
+        )
+    return payload
+
+
+def should_clear_provider_session_before_turn(
+    session_payload: dict[str, Any],
+    *,
+    expects_output_draft: bool,
+) -> bool:
+    policy = str(session_payload.get("provider_session_policy") or "")
+    if policy in {"clear_before_next_turn", "clear_immediately"}:
+        return True
+    return expects_output_draft and policy == "clear_before_next_structured_turn"
+
+
+def clear_session_failure_state(session_payload: dict[str, Any]) -> dict[str, Any]:
+    cleared = dict(session_payload)
+    for key in (
+        "last_failure_kind",
+        "last_recoverability",
+        "last_failure_user_summary",
+        "last_failure_technical_detail",
+        "last_failure_turn_id",
+        "last_failure_at",
+    ):
+        cleared[key] = None
+    cleared["provider_session_health"] = "healthy"
+    cleared["provider_session_policy"] = "reuse_allowed"
+    cleared["can_submit_next_turn"] = True
+    return cleared
+
+
+def upsert_agent_terminal_failure_event(
+    event_log_path: Path,
+    event_type: str,
+    *,
+    session_id: str,
+    turn_id: str,
+    run_id: str | None,
+    node_id: str | None,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    events = read_jsonl(event_log_path) if event_log_path.exists() else []
+    for index, event in enumerate(events):
+        current_type = str(event.get("type") or event.get("event") or "")
+        if current_type not in {"agent_turn_failed", "agent_turn_cancelled"}:
+            continue
+        current_payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+        merged_payload = {**current_payload, **payload}
+        merged_event = {
+            **event,
+            "type": current_type,
+            "payload": merged_payload,
+            "projection": project_agent_event(current_type, merged_payload),
+        }
+        events[index] = merged_event
+        write_jsonl(event_log_path, events)
+        return merged_event
+    return append_agent_event(
+        event_log_path,
+        event_type,
+        session_id=session_id,
+        turn_id=turn_id,
+        run_id=run_id,
+        node_id=node_id,
+        payload=payload,
+    )
+
+
+def write_jsonl(path: Path, events: list[dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
+        for event in events:
+            handle.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
 
 
 class AgentTurnService:
@@ -200,7 +408,16 @@ class AgentTurnService:
                 input_payload=input_payload,
             )
 
-        validate_output_schema(output, schema)
+        try:
+            validate_output_schema(output, schema)
+        except Exception as exc:
+            self.mark_turn_failed(
+                str(session_payload["session_id"]),
+                turn_id,
+                str(exc),
+                stage="post_provider_result_validation",
+            )
+            raise
         write_json(session_dir / "current_output.json", output)
         write_json(session_dir / "published_output.json", output)
         append_agent_event(
@@ -213,17 +430,19 @@ class AgentTurnService:
             payload={"output_path": str((session_dir / "published_output.json").resolve())},
         )
         self._finalize_turn(turn_dir, status="success")
-        next_session = {
-            **session_payload,
-            "status": "ready",
-            "updated_at": utc_now_iso(),
-            "current_output_ref": "current_output.json",
-            "published_output_ref": "published_output.json",
-            "current_output_turn_id": turn_id,
-            "published_output_turn_id": turn_id,
-            "last_published_at": utc_now_iso(),
-            "last_turn_id": turn_id,
-        }
+        next_session = clear_session_failure_state(
+            {
+                **session_payload,
+                "status": "ready",
+                "updated_at": utc_now_iso(),
+                "current_output_ref": "current_output.json",
+                "published_output_ref": "published_output.json",
+                "current_output_turn_id": turn_id,
+                "published_output_turn_id": turn_id,
+                "last_published_at": utc_now_iso(),
+                "last_turn_id": turn_id,
+            }
+        )
         write_json(session_dir / "session.json", next_session)
         update_runtime_json(
             node_dir / "runtime.json",
@@ -436,6 +655,8 @@ class AgentTurnService:
             raise AccError("Workbench assistant turns require a workbench assistant session")
         if reason in NODE_CHAT_REASONS and is_workbench_assistant:
             raise AccError("Workbench assistant session does not accept node chat turn reasons")
+        response_mode = turn_response_mode(reason, is_workbench_assistant=is_workbench_assistant)
+        expects_output_draft = response_mode == STRUCTURED_RESPONSE_MODE
         current_provider_session_id = state.get("provider_session_id")
         if (
             expected_provider_session_id is not None
@@ -448,6 +669,23 @@ class AgentTurnService:
         turn_dir.mkdir(parents=True, exist_ok=False)
         input_payload = {"message": message, "reason": reason}
         prompt = message
+        primary_channel = PRIMARY_CHANNEL_DRAFT if expects_output_draft else PRIMARY_CHANNEL_TEXT
+        if should_clear_provider_session_before_turn(state, expects_output_draft=expects_output_draft):
+            state = {
+                **state,
+                "provider_session_id": None,
+                "provider_session_policy": "fresh_session_started",
+                "provider_session_health": "unknown",
+                "updated_at": utc_now_iso(),
+            }
+            write_json(session_dir / "session.json", state)
+        input_payload.update(
+            {
+                "response_mode": response_mode,
+                "primary_channel": primary_channel,
+                "expects_output_draft": expects_output_draft,
+            }
+        )
         if is_workbench_assistant:
             if canvas_hash is None or canvas_snapshot is None:
                 raise AccError(
@@ -495,8 +733,11 @@ class AgentTurnService:
             status="queued",
             prompt_ref="resolved_prompt.md",
             input_ref="input.json",
-            draft_output_ref="output_draft.json",
+            draft_output_ref="output_draft.json" if expects_output_draft else None,
             usage_ref="usage.json",
+            response_mode=response_mode,
+            primary_channel=primary_channel,
+            expects_output_draft=expects_output_draft,
         )
         append_message(
             session_dir,
@@ -619,7 +860,7 @@ class AgentTurnService:
                     else {}
                 ),
             }
-            write_json(session_dir / "session.json", ready_state)
+            write_json(session_dir / "session.json", clear_session_failure_state(ready_state))
             return {**self._turn_payload(turn_dir), "session_id": session_id}
         if not external_agent_execution_enabled():
             raise AccError(
@@ -629,17 +870,25 @@ class AgentTurnService:
             )
         result = await self._run_session_streaming_adapter(session_dir, turn_dir, state)
         next_state = require_object(load_json(session_dir / "session.json"), "session.json")
+        input_payload = load_optional_object(turn_dir / "input.json")
+        reason = str(input_payload.get("reason") or "")
+        is_workbench_assistant = next_state.get("session_kind") == "workbench_assistant"
+        expects_workbench_draft = is_workbench_assistant and reason in {
+            "canvas_revision",
+            "selected_node_revision",
+        }
+        is_workbench_chat = is_workbench_assistant and reason == "workbench_chat"
         if result.status != "success":
             terminal_status = "cancelled" if result.status == "cancelled" else "failed"
-            self._finalize_turn(turn_dir, status=terminal_status)
-            write_json(
-                session_dir / "session.json",
-                {
-                    **next_state,
-                    "status": terminal_status,
-                    "updated_at": utc_now_iso(),
-                    "last_turn_id": turn_id,
-                },
+            self.mark_turn_failed(
+                session_id,
+                turn_id,
+                result.error or result.summary,
+                status=terminal_status,
+                stage="provider_cancelled"
+                if result.status == "cancelled"
+                else "provider_result",
+                provider_session_id=result.provider_session_id,
             )
             if result.status == "cancelled":
                 return {**self._turn_payload(turn_dir), "session_id": session_id}
@@ -656,27 +905,50 @@ class AgentTurnService:
             )
         if result.usage:
             write_json(turn_dir / "usage.json", result.usage)
-        if result.output_json_path is not None and result.output_json_path.exists():
-            draft = require_object(load_json(result.output_json_path), "output_draft.json")
-            schema = (
-                next_state.get("output_schema")
-                if isinstance(next_state.get("output_schema"), dict)
-                else {}
+        try:
+            if is_workbench_chat:
+                if result.output_json_path is not None and result.output_json_path.exists():
+                    result.output_json_path.unlink()
+                if not any(content.strip() for content in result.assistant_messages):
+                    raise AccError("Workbench chat turn completed without assistant text")
+            elif expects_workbench_draft and (
+                result.output_json_path is None or not result.output_json_path.exists()
+            ):
+                raise AccError("Workbench authoring turn did not produce output_draft.json")
+            elif result.output_json_path is not None and result.output_json_path.exists():
+                draft = require_object(load_json(result.output_json_path), "output_draft.json")
+                schema = (
+                    next_state.get("output_schema")
+                    if isinstance(next_state.get("output_schema"), dict)
+                    else {}
+                )
+                if expects_workbench_draft:
+                    draft = normalize_workbench_authoring_output(draft)
+                    validate_authoring_output_payload(draft)
+                if schema:
+                    validate_output_schema(draft, schema)
+                if expects_workbench_draft:
+                    write_json(result.output_json_path, draft)
+                write_json(session_dir / "current_output.json", draft)
+                next_state = {
+                    **next_state,
+                    "current_output_ref": "current_output.json",
+                    "current_output_turn_id": turn_id,
+                }
+        except Exception as exc:
+            self.mark_turn_failed(
+                session_id,
+                turn_id,
+                str(exc),
+                stage="post_provider_result_validation",
             )
-            if next_state.get("session_kind") == "workbench_assistant":
-                validate_authoring_output_payload(draft)
-            if schema:
-                validate_output_schema(draft, schema)
-            write_json(session_dir / "current_output.json", draft)
-            next_state = {
-                **next_state,
-                "current_output_ref": "current_output.json",
-                "current_output_turn_id": turn_id,
-            }
+            raise
         self._finalize_turn(turn_dir, status="success")
         write_json(
             session_dir / "session.json",
-            {**next_state, "status": "ready", "updated_at": utc_now_iso(), "last_turn_id": turn_id},
+            clear_session_failure_state(
+                {**next_state, "status": "ready", "updated_at": utc_now_iso(), "last_turn_id": turn_id}
+            ),
         )
         return {**self._turn_payload(turn_dir), "session_id": session_id}
 
@@ -688,7 +960,10 @@ class AgentTurnService:
         return {
             "session_id": session_id,
             "turn_id": turn_id,
-            "events": read_jsonl(turn_dir / "events.jsonl"),
+            "events": [
+                ensure_agent_event_projection(event, fallback_event_seq=index)
+                for index, event in enumerate(read_jsonl(turn_dir / "events.jsonl"), start=1)
+            ],
         }
 
     def get_turn(self, session_id: str, turn_id: str) -> dict[str, Any]:
@@ -715,11 +990,14 @@ class AgentTurnService:
         current_path = session_dir / "current_output.json"
         if not current_path.exists():
             raise AccError("No assistant draft is available")
-        output = require_object(load_json(current_path), "current_output.json")
+        output = normalize_workbench_authoring_output(
+            require_object(load_json(current_path), "current_output.json")
+        )
         validate_authoring_output_payload(output)
         schema = state.get("output_schema") if isinstance(state.get("output_schema"), dict) else {}
         if schema:
             validate_output_schema(output, schema)
+        write_json(current_path, output)
         return {
             "session_id": session_id,
             "turn_id": expected_turn_id,
@@ -732,27 +1010,76 @@ class AgentTurnService:
             "confidence": output.get("confidence") or "low",
         }
 
-    def mark_turn_failed(self, session_id: str, turn_id: str, error: str) -> None:
+    def mark_turn_failed(
+        self,
+        session_id: str,
+        turn_id: str,
+        error: str,
+        *,
+        status: str = "failed",
+        stage: str = "agent_turn_execution",
+        provider_session_id: str | None = None,
+    ) -> None:
         session_dir = self._find_session_dir(session_id)
         turn_dir = session_dir / "turns" / safe_segment(turn_id)
         if not turn_dir.exists():
             return
         state = require_object(load_json(session_dir / "session.json"), "session.json")
+        input_payload = load_optional_object(turn_dir / "input.json")
+        reason = str(input_payload.get("reason") or self._turn_payload(turn_dir).get("reason") or "")
+        current_provider_session_id = (
+            provider_session_id
+            if provider_session_id is not None
+            else optional_string(state, "provider_session_id")
+        )
+        failure = classify_agent_turn_failure(
+            error,
+            reason=reason,
+            stage=stage,
+            provider_session_id=current_provider_session_id,
+        )
         run_id = optional_string(state, "bound_run_id")
         node_id = optional_string(state, "bound_node_id")
-        append_agent_event(
+        event_type = "agent_turn_cancelled" if status == "cancelled" else "agent_turn_failed"
+        event = upsert_agent_terminal_failure_event(
             turn_dir / "events.jsonl",
-            "agent_turn_failed",
+            event_type,
             session_id=session_id,
             turn_id=turn_id,
             run_id=run_id,
             node_id=node_id,
-            payload={"error": error},
+            payload={**failure, "error": error},
         )
-        self._finalize_turn(turn_dir, status="failed")
+        failure["raw_error_ref"] = f"events.jsonl#{event.get('event_id')}"
+        upsert_agent_terminal_failure_event(
+            turn_dir / "events.jsonl",
+            event_type,
+            session_id=session_id,
+            turn_id=turn_id,
+            run_id=run_id,
+            node_id=node_id,
+            payload={**failure, "error": error},
+        )
+        turn_payload = self._turn_payload(turn_dir)
+        turn_payload.update({**failure, "status": status, "ended_at": utc_now_iso()})
+        write_json(turn_dir / "turn.json", turn_payload)
         write_json(
             session_dir / "session.json",
-            {**state, "status": "failed", "updated_at": utc_now_iso(), "last_turn_id": turn_id},
+            {
+                **state,
+                "status": status,
+                "updated_at": utc_now_iso(),
+                "last_turn_id": turn_id,
+                "last_failure_kind": failure["failure_kind"],
+                "last_recoverability": failure["recoverability"],
+                "provider_session_health": failure["provider_session_health"],
+                "provider_session_policy": failure["provider_session_policy"],
+                "can_submit_next_turn": failure["can_submit_next_turn"],
+                "last_failure_user_summary": failure["user_summary"],
+                "last_failure_technical_detail": failure["technical_detail"],
+                "last_failure_turn_id": turn_id,
+                "last_failure_at": failure["failed_at"],
+            },
         )
 
     def publish_output(
@@ -877,6 +1204,16 @@ class AgentTurnService:
         session_payload["updated_at"] = utc_now_iso()
         write_json(turn_dir.parent.parent / "session.json", session_payload)
         if result.status != "success":
+            self.mark_turn_failed(
+                str(session_payload["session_id"]),
+                turn_dir.name,
+                result.error or result.summary,
+                status="cancelled" if result.status == "cancelled" else "failed",
+                stage="provider_cancelled"
+                if result.status == "cancelled"
+                else "provider_result",
+                provider_session_id=result.provider_session_id,
+            )
             raise AccError(result.error or result.summary)
         if result.usage:
             write_json(turn_dir / "usage.json", result.usage)
@@ -893,6 +1230,11 @@ class AgentTurnService:
         adapter = self.adapter or StreamingAgentAdapterDispatcher().resolve(runtime)
         run_id = session_payload.get("bound_run_id")
         node_id = session_payload.get("bound_node_id")
+        input_payload = load_optional_object(turn_dir / "input.json")
+        response_mode = turn_response_mode(
+            str(input_payload.get("reason") or ""),
+            is_workbench_assistant=session_payload.get("session_kind") == "workbench_assistant",
+        )
         cancel_path = (
             self.project_root / "runs" / run_id / "cancel_requested"
             if isinstance(run_id, str)
@@ -904,7 +1246,7 @@ class AgentTurnService:
             run_dir=turn_dir,
             workspace_dir=Path(str(session_payload.get("workspace_ref") or self.project_root)),
             prompt_path=turn_dir / "resolved_prompt.md",
-            input_payload=load_optional_object(turn_dir / "input.json"),
+            input_payload=input_payload,
             output_schema_path=turn_dir / "output_schema.json",
             output_json_path=turn_dir / "output_draft.json",
             events_log_path=turn_dir / "events.jsonl",
@@ -921,11 +1263,7 @@ class AgentTurnService:
             if isinstance(session_payload.get("provider_session_id"), str)
             else None,
             cancel_path=cancel_path,
-            response_mode=(
-                "authoring_optional_proposal"
-                if session_payload.get("session_kind") == "workbench_assistant"
-                else "chat_optional_output"
-            ),
+            response_mode=response_mode,
             approval_bridge=FilesystemAgentApprovalBridge(
                 project_root=self.project_root,
                 session_dir=session_dir,
@@ -1052,25 +1390,32 @@ class AgentTurnService:
         status: str,
         prompt_ref: str,
         input_ref: str,
-        draft_output_ref: str,
+        draft_output_ref: str | None,
         usage_ref: str,
+        response_mode: str | None = None,
+        primary_channel: str | None = None,
+        expects_output_draft: bool | None = None,
     ) -> None:
-        write_json(
-            turn_dir / "turn.json",
-            {
-                "schema_version": AGENT_TURN_SCHEMA_VERSION,
-                "turn_id": turn_id,
-                "session_id": session_id,
-                "reason": reason,
-                "status": status,
-                "prompt_ref": prompt_ref,
-                "input_ref": input_ref,
-                "draft_output_ref": draft_output_ref,
-                "usage_ref": usage_ref,
-                "started_at": utc_now_iso(),
-                "ended_at": None,
-            },
-        )
+        payload = {
+            "schema_version": AGENT_TURN_SCHEMA_VERSION,
+            "turn_id": turn_id,
+            "session_id": session_id,
+            "reason": reason,
+            "status": status,
+            "prompt_ref": prompt_ref,
+            "input_ref": input_ref,
+            "draft_output_ref": draft_output_ref,
+            "usage_ref": usage_ref,
+            "started_at": utc_now_iso(),
+            "ended_at": None,
+        }
+        if response_mode is not None:
+            payload["response_mode"] = response_mode
+        if primary_channel is not None:
+            payload["primary_channel"] = primary_channel
+        if expects_output_draft is not None:
+            payload["expects_output_draft"] = expects_output_draft
+        write_json(turn_dir / "turn.json", payload)
 
     def _finalize_turn(self, turn_dir: Path, *, status: str) -> None:
         payload = self._turn_payload(turn_dir)
@@ -1365,20 +1710,86 @@ def render_workbench_assistant_prompt(
     selection: dict[str, Any],
 ) -> str:
     if reason == "workbench_chat":
-        response_contract = (
-            "You may answer conversationally. If you propose a canvas change, return exactly one "
-            f"JSON object matching {AUTHORING_OUTPUT_SCHEMA_VERSION}."
+        return render_workbench_chat_prompt(
+            message=message,
+            reason=reason,
+            canvas_hash=canvas_hash,
+            canvas_snapshot=canvas_snapshot,
+            selection=selection,
         )
-    else:
-        response_contract = (
-            f"Return exactly one JSON object matching {AUTHORING_OUTPUT_SCHEMA_VERSION}. "
-            "The JSON may contain a CanvasAuthoringProposal draft only; do not write files."
-        )
+    return render_workbench_authoring_prompt(
+        message=message,
+        reason=reason,
+        canvas_hash=canvas_hash,
+        canvas_snapshot=canvas_snapshot,
+        selection=selection,
+    )
+
+
+def render_workbench_chat_prompt(
+    *,
+    message: str,
+    reason: str,
+    canvas_hash: str,
+    canvas_snapshot: dict[str, Any],
+    selection: dict[str, Any],
+) -> str:
+    return "\n".join(
+        [
+            "You are ACC's Workbench AI assistant.",
+            "You help the user understand and discuss the current workflow canvas.",
+            "Reply in natural language. Do not wrap the reply in acc.authoring.output.v1 JSON.",
+            "If the user asks for JSON examples, show them as ordinary explanatory text only.",
+            "Do not propose or apply canvas mutations in this chat response.",
+            "",
+            f"Turn reason: {reason}",
+            "Response mode: chat_optional_output",
+            f"Canvas hash: {canvas_hash}",
+            "",
+            "Current selection JSON:",
+            json.dumps(selection, ensure_ascii=False, indent=2, sort_keys=True),
+            "",
+            "Current canvas snapshot JSON:",
+            json.dumps(canvas_snapshot, ensure_ascii=False, indent=2, sort_keys=True),
+            "",
+            "User request:",
+            message,
+        ]
+    )
+
+
+def render_workbench_authoring_prompt(
+    *,
+    message: str,
+    reason: str,
+    canvas_hash: str,
+    canvas_snapshot: dict[str, Any],
+    selection: dict[str, Any],
+) -> str:
+    response_contract = (
+        f"Return exactly one JSON object matching {AUTHORING_OUTPUT_SCHEMA_VERSION}. "
+        "The JSON may contain a CanvasAuthoringProposal draft only; do not write files. "
+        "If you do not need to change the canvas, set proposal to null."
+    )
+    response_shape = {
+        "schema_version": AUTHORING_OUTPUT_SCHEMA_VERSION,
+        "assistant_message": "用户可读回答",
+        "proposal_kind": "canvas",
+        "proposal": None,
+        "questions": [],
+        "risk_notes": [],
+        "confidence": "medium",
+    }
     return "\n".join(
         [
             "You are ACC's Workbench AI assistant.",
             "You help the user understand and revise the current workflow canvas.",
             response_contract,
+            "Always include questions, risk_notes, and confidence. Use questions: [], "
+            'risk_notes: [], confidence: "medium" when there is no specific metadata.',
+            "",
+            "Required response shape:",
+            json.dumps(response_shape, ensure_ascii=False, indent=2),
             "",
             "Authoring rules:",
             *[f"- {rule}" for rule in AUTHORING_CORE_RULES],
@@ -1396,6 +1807,20 @@ def render_workbench_assistant_prompt(
             message,
         ]
     )
+
+
+def turn_response_mode(reason: str, *, is_workbench_assistant: bool) -> AgentTurnResponseMode:
+    if is_workbench_assistant:
+        return CHAT_RESPONSE_MODE if reason == "workbench_chat" else STRUCTURED_RESPONSE_MODE
+    return STRUCTURED_RESPONSE_MODE if reason == "output_revision" else CHAT_RESPONSE_MODE
+
+
+def normalize_workbench_authoring_output(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(payload)
+    for key, default_value in WORKBENCH_AUTHORING_METADATA_DEFAULTS.items():
+        if key not in normalized:
+            normalized[key] = list(default_value) if isinstance(default_value, list) else default_value
+    return normalized
 
 
 def append_message(session_dir: Path, payload: dict[str, Any]) -> None:

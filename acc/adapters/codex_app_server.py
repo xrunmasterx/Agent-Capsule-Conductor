@@ -27,6 +27,8 @@ APPROVAL_METHODS = frozenset(
     }
 )
 
+CODEX_APP_SERVER_STREAM_LIMIT_BYTES = 16 * 1024 * 1024
+
 
 class CodexAppServerAdapter:
     """Run Codex through app-server JSON-RPC, not one-shot ``codex exec``."""
@@ -55,6 +57,7 @@ class CodexAppServerAdapter:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=env,
+                limit=CODEX_APP_SERVER_STREAM_LIMIT_BYTES,
             )
             if (
                 getattr(process, "stdin", None) is None
@@ -178,8 +181,10 @@ async def run_codex_turn(
         },
     )
     await client.completed.wait()
-    output = latest_json_object(client.agent_messages)
-    if output is None and request.response_mode == "structured_required":
+    output = None
+    if request.response_mode != "chat_optional_output":
+        output = latest_json_object(client.agent_messages)
+    if output is None and request.response_mode != "chat_optional_output":
         raise AccError("Codex app-server did not produce a JSON object agent message")
     output_json_path = None
     if output is not None:
@@ -433,11 +438,35 @@ class CodexJsonRpcClient:
                 )
             self.completed.set()
             return
+        if method == "item/agentMessage/delta":
+            self.handle_agent_message_delta(params)
+            return
         if method in {"item/started", "item/completed"}:
             self.handle_item_event(method, params)
             return
         if method == "codex/event":
             self.handle_legacy_codex_event(params)
+
+    def handle_agent_message_delta(self, params: dict[str, Any]) -> None:
+        delta = params.get("delta")
+        if not isinstance(delta, str) or not delta:
+            return
+        append_agent_event(
+            self.turn_request.events_log_path,
+            "agent_message_delta",
+            session_id=self.turn_request.session_id,
+            turn_id=self.turn_request.turn_id,
+            run_id=self.turn_request.run_id,
+            node_id=self.turn_request.node_id,
+            payload={
+                "content": delta,
+                "delta": delta,
+                "thread_id": string_from(params, "threadId") or string_from(params, "thread_id"),
+                "turn_id": string_from(params, "turnId") or string_from(params, "turn_id"),
+                "item_id": string_from(params, "itemId") or string_from(params, "item_id"),
+                "source": "codex_app_server",
+            },
+        )
 
     def handle_item_event(self, method: str, params: dict[str, Any]) -> None:
         item = params.get("item") if isinstance(params.get("item"), dict) else params

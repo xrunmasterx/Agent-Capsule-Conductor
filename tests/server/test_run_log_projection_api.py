@@ -63,6 +63,25 @@ def test_node_log_delta_ignores_agent_session_ref_outside_project(client, projec
     assert response.json()["text"] == "node log\n"
 
 
+def test_node_log_delta_ignores_agent_session_ref_from_sibling_run(client, project_root) -> None:
+    node_dir = project_root / "runs" / "server_run" / "nodes" / "server_node"
+    sibling_session_dir = project_root / "runs" / "_agent_sessions" / "other_run" / "server_node"
+    sibling_turn_dir = sibling_session_dir / "turns" / "turn_1"
+    node_dir.mkdir(parents=True, exist_ok=True)
+    sibling_turn_dir.mkdir(parents=True)
+    (node_dir / "stdout.log").write_bytes(b"node log\n")
+    (node_dir / "runtime.json").write_text(
+        json.dumps({"agent_session_ref": str(sibling_session_dir.resolve()), "turn_id": "turn_1"}),
+        encoding="utf-8",
+    )
+    (sibling_turn_dir / "stdout.log").write_bytes(b"sibling secret\n")
+
+    response = client.get("/api/runs/server_run/nodes/server_node/logs/stdout")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["text"] == "node log\n"
+
+
 def test_node_log_delta_ignores_unsafe_agent_turn_id(client, project_root) -> None:
     node_dir = project_root / "runs" / "server_run" / "nodes" / "server_node"
     session_dir = project_root / "runs" / "_agent_sessions" / "server_run" / "server_node"

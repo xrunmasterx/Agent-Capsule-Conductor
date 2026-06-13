@@ -5,12 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from acc.models import (
-    CallableRef,
-    NodeInvocationSpec,
-    WorkflowFunctionTemplate,
-    WorkflowInputBinding,
-)
 from acc.engine import (
     callable_topological_levels,
     validate_callable_control_edges,
@@ -21,6 +15,12 @@ from acc.engine import (
     validate_node_invocation_spec,
     validate_workflow_call_input_boundary,
     validate_workflow_call_output_boundary,
+)
+from acc.models import (
+    CallableRef,
+    NodeInvocationSpec,
+    WorkflowFunctionTemplate,
+    WorkflowInputBinding,
 )
 
 ValidationSeverity = Literal["error", "warning"]
@@ -217,6 +217,9 @@ def _incoming_data_ports(template: WorkflowFunctionTemplate) -> dict[str, set[st
         source_node = template.node_invocations.get(edge.source)
         if source_node is not None and _control_main_can_satisfy_input(source_node):
             incoming[edge.target].add("main")
+    for binding in template.workflow_input_bindings:
+        if binding.target.node in incoming:
+            incoming[binding.target.node].add(binding.target.port)
     for node in template.node_invocations.values():
         for binding in node.input_bindings:
             if binding.source is not None or binding.static_value is not None:

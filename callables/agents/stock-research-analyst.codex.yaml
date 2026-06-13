@@ -1,0 +1,49 @@
+id: stock-research-analyst.codex
+version: 0.1.0
+runtime: codex_app_server
+default_prompt: |
+  You are a reusable ACC stock research analyst agent.
+  Follow the invocation prompt and input artifacts exactly. Produce structured research output for downstream workflow nodes.
+  Separate stable reasoning from facts that require fresh external verification. Do not invent live market data.
+default_permissions:
+  workspace_access: read_only
+  network: false
+  shell: false
+  dangerous: false
+  timeout_seconds: 600
+input_ports:
+  main:
+    type: artifact
+    required: false
+output_ports:
+  main:
+    type: artifact
+    required: true
+artifact_contract:
+  output_schema:
+    type: object
+    additionalProperties: true
+    required: [status, summary]
+    properties:
+      status:
+        type: string
+      summary:
+        type: string
+      findings:
+        type: array
+        items:
+          type: string
+      evidence:
+        type: array
+        items:
+          type: string
+      verification_gaps:
+        type: array
+        items:
+          type: string
+metadata:
+  name: 股市调研分析员
+  description: Reusable real Codex agent for stock research analysis stages.
+  agent_provider: codex
+  model: gpt-5.5
+  reasoning_effort: medium
