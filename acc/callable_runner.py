@@ -35,6 +35,7 @@ from acc.runtime.policy import (
     production_codex_app_server_timeout_seconds,
     production_codex_timeout_seconds,
 )
+from acc.storage import write_text_atomic
 from acc.store import write_json
 from acc.utils import update_runtime_json
 
@@ -65,7 +66,7 @@ class CallableClassRunner:
             )
         write_json(run_dir / "output_schema.json", schema)
         prompt = render_agent_prompt(template, context.node, input_payload)
-        (run_dir / "resolved_prompt.md").write_text(prompt, encoding="utf-8")
+        write_text_atomic(run_dir / "resolved_prompt.md", prompt)
 
         mode = acc_run_mode()
         if mode == HERMETIC_RUN_MODE:
@@ -551,7 +552,8 @@ def hermetic_stub_output(
         ensure_ascii=False,
         sort_keys=True,
     )
-    return {
+    schema = output_schema_for_agent(template, node)
+    default_output = {
         "schema_version": "acc.agent.output.v1",
         "status": "success",
         "summary": f"Callable agent_class:{template.id} executed in hermetic stub mode",
@@ -570,6 +572,123 @@ def hermetic_stub_output(
         "next_actions": [],
         "outputs": {},
     }
+    return synthesize_hermetic_schema_output(
+        schema,
+        default_output,
+        node_id=node.id,
+        callable_id=template.id,
+        input_payload=input_payload,
+    )
+
+
+def synthesize_hermetic_schema_output(
+    schema: dict[str, Any],
+    defaults: dict[str, Any],
+    *,
+    node_id: str,
+    callable_id: str,
+    input_payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Build deterministic hermetic output matching a node output_schema.
+
+    Hermetic mode is used by tests and browser acceptance. It should exercise
+    ACC payload routing without depending on a real model, so the stub must
+    materialize declared named output ports under ``outputs``.
+    """
+
+    value = synthesize_schema_value(
+        schema,
+        defaults,
+        node_id=node_id,
+        callable_id=callable_id,
+        input_payload=input_payload,
+        property_name=None,
+    )
+    return value if isinstance(value, dict) else dict(defaults)
+
+
+def synthesize_schema_value(
+    schema: Any,
+    defaults: dict[str, Any],
+    *,
+    node_id: str,
+    callable_id: str,
+    input_payload: dict[str, Any],
+    property_name: str | None,
+) -> Any:
+    if not isinstance(schema, dict):
+        return default_value_for_schema_name(property_name, defaults, node_id, callable_id, input_payload)
+
+    if "const" in schema:
+        return copy.deepcopy(schema["const"])
+    enum_values = schema.get("enum")
+    if isinstance(enum_values, list) and enum_values:
+        if property_name == "status" and "success" in enum_values:
+            return "success"
+        return copy.deepcopy(enum_values[0])
+
+    for union_key in ("oneOf", "anyOf", "allOf"):
+        variants = schema.get(union_key)
+        if isinstance(variants, list) and variants:
+            return synthesize_schema_value(
+                variants[0],
+                defaults,
+                node_id=node_id,
+                callable_id=callable_id,
+                input_payload=input_payload,
+                property_name=property_name,
+            )
+
+    schema_type = schema.get("type")
+    if isinstance(schema_type, list):
+        schema_type = next((item for item in schema_type if item != "null"), schema_type[0] if schema_type else None)
+
+    if schema_type == "object" or isinstance(schema.get("properties"), dict):
+        properties = schema.get("properties")
+        if not isinstance(properties, dict):
+            return {}
+        return {
+            str(name): synthesize_schema_value(
+                property_schema,
+                defaults,
+                node_id=node_id,
+                callable_id=callable_id,
+                input_payload=input_payload,
+                property_name=str(name),
+            )
+            for name, property_schema in properties.items()
+        }
+    if schema_type == "array":
+        return []
+    if schema_type == "integer":
+        return 0
+    if schema_type == "number":
+        return 0
+    if schema_type == "boolean":
+        return False
+    if schema_type == "string":
+        return default_value_for_schema_name(property_name, defaults, node_id, callable_id, input_payload)
+    return default_value_for_schema_name(property_name, defaults, node_id, callable_id, input_payload)
+
+
+def default_value_for_schema_name(
+    property_name: str | None,
+    defaults: dict[str, Any],
+    node_id: str,
+    callable_id: str,
+    input_payload: dict[str, Any],
+) -> Any:
+    if property_name and property_name in defaults:
+        return copy.deepcopy(defaults[property_name])
+    if property_name == "node_id":
+        return node_id
+    if property_name == "callable_id":
+        return callable_id
+    if property_name == "input":
+        return copy.deepcopy(input_payload)
+    if property_name:
+        return f"hermetic:{node_id}:{property_name}"
+    return f"hermetic:{node_id}:{callable_id}"
 
 
 def validate_output_schema(output: dict[str, Any], schema: dict[str, Any]) -> None:

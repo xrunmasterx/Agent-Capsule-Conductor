@@ -108,6 +108,14 @@ import {
   type WorkflowPortView,
 } from './workflow-viewer/palette';
 import {
+  effectiveOutputPortsForNode,
+  hasProjectedOutputPorts,
+  isSchemaDerivedOutputPort,
+  outputPortTooltip,
+  outputPortsFromSchema,
+  schemaDerivedOutputFields,
+} from './workflow-viewer/schemaPorts';
+import {
   edgeAddressEquals,
   edgeAddressFromFlowEdgeId,
   flowEdgeId,
@@ -175,6 +183,7 @@ const DEMO_ANALYST_AGENT_ID = 'stock-research-analyst.codex';
 const DEMO_SYNTHESIS_AGENT_ID = 'stock-research-synthesis.codex';
 const DEMO_REPORT_AGENT_ID = 'stock-report-writer.codex';
 const DEMO_REVIEW_AGENT_ID = 'stock-publication-reviewer.codex';
+const DEMO_DATA_AGENT_ID = 'stock-data-collector.codex';
 
 type InternalNodeView = {
   id: string;
@@ -250,6 +259,8 @@ type WorkspaceCanvasModel = {
   layout?: 'workspace-canvas' | 'workflow-focus';
   focusedWorkflowId?: string;
   rootWorkflowId: string;
+  exposedOutputs?: WorkflowPortView[];
+  workflowOutputBindings?: NonNullable<WorkflowGraph['workflow_output_bindings']>;
   workflows: WorkflowContainerModel[];
   edges: WorkflowCanvasEdge[];
 };
@@ -265,6 +276,11 @@ type PendingCanvasConnection = {
   mode: ConnectionMode;
   side: EndpointSide;
   endpoint: EndpointDescriptor | null;
+};
+
+type DataDropTargetPreview = {
+  flowNodeId: string;
+  portId: string;
 };
 
 type ConnectPreviewState = {
@@ -332,6 +348,13 @@ type DataEdgeCommandResult = {
   canvas: WorkspaceCanvasModel;
   edge: WorkflowCanvasEdge;
   autoAddedControlEdge: boolean;
+};
+
+type BodyDropDataEdgePlan = {
+  canvasWithTargetPort: WorkspaceCanvasModel;
+  request: DataEdgeCommandRequest;
+  targetPortId: string;
+  createdTargetPort: boolean;
 };
 
 type ScopedEdgeSemantic =
@@ -414,6 +437,14 @@ type DataConnectNodeOption = {
   inputPorts: WorkflowPortView[];
   outputPorts: WorkflowPortView[];
   subtitle?: string;
+};
+
+type EdgeDiagnostic = {
+  code: 'dangling_data_edge_source' | 'dangling_data_edge_target';
+  message: string;
+  nodeId: string;
+  portId: string;
+  expectedSchemaPath?: string;
 };
 
 type EvidenceDockState = {
@@ -775,7 +806,9 @@ type WorkflowNodeData = {
   connectionMode: ConnectionMode;
   edgeViewMode: EdgeViewMode;
   selected: boolean;
+  dataDropHint?: string;
   showDataPorts: boolean;
+  showDataPortLabels?: boolean;
   onSelectEdge: (address: EdgeAddress, altKey?: boolean) => void;
   onSelectPort: (workflowId: string, port: WorkflowPortView) => void;
   onSelectInternal: (workflowId: string, nodeId: string) => void;
@@ -809,8 +842,11 @@ type AgentToolNodeData = {
   internalNodeId?: string;
   inputPorts: WorkflowPortView[];
   outputPorts: WorkflowPortView[];
+  size: { width: number; height: number };
   selected: boolean;
+  dataDropHint?: string;
   showDataPorts: boolean;
+  showDataPortLabels?: boolean;
   onSelect: () => void;
   onSelectPort: (workflowId: string, port: WorkflowPortView) => void;
   onControlHandleMouseDown: (
@@ -831,15 +867,22 @@ const DEFAULT_CONTAINER_SIZE = { width: 430, height: 328 };
 const BOUNDARY_NODE_SIZE = { width: 270, height: 240 };
 const AGENT_TOOL_NODE_SIZE = { width: 276, height: 132 };
 const INTERNAL_AGENT_TOOL_NODE_SIZE = { width: 276, height: 158 };
-const AGENT_CONTROL_HANDLE_TOP = AGENT_TOOL_NODE_SIZE.height / 2;
-const AGENT_DATA_PORT_TOP = 88;
+const AGENT_CONTROL_HANDLE_TOP = '50%';
+const AGENT_CONTROL_HANDLE_FALLBACK_TOP = AGENT_TOOL_NODE_SIZE.height / 2;
+const AGENT_MAX_DATA_PORTS = 10;
 const AGENT_DATA_PORT_GAP = 28;
+const AGENT_PORT_VERTICAL_PADDING = 42;
 const WORKFLOW_INNER_HANDLE_X = 25;
 const WORKFLOW_CHILD_PADDING = 24;
 const WORKFLOW_CHILD_START_PADDING = 8;
 const WORKFLOW_LAYOUT_SAFE_AREA = { left: 64, top: 146, right: 64, bottom: 56 };
 const WORKFLOW_INTERNAL_LAYOUT_GAP = { rank: 72, node: 28 };
 const ROOT_LAYOUT_GAP = { rank: 96, node: 88 };
+const WORKFLOW_CONTAINER_Z_INDEX = 0;
+const WORKFLOW_INTERNAL_EDGE_Z_INDEX = 2;
+const WORKFLOW_INTERNAL_SELECTED_EDGE_Z_INDEX = 6;
+const WORKFLOW_INTERNAL_NODE_Z_INDEX = 4;
+const WORKFLOW_INTERNAL_SELECTED_NODE_Z_INDEX = 8;
 const INSPECTOR_DEFAULT_WIDTH = 390;
 const INSPECTOR_MIN_WIDTH = 320;
 const INSPECTOR_MAX_WIDTH = 640;
@@ -856,8 +899,32 @@ const TASK_STORE_KEY = 'acc.workbench.tasks.v2';
 const DEFAULT_TASK_ID = 'task_canvas_default';
 const TEMPORARY_CALLABLE_ID_PREFIX = 'tmp_agent_';
 
-function agentDataPortTop(index: number): number {
-  return AGENT_DATA_PORT_TOP + index * AGENT_DATA_PORT_GAP;
+function visibleAgentDataPorts(ports: WorkflowPortView[]): WorkflowPortView[] {
+  return ports.slice(0, AGENT_MAX_DATA_PORTS);
+}
+
+function agentDataPortSlot(index: number, count: number): number {
+  if (count <= 0) {
+    return 0;
+  }
+  const aboveCount = Math.floor(count / 2);
+  if (index < aboveCount) {
+    return index - aboveCount;
+  }
+  return index - aboveCount + 1;
+}
+
+function agentDataPortTop(index: number, count: number, nodeHeight: number): number {
+  return nodeHeight / 2 + agentDataPortSlot(index, count) * AGENT_DATA_PORT_GAP;
+}
+
+function agentDataPortMaxOffset(count: number): number {
+  if (count <= 0) {
+    return 0;
+  }
+  const aboveCount = Math.floor(count / 2);
+  const belowCount = count - aboveCount;
+  return Math.max(aboveCount, belowCount) * AGENT_DATA_PORT_GAP;
 }
 
 function trimLiveLog(value: string): string {
@@ -2301,6 +2368,10 @@ export function WorkflowViewer({
   const [tasks, setTasks] = useState<WorkbenchTask[]>(() => initialTaskStore.tasks);
   const [activeTaskId, setActiveTaskId] = useState(initialTaskStore.activeTaskId);
   const durableTaskBootstrapStartedRef = useRef(false);
+  const backendTaskPersistTimerRef = useRef<number | null>(null);
+  const lastBackendTaskPersistKeyRef = useRef('');
+  const callablesRef = useRef(callables);
+  const workflowsRef = useRef(workflows);
   const currentTask = useMemo(
     () => tasks.find((task) => task.taskId === activeTaskId) || tasks[0],
     [activeTaskId, tasks],
@@ -2320,6 +2391,7 @@ export function WorkflowViewer({
   const [runsById, setRunsById] = useState<Record<string, RunProjection>>({});
   const [runLogsById, setRunLogsById] = useState<Record<string, Record<string, NodeLiveLogs>>>({});
   const [runLiveEventsById, setRunLiveEventsById] = useState<Record<string, WorkbenchLiveEvent[]>>({});
+  const [nodeRunDetailsByKey, setNodeRunDetailsByKey] = useState<Record<string, NodeRunSummary>>({});
   const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfig | null>(null);
   const [openedExternalWorkflow, setOpenedExternalWorkflow] = useState(false);
   const [focusedWorkflowId, setFocusedWorkflowId] = useState<string | null>(null);
@@ -2331,6 +2403,14 @@ export function WorkflowViewer({
   });
   const [edgeViewMode, setEdgeViewMode] = useState<EdgeViewMode>('all');
   const [taskWorkspaceView, setTaskWorkspaceView] = useState<TaskWorkspaceView>('blueprint');
+
+  useEffect(() => {
+    callablesRef.current = callables;
+  }, [callables]);
+
+  useEffect(() => {
+    workflowsRef.current = workflows;
+  }, [workflows]);
   const [selectedResource, setSelectedResource] = useState<ResourceTemplate | null>(null);
   const [workflowBindings, setWorkflowBindings] = useState<Record<string, WorkflowBindingView>>({});
   const [bindingEditorWorkflowId, setBindingEditorWorkflowId] = useState<string | null>(null);
@@ -2381,6 +2461,7 @@ export function WorkflowViewer({
   const runOverlay = selectedRunProjection?.overlay || null;
   const isRunning = currentTask ? isActiveTaskStatus(currentTask.status) : false;
   const resourceDetailOpen = chrome.rightPanel === 'resourceDetail';
+  const inspectorOpen = chrome.rightPanel === 'inspector';
   const assistantOpen = bottomDockMode === 'assistant' && evidenceDock.open;
   const inspectorWidth = chrome.inspectorWidth;
   const workflowBindingKey = useMemo(
@@ -2597,7 +2678,7 @@ export function WorkflowViewer({
         }
         await Promise.all(
           initialTaskStore.tasks.map((task) =>
-            persistWorkbenchTaskToBackend(task, callables, workflows),
+            persistWorkbenchTaskToBackend(task, callablesRef.current, workflowsRef.current),
           ),
         );
         if (!cancelled) {
@@ -2617,8 +2698,9 @@ export function WorkflowViewer({
     void bootstrapDurableTasks();
     return () => {
       cancelled = true;
+      durableTaskBootstrapStartedRef.current = false;
     };
-  }, [callables, initialTaskStore, workflows]);
+  }, [initialTaskStore]);
 
   useEffect(() => {
     if (!assistantOpen || assistantSessionId || assistantBusy) {
@@ -3079,13 +3161,51 @@ export function WorkflowViewer({
       selectedRunProjection?.targetId,
     ],
   );
+  const rawSelectedNodeRun = useMemo(
+    () => selectedNodeRunForSelection(workflowRun, selection, selectedWorkflow, selectedInternalNode, selectedNodeRunLookup),
+    [selection, selectedInternalNode, selectedNodeRunLookup, selectedWorkflow, workflowRun],
+  );
+  const rawSelectedNodeRunDetailKey =
+    selectedRunId && rawSelectedNodeRun ? nodeRunDetailCacheKey(selectedRunId, rawSelectedNodeRun) : '';
+
+  useEffect(() => {
+    if (!selectedRunId || !rawSelectedNodeRun || !rawSelectedNodeRunDetailKey) {
+      return undefined;
+    }
+    if (nodeRunDetailsByKey[rawSelectedNodeRunDetailKey]) {
+      return undefined;
+    }
+    let cancelled = false;
+    api
+      .node(selectedRunId, rawSelectedNodeRun.node_id)
+      .then((detail) => {
+        if (cancelled) {
+          return;
+        }
+        setNodeRunDetailsByKey((current) => ({
+          ...current,
+          [rawSelectedNodeRunDetailKey]: mergeNodeRunDetail(rawSelectedNodeRun, detail),
+        }));
+      })
+      .catch(() => {
+        // The lightweight run summary remains usable if detail projection is not available yet.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [nodeRunDetailsByKey, rawSelectedNodeRun, rawSelectedNodeRunDetailKey, selectedRunId]);
+
+  const enrichedWorkflowRun = useMemo(
+    () => mergeWorkflowRunNodeDetails(workflowRun, selectedRunId, nodeRunDetailsByKey),
+    [nodeRunDetailsByKey, selectedRunId, workflowRun],
+  );
   const selectedNodeSettings = useMemo(
     () =>
       selectedNodeSettingsModel({
         selection,
         selectedWorkflow,
         selectedInternalNode,
-        workflowRun,
+        workflowRun: enrichedWorkflowRun,
         liveLogs: selectedLiveLogs,
         nodeRunLookup: selectedNodeRunLookup,
       }),
@@ -3093,7 +3213,7 @@ export function WorkflowViewer({
       selection,
       selectedWorkflow,
       selectedInternalNode,
-      workflowRun,
+      enrichedWorkflowRun,
       selectedLiveLogs,
       selectedNodeRunLookup,
     ],
@@ -3113,7 +3233,7 @@ export function WorkflowViewer({
         selectedEdge,
         selectedInternalNode,
         selectedNodeSettings,
-        workflowRun,
+        workflowRun: enrichedWorkflowRun,
         workflowEvents,
         liveLogs: selectedLiveLogs,
         runtimeConfig,
@@ -3133,7 +3253,7 @@ export function WorkflowViewer({
       selection,
       workflowBindings,
       workflowEvents,
-      workflowRun,
+      enrichedWorkflowRun,
     ],
   );
   const selectedAgentNodeRun =
@@ -3146,7 +3266,7 @@ export function WorkflowViewer({
             nodeId: selectedAgentNodeRun.node_id,
             uiNodeId: selectedAgentNodeRun.ui_node_id || '',
             parentNodeId: selectedAgentNodeRun.parent_node_id || '',
-            nodeRunDir: selectedAgentNodeRun.run_dir || '',
+            nodeRunDir: effectiveNodeRunDir(selectedAgentNodeRun) || '',
           }
         : null,
     [selectedAgentNodeRun, selectedRunId],
@@ -3255,7 +3375,7 @@ export function WorkflowViewer({
       });
       const [messages, nodeEvents, interactions] = await Promise.all([
         api.getAgentSessionMessages(session.session_id).catch(() => ({ messages: [] as AgentMessage[] })),
-        api.nodeEvents(runId, nodeId).catch(() => ({ events: [] as RunEvent[] })),
+        api.nodeEvents(runId, nodeId, 200, { nodeRunDir }).catch(() => ({ events: [] as RunEvent[] })),
         api.runInteractions(runId).catch(() => ({ interactions: [] as InteractionRequest[] })),
       ]);
       setAgentSessionState((current) => {
@@ -3370,6 +3490,45 @@ export function WorkflowViewer({
     assistantApplyUndo.afterCanvasHash === currentAuthoringCanvasHash &&
     !isRunning &&
     !assistantPendingTurn;
+
+  useEffect(() => {
+    if (!durableTasksReady || !currentTask) {
+      return undefined;
+    }
+    const persistKey = `${activeTaskId}:${currentAuthoringCanvasHash}`;
+    if (lastBackendTaskPersistKeyRef.current === persistKey) {
+      return undefined;
+    }
+    if (backendTaskPersistTimerRef.current) {
+      window.clearTimeout(backendTaskPersistTimerRef.current);
+    }
+    const taskSnapshot: WorkbenchTask = {
+      ...currentTask,
+      canvas: stripRuntimeStateFromCanvas(canvas),
+    };
+    backendTaskPersistTimerRef.current = window.setTimeout(() => {
+      backendTaskPersistTimerRef.current = null;
+      lastBackendTaskPersistKeyRef.current = persistKey;
+      void persistWorkbenchTaskToBackend(taskSnapshot, callables, workflows).catch((error) => {
+        lastBackendTaskPersistKeyRef.current = '';
+        console.warn('Workbench task autosave failed', error);
+      });
+    }, 700);
+    return () => {
+      if (backendTaskPersistTimerRef.current) {
+        window.clearTimeout(backendTaskPersistTimerRef.current);
+        backendTaskPersistTimerRef.current = null;
+      }
+    };
+  }, [
+    activeTaskId,
+    callables,
+    canvas,
+    currentAuthoringCanvasHash,
+    currentTask,
+    durableTasksReady,
+    workflows,
+  ]);
 
   useEffect(() => {
     if (selectionKey(normalizedSelection) !== selectionKey(selection)) {
@@ -3521,7 +3680,10 @@ export function WorkflowViewer({
     setSelection(nextSelection);
     if (!isInspectableNodeSelection(nextSelection)) {
       setNodeDetailOpen(false);
+      setChrome((current) => ({ ...current, rightPanel: 'none' }));
+      return;
     }
+    setChrome((current) => ({ ...current, rightPanel: 'inspector' }));
   }, []);
 
   const openNodeDetails = useCallback((nextSelection: CanvasSelection) => {
@@ -3533,10 +3695,7 @@ export function WorkflowViewer({
     setNodeDetailOpen(true);
     setChrome((current) => ({
       ...current,
-      rightPanel:
-        current.rightPanel === 'resourceDetail' || current.rightPanel === 'inspector'
-          ? 'none'
-          : current.rightPanel,
+      rightPanel: 'none',
     }));
   }, []);
 
@@ -3869,7 +4028,7 @@ export function WorkflowViewer({
     if (!path) {
       return;
     }
-    const content = await api.artifact(path);
+    const content = await readEvidenceContent(path, selectedRunId);
     setEvidenceDock({
       open: true,
       title,
@@ -3888,7 +4047,7 @@ export function WorkflowViewer({
       return;
     }
     try {
-      const content = await api.artifact(path);
+      const content = await readEvidenceContent(path, selectedRunId);
       setArtifactCacheByPath((current) => ({
         ...current,
         [path]: truncateLargeLog(content),
@@ -4195,6 +4354,44 @@ export function WorkflowViewer({
       setMessage(`已添加 ${direction} port: ${nodeId}.${normalizedPortId}`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '添加端口失败');
+    }
+  }
+
+  function renameDataConnectPort(
+    scopeWorkflowId: string | null,
+    nodeId: string,
+    direction: PortDirection,
+    portId: string,
+    requestedPortId: string,
+  ) {
+    const normalizedPortId = slugId(requestedPortId);
+    if (!normalizedPortId) {
+      setMessage('端口 id 不能为空');
+      return;
+    }
+    try {
+      updateCanvasAndGraph((current) =>
+        renamePortOnDataConnectNode(current, scopeWorkflowId, nodeId, direction, portId, normalizedPortId),
+      );
+      setMessage(`已重命名 ${direction} port: ${nodeId}.${portId} -> ${normalizedPortId}`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '重命名端口失败');
+    }
+  }
+
+  function deleteDataConnectPort(
+    scopeWorkflowId: string | null,
+    nodeId: string,
+    direction: PortDirection,
+    portId: string,
+  ) {
+    try {
+      updateCanvasAndGraph((current) =>
+        deletePortFromDataConnectNode(current, scopeWorkflowId, nodeId, direction, portId),
+      );
+      setMessage(`已删除 ${direction} port: ${nodeId}.${portId}`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '删除端口失败');
     }
   }
 
@@ -4538,7 +4735,7 @@ export function WorkflowViewer({
   }
 
   return (
-    <WorkbenchShell>
+    <WorkbenchShell durableTasksReady={durableTasksReady}>
       <TopBar
         title={canvas.name}
         subtitle="WorkflowFunctionTemplate / ScopeFrame / SessionInstance / ArtifactBundle 统一视图"
@@ -4644,6 +4841,58 @@ export function WorkflowViewer({
             {selectedResource ? (
               <ResourceInspector resource={selectedResource} />
             ) : null}
+          </div>
+        ) : null}
+        {inspectorOpen ? (
+          <div
+            className="canvas-drawer canvas-drawer-right"
+            style={{ width: inspectorWidth }}
+          >
+            <div
+              className="drawer-resize-handle"
+              role="separator"
+              aria-label="调整节点设置面板宽度"
+              aria-orientation="vertical"
+              onPointerDown={startInspectorResize}
+            />
+            <RightInspector
+              canvas={displayCanvas}
+              selection={selection}
+              selectedWorkflow={selectedWorkflow}
+              selectedPort={selectedPort}
+              selectedEdge={selectedEdge}
+              selectedInternalNode={selectedInternalNode}
+              connectionMode={connectionMode}
+              dataConnectionDraft={dataConnectionDraft}
+              runtimeConfig={runtimeConfig}
+              liveLogs={selectedLiveLogs}
+              workflowRun={enrichedWorkflowRun}
+              workflowEvents={selectedRunLiveEvents}
+              workflows={workflows}
+              binding={selectedWorkflow ? workflowBindings[selectedWorkflow.id] : undefined}
+              onConnectionMode={setConnectionMode}
+              onBeginDataConnection={beginDataConnection}
+              onCancelDataConnection={cancelDataConnection}
+              onUpdateDataConnectionMaterialization={updateDataConnectionMaterialization}
+              onCompleteDataConnection={completeDataConnection}
+              onCompleteDataConnectionWithNewInputPort={completeDataConnectionWithNewInputPort}
+              onAddDataConnectPort={addDataConnectPort}
+              onRenameDataConnectPort={renameDataConnectPort}
+              onDeleteDataConnectPort={deleteDataConnectPort}
+              onReadEvidence={readEvidence}
+              onConfigureBinding={setBindingEditorWorkflowId}
+              onUpdateWorkflowInput={updateWorkflowInvocationInput}
+              onUpdateInternalInput={updateInternalInvocationInput}
+              onUpdateWorkflowLabel={updateWorkflowInvocationLabel}
+              onUpdateInternalLabel={updateInternalInvocationLabel}
+              onUpdateWorkflowForwardMainOutput={updateWorkflowForwardMainOutput}
+              onUpdateInternalForwardMainOutput={updateInternalForwardMainOutput}
+              onUpdateWorkflowEmptyInputPolicy={updateWorkflowEmptyInputPolicy}
+              onUpdateInternalEmptyInputPolicy={updateInternalEmptyInputPolicy}
+              onUpdateWorkflowCodexExecutionMode={updateWorkflowCodexExecutionMode}
+              onUpdateInternalCodexExecutionMode={updateInternalCodexExecutionMode}
+              onOpenCallableResource={openCallableResourceFromNode}
+            />
           </div>
         ) : null}
         {nodeDetailOpen && isNodeDetailModel(selectedDetailsModelWithAgentEvents) ? (
@@ -4782,9 +5031,19 @@ export function WorkflowViewer({
   );
 }
 
-function WorkbenchShell({ children }: { children: ReactNode }) {
+function WorkbenchShell({
+  children,
+  durableTasksReady,
+}: {
+  children: ReactNode;
+  durableTasksReady: boolean;
+}) {
   return (
-    <section className="panel workflow-viewer graph-workbench-v2" aria-label="ACC Workbench">
+    <section
+      className="panel workflow-viewer graph-workbench-v2"
+      aria-label="ACC Workbench"
+      data-durable-tasks-ready={durableTasksReady ? 'true' : 'false'}
+    >
       {children}
     </section>
   );
@@ -6798,10 +7057,13 @@ function SelectionLiveOutput({ model }: { model: SelectedEntityDetailsModel }) {
 
 function NodeOutputSchemaPane({ model }: { model: SelectedEntityDetailsModel }) {
   const nodeSettings = model.nodeSettings;
-  const fields = dedupeSchemaFields([
-    ...(nodeSettings?.outputSchema ? schemaFieldsFromJsonSchema(nodeSettings.outputSchema) : []),
-    ...schemaFieldsFromPorts(undefined, nodeSettings?.outputPorts || []),
-  ]);
+  const fields =
+    nodeSettings?.outputSchema && hasProjectedOutputPorts(nodeSettings.outputSchema)
+      ? schemaDerivedOutputFields(nodeSettings.outputSchema)
+      : dedupeSchemaFields([
+          ...(nodeSettings?.outputSchema ? schemaFieldsFromJsonSchema(nodeSettings.outputSchema) : []),
+          ...schemaFieldsFromPorts(undefined, nodeSettings?.outputPorts || []),
+        ]);
   return (
     <div className="assistant-runtime-content output-schema-content">
       <SchemaFieldCards title="output schema" fields={fields} emptyText="当前节点没有声明 output schema。" />
@@ -6888,6 +7150,7 @@ function WorkspaceCanvas({
   const [nodeCreateMenu, setNodeCreateMenu] = useState<NodeCreateMenuState>(null);
   const [connectStart, setConnectStart] = useState<PendingCanvasConnection | null>(null);
   const [connectPreview, setConnectPreview] = useState<ConnectPreviewState | null>(null);
+  const [dataDropTargetPreview, setDataDropTargetPreview] = useState<DataDropTargetPreview | null>(null);
   const [isDraggingNode, setIsDraggingNode] = useState(false);
   const [flowNodes, setFlowNodes] = useState<CanvasFlowNode[]>([]);
   const flowNodesRef = useRef<CanvasFlowNode[]>([]);
@@ -6919,6 +7182,7 @@ function WorkspaceCanvas({
     internalClickConnectRef.current = null;
     setConnectStart(null);
     setConnectPreview(null);
+    setDataDropTargetPreview(null);
   }, [canvas.id]);
   useEffect(() => {
     connectionModeRef.current = connectionMode;
@@ -6953,8 +7217,8 @@ function WorkspaceCanvas({
       };
       if (connectionMode === 'data' && selection.type === 'port') {
         const endpoints = [selection, nextSelection];
-        const source = endpoints.find((item) => item.direction === 'output');
-        const target = endpoints.find((item) => item.direction === 'input');
+      const source = endpoints.find((item) => item.direction === 'output');
+      const target = endpoints.find((item) => item.direction === 'input');
         if (!source || !target) {
           onSelect(nextSelection);
           onNotice?.('Data Edge 必须从 output port 连接到 input port');
@@ -6972,21 +7236,30 @@ function WorkspaceCanvas({
         );
         if (!resolved.accepted) {
           onSelect(nextSelection);
-          onNotice?.(resolved.reason);
-          return;
-        }
-        let storedEdge = resolved.edge;
-        onCanvasChange((current) => {
-          const committed = commitResolvedConnection(current, resolved);
-          storedEdge = committed.edge;
-          return committed.canvas;
-        });
-        onSelect(selectionForEdgeAddress(edgeAddressForScope(resolved.scopeWorkflowId, storedEdge.id)));
+        onNotice?.(resolved.reason);
         return;
+      }
+      const preflight = tryCommitResolvedConnection(canvas, resolved);
+      if (!preflight.ok) {
+        onSelect(nextSelection);
+        onNotice?.(preflight.message);
+        return;
+      }
+      let storedEdge = preflight.result.edge;
+      onCanvasChange((current) => {
+        const committed = tryCommitResolvedConnection(current, resolved);
+        if (!committed.ok) {
+          return current;
+        }
+        storedEdge = committed.result.edge;
+        return committed.result.canvas;
+      });
+      onSelect(selectionForEdgeAddress(edgeAddressForScope(resolved.scopeWorkflowId, storedEdge.id)));
+      return;
       }
       onSelect(nextSelection);
     },
-    [connectionMode, onCanvasChange, onNotice, onSelect, selection, visibleCanvas],
+    [canvas, connectionMode, onCanvasChange, onNotice, onSelect, selection, visibleCanvas],
   );
   const clearTransientInteractionState = useCallback(() => {
     setNodeCreateMenu(null);
@@ -6994,6 +7267,7 @@ function WorkspaceCanvas({
     internalClickConnectRef.current = null;
     setConnectStart(null);
     setConnectPreview(null);
+    setDataDropTargetPreview(null);
   }, []);
   const dispatchCanvasInteraction = useCallback(
     (command: CanvasInteractionCommand) => {
@@ -7005,7 +7279,7 @@ function WorkspaceCanvas({
       }
       if (command.type === 'port-click') {
         const workflow = visibleCanvas.workflows.find((item) => item.id === command.workflowId);
-        const ports = command.direction === 'input' ? workflow?.inputPorts : workflow?.outputPorts;
+        const ports = command.direction === 'input' ? workflow?.inputPorts : workflow ? workflowOutputPorts(workflow) : undefined;
         const portValue = ports?.find((item) => item.id === command.portId);
         if (workflow && portValue) {
           handleSelectPort(command.workflowId, portValue);
@@ -7074,8 +7348,10 @@ function WorkspaceCanvas({
     [onNotice, visibleCanvas],
   );
   const projectedFlowNodes = useMemo(
-    () =>
-      toFlowNodes(
+    () => {
+      const dataPortsVisible = connectionMode === 'data' || edgeViewMode === 'all' || edgeViewMode === 'data';
+      const dataPortLabelsVisible = connectionMode === 'data';
+      return toFlowNodes(
         visibleCanvas,
         selection,
         bindings,
@@ -7092,14 +7368,18 @@ function WorkspaceCanvas({
         onOpenNodeDetails,
         onFocusedWorkflow,
         onConfigureWorkflow,
-        connectionMode === 'data',
+        dataPortsVisible,
+        dataPortsVisible,
+        dataPortLabelsVisible,
         handleResizeWorkflow,
         handleMoveInternal,
         handleControlHandleMouseDown,
         connectionMode,
         edgeViewMode,
+        dataDropTargetPreview,
         (address, altKey = false) => dispatchCanvasInteraction({ type: 'edge-click', address, altKey }),
-      ),
+      );
+    },
     [
       visibleCanvas,
       selection,
@@ -7113,6 +7393,7 @@ function WorkspaceCanvas({
       handleMoveInternal,
       handleControlHandleMouseDown,
       edgeViewMode,
+      dataDropTargetPreview,
     ],
   );
   const projectedIdentityKey = useMemo(
@@ -7242,18 +7523,29 @@ function WorkspaceCanvas({
   }, [onDeleteSelection]);
 
   const commitResolved = useCallback((resolved: Extract<ConnectionResolution, { accepted: true }>) => {
+    const preflight = tryCommitResolvedConnection(canvas, resolved);
+    if (!preflight.ok) {
+      connectCompletedRef.current = false;
+      onNotice?.(preflight.message);
+      recordConnectionTrace('commit_rejected', { resolved, reason: preflight.message });
+      return;
+    }
     connectCompletedRef.current = true;
     connectCommitVersionRef.current += 1;
     setConnectPreview(null);
+    setDataDropTargetPreview(null);
     recordConnectionTrace('commit', { resolved });
-    let storedEdge = resolved.edge;
+    let storedEdge = preflight.result.edge;
     onCanvasChange((current) => {
-      const committed = commitResolvedConnection(current, resolved);
-      storedEdge = committed.edge;
-      return committed.canvas;
+      const committed = tryCommitResolvedConnection(current, resolved);
+      if (!committed.ok) {
+        return current;
+      }
+      storedEdge = committed.result.edge;
+      return committed.result.canvas;
     });
     onSelect(selectionForEdgeAddress(edgeAddressForScope(resolved.scopeWorkflowId, storedEdge.id)));
-  }, [onCanvasChange, onSelect]);
+  }, [canvas, onCanvasChange, onNotice, onSelect]);
 
   const beginPendingConnection = useCallback(
     (
@@ -7274,10 +7566,13 @@ function WorkspaceCanvas({
         recordConnectionTrace('begin_rejected', { nodeId, handleId, side, mode });
         connectStartRef.current = null;
         setConnectStart(null);
+        setConnectPreview(null);
+        setDataDropTargetPreview(null);
         return false;
       }
       connectCompletedRef.current = false;
       connectStartRef.current = pending;
+      setDataDropTargetPreview(null);
       recordConnectionTrace('begin', { nodeId, handleId, side, mode, endpoint: pending.endpoint });
       return true;
     },
@@ -7322,11 +7617,75 @@ function WorkspaceCanvas({
       point: { x: number; y: number },
       pendingConnection: PendingCanvasConnection,
       targetEndpointOverride?: DomConnectionEndpoint | null,
+      targetElementOverride?: Element | null,
     ): boolean => {
       const targetEndpoint = targetEndpointOverride || domConnectionEndpointAtPoint(point, pendingConnection.mode);
       recordConnectionTrace('release_target', { point, pendingConnection, targetEndpoint });
       const connection = connectionFromPendingEndpoint(pendingConnection, targetEndpoint);
       if (!connection) {
+        if (pendingConnection.mode === 'data') {
+          const targetFlowNodeId = domFlowNodeIdAtPoint(point, targetElementOverride);
+          if (targetFlowNodeId) {
+            try {
+              const plan = prepareDataEdgeToNodeBodyCommand(
+                canvas,
+                visibleCanvas,
+                pendingConnection,
+                targetFlowNodeId,
+              );
+              const expected = createDataEdgeCommand(plan.canvasWithTargetPort, plan.request);
+              connectCompletedRef.current = true;
+              connectCommitVersionRef.current += 1;
+              if (plan.createdTargetPort) {
+                onCanvasChange((current) =>
+                  prepareDataEdgeToNodeBodyCommand(
+                    current,
+                    current === canvas ? visibleCanvas : focusCanvas(current, focusedWorkflowId),
+                    pendingConnection,
+                    targetFlowNodeId,
+                  ).canvasWithTargetPort,
+                );
+                window.setTimeout(() => {
+                  onCanvasChange((current) => {
+                    const nextPlan = prepareDataEdgeToNodeBodyCommand(
+                      current,
+                      focusCanvas(current, focusedWorkflowId),
+                      pendingConnection,
+                      targetFlowNodeId,
+                    );
+                    return createDataEdgeCommand(nextPlan.canvasWithTargetPort, nextPlan.request).canvas;
+                  });
+                  onSelect(selectionForEdgeAddress(edgeAddressForScope(plan.request.scopeWorkflowId, expected.edge.id)));
+                }, 0);
+              } else {
+                onCanvasChange((current) => {
+                  if (current === canvas) {
+                    return expected.canvas;
+                  }
+                  return createDataEdgeToNodeBodyCommand(
+                    current,
+                    focusCanvas(current, focusedWorkflowId),
+                    pendingConnection,
+                    targetFlowNodeId,
+                  ).canvas;
+                });
+                onSelect(selectionForEdgeAddress(edgeAddressForScope(plan.request.scopeWorkflowId, expected.edge.id)));
+              }
+              onNotice?.(
+                `已创建输入端口 ${plan.request.targetNodeId}.${plan.targetPortId} 并连接 Data Edge` +
+                  (expected.autoAddedControlEdge ? '；已自动补控制依赖' : ''),
+              );
+              setDataDropTargetPreview(null);
+              return true;
+            } catch (error) {
+              connectCompletedRef.current = false;
+              onNotice?.(error instanceof Error ? error.message : '创建 Data Edge 失败');
+              setDataDropTargetPreview(null);
+              return false;
+            }
+          }
+          onNotice?.('Data Edge 请释放到目标节点或 input port');
+        }
         recordConnectionTrace('release_no_connection', { point, pendingConnection, targetEndpoint });
         return false;
       }
@@ -7337,9 +7696,10 @@ function WorkspaceCanvas({
         return false;
       }
       commitResolved(resolved);
+      setDataDropTargetPreview(null);
       return true;
     },
-    [commitResolved, onNotice, visibleCanvas],
+    [canvas, commitResolved, focusedWorkflowId, onCanvasChange, onNotice, onSelect, visibleCanvas],
   );
 
   const beginPendingFromHandleEvent = useCallback(
@@ -7392,6 +7752,7 @@ function WorkspaceCanvas({
         pendingAtRelease && event.target instanceof Element
           ? domConnectionEndpointFromElement(event.target, pendingAtRelease.mode)
           : null;
+      const targetElementAtRelease = event.target instanceof Element ? event.target : null;
       const commitVersionAtRelease = connectCommitVersionRef.current;
       recordConnectionTrace('release_event', {
         point,
@@ -7405,7 +7766,7 @@ function WorkspaceCanvas({
           return;
         }
         if (connectCommitVersionRef.current === commitVersionAtRelease) {
-          commitPendingConnectionAtPoint(point, pendingConnection, targetAtRelease);
+          commitPendingConnectionAtPoint(point, pendingConnection, targetAtRelease, targetElementAtRelease);
         }
         if (connectStartRef.current === pendingConnection) {
           connectStartRef.current = null;
@@ -7413,6 +7774,7 @@ function WorkspaceCanvas({
         connectCompletedRef.current = false;
         setConnectStart(null);
         setConnectPreview(null);
+        setDataDropTargetPreview(null);
       }, 0);
       return Boolean(pendingAtRelease);
     },
@@ -7442,6 +7804,7 @@ function WorkspaceCanvas({
     connectCompletedRef.current = false;
     setConnectStart(null);
     setConnectPreview(null);
+    setDataDropTargetPreview(null);
     if (!startsFromHandle) {
       internalClickConnectRef.current = null;
       suppressInternalClickConnectRef.current = true;
@@ -7546,10 +7909,11 @@ function WorkspaceCanvas({
     const point = pointerPoint(event);
     if (!connectCompletedRef.current && pendingConnection) {
       const targetEndpoint = domConnectionEndpointFromElement(target, pendingConnection.mode);
-      if (commitPendingConnectionAtPoint(point, pendingConnection, targetEndpoint)) {
+      if (commitPendingConnectionAtPoint(point, pendingConnection, targetEndpoint, target)) {
         connectStartRef.current = null;
         setConnectStart(null);
         setConnectPreview(null);
+        setDataDropTargetPreview(null);
         return;
       }
     }
@@ -7562,6 +7926,16 @@ function WorkspaceCanvas({
       connectStartRef.current = null;
       setConnectStart(null);
       setConnectPreview(null);
+      setDataDropTargetPreview(null);
+      return;
+    }
+    if (pendingConnection.mode === 'data') {
+      onNotice?.('Data Edge 请释放到目标节点或 input port');
+      connectStartRef.current = null;
+      connectCompletedRef.current = false;
+      setConnectStart(null);
+      setConnectPreview(null);
+      setDataDropTargetPreview(null);
       return;
     }
     setNodeCreateMenu({
@@ -7574,7 +7948,8 @@ function WorkspaceCanvas({
     connectCompletedRef.current = false;
     setConnectStart(null);
     setConnectPreview(null);
-  }, [commitPendingConnectionAtPoint, connectStart, flowInstance]);
+    setDataDropTargetPreview(null);
+  }, [commitPendingConnectionAtPoint, connectStart, flowInstance, onNotice]);
 
   const createMenuItem = useCallback((item: PaletteItem) => {
     if (focusedWorkflowId && item.kind === 'workflow') {
@@ -7655,6 +8030,25 @@ function WorkspaceCanvas({
         ? rectCenter(snapRect)
         : point;
       setConnectPreview((current) => current ? { ...current, end, snapped: Boolean(snapRect) } : null);
+      if (pendingConnection.mode === 'data' && !snapRect) {
+        const targetFlowNodeId = domFlowNodeIdAtPoint(point, event.target instanceof Element ? event.target : null);
+        if (targetFlowNodeId) {
+          try {
+            const previewPortId = inputPortIdForDataBodyPreview(
+              canvas,
+              focusCanvas(canvas, focusedWorkflowId),
+              pendingConnection,
+              targetFlowNodeId,
+            );
+            setDataDropTargetPreview({ flowNodeId: targetFlowNodeId, portId: previewPortId });
+            return;
+          } catch {
+            setDataDropTargetPreview(null);
+            return;
+          }
+        }
+      }
+      setDataDropTargetPreview(null);
     };
     document.addEventListener('pointerdown', handlePointerDown, true);
     document.addEventListener('pointerup', handlePointerUp, true);
@@ -7676,7 +8070,7 @@ function WorkspaceCanvas({
       document.removeEventListener('touchend', handlePointerUp, true);
       document.removeEventListener('touchmove', handlePointerMove, true);
     };
-  }, [beginPendingFromHandleEvent, commitPendingFromReleaseEvent, visibleCanvas]);
+  }, [beginPendingFromHandleEvent, canvas, commitPendingFromReleaseEvent, focusedWorkflowId, visibleCanvas]);
 
   const handleInit = useCallback(
     (instance: {
@@ -7973,6 +8367,7 @@ export function WorkflowContainer({
   data,
 }: NodeProps<WorkflowFlowNode>) {
   const workflow = data.workflow;
+  const showPortLabels = data.showDataPorts && (data.showDataPortLabels || data.selected);
   return (
     <article
       className={[
@@ -7980,6 +8375,7 @@ export function WorkflowContainer({
         workflow.boundaryKind ? 'workflow-boundary-container' : '',
         `status-${workflow.status}`,
         data.selected ? 'selected' : '',
+        data.dataDropHint ? 'data-drop-target' : '',
       ]
         .filter(Boolean)
         .join(' ')}
@@ -8104,289 +8500,144 @@ export function WorkflowContainer({
         onOpenFocus={() => data.onOpenFocus(workflow.id)}
         onConfigure={() => data.onConfigureWorkflow(workflow.id)}
       />
-      {!data.showDataPorts ? <HiddenWorkflowPortHandles workflow={workflow} /> : null}
-      <WorkflowInternalEdgeLayer
+      {data.dataDropHint ? <div className="data-drop-hint">{data.dataDropHint}</div> : null}
+      <WorkflowBoundaryPortHandles
         workflow={workflow}
-        selection={data.selection}
-        connectionMode={data.connectionMode}
-        edgeViewMode={data.edgeViewMode}
-        onSelectEdge={data.onSelectEdge}
+        showDataPorts={data.showDataPorts}
+        showDataPortLabels={showPortLabels}
+        onSelectPort={data.onSelectPort}
       />
       <div
-        className={data.showDataPorts ? 'workflow-nested-canvas advanced-data' : 'workflow-nested-canvas'}
+        className="workflow-nested-canvas"
         data-drop-scope="workflow-internal"
         data-workflow-id={workflow.id}
       >
-        {data.showDataPorts ? (
-          <WorkflowPortColumn
-            workflowId={workflow.id}
-            direction="input"
-            ports={workflow.inputPorts}
-            onSelectPort={data.onSelectPort}
-          />
-        ) : null}
         <div className="internal-node-grid" aria-label={`${workflow.title} internal nodes`} />
-        {data.showDataPorts ? (
-          <WorkflowPortColumn
-            workflowId={workflow.id}
-            direction="output"
-            ports={workflow.outputPorts}
-            onSelectPort={data.onSelectPort}
-          />
-        ) : null}
       </div>
     </article>
   );
 }
 
-type WorkflowInternalEdgePath = {
-  edge: WorkflowCanvasEdge;
-  address: EdgeAddress;
-  path: string;
-  selected: boolean;
-  className: string;
-};
-
-type LayoutOverlay = Map<string, { x: number; y: number }>;
-
-function WorkflowInternalEdgeLayer({
+function WorkflowBoundaryPortHandles({
   workflow,
-  selection,
-  connectionMode,
-  edgeViewMode,
-  onSelectEdge,
+  showDataPorts,
+  showDataPortLabels,
+  onSelectPort,
 }: {
   workflow: WorkflowContainerModel;
-  selection: CanvasSelection;
-  connectionMode: ConnectionMode;
-  edgeViewMode: EdgeViewMode;
-  onSelectEdge: (address: EdgeAddress, altKey?: boolean) => void;
+  showDataPorts: boolean;
+  showDataPortLabels: boolean;
+  onSelectPort: (workflowId: string, port: WorkflowPortView) => void;
 }) {
-  const liveFlowNodes = useContext(FlowNodeLayoutContext);
-  const layoutOverlay = useMemo(
-    () => workflowInternalLayoutOverlay(workflow, liveFlowNodes),
-    [workflow, liveFlowNodes],
-  );
-  const paths = workflowInternalEdgePaths(workflow, selection, connectionMode, edgeViewMode, layoutOverlay);
-  if (!paths.length) {
-    return null;
-  }
-  const markerPrefix = safeSvgId(`workflow-internal-edge-${workflow.id}`);
-  const markerId = `${markerPrefix}-arrow`;
-  const selectedMarkerId = `${markerPrefix}-arrow-selected`;
-  return (
-    <svg
-      className="workflow-internal-edge-layer"
-      width={workflow.size.width}
-      height={workflow.size.height}
-      viewBox={`0 0 ${workflow.size.width} ${workflow.size.height}`}
-      aria-hidden="true"
-    >
-      <defs>
-        <marker
-          id={markerId}
-          markerWidth="10"
-          markerHeight="10"
-          refX="8"
-          refY="5"
-          orient="auto"
-          markerUnits="strokeWidth"
-        >
-          <path d="M 0 0 L 10 5 L 0 10 z" fill="#f8fafc" />
-        </marker>
-        <marker
-          id={selectedMarkerId}
-          markerWidth="10"
-          markerHeight="10"
-          refX="8"
-          refY="5"
-          orient="auto"
-          markerUnits="strokeWidth"
-        >
-          <path d="M 0 0 L 10 5 L 0 10 z" fill="#16b89e" />
-        </marker>
-      </defs>
-      {paths.map((item) => (
-        <g
-          key={`${item.address.scopeWorkflowId || 'root'}::${item.address.edgeId}`}
-          className={item.className}
-          data-edge-id={flowEdgeId(item.address)}
-          data-selected={item.selected ? 'true' : 'false'}
-        >
-          <path
-            className="workflow-internal-edge-hit"
-            d={item.path}
-            onPointerDown={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-            }}
-            onMouseDown={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-            }}
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              onSelectEdge(item.address, event.altKey);
-            }}
-          />
-          <path
-            className={item.selected ? 'workflow-internal-edge-visible selected' : 'workflow-internal-edge-visible'}
-            d={item.path}
-            markerEnd={item.edge.kind === 'data' ? `url(#${item.selected ? selectedMarkerId : markerId})` : undefined}
-          />
-        </g>
-      ))}
-    </svg>
-  );
-}
-
-function workflowInternalEdgePaths(
-  workflow: WorkflowContainerModel,
-  selection: CanvasSelection,
-  connectionMode: ConnectionMode,
-  edgeViewMode: EdgeViewMode,
-  layoutOverlay: LayoutOverlay = new Map(),
-): WorkflowInternalEdgePath[] {
-  const nodeById = new Map(workflow.internalNodes.map((node, index) => [
-    node.id,
-    layoutOverlay.get(node.id) || node.position || defaultInternalNodePosition(index),
-  ]));
-  return uniqueCanvasEdges(workflow.internalEdges).flatMap((edge) => {
-    if (edgeViewMode !== 'all' && edge.kind !== edgeViewMode) {
-      return [];
-    }
-    if (isImplicitMainDataEdge(edge)) {
-      return [];
-    }
-    const source = workflowLocalEdgeEndpoint(workflow, nodeById, edge, 'source');
-    const target = workflowLocalEdgeEndpoint(workflow, nodeById, edge, 'target');
-    if (!source || !target) {
-      return [];
-    }
-    const address = edgeAddressForScope(workflow.id, edge.id);
-    const selected = selectionMatchesEdgeAddress(selection, address);
-    return [{
-      edge,
-      address,
-      selected,
-      path: localBezierPath(source, target),
-      className: [
-        'workflow-internal-edge',
-        edge.kind === 'data' ? 'workflow-internal-edge-data' : 'workflow-internal-edge-control',
-        edge.kind === 'data' && isWorkflowBoundaryEdge(edge) ? 'workflow-internal-edge-boundary-main' : '',
-        connectionMode === edge.kind ? 'active-mode' : '',
-        selected ? 'selected' : '',
-      ]
-        .filter(Boolean)
-        .join(' '),
-    }];
-  });
-}
-
-function workflowInternalLayoutOverlay(
-  workflow: WorkflowContainerModel,
-  flowNodes: Array<Pick<CanvasFlowNode, 'id' | 'position'>>,
-): LayoutOverlay {
-  const overlay: LayoutOverlay = new Map();
-  if (!flowNodes.length || !workflow.internalNodes.length) {
-    return overlay;
-  }
-  const flowNodeById = new Map(flowNodes.map((node) => [node.id, node]));
-  workflow.internalNodes.forEach((node) => {
-    const liveNode = flowNodeById.get(internalFlowNodeId(workflow.id, node.id));
-    if (liveNode?.position) {
-      overlay.set(node.id, liveNode.position);
-    }
-  });
-  return overlay;
-}
-
-function workflowLocalEdgeEndpoint(
-  workflow: WorkflowContainerModel,
-  nodeById: Map<string, { x: number; y: number }>,
-  edge: WorkflowCanvasEdge,
-  side: 'source' | 'target',
-): { x: number; y: number } | null {
-  const endpoint = side === 'source' ? edge.source.workflowId : edge.target.workflowId;
-  if (side === 'source' && endpoint === workflowInputBoundaryId(workflow.id)) {
-    return workflowInnerInputPoint(workflow);
-  }
-  if (side === 'target' && endpoint === workflowOutputBoundaryId(workflow.id)) {
-    return workflowInnerOutputPoint(workflow);
-  }
-  if (isWorkflowBoundaryId(endpoint)) {
-    return null;
-  }
-  const position = nodeById.get(endpoint);
-  if (!position) {
-    return null;
-  }
-  return side === 'source'
-    ? {
-        x: position.x + AGENT_TOOL_NODE_SIZE.width,
-        y: position.y + AGENT_CONTROL_HANDLE_TOP,
-      }
-    : {
-        x: position.x,
-        y: position.y + AGENT_CONTROL_HANDLE_TOP,
-      };
-}
-
-function workflowInnerInputPoint(workflow: WorkflowContainerModel): { x: number; y: number } {
-  return {
-    x: WORKFLOW_INNER_HANDLE_X,
-    y: workflow.size.height / 2,
-  };
-}
-
-function workflowInnerOutputPoint(workflow: WorkflowContainerModel): { x: number; y: number } {
-  return {
-    x: Math.max(WORKFLOW_INNER_HANDLE_X, workflow.size.width - WORKFLOW_INNER_HANDLE_X),
-    y: workflow.size.height / 2,
-  };
-}
-
-function localBezierPath(source: { x: number; y: number }, target: { x: number; y: number }): string {
-  const controlOffset = Math.max(48, Math.abs(target.x - source.x) * 0.45);
-  return [
-    `M ${source.x} ${source.y}`,
-    `C ${source.x + controlOffset} ${source.y}`,
-    `${target.x - controlOffset} ${target.y}`,
-    `${target.x} ${target.y}`,
-  ].join(' ');
-}
-
-function safeSvgId(value: string): string {
-  return value.replace(/[^a-zA-Z0-9_-]/g, '_');
-}
-
-function HiddenWorkflowPortHandles({ workflow }: { workflow: WorkflowContainerModel }) {
+  const visibleInputPorts = visibleAgentDataPorts(workflow.inputPorts);
+  const visibleOutputPorts = visibleAgentDataPorts(workflow.outputPorts);
   return (
     <div
       className="workflow-hidden-port-handles"
-      aria-hidden="true"
       data-drop-scope="workflow-internal"
       data-workflow-id={workflow.id}
     >
-      {workflow.inputPorts.map((port) => (
-        <Handle
-          key={`input-${port.id}`}
-          type="target"
-          position={Position.Left}
-          id={portHandleId(workflow.id, 'input', port.id)}
-          className="workflow-port-handle hidden input"
-        />
-      ))}
-      {workflow.outputPorts.map((port) => (
-        <Handle
-          key={`output-${port.id}`}
-          type="source"
-          position={Position.Right}
-          id={portHandleId(workflow.id, 'output', port.id)}
-          className="workflow-port-handle hidden output"
-        />
-      ))}
+      {visibleInputPorts.map((port, index) => {
+        const top = agentDataPortTop(index, visibleInputPorts.length, workflow.size.height);
+        const handleId = portHandleId(workflow.id, 'input', port.id);
+        return (
+          <Fragment key={`input-${port.id}`}>
+            <Handle
+              type="target"
+              position={Position.Left}
+              id={handleId}
+              className={['workflow-port-handle', showDataPorts ? '' : 'hidden', 'input'].filter(Boolean).join(' ')}
+              data-nodeid={workflow.id}
+              data-handleid={handleId}
+              data-acc-connection-mode="data"
+              data-acc-connection-side="target"
+              style={{ top }}
+              title={`数据输入端口: ${port.id}`}
+            />
+            {showDataPorts ? (
+              <button
+                type="button"
+                className="workflow-port-click-target input nodrag nopan"
+                style={{ top }}
+                title={`数据输入端口: ${port.id}`}
+                aria-label={`选择数据输入端口 ${port.id}`}
+                onPointerDown={(event) => {
+                  event.stopPropagation();
+                  onSelectPort(workflow.id, port);
+                }}
+                onMouseDown={(event) => {
+                  event.stopPropagation();
+                  onSelectPort(workflow.id, port);
+                }}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onSelectPort(workflow.id, port);
+                }}
+              />
+            ) : null}
+            {showDataPortLabels ? (
+              <span
+                className="workflow-port-label input workflow-boundary-port-label"
+                style={{ top }}
+                title={`数据输入端口: ${port.id}`}
+              >
+                {port.id}
+              </span>
+            ) : null}
+          </Fragment>
+        );
+      })}
+      {visibleOutputPorts.map((port, index) => {
+        const top = agentDataPortTop(index, visibleOutputPorts.length, workflow.size.height);
+        const handleId = portHandleId(workflow.id, 'output', port.id);
+        const tooltip = outputPortTooltip(port);
+        return (
+          <Fragment key={`output-${port.id}`}>
+            <Handle
+              type="source"
+              position={Position.Right}
+              id={handleId}
+              className={['workflow-port-handle', showDataPorts ? '' : 'hidden', 'output'].filter(Boolean).join(' ')}
+              data-nodeid={workflow.id}
+              data-handleid={handleId}
+              data-acc-connection-mode="data"
+              data-acc-connection-side="source"
+              style={{ top }}
+              title={tooltip || `数据输出端口: ${port.id}`}
+            />
+            {showDataPorts ? (
+              <button
+                type="button"
+                className="workflow-port-click-target output nodrag nopan"
+                style={{ top }}
+                title={tooltip || `数据输出端口: ${port.id}`}
+                aria-label={`选择数据输出端口 ${port.id}`}
+                onPointerDown={(event) => {
+                  event.stopPropagation();
+                  onSelectPort(workflow.id, port);
+                }}
+                onMouseDown={(event) => {
+                  event.stopPropagation();
+                  onSelectPort(workflow.id, port);
+                }}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onSelectPort(workflow.id, port);
+                }}
+              />
+            ) : null}
+            {showDataPortLabels ? (
+              <span
+                className="workflow-port-label output workflow-boundary-port-label"
+                style={{ top }}
+                title={tooltip || `数据输出端口: ${port.id}`}
+              >
+                {port.id}
+              </span>
+            ) : null}
+          </Fragment>
+        );
+      })}
     </div>
   );
 }
@@ -8489,31 +8740,43 @@ function HiddenAgentPortHandles({
   nodeId,
   inputPorts,
   outputPorts,
+  nodeHeight,
 }: {
   nodeId: string;
   inputPorts: WorkflowPortView[];
   outputPorts: WorkflowPortView[];
+  nodeHeight: number;
 }) {
+  const visibleInputPorts = visibleAgentDataPorts(inputPorts);
+  const visibleOutputPorts = visibleAgentDataPorts(outputPorts);
   return (
     <div className="workflow-hidden-port-handles" aria-hidden="true">
-      {inputPorts.map((portValue, index) => (
+      {visibleInputPorts.map((portValue, index) => (
         <Handle
           key={`input-${portValue.id}`}
           id={portHandleId(nodeId, 'input', portValue.id)}
           type="target"
           position={Position.Left}
           className="workflow-port-handle hidden input"
-          style={{ top: agentDataPortTop(index) }}
+          data-nodeid={nodeId}
+          data-handleid={portHandleId(nodeId, 'input', portValue.id)}
+          data-acc-connection-mode="data"
+          data-acc-connection-side="target"
+          style={{ top: agentDataPortTop(index, visibleInputPorts.length, nodeHeight) }}
         />
       ))}
-      {outputPorts.map((portValue, index) => (
+      {visibleOutputPorts.map((portValue, index) => (
         <Handle
           key={`output-${portValue.id}`}
           id={portHandleId(nodeId, 'output', portValue.id)}
           type="source"
           position={Position.Right}
           className="workflow-port-handle hidden output"
-          style={{ top: agentDataPortTop(index) }}
+          data-nodeid={nodeId}
+          data-handleid={portHandleId(nodeId, 'output', portValue.id)}
+          data-acc-connection-mode="data"
+          data-acc-connection-side="source"
+          style={{ top: agentDataPortTop(index, visibleOutputPorts.length, nodeHeight) }}
         />
       ))}
     </div>
@@ -8523,6 +8786,11 @@ function HiddenAgentPortHandles({
 function AgentToolNode({
   data,
 }: NodeProps<AgentToolFlowNode>) {
+  const nodeSize = data.size || AGENT_TOOL_NODE_SIZE;
+  const visibleInputPorts = visibleAgentDataPorts(data.inputPorts);
+  const visibleOutputPorts = visibleAgentDataPorts(data.outputPorts);
+  const showPortLabels = data.showDataPorts && (data.showDataPortLabels || data.selected);
+
   function queuePortSelection(target: EventTarget | null): boolean {
     if (!(target instanceof Element)) {
       return false;
@@ -8552,10 +8820,12 @@ function AgentToolNode({
         data.kind === 'Tool' ? 'tool' : 'agent',
         `status-${data.status}`,
         data.selected ? 'selected' : '',
+        data.dataDropHint ? 'data-drop-target' : '',
       ]
         .filter(Boolean)
         .join(' ')}
       data-testid={`agent-tool-node-${data.id}`}
+      style={{ width: nodeSize.width, minHeight: nodeSize.height }}
       onPointerDownCapture={(event) => {
         if (queuePortSelection(event.target)) {
           return;
@@ -8619,8 +8889,8 @@ function AgentToolNode({
         style={{ top: AGENT_CONTROL_HANDLE_TOP }}
         onPointerDown={() => data.onControlHandleMouseDown(data.id, controlTargetHandleId(data.id), 'target', 'control')}
         onMouseDown={() => data.onControlHandleMouseDown(data.id, controlTargetHandleId(data.id), 'target', 'control')}
-        title="控制输入: 只决定执行顺序，不传输数据"
-        aria-label="控制输入端口，只决定执行顺序，不传输数据"
+        title="控制输入：接收运行顺序；是否收到完整输出取决于上游节点的“控制线传递完整输出”开关"
+        aria-label="控制输入端口，接收运行顺序和可能的完整输出"
       />
       <ControlConnectHitbox
         nodeId={data.id}
@@ -8642,8 +8912,8 @@ function AgentToolNode({
         style={{ top: AGENT_CONTROL_HANDLE_TOP }}
         onPointerDown={() => data.onControlHandleMouseDown(data.id, controlSourceHandleId(data.id), 'source', 'control')}
         onMouseDown={() => data.onControlHandleMouseDown(data.id, controlSourceHandleId(data.id), 'source', 'control')}
-        title="控制输出: 只决定执行顺序，不传输数据"
-        aria-label="控制输出端口，只决定执行顺序，不传输数据"
+        title="控制输出：开启“控制线传递完整输出”时，下游 main input 会收到该节点完整输出"
+        aria-label="控制输出端口，连接运行顺序和可能的完整输出"
       />
       <ControlConnectHitbox
         nodeId={data.id}
@@ -8656,13 +8926,14 @@ function AgentToolNode({
       {!data.showDataPorts ? (
         <HiddenAgentPortHandles
           nodeId={data.id}
-          inputPorts={data.inputPorts}
-          outputPorts={data.outputPorts}
+          inputPorts={visibleInputPorts}
+          outputPorts={visibleOutputPorts}
+          nodeHeight={nodeSize.height}
         />
       ) : null}
       {data.showDataPorts
-        ? data.inputPorts.map((portValue, index) => {
-            const portTop = agentDataPortTop(index);
+        ? visibleInputPorts.map((portValue, index) => {
+            const portTop = agentDataPortTop(index, visibleInputPorts.length, nodeSize.height);
             return (
               <Fragment key={portValue.id}>
                 <Handle
@@ -8670,6 +8941,10 @@ function AgentToolNode({
                   type="target"
                   position={Position.Left}
                   className="workflow-port-handle input"
+                  data-nodeid={data.id}
+                  data-handleid={portHandleId(data.id, 'input', portValue.id)}
+                  data-acc-connection-mode="data"
+                  data-acc-connection-side="target"
                   style={{ top: portTop }}
                   title={`数据输入端口: ${portValue.id}`}
                   aria-label={`数据输入端口 ${portValue.id}`}
@@ -8693,13 +8968,23 @@ function AgentToolNode({
                     data.onSelectPort(data.id, portValue);
                   }}
                 />
+                {showPortLabels ? (
+                  <span
+                    className="workflow-port-label input"
+                    style={{ top: portTop }}
+                    title={`数据输入端口: ${portValue.id}`}
+                  >
+                    {portValue.id}
+                  </span>
+                ) : null}
               </Fragment>
             );
           })
         : null}
       {data.showDataPorts
-        ? data.outputPorts.map((portValue, index) => {
-            const portTop = agentDataPortTop(index);
+        ? visibleOutputPorts.map((portValue, index) => {
+            const portTop = agentDataPortTop(index, visibleOutputPorts.length, nodeSize.height);
+            const tooltip = outputPortTooltip(portValue);
             return (
               <Fragment key={portValue.id}>
                 <Handle
@@ -8707,15 +8992,19 @@ function AgentToolNode({
                   type="source"
                   position={Position.Right}
                   className="workflow-port-handle output"
+                  data-nodeid={data.id}
+                  data-handleid={portHandleId(data.id, 'output', portValue.id)}
+                  data-acc-connection-mode="data"
+                  data-acc-connection-side="source"
                   style={{ top: portTop }}
-                  title={`数据输出端口: ${portValue.id}`}
+                  title={tooltip || `数据输出端口: ${portValue.id}`}
                   aria-label={`数据输出端口 ${portValue.id}`}
                 />
                 <button
                   type="button"
                   className="workflow-port-click-target output nodrag nopan"
                   style={{ top: portTop }}
-                  title={`数据输出端口: ${portValue.id}`}
+                  title={tooltip || `数据输出端口: ${portValue.id}`}
                   aria-label={`选择数据输出端口 ${portValue.id}`}
                   onPointerDown={(event) => {
                     event.stopPropagation();
@@ -8730,6 +9019,15 @@ function AgentToolNode({
                     data.onSelectPort(data.id, portValue);
                   }}
                 />
+                {showPortLabels ? (
+                  <span
+                    className="workflow-port-label output"
+                    style={{ top: portTop }}
+                    title={tooltip || `数据输出端口: ${portValue.id}`}
+                  >
+                    {portValue.id}
+                  </span>
+                ) : null}
               </Fragment>
             );
           })
@@ -8746,6 +9044,7 @@ function AgentToolNode({
         <p title={data.subtitle || data.callableId || ''}>{data.subtitle || data.callableId || 'Unbound template'}</p>
         {data.scopeLabel ? <span className="node-scope-badge">{data.scopeLabel}</span> : null}
       </div>
+      {data.dataDropHint ? <div className="data-drop-hint">{data.dataDropHint}</div> : null}
         <div className="agent-node-footer">
           <span className={data.kind === 'Tool' ? 'node-badge tool' : 'node-badge agent'}>
             {data.kind === 'Tool' ? 'Tool' : 'Agent'}
@@ -8800,72 +9099,6 @@ function WorkflowHeader({
         </button>
       </div>
     </header>
-  );
-}
-
-function WorkflowPortColumn({
-  workflowId,
-  direction,
-  ports,
-  onSelectPort,
-}: {
-  workflowId: string;
-  direction: PortDirection;
-  ports: WorkflowPortView[];
-  onSelectPort: (workflowId: string, port: WorkflowPortView) => void;
-}) {
-  return (
-    <div className={`workflow-port-column ${direction}`} aria-label={`${workflowId} ${direction}`}>
-      {ports.map((port) => (
-        <WorkflowPortNode
-          key={port.id}
-          workflowId={workflowId}
-          port={port}
-          onSelect={() => onSelectPort(workflowId, port)}
-        />
-      ))}
-    </div>
-  );
-}
-
-function WorkflowPortNode({
-  workflowId,
-  port,
-  onSelect,
-}: {
-  workflowId: string;
-  port: WorkflowPortView;
-  onSelect: () => void;
-}) {
-  const handleId = portHandleId(workflowId, port.direction, port.id);
-  return (
-    <button
-      type="button"
-      className={`workflow-port-node ${port.direction}`}
-      data-testid={`workflow-port-${workflowId}-${port.id}`}
-      onClick={(event) => {
-        event.stopPropagation();
-        onSelect();
-      }}
-    >
-      {port.direction === 'input' ? (
-        <Handle
-          type="target"
-          position={Position.Left}
-          id={handleId}
-          className="workflow-port-handle input"
-        />
-      ) : (
-        <Handle
-          type="source"
-          position={Position.Right}
-          id={handleId}
-          className="workflow-port-handle output"
-        />
-      )}
-      <span>{port.id}</span>
-      <small>{port.label}</small>
-    </button>
   );
 }
 
@@ -9002,6 +9235,47 @@ type AgentNodeSettingsModel = {
   raw: unknown;
 };
 
+type AgentNodeConnectionEditor = {
+  canvas: WorkspaceCanvasModel;
+  canvasNodeKind: 'workflow' | 'internal';
+  scopeWorkflowId: string | null;
+  nodeId: string;
+  nodeLabel: string;
+  callableId: string;
+  inputPorts: WorkflowPortView[];
+  outputPorts: WorkflowPortView[];
+  outputPortsReadonly?: boolean;
+  dataConnectionDraft: DataConnectionDraft;
+  onBeginDataConnection: (draft: Exclude<DataConnectionDraft, null>) => void;
+  onCancelDataConnection: () => void;
+  onUpdateDataConnectionMaterialization: (materialization: 'copy' | 'reference') => void;
+  onCompleteDataConnection: (
+    targetNodeId: string,
+    targetPortId: string,
+    options?: { replaceExisting?: boolean },
+  ) => void;
+  onCompleteDataConnectionWithNewInputPort: (targetNodeId: string, requestedPortId: string) => void;
+  onAddPort: (
+    scopeWorkflowId: string | null,
+    nodeId: string,
+    direction: PortDirection,
+    requestedPortId: string,
+  ) => void;
+  onRenamePort: (
+    scopeWorkflowId: string | null,
+    nodeId: string,
+    direction: PortDirection,
+    portId: string,
+    requestedPortId: string,
+  ) => void;
+  onDeletePort: (
+    scopeWorkflowId: string | null,
+    nodeId: string,
+    direction: PortDirection,
+    portId: string,
+  ) => void;
+};
+
 type SchemaFieldCard = {
   name: string;
   type: string;
@@ -9062,6 +9336,7 @@ function useCallableDetail(callableId: string): CallableDetailLoadState {
 
 function AgentNodeSettings({
   node,
+  connectionEditor,
   runtimeConfig,
   callableState,
   onUpdateInput,
@@ -9073,6 +9348,7 @@ function AgentNodeSettings({
   onOpenCallableResource,
 }: {
   node: AgentNodeSettingsModel;
+  connectionEditor?: AgentNodeConnectionEditor;
   runtimeConfig: RuntimeConfig | null;
   callableState: CallableDetailLoadState;
   onUpdateInput: (input: Record<string, unknown>) => void;
@@ -9087,10 +9363,12 @@ function AgentNodeSettings({
   const templateName = detail ? callableDisplayTitle(detail) : node.callableId || 'Unbound template';
   const templateDescription = detail ? callableDescription(detail) : '';
   const inputFields = schemaFieldsFromPorts(detail?.input_ports, node.inputPorts);
-  const outputFields = [
-    ...schemaFieldsFromPorts(detail?.output_ports, node.outputPorts),
-    ...schemaFieldsFromArtifactContract(detail?.artifact_contract),
-  ];
+  const outputFields = hasProjectedOutputPorts(node.outputSchema)
+    ? schemaDerivedOutputFields(node.outputSchema)
+    : [
+        ...schemaFieldsFromPorts(detail?.output_ports, node.outputPorts),
+        ...schemaFieldsFromArtifactContract(detail?.artifact_contract),
+      ];
   const provider = detail ? providerLabelFromCallable(detail) : node.kind === 'Tool' ? 'Tool' : 'Agent';
   const metadata = detail?.metadata || {};
   const skills = skillsFromMetadata(metadata);
@@ -9127,7 +9405,9 @@ function AgentNodeSettings({
             checked={node.forwardMainOutputOnControl !== false}
             onChange={(event) => onUpdateForwardMainOutput(event.currentTarget.checked)}
           />
-          <span>输出信息到下一节点</span>
+          <span title="开启时，只有 control-only 下游会默认收到该节点完整 main 输出；如果同一上下游已有 Data Edge，控制线只决定运行顺序。关闭后，所有控制线都只决定运行顺序。">
+            控制线传递完整输出
+          </span>
         </label>
         <label className="node-settings-checkbox">
           <input
@@ -9213,6 +9493,37 @@ function AgentNodeSettings({
         <SchemaFieldCards title="Input" fields={inputFields} emptyText="No input schema fields declared." />
         <SchemaFieldCards title="Output" fields={dedupeSchemaFields(outputFields)} emptyText="No output schema fields declared." />
       </section>
+
+      {connectionEditor ? (
+        <section className="node-settings-card">
+          <div className="node-settings-section-header">
+            <div>
+              <span className="panel-kicker">Data edges</span>
+              <h4>连接设置</h4>
+            </div>
+          </div>
+          <DataConnectionsPanel
+            canvasNodeKind={connectionEditor.canvasNodeKind}
+            canvas={connectionEditor.canvas}
+            scopeWorkflowId={connectionEditor.scopeWorkflowId}
+            nodeId={connectionEditor.nodeId}
+            nodeLabel={connectionEditor.nodeLabel}
+            callableId={connectionEditor.callableId}
+            inputPorts={connectionEditor.inputPorts}
+            outputPorts={connectionEditor.outputPorts}
+            outputPortsReadonly={connectionEditor.outputPortsReadonly}
+            dataConnectionDraft={connectionEditor.dataConnectionDraft}
+            onBeginDataConnection={connectionEditor.onBeginDataConnection}
+            onCancelDataConnection={connectionEditor.onCancelDataConnection}
+            onUpdateDataConnectionMaterialization={connectionEditor.onUpdateDataConnectionMaterialization}
+            onCompleteDataConnection={connectionEditor.onCompleteDataConnection}
+            onCompleteDataConnectionWithNewInputPort={connectionEditor.onCompleteDataConnectionWithNewInputPort}
+            onAddPort={connectionEditor.onAddPort}
+            onRenamePort={connectionEditor.onRenamePort}
+            onDeletePort={connectionEditor.onDeletePort}
+          />
+        </section>
+      ) : null}
 
       <section className="node-settings-card">
         <div className="node-settings-section-header">
@@ -9987,7 +10298,9 @@ function SelectionNodeProperties({
             checked={node.forwardMainOutputOnControl !== false}
             onChange={(event) => onUpdateForwardMainOutput(event.currentTarget.checked)}
           />
-          <span>输出信息到下一节点</span>
+          <span title="开启时，只有 control-only 下游会默认收到该节点完整 main 输出；如果同一上下游已有 Data Edge，控制线只决定运行顺序。关闭后，所有控制线都只决定运行顺序。">
+            控制线传递完整输出
+          </span>
         </label>
         <label className="node-settings-checkbox">
           <input
@@ -10632,6 +10945,10 @@ function liveEventMatchesNodeRun(event: WorkbenchLiveEvent, nodeRun: NodeRunSumm
   if (nodeRun.ui_node_id && event.ui_node_id === nodeRun.ui_node_id) {
     return true;
   }
+  const effectiveRunDir = effectiveNodeRunDir(nodeRun);
+  if (effectiveRunDir && sameRunDir(event.node_run_dir, effectiveRunDir)) {
+    return true;
+  }
   if (nodeRun.run_dir && sameRunDir(event.node_run_dir, nodeRun.run_dir)) {
     return true;
   }
@@ -10664,6 +10981,28 @@ function sameRunDir(left: string | null | undefined, right: string | null | unde
     return false;
   }
   return normalizeRunDirKey(left) === normalizeRunDirKey(right);
+}
+
+function effectiveNodeRunDir(nodeRun?: NodeRunSummary): string {
+  if (!nodeRun) {
+    return '';
+  }
+  for (const path of [nodeRun.output_path, nodeRun.input_path, nodeRun.prompt_path, nodeRun.event_log]) {
+    const parent = parentPath(path);
+    if (parent) {
+      return parent;
+    }
+  }
+  return nodeRun.run_dir || '';
+}
+
+function parentPath(path: string | null | undefined): string {
+  if (!path) {
+    return '';
+  }
+  const normalized = path.replaceAll('\\', '/');
+  const index = normalized.lastIndexOf('/');
+  return index > 0 ? normalized.slice(0, index) : '';
 }
 
 function uniqueStrings(values: Array<string | null | undefined>): string[] {
@@ -11185,6 +11524,8 @@ function RightInspector({
   onCompleteDataConnection,
   onCompleteDataConnectionWithNewInputPort,
   onAddDataConnectPort,
+  onRenameDataConnectPort,
+  onDeleteDataConnectPort,
   onReadEvidence,
   onConfigureBinding,
   onUpdateWorkflowInput,
@@ -11228,6 +11569,19 @@ function RightInspector({
     nodeId: string,
     direction: PortDirection,
     requestedPortId: string,
+  ) => void;
+  onRenameDataConnectPort: (
+    scopeWorkflowId: string | null,
+    nodeId: string,
+    direction: PortDirection,
+    portId: string,
+    requestedPortId: string,
+  ) => void;
+  onDeleteDataConnectPort: (
+    scopeWorkflowId: string | null,
+    nodeId: string,
+    direction: PortDirection,
+    portId: string,
   ) => void;
   onReadEvidence: (path: string | null | undefined, title?: string) => void;
   onConfigureBinding: (workflowId: string) => void;
@@ -11293,13 +11647,34 @@ function RightInspector({
             codexExecutionMode: selectedWorkflow.codexExecutionMode,
             input: selectedWorkflow.sourceInput || {},
             inputPorts: selectedWorkflow.inputPorts,
-            outputPorts: selectedWorkflow.outputPorts,
+            outputPorts: workflowOutputPorts(selectedWorkflow),
+            outputSchema: selectedWorkflow.outputSchema,
             forwardMainOutputOnControl: selectedWorkflow.forwardMainOutputOnControl,
             emptyInputPolicy: selectedWorkflow.emptyInputPolicy,
             run: nodeRunForWorkflow(workflowRun, selectedWorkflow),
             logs: nodeLiveLogsFor(liveLogs, nodeRunForWorkflow(workflowRun, selectedWorkflow)),
             preview: workflowInvocationPreview(selectedWorkflow),
             raw: selectedWorkflow,
+          }}
+          connectionEditor={{
+            canvas,
+            canvasNodeKind: 'workflow',
+            scopeWorkflowId: null,
+            nodeId: selectedWorkflow.id,
+            nodeLabel: workflowInvocationLabel(selectedWorkflow),
+            callableId: selectedWorkflow.callableId || selectedWorkflow.workflowRef || '',
+            inputPorts: selectedWorkflow.inputPorts,
+            outputPorts: workflowOutputPorts(selectedWorkflow),
+            outputPortsReadonly: workflowOutputPortsReadonly(selectedWorkflow),
+            dataConnectionDraft,
+            onBeginDataConnection,
+            onCancelDataConnection,
+            onUpdateDataConnectionMaterialization,
+            onCompleteDataConnection,
+            onCompleteDataConnectionWithNewInputPort,
+            onAddPort: onAddDataConnectPort,
+            onRenamePort: onRenameDataConnectPort,
+            onDeletePort: onDeleteDataConnectPort,
           }}
           runtimeConfig={runtimeConfig}
           callableState={callableDetailState}
@@ -11343,13 +11718,34 @@ function RightInspector({
             codexExecutionMode: selectedInternalNode.codexExecutionMode,
             input: selectedInternalNode.input || {},
             inputPorts: selectedInternalNode.inputPorts || [port('main', 'input', 'input')],
-            outputPorts: selectedInternalNode.outputPorts || [port('main', 'output', 'output')],
+            outputPorts: internalNodeOutputPorts(selectedInternalNode),
+            outputSchema: selectedInternalNode.outputSchema,
             forwardMainOutputOnControl: selectedInternalNode.forwardMainOutputOnControl,
             emptyInputPolicy: selectedInternalNode.emptyInputPolicy,
             run: nodeRun,
             logs: nodeLiveLogsFor(liveLogs, nodeRun),
             preview: internalNodeInvocationPreview(selectedInternalNode),
             raw: { workflow: selectedWorkflow.id, node: selectedInternalNode },
+          }}
+          connectionEditor={{
+            canvas,
+            canvasNodeKind: 'internal',
+            scopeWorkflowId: selectedWorkflow.id,
+            nodeId: selectedInternalNode.id,
+            nodeLabel: internalInvocationLabel(selectedInternalNode),
+            callableId: selectedInternalNode.callableId || selectedInternalNode.runtime || '',
+            inputPorts: selectedInternalNode.inputPorts || [port('main', 'input', 'input')],
+            outputPorts: internalNodeOutputPorts(selectedInternalNode),
+            outputPortsReadonly: true,
+            dataConnectionDraft,
+            onBeginDataConnection,
+            onCancelDataConnection,
+            onUpdateDataConnectionMaterialization,
+            onCompleteDataConnection,
+            onCompleteDataConnectionWithNewInputPort,
+            onAddPort: onAddDataConnectPort,
+            onRenamePort: onRenameDataConnectPort,
+            onDeletePort: onDeleteDataConnectPort,
           }}
           runtimeConfig={runtimeConfig}
           callableState={callableDetailState}
@@ -11417,6 +11813,8 @@ function RightInspector({
           onCompleteDataConnection={onCompleteDataConnection}
           onCompleteDataConnectionWithNewInputPort={onCompleteDataConnectionWithNewInputPort}
           onAddDataConnectPort={onAddDataConnectPort}
+          onRenameDataConnectPort={onRenameDataConnectPort}
+          onDeleteDataConnectPort={onDeleteDataConnectPort}
           onUpdateInput={onUpdateWorkflowInput}
           onUpdateLabel={onUpdateWorkflowLabel}
         />
@@ -11425,7 +11823,15 @@ function RightInspector({
         <PortInspector workflow={selectedWorkflow} port={selectedPort} tab={tab} canvas={canvas} />
       ) : null}
       {selection.type === 'edge' && selectedEdge ? (
-        <EdgeInspector edge={selectedEdge} tab={tab} canvas={canvas} />
+        <EdgeInspector
+          edge={selectedEdge}
+          tab={tab}
+          canvas={canvas}
+          scopeWorkflowId={selection.scopeWorkflowId || null}
+          onCreateTargetInputPort={(targetNodeId, targetPortId) =>
+            onAddDataConnectPort(selection.scopeWorkflowId || null, targetNodeId, 'input', targetPortId)
+          }
+        />
       ) : null}
       {selection.type === 'internal' && selectedWorkflow && selectedInternalNode ? (
         <InternalNodeInspector
@@ -11444,6 +11850,8 @@ function RightInspector({
           onCompleteDataConnection={onCompleteDataConnection}
           onCompleteDataConnectionWithNewInputPort={onCompleteDataConnectionWithNewInputPort}
           onAddDataConnectPort={onAddDataConnectPort}
+          onRenameDataConnectPort={onRenameDataConnectPort}
+          onDeleteDataConnectPort={onDeleteDataConnectPort}
           onUpdateInput={onUpdateInternalInput}
           onUpdateLabel={onUpdateInternalLabel}
         />
@@ -11527,6 +11935,8 @@ function WorkflowInspector({
   onCompleteDataConnection,
   onCompleteDataConnectionWithNewInputPort,
   onAddDataConnectPort,
+  onRenameDataConnectPort,
+  onDeleteDataConnectPort,
   onUpdateInput,
   onUpdateLabel,
 }: {
@@ -11556,6 +11966,19 @@ function WorkflowInspector({
     nodeId: string,
     direction: PortDirection,
     requestedPortId: string,
+  ) => void;
+  onRenameDataConnectPort: (
+    scopeWorkflowId: string | null,
+    nodeId: string,
+    direction: PortDirection,
+    portId: string,
+    requestedPortId: string,
+  ) => void;
+  onDeleteDataConnectPort: (
+    scopeWorkflowId: string | null,
+    nodeId: string,
+    direction: PortDirection,
+    portId: string,
   ) => void;
   onUpdateInput: (workflowId: string, input: Record<string, unknown>) => void;
   onUpdateLabel: (workflowId: string, label: string) => void;
@@ -11602,6 +12025,8 @@ function WorkflowInspector({
         onCompleteDataConnection={onCompleteDataConnection}
         onCompleteDataConnectionWithNewInputPort={onCompleteDataConnectionWithNewInputPort}
         onAddPort={onAddDataConnectPort}
+        onRenamePort={onRenameDataConnectPort}
+        onDeletePort={onDeleteDataConnectPort}
       />
     );
   }
@@ -11788,6 +12213,7 @@ function DataConnectionsPanel({
   callableId,
   inputPorts,
   outputPorts,
+  outputPortsReadonly = false,
   dataConnectionDraft,
   onBeginDataConnection,
   onCancelDataConnection,
@@ -11795,6 +12221,8 @@ function DataConnectionsPanel({
   onCompleteDataConnection,
   onCompleteDataConnectionWithNewInputPort,
   onAddPort,
+  onRenamePort,
+  onDeletePort,
 }: {
   canvasNodeKind: 'workflow' | 'internal';
   canvas: WorkspaceCanvasModel;
@@ -11804,6 +12232,7 @@ function DataConnectionsPanel({
   callableId?: string;
   inputPorts: WorkflowPortView[];
   outputPorts: WorkflowPortView[];
+  outputPortsReadonly?: boolean;
   dataConnectionDraft: DataConnectionDraft;
   onBeginDataConnection: (draft: Exclude<DataConnectionDraft, null>) => void;
   onCancelDataConnection: () => void;
@@ -11819,6 +12248,19 @@ function DataConnectionsPanel({
     nodeId: string,
     direction: PortDirection,
     requestedPortId: string,
+  ) => void;
+  onRenamePort: (
+    scopeWorkflowId: string | null,
+    nodeId: string,
+    direction: PortDirection,
+    portId: string,
+    requestedPortId: string,
+  ) => void;
+  onDeletePort: (
+    scopeWorkflowId: string | null,
+    nodeId: string,
+    direction: PortDirection,
+    portId: string,
   ) => void;
 }) {
   const [newInputPortId, setNewInputPortId] = useState('');
@@ -11838,6 +12280,18 @@ function DataConnectionsPanel({
     } else {
       setNewOutputPortId('');
     }
+  }
+
+  function renamePort(direction: PortDirection, currentPortId: string) {
+    const requestedPortId = window.prompt('新的 port id', currentPortId);
+    if (requestedPortId === null) {
+      return;
+    }
+    onRenamePort(scopeWorkflowId, nodeId, direction, currentPortId, requestedPortId);
+  }
+
+  function deletePort(direction: PortDirection, portId: string) {
+    onDeletePort(scopeWorkflowId, nodeId, direction, portId);
   }
 
   return (
@@ -11877,12 +12331,20 @@ function DataConnectionsPanel({
 
       <section className="inspector-stack">
         <h4>输出端口</h4>
+        {outputPortsReadonly ? (
+          <p className="muted">
+            输出端口来自 output_schema.properties.outputs.properties，只读展示；需要修改命名输出时请编辑 output schema。
+          </p>
+        ) : null}
         {outputPorts.map((portValue) => {
           const related = outgoing.filter((edge) => edge.source.portId === portValue.id);
+          const readonlyPort = outputPortsReadonly || isSchemaDerivedOutputPort(portValue);
           return (
             <article key={portValue.id} className="port-contract-row">
               <strong>{portValue.id}</strong>
               <span>{portValue.label}</span>
+              {portValue.jsonPath ? <small>{portValue.jsonPath}</small> : null}
+              {portValue.diagnostic ? <small>{portValue.diagnostic}</small> : null}
               {related.length > 0 ? (
                 <small>
                   输出到 {related.map((edge) => `${edge.target.workflowId}.${edge.target.portId}`).join(', ')}
@@ -11905,20 +12367,40 @@ function DataConnectionsPanel({
               >
                 从此输出连接...
               </button>
+              <button
+                type="button"
+                className="secondary-action-button"
+                disabled={readonlyPort}
+                title={readonlyPort ? 'schema-derived output port 只读，请修改 output schema' : undefined}
+                onClick={() => renamePort('output', portValue.id)}
+              >
+                重命名
+              </button>
+              <button
+                type="button"
+                className="secondary-action-button"
+                disabled={readonlyPort}
+                title={readonlyPort ? 'schema-derived output port 只读，请修改 output schema' : undefined}
+                onClick={() => deletePort('output', portValue.id)}
+              >
+                删除
+              </button>
             </article>
           );
         })}
-        <div className="inline-port-form">
-          <input
-            value={newOutputPortId}
-            onChange={(event) => setNewOutputPortId(event.target.value)}
-            placeholder="new_output_port"
-            aria-label="new output port id"
-          />
-          <button type="button" onClick={() => addPort('output')}>
-            添加输出端口
-          </button>
-        </div>
+        {!outputPortsReadonly ? (
+          <div className="inline-port-form">
+            <input
+              value={newOutputPortId}
+              onChange={(event) => setNewOutputPortId(event.target.value)}
+              placeholder="new_output_port"
+              aria-label="new output port id"
+            />
+            <button type="button" onClick={() => addPort('output')}>
+              添加输出端口
+            </button>
+          </div>
+        ) : null}
       </section>
 
       <section className="inspector-stack">
@@ -11936,6 +12418,20 @@ function DataConnectionsPanel({
               ) : (
                 <small>暂无上游 data edge</small>
               )}
+              <button
+                type="button"
+                className="secondary-action-button"
+                onClick={() => renamePort('input', portValue.id)}
+              >
+                重命名
+              </button>
+              <button
+                type="button"
+                className="secondary-action-button"
+                onClick={() => deletePort('input', portValue.id)}
+              >
+                删除
+              </button>
             </article>
           );
         })}
@@ -12072,17 +12568,75 @@ function PortInspector({
   return <p className="muted">运行证据会在 workflow run 后按 inbox/outbox manifest 展示。</p>;
 }
 
+function controlEdgeMainTransferMode(
+  canvas: WorkspaceCanvasModel,
+  scopeWorkflowId: string | null,
+  edge: WorkflowCanvasEdge,
+): { label: string; reason: string } {
+  if (edge.kind !== 'control') {
+    return { label: '不适用', reason: 'Data Edge 显式传递指定端口。' };
+  }
+  const samePairHasDataEdge = dataConnectEdges(canvas, scopeWorkflowId).some(
+    (candidate) =>
+      candidate.kind === 'data' &&
+      candidate.source.workflowId === edge.source.workflowId &&
+      candidate.target.workflowId === edge.target.workflowId,
+  );
+  if (samePairHasDataEdge) {
+    return {
+      label: '仅控制顺序',
+      reason: '同一上游和下游之间已有 Data Edge，控制线不会重复传递完整 main 输出。',
+    };
+  }
+  if (!sourceNodeForwardsMainByDefault(canvas, scopeWorkflowId, edge.source.workflowId)) {
+    return {
+      label: '仅控制顺序',
+      reason: '上游节点已关闭“控制线传递完整输出”。',
+    };
+  }
+  return {
+    label: '传递 main',
+    reason: '没有同 pair Data Edge，且上游节点允许控制线默认传递完整输出。',
+  };
+}
+
+function sourceNodeForwardsMainByDefault(
+  canvas: WorkspaceCanvasModel,
+  scopeWorkflowId: string | null,
+  nodeId: string,
+): boolean {
+  if (scopeWorkflowId) {
+    const workflow = canvas.workflows.find((item) => item.id === scopeWorkflowId);
+    const node = workflow?.internalNodes.find((item) => item.id === nodeId);
+    return node?.forwardMainOutputOnControl !== false;
+  }
+  const node = canvas.workflows.find((item) => item.id === nodeId);
+  return node?.forwardMainOutputOnControl !== false;
+}
+
 function EdgeInspector({
   edge,
   tab,
   canvas,
+  scopeWorkflowId,
+  onCreateTargetInputPort,
 }: {
   edge: WorkflowCanvasEdge;
   tab: string;
   canvas: WorkspaceCanvasModel;
+  scopeWorkflowId: string | null;
+  onCreateTargetInputPort: (targetNodeId: string, targetPortId: string) => void;
 }) {
   const sourceWorkflow = canvas.workflows.find((workflow) => workflow.id === edge.source.workflowId);
   const targetWorkflow = canvas.workflows.find((workflow) => workflow.id === edge.target.workflowId);
+  const diagnostics = edgeDiagnosticsForCanvasEdge(canvas, scopeWorkflowId, edge);
+  const targetNodeExists =
+    edge.kind === 'data' &&
+    dataConnectNodes(canvas, scopeWorkflowId).some((node) => node.nodeId === edge.target.workflowId);
+  const targetPortDiagnostic = targetNodeExists
+    ? diagnostics.find((diagnostic) => diagnostic.code === 'dangling_data_edge_target')
+    : undefined;
+  const transferMode = controlEdgeMainTransferMode(canvas, scopeWorkflowId, edge);
   if (tab === 'raw') {
     return <CodeBlock title="edge.json" content={JSON.stringify(edge, null, 2)} variant="json" />;
   }
@@ -12111,6 +12665,40 @@ function EdgeInspector({
       </dd>
       <dt>样式</dt>
       <dd>{edge.kind === 'data' ? '浅灰虚线' : '灰黑实线'}</dd>
+      {edge.kind === 'control' ? (
+        <>
+          <dt>数据传递</dt>
+          <dd>{transferMode.label}</dd>
+          <dt>传递规则</dt>
+          <dd>{transferMode.reason}</dd>
+        </>
+      ) : null}
+      {diagnostics.length > 0 ? (
+        <>
+          <dt>诊断</dt>
+          <dd>{diagnostics.map((diagnostic) => diagnostic.message).join('；')}</dd>
+          <dt>修复建议</dt>
+          <dd>
+            {diagnostics.some((diagnostic) => diagnostic.code === 'dangling_data_edge_source')
+              ? '更新上游 output_schema，或把这条 data edge 迁移到仍存在的输出端口。'
+              : '在下游节点创建对应 input port，或把这条 data edge 迁移到已有输入端口。'}
+          </dd>
+        </>
+      ) : null}
+      {targetPortDiagnostic && edge.kind === 'data' ? (
+        <>
+          <dt>快速修复</dt>
+          <dd>
+            <button
+              type="button"
+              className="secondary-action-button"
+              onClick={() => onCreateTargetInputPort(edge.target.workflowId, edge.target.portId)}
+            >
+              创建 target input port
+            </button>
+          </dd>
+        </>
+      ) : null}
     </dl>
   );
 }
@@ -12131,6 +12719,8 @@ function InternalNodeInspector({
   onCompleteDataConnection,
   onCompleteDataConnectionWithNewInputPort,
   onAddDataConnectPort,
+  onRenameDataConnectPort,
+  onDeleteDataConnectPort,
   onUpdateInput,
   onUpdateLabel,
 }: {
@@ -12157,6 +12747,19 @@ function InternalNodeInspector({
     nodeId: string,
     direction: PortDirection,
     requestedPortId: string,
+  ) => void;
+  onRenameDataConnectPort: (
+    scopeWorkflowId: string | null,
+    nodeId: string,
+    direction: PortDirection,
+    portId: string,
+    requestedPortId: string,
+  ) => void;
+  onDeleteDataConnectPort: (
+    scopeWorkflowId: string | null,
+    nodeId: string,
+    direction: PortDirection,
+    portId: string,
   ) => void;
   onUpdateInput: (
     workflowId: string,
@@ -12201,8 +12804,9 @@ function InternalNodeInspector({
         nodeId={node.id}
         nodeLabel={internalInvocationLabel(node)}
         callableId={node.callableId || node.runtime}
-        inputPorts={node.inputPorts || [port('main', 'input', 'input')]}
-        outputPorts={node.outputPorts || [port('main', 'output', 'output')]}
+        inputPorts={internalNodeInputPorts(node)}
+        outputPorts={internalNodeOutputPorts(node)}
+        outputPortsReadonly
         dataConnectionDraft={dataConnectionDraft}
         onBeginDataConnection={onBeginDataConnection}
         onCancelDataConnection={onCancelDataConnection}
@@ -12210,6 +12814,8 @@ function InternalNodeInspector({
         onCompleteDataConnection={onCompleteDataConnection}
         onCompleteDataConnectionWithNewInputPort={onCompleteDataConnectionWithNewInputPort}
         onAddPort={onAddDataConnectPort}
+        onRenamePort={onRenameDataConnectPort}
+        onDeletePort={onDeleteDataConnectPort}
       />
     );
   }
@@ -13104,6 +13710,8 @@ function toFlowNodes(
   onOpenFocus: (workflowId: string) => void,
   onConfigureWorkflow: (workflowId: string) => void,
   showDataPorts: boolean,
+  showAgentDataPorts: boolean,
+  showDataPortLabels: boolean,
   onResize: (workflowId: string, size: { width: number; height: number }) => void,
   onMoveInternal: (
     workflowId: string,
@@ -13118,6 +13726,7 @@ function toFlowNodes(
   ) => void,
   connectionMode: ConnectionMode,
   edgeViewMode: EdgeViewMode,
+  dataDropTargetPreview: DataDropTargetPreview | null,
   onSelectEdge: (address: EdgeAddress, altKey?: boolean) => void,
 ): CanvasFlowNode[] {
   return canvas.workflows.flatMap((workflow) => {
@@ -13126,10 +13735,12 @@ function toFlowNodes(
         topLevelAgentToolFlowNode(
           workflow,
           selection,
-          showDataPorts,
+          showAgentDataPorts,
+          showDataPortLabels,
           onSelectWorkflowFn,
           onSelectPortFn,
           onControlHandleMouseDown,
+          dataDropTargetPreview,
         ),
       ];
     }
@@ -13138,6 +13749,7 @@ function toFlowNodes(
       type: 'workflowContainer',
       position: workflow.position,
       selected: selection.type === 'workflow' && selection.id === workflow.id,
+      zIndex: WORKFLOW_CONTAINER_Z_INDEX,
       data: {
         workflow,
         binding: bindings[workflow.id],
@@ -13145,7 +13757,12 @@ function toFlowNodes(
         connectionMode,
         edgeViewMode,
         selected: selection.type === 'workflow' && selection.id === workflow.id,
+        dataDropHint:
+          dataDropTargetPreview?.flowNodeId === workflow.id
+            ? `释放后创建输入端口：${dataDropTargetPreview.portId}`
+            : undefined,
         showDataPorts,
+        showDataPortLabels,
         onSelectEdge,
         onSelectPort: onSelectPortFn,
         onSelectInternal: onSelectInternalFn,
@@ -13157,39 +13774,48 @@ function toFlowNodes(
         onControlHandleMouseDown,
       },
     };
-    const internalNodes = workflow.internalNodes.map((node, index): AgentToolFlowNode => ({
-      id: internalFlowNodeId(workflow.id, node.id),
-      type: 'agentToolNode',
-      parentId: workflow.id,
-      extent: 'parent',
-      position: node.position || defaultInternalNodePosition(index),
-      selected:
+    const internalNodes = workflow.internalNodes.map((node, index): AgentToolFlowNode => {
+      const inputPorts = internalNodeInputPorts(node);
+      const outputPorts = internalNodeOutputPorts(node);
+      const selected =
         selection.type === 'internal' &&
         selection.workflowId === workflow.id &&
-        selection.nodeId === node.id,
-      data: {
+        selection.nodeId === node.id;
+      return {
         id: internalFlowNodeId(workflow.id, node.id),
-        title: internalInvocationLabel(node),
-        subtitle: node.callableId || node.runtime,
-        scopeLabel: `Inside: ${workflowInvocationLabel(workflow)}`,
-        kind: node.kind,
-        status: node.status,
-        callableId: node.callableId || node.runtime,
-        temporaryResourceId: node.temporaryResourceId,
-        workflowId: workflow.id,
-        internalNodeId: node.id,
-        inputPorts: node.inputPorts || [port('main', 'input', 'input')],
-        outputPorts: node.outputPorts || [port('main', 'output', 'output')],
-        selected:
-          selection.type === 'internal' &&
-          selection.workflowId === workflow.id &&
-          selection.nodeId === node.id,
-        showDataPorts,
-        onSelect: () => onSelectInternalFn(workflow.id, node.id),
-        onSelectPort: onSelectPortFn,
-        onControlHandleMouseDown,
-      },
-    }));
+        type: 'agentToolNode',
+        parentId: workflow.id,
+        extent: 'parent',
+        position: node.position || defaultInternalNodePosition(index),
+        selected,
+        zIndex: selected ? WORKFLOW_INTERNAL_SELECTED_NODE_Z_INDEX : WORKFLOW_INTERNAL_NODE_Z_INDEX,
+        data: {
+          id: internalFlowNodeId(workflow.id, node.id),
+          title: internalInvocationLabel(node),
+          subtitle: node.callableId || node.runtime,
+          scopeLabel: `Inside: ${workflowInvocationLabel(workflow)}`,
+          kind: node.kind,
+          status: node.status,
+          callableId: node.callableId || node.runtime,
+          temporaryResourceId: node.temporaryResourceId,
+          workflowId: workflow.id,
+          internalNodeId: node.id,
+          inputPorts,
+          outputPorts,
+          size: agentToolNodeSize(inputPorts, outputPorts, showAgentDataPorts),
+          selected,
+          dataDropHint:
+            dataDropTargetPreview?.flowNodeId === internalFlowNodeId(workflow.id, node.id)
+              ? `释放后创建输入端口：${dataDropTargetPreview.portId}`
+              : undefined,
+          showDataPorts: showAgentDataPorts,
+          showDataPortLabels,
+          onSelect: () => onSelectInternalFn(workflow.id, node.id),
+          onSelectPort: onSelectPortFn,
+          onControlHandleMouseDown,
+        },
+      };
+    });
     return [workflowNode, ...internalNodes];
   });
 }
@@ -13198,6 +13824,7 @@ function topLevelAgentToolFlowNode(
   workflow: WorkflowContainerModel,
   selection: CanvasSelection,
   showDataPorts: boolean,
+  showDataPortLabels: boolean,
   onSelectWorkflowFn: (workflowId: string) => void,
   onSelectPortFn: (workflowId: string, port: WorkflowPortView) => void,
   onControlHandleMouseDown: (
@@ -13206,8 +13833,11 @@ function topLevelAgentToolFlowNode(
     side: EndpointSide,
     mode?: ConnectionMode,
   ) => void,
+  dataDropTargetPreview: DataDropTargetPreview | null,
 ): AgentToolFlowNode {
   const kind = workflow.sourceKind === 'tool' ? 'Tool' : 'Agent';
+  const inputPorts = workflow.inputPorts;
+  const outputPorts = workflowOutputPorts(workflow);
   return {
     id: workflow.id,
     type: 'agentToolNode',
@@ -13221,14 +13851,42 @@ function topLevelAgentToolFlowNode(
       status: workflow.status,
       callableId: workflow.callableId,
       temporaryResourceId: workflow.temporaryResourceId,
-      inputPorts: workflow.inputPorts,
-      outputPorts: workflow.outputPorts,
+      inputPorts,
+      outputPorts,
+      size: agentToolNodeSize(inputPorts, outputPorts, showDataPorts),
       selected: selection.type === 'workflow' && selection.id === workflow.id,
+      dataDropHint:
+        dataDropTargetPreview?.flowNodeId === workflow.id
+          ? `释放后创建输入端口：${dataDropTargetPreview.portId}`
+          : undefined,
       showDataPorts,
+      showDataPortLabels,
       onSelect: () => onSelectWorkflowFn(workflow.id),
       onSelectPort: onSelectPortFn,
       onControlHandleMouseDown,
     },
+  };
+}
+
+function agentToolNodeSize(
+  inputPorts: WorkflowPortView[],
+  outputPorts: WorkflowPortView[],
+  showDataPorts: boolean,
+): { width: number; height: number } {
+  if (!showDataPorts) {
+    return AGENT_TOOL_NODE_SIZE;
+  }
+  const visiblePortCount = Math.max(
+    Math.min(inputPorts.length, AGENT_MAX_DATA_PORTS),
+    Math.min(outputPorts.length, AGENT_MAX_DATA_PORTS),
+  );
+  const requiredHeight =
+    visiblePortCount > 0
+      ? (agentDataPortMaxOffset(visiblePortCount) + AGENT_PORT_VERTICAL_PADDING) * 2
+      : AGENT_TOOL_NODE_SIZE.height;
+  return {
+    width: AGENT_TOOL_NODE_SIZE.width,
+    height: Math.max(AGENT_TOOL_NODE_SIZE.height, requiredHeight),
   };
 }
 
@@ -13247,9 +13905,37 @@ function toFlowEdges(
   const edgeScopeWorkflowId =
     canvas.layout === 'workflow-focus' && canvas.focusedWorkflowId ? canvas.focusedWorkflowId : null;
   const rootEdges = uniqueCanvasEdges(canvas.edges).flatMap((edge) =>
-    canvasEdgeToFlowEdge(edge, edgeScopeWorkflowId, selection, connectionMode, undefined, edgeViewMode, showDataPorts, workflowContainerIds),
+    canvasEdgeToFlowEdge(
+      edge,
+      edgeScopeWorkflowId,
+      selection,
+      connectionMode,
+      undefined,
+      edgeViewMode,
+      showDataPorts,
+      workflowContainerIds,
+      edgeDiagnosticsForCanvasEdge(canvas, null, edge),
+    ),
   );
-  return uniqueFlowEdgesById(rootEdges);
+  const internalEdges =
+    canvas.layout === 'workflow-focus'
+      ? []
+      : canvas.workflows.flatMap((workflow) =>
+          uniqueCanvasEdges(workflow.internalEdges).flatMap((edge) =>
+            canvasEdgeToFlowEdge(
+              edge,
+              workflow.id,
+              selection,
+              connectionMode,
+              workflow.id,
+              edgeViewMode,
+              showDataPorts,
+              workflowContainerIds,
+              edgeDiagnosticsForCanvasEdge(canvas, workflow.id, edge),
+            ),
+          ),
+        );
+  return uniqueFlowEdgesById([...rootEdges, ...internalEdges]);
 }
 
 function uniqueFlowEdgesById(edges: Edge[]): Edge[] {
@@ -13283,6 +13969,7 @@ function canvasEdgeToFlowEdge(
   edgeViewMode: EdgeViewMode = 'all',
   showDataPorts = false,
   workflowContainerIds: Set<string> = new Set(),
+  diagnostics: EdgeDiagnostic[] = [],
 ): Edge[] {
     if (edgeViewMode !== 'all' && edge.kind !== edgeViewMode) {
       return [];
@@ -13305,20 +13992,47 @@ function canvasEdgeToFlowEdge(
       ? internalEdgeEndpointToFlowId(parentWorkflowId, edge.target.workflowId)
       : edge.target.workflowId;
     if (edge.kind === 'data') {
+      const broken = diagnostics.length > 0;
+      const sourcePortMissing = diagnostics.some(
+        (diagnostic) => diagnostic.code === 'dangling_data_edge_source',
+      );
+      const targetPortMissing = diagnostics.some(
+        (diagnostic) => diagnostic.code === 'dangling_data_edge_target',
+      );
       return [{
         id: flowEdgeId(address),
-        data: flowEdgeData(address),
+        type: 'step',
+        data: { ...flowEdgeData(address), diagnostics },
         source: sourceId,
         target: targetId,
-        sourceHandle: portHandleId(sourceId, 'output', edge.source.portId),
-        targetHandle: portHandleId(targetId, 'input', edge.target.portId),
+        zIndex: parentWorkflowId
+          ? isSelected
+            ? WORKFLOW_INTERNAL_SELECTED_EDGE_Z_INDEX
+            : WORKFLOW_INTERNAL_EDGE_Z_INDEX
+          : undefined,
+        sourceHandle: sourcePortMissing
+          ? controlSourceHandleForFlowNode(
+              sourceId,
+              canvasWorkflowId(sourceId, parentWorkflowId),
+              workflowContainerIds,
+              parentWorkflowId,
+            )
+          : portHandleId(sourceId, 'output', edge.source.portId),
+        targetHandle: targetPortMissing
+          ? controlTargetHandleForFlowNode(
+              targetId,
+              canvasWorkflowId(targetId, parentWorkflowId),
+              workflowContainerIds,
+              parentWorkflowId,
+            )
+          : portHandleId(targetId, 'input', edge.target.portId),
         selected: isSelected,
-        markerEnd: { type: MarkerType.ArrowClosed, color: isSelected ? '#16b89e' : '#f8fafc' },
-        className: 'workflow-edge-data',
+        markerEnd: { type: MarkerType.ArrowClosed, color: broken ? '#ef4444' : isSelected ? '#16b89e' : '#38bdf8' },
+        className: ['workflow-edge-data', broken ? 'workflow-edge-broken' : ''].filter(Boolean).join(' '),
         style: {
-          stroke: isSelected ? '#16b89e' : '#f8fafc',
+          stroke: broken ? '#ef4444' : isSelected ? '#16b89e' : '#38bdf8',
           strokeWidth: isSelected ? 4 : 3,
-          strokeDasharray: isSelected ? '14 8' : '8 6',
+          strokeDasharray: broken ? '3 5' : isSelected ? '14 8' : '8 6',
         },
       }];
     }
@@ -13327,6 +14041,11 @@ function canvasEdgeToFlowEdge(
       data: flowEdgeData(address),
       source: sourceId,
       target: targetId,
+      zIndex: parentWorkflowId
+        ? isSelected
+          ? WORKFLOW_INTERNAL_SELECTED_EDGE_Z_INDEX
+          : WORKFLOW_INTERNAL_EDGE_Z_INDEX
+        : undefined,
       sourceHandle: controlSourceHandleForFlowNode(sourceId, canvasWorkflowId(sourceId, parentWorkflowId), workflowContainerIds, parentWorkflowId),
       targetHandle: controlTargetHandleForFlowNode(targetId, canvasWorkflowId(targetId, parentWorkflowId), workflowContainerIds, parentWorkflowId),
       selected: isSelected,
@@ -13394,16 +14113,19 @@ function shellBoundaryFlowEdge(
     : internalEdgeEndpointToFlowId(workflowId, edge.target.workflowId);
   return {
     id: flowEdgeId(address),
+    type: 'step',
     data: flowEdgeData(address),
     source: sourceId,
     target: targetId,
     sourceHandle: sourceIsWorkflowInput ? workflowInputInnerSourceHandleId(workflowId) : controlSourceHandleId(sourceId),
     targetHandle: targetIsWorkflowOutput ? workflowOutputInnerTargetHandleId(workflowId) : controlTargetHandleId(targetId),
     selected: isSelected,
-    className: 'workflow-edge-control workflow-edge-boundary-main',
+    markerEnd: { type: MarkerType.ArrowClosed, color: isSelected ? '#16b89e' : '#38bdf8' },
+    className: 'workflow-edge-data workflow-edge-boundary-main',
     style: {
-      stroke: isSelected ? '#16b89e' : '#f8fafc',
-      strokeWidth: isSelected ? 4 : 2.8,
+      stroke: isSelected ? '#16b89e' : '#38bdf8',
+      strokeWidth: isSelected ? 4 : 3,
+      strokeDasharray: isSelected ? '14 8' : '8 6',
     },
   };
 }
@@ -13750,6 +14472,43 @@ function domConnectionEndpointFromElement(
     handleId: handle.getAttribute('data-handleid'),
     side,
   };
+}
+
+function domFlowNodeIdAtPoint(
+  point: { x: number; y: number },
+  elementOverride?: Element | null,
+): string | null {
+  const overrideId = flowNodeIdFromElement(elementOverride);
+  if (overrideId) {
+    return overrideId;
+  }
+  if (typeof document === 'undefined') {
+    return null;
+  }
+  const stack =
+    typeof document.elementsFromPoint === 'function'
+      ? document.elementsFromPoint(point.x, point.y)
+      : ([document.elementFromPoint(point.x, point.y)].filter(Boolean) as Element[]);
+  for (const element of stack) {
+    const flowNodeId = flowNodeIdFromElement(element);
+    if (flowNodeId) {
+      return flowNodeId;
+    }
+  }
+  return flowNodeIdFromElement(document.elementFromPoint(point.x, point.y));
+}
+
+function flowNodeIdFromElement(element: Element | null | undefined): string | null {
+  const node = element?.closest?.('.react-flow__node');
+  if (!(node instanceof HTMLElement)) {
+    return null;
+  }
+  return (
+    node.getAttribute('data-id') ||
+    node.getAttribute('data-nodeid') ||
+    node.id ||
+    null
+  );
 }
 
 function connectionHandleElementForEndpoint(endpoint: DomConnectionEndpoint): HTMLElement | null {
@@ -14261,7 +15020,12 @@ function graphToWorkspaceCanvas(
     id: graph.id,
     name: graph.name || graph.id,
     layout: isWorkflowFocusGraph ? 'workflow-focus' : 'workspace-canvas',
-    rootWorkflowId: runtimeWorkflows[0]?.id || graph.id,
+    rootWorkflowId:
+      typeof metadata.root_workflow_id === 'string'
+        ? metadata.root_workflow_id
+        : runtimeWorkflows[0]?.id || graph.id,
+    exposedOutputs: isWorkflowFocusGraph ? undefined : workflowPortsFromGraph(graph.exposed_outputs, 'output'),
+    workflowOutputBindings: isWorkflowFocusGraph ? undefined : graph.workflow_output_bindings,
     workflows,
     edges,
   };
@@ -14342,7 +15106,8 @@ function workflowFromGraphNode(
       : callableKind === 'tool_class'
         ? 'tool'
         : 'agent_session';
-  const internalNodes =
+  const outputSchema = outputSchemaFromGraphNode(node);
+  const rawInternalNodes =
     Array.isArray(metadata.internal_nodes)
       ? (metadata.internal_nodes as InternalNodeView[])
       : explicitWorkflowContainer || callableKind === 'workflow_function'
@@ -14361,6 +15126,12 @@ function workflowFromGraphNode(
               emptyInputPolicy: emptyInputPolicyFromGraphNode(node),
             },
           ];
+  const internalNodes = rawInternalNodes.map((internalNodeValue) => ({
+    ...internalNodeValue,
+    inputPorts: internalNodeInputPorts(internalNodeValue),
+    outputPorts: internalNodeOutputPorts(internalNodeValue),
+  }));
+  const graphOutputPorts = workflowPortsFromGraph(node.output_ports, 'output');
   return {
     id: node.id,
     title: uiLabel,
@@ -14377,7 +15148,7 @@ function workflowFromGraphNode(
     sourceInput: node.input,
     sourceInputMapping: node.input_mapping,
     control: node.control,
-    outputSchema: outputSchemaFromGraphNode(node),
+    outputSchema,
     forwardMainOutputOnControl: forwardMainOutputFromGraphNode(node),
     emptyInputPolicy: emptyInputPolicyFromGraphNode(node),
     workflowRef: callableKind === 'workflow_function' ? callableId : node.workflow_ref,
@@ -14388,7 +15159,10 @@ function workflowFromGraphNode(
     relativeCwd: node.relative_cwd,
     status: (nodeStatus.get(node.id) as WorkflowStatus) || 'not_run',
     inputPorts: workflowPortsFromGraph(node.input_ports, 'input'),
-    outputPorts: workflowPortsFromGraph(node.output_ports, 'output'),
+    outputPorts:
+      !explicitWorkflowContainer && sourceKind !== 'workflow'
+        ? outputPortsFromSchema(outputSchema, graphOutputPorts)
+        : graphOutputPorts,
     internalNodes,
     internalEdges: internalEdgesFromMetadata(metadata),
     position: node.position || { x: 80 + index * 500, y: 220 },
@@ -14447,7 +15221,12 @@ function canvasToWorkflowGraph(canvas: WorkspaceCanvasModel): WorkflowGraph {
     },
     ...(canvas.layout === 'workflow-focus'
       ? focusBoundaryPortsForGraph(canvas)
-      : {}),
+      : canvas.exposedOutputs || canvas.workflowOutputBindings
+        ? {
+            exposed_outputs: (canvas.exposedOutputs || []).map(portViewToGraphPort),
+            workflow_output_bindings: canvas.workflowOutputBindings || [],
+          }
+        : {}),
   };
 }
 
@@ -14673,7 +15452,7 @@ function internalNodeToGraphNode(node: InternalNodeView): WorkflowGraphNode {
     input_mapping: {},
     cwd_policy: 'inherit_environment',
     input_ports: (node.inputPorts || [port('main', 'input', 'input')]).map(portViewToGraphPort),
-    output_ports: (node.outputPorts || [port('main', 'output', 'output')]).map(portViewToGraphPort),
+    output_ports: internalNodeOutputPorts(node).map(portViewToGraphPort),
     ...(nodeControlPayload(node.forwardMainOutputOnControl, node.control)
       ? { control: nodeControlPayload(node.forwardMainOutputOnControl, node.control) }
       : {}),
@@ -14756,7 +15535,7 @@ function workflowToGraphNode(workflow: WorkflowContainerModel): WorkflowGraphNod
       cwd_policy: workflow.relativeCwd ? 'relative_subdir' : 'inherit_environment',
       relative_cwd: workflow.relativeCwd,
       input_ports: workflow.inputPorts.map(portViewToGraphPort),
-      output_ports: workflow.outputPorts.map(portViewToGraphPort),
+      output_ports: workflowOutputPorts(workflow).map(portViewToGraphPort),
       ...(nodeControlPayload(workflow.forwardMainOutputOnControl, workflow.control)
         ? { control: nodeControlPayload(workflow.forwardMainOutputOnControl, workflow.control) }
         : {}),
@@ -14818,7 +15597,11 @@ function workflowToGraphNode(workflow: WorkflowContainerModel): WorkflowGraphNod
     ui: {
       semantic_kind: 'workflow_container',
       ...(workflow.bindingPath ? { binding_ref: workflow.bindingPath } : {}),
-      internal_nodes: workflow.internalNodes,
+      internal_nodes: workflow.internalNodes.map((node) => ({
+        ...node,
+        inputPorts: internalNodeInputPorts(node),
+        outputPorts: internalNodeOutputPorts(node),
+      })),
       internal_edges: workflow.internalEdges.map(canvasEdgeToGraphMetadataEdge),
     },
   };
@@ -14967,11 +15750,6 @@ async function persistWorkbenchTaskToBackend(
   callables: CallableSummary[],
   workflows: WorkflowSummary[],
 ): Promise<void> {
-  try {
-    await api.createWorkbenchTask({ task_id: task.taskId, title: task.title });
-  } catch {
-    await api.updateWorkbenchTask(task.taskId, { title: task.title });
-  }
   const canvas = stripRuntimeStateFromCanvas(task.canvas);
   const snapshot = captureAuthoringSnapshot({
     taskId: task.taskId,
@@ -15186,6 +15964,22 @@ function isActiveCanvasObjectStatus(status: string): boolean {
 }
 
 function workspaceDemoCanvas(): WorkspaceCanvasModel {
+  const nvidiaResearchPrompt =
+    '请对 NVIDIA Corporation（ticker: NVDA，NASDAQ）进行单股深度调研分析。研究目标是形成可验证、可追踪的投资研究报告，覆盖业务模式、财务质量、行业位置、估值情景、主要风险、潜在催化剂和最终一致性评审。';
+  const nvidiaResearchInput = {
+    user_prompt: nvidiaResearchPrompt,
+    target: {
+      ticker: 'NVDA',
+      company_name: 'NVIDIA Corporation',
+      exchange: 'NASDAQ',
+      asset_type: 'common_stock',
+      research_scope: 'single_stock_deep_research',
+    },
+    research_preferences: {
+      focus: ['AI accelerators', 'data center revenue', 'gross margin quality', 'valuation sensitivity', 'supply chain and regulatory risks'],
+      output_language: 'zh-CN',
+    },
+  };
   const agentNode = (
     id: string,
     title: string,
@@ -15195,6 +15989,7 @@ function workspaceDemoCanvas(): WorkspaceCanvasModel {
     outputSchema: Record<string, unknown>,
     position: { x: number; y: number },
     callableId = DEMO_ANALYST_AGENT_ID,
+    sourceInput?: Record<string, unknown>,
   ): WorkflowContainerModel => ({
     id,
     title,
@@ -15203,7 +15998,7 @@ function workspaceDemoCanvas(): WorkspaceCanvasModel {
     codexExecutionMode: 'default',
     directory: `workflows/demo/${id}`,
     status: 'not_run',
-    sourceInput: { user_prompt: task },
+    sourceInput: sourceInput || { user_prompt: task },
     outputSchema,
     inputPorts,
     outputPorts,
@@ -15254,6 +16049,7 @@ function workspaceDemoCanvas(): WorkspaceCanvasModel {
     action_items: stringArrayField('发布前行动项'),
   });
 
+  const sourceDataWorkflowId = 'Source_Data_Workflow';
   const fundamentalsWorkflowId = 'Fundamentals_Workflow';
   const valuationWorkflowId = 'Valuation_Workflow';
   const riskWorkflowId = 'Risk_Catalyst_Workflow';
@@ -15264,48 +16060,156 @@ function workspaceDemoCanvas(): WorkspaceCanvasModel {
     name: 'Core v2 股市调研分析示例',
     layout: 'workspace-canvas',
     rootWorkflowId: 'Final_Review_Agent',
+    exposedOutputs: [
+      port('main', '投资调研报告', 'output', true),
+      port('review', '发布评审结论', 'output', true),
+      port('action_items', '后续行动项', 'output', true),
+      port('source_register', '来源登记表', 'output', true),
+      port('valuation', '估值结论', 'output', true),
+    ],
+    workflowOutputBindings: [
+      {
+        source: { node: reportWorkflowId, port: 'report' },
+        target_port: 'main',
+        materialization: 'copy',
+        required: true,
+      },
+      {
+        source: { node: 'Final_Review_Agent', port: 'main' },
+        target_port: 'review',
+        materialization: 'copy',
+        required: true,
+      },
+      {
+        source: { node: 'Final_Review_Agent', port: 'action_items' },
+        target_port: 'action_items',
+        materialization: 'copy',
+        required: true,
+      },
+      {
+        source: { node: sourceDataWorkflowId, port: 'source_register' },
+        target_port: 'source_register',
+        materialization: 'copy',
+        required: true,
+      },
+      {
+        source: { node: valuationWorkflowId, port: 'main' },
+        target_port: 'valuation',
+        materialization: 'copy',
+        required: true,
+      },
+    ],
     workflows: [
       agentNode(
-        'Market_Context_Agent',
-        '市场上下文采集',
-        '读取用户关注的市场主题，输出研究范围、候选行业、数据口径和约束。',
-        [port('main', '用户主题', 'input')],
+        'Research_Brief_Agent',
+        '研究简报确认',
+        '确认 NVIDIA / NVDA 的研究对象、范围、约束和后续关注点；不要提前写投资结论、估值观点或未经核验的数据。',
+        [port('main', '股票或公司输入', 'input')],
         [
-          port('main', '市场上下文', 'output', true),
-          port('watchlist', '候选关注点', 'output', true),
-        ],
-        objectOutputSchema(['status', 'summary', 'findings', 'evidence', 'watchlist'], {
-          findings: stringArrayField('市场主题、候选行业和调研边界'),
-          evidence: stringArrayField('用户输入、假设和需外部验证的信息'),
-          watchlist: stringArrayField('后续风险与催化剂 workflow 需要持续关注的事项'),
-        }),
-        { x: 80, y: 260 },
-      ),
-      agentNode(
-        'Target_Profile_Agent',
-        '标的画像确认',
-        '基于市场上下文确认一个可研究的美股标的，并输出公司身份、业务边界和验证缺口。',
-        [port('context', '市场上下文', 'input', true)],
-        [
-          port('main', '标的画像', 'output', true),
+          port('target_profile', '标的画像', 'output', true),
+          port('research_scope', '研究范围', 'output', true),
           port('constraints', '研究约束', 'output', true),
+          port('watchlist_seed', '候选关注点', 'output', true),
         ],
-        objectOutputSchema(['status', 'summary', 'ticker', 'company_name', 'verification_gaps'], {
-          ticker: stringField('股票代码'),
-          company_name: stringField('公司名称'),
-          constraints: stringArrayField('研究范围、数据边界和下游限制条件'),
-          verification_gaps: stringArrayField('需要外部数据源验证的信息'),
-        }),
-        { x: 460, y: 260 },
+        objectOutputSchema(
+          ['status', 'summary', 'target_profile', 'research_scope', 'constraints', 'watchlist_seed'],
+          {
+            target_profile: {
+              type: 'object',
+              description: 'ticker、公司名称、业务边界和研究对象定义',
+              additionalProperties: true,
+            },
+            research_scope: stringField('本次单股深研的范围边界'),
+            constraints: stringArrayField('研究范围、数据边界和下游限制条件'),
+            watchlist_seed: stringArrayField('后续风险与催化剂 workflow 需要持续关注的事项'),
+          },
+        ),
+        { x: 80, y: 260 },
+        DEMO_ANALYST_AGENT_ID,
+        nvidiaResearchInput,
+      ),
+      inlineWorkflow(
+        sourceDataWorkflowId,
+        '公开数据核验工作流',
+        'workflows/demo/core_v2/source_data',
+        [port('target', '标的画像', 'input', true)],
+        [
+          port('verified_data_pack', '核验数据包', 'output', true),
+          port('source_register', '来源登记表', 'output', true),
+          port('data_gaps', '数据缺口', 'output', true),
+        ],
+        [
+          internalNode(
+            'company_disclosure_agent',
+            '公司披露采集',
+            '联网读取 NVIDIA 10-K、10-Q、earnings release、investor presentation 和 transcript，提取可引用事实。',
+            'Agent',
+            DEMO_DATA_AGENT_ID,
+            sourceDataComponentOutputSchema('公司披露采集'),
+            [port('target', '标的画像', 'input', true)],
+          ),
+          internalNode(
+            'market_data_agent',
+            '市场数据采集',
+            '联网读取股价、市值、forward multiples、consensus estimates 和 peer multiples；无法取得时必须列入 data_gaps。',
+            'Agent',
+            DEMO_DATA_AGENT_ID,
+            sourceDataComponentOutputSchema('市场数据采集'),
+            [port('target', '标的画像', 'input', true)],
+          ),
+          internalNode(
+            'news_policy_agent',
+            '新闻政策采集',
+            '联网整理近 3-6 个月 export control、Blackwell/Rubin、hyperscaler capex 和 AI demand 相关新闻。',
+            'Agent',
+            DEMO_DATA_AGENT_ID,
+            sourceDataComponentOutputSchema('新闻政策采集'),
+            [port('target', '标的画像', 'input', true)],
+          ),
+          internalNode(
+            'peer_competition_agent',
+            '同业竞争采集',
+            '联网整理 AMD、Broadcom/custom ASIC、Google TPU、hyperscaler internal silicon 和推理替代方案。',
+            'Agent',
+            DEMO_DATA_AGENT_ID,
+            sourceDataComponentOutputSchema('同业竞争采集'),
+            [port('target', '标的画像', 'input', true)],
+          ),
+          internalNode(
+            'data_quality_synthesis_agent',
+            '数据质量汇总',
+            '从 main 控制聚合输入中读取四路公开数据采集结果，压缩为可供下游消费的核验数据包、来源登记表、数据缺口和 as_of_date；不要复制上游原文。',
+            'Agent',
+            DEMO_SYNTHESIS_AGENT_ID,
+            verifiedDataPackOutputSchema(),
+            [port('main', '四路采集结果聚合', 'input', true)],
+            [
+              port('verified_data_pack', '核验数据包', 'output', true),
+              port('source_register', '来源登记表', 'output', true),
+              port('data_gaps', '数据缺口', 'output', true),
+            ],
+          ),
+        ],
+        [
+          dataEdge(workflowInputBoundaryId(sourceDataWorkflowId), 'target', 'company_disclosure_agent', 'target'),
+          dataEdge(workflowInputBoundaryId(sourceDataWorkflowId), 'target', 'market_data_agent', 'target'),
+          dataEdge(workflowInputBoundaryId(sourceDataWorkflowId), 'target', 'news_policy_agent', 'target'),
+          dataEdge(workflowInputBoundaryId(sourceDataWorkflowId), 'target', 'peer_competition_agent', 'target'),
+          controlEdge('company_disclosure_agent', 'data_quality_synthesis_agent'),
+          controlEdge('market_data_agent', 'data_quality_synthesis_agent'),
+          controlEdge('news_policy_agent', 'data_quality_synthesis_agent'),
+          controlEdge('peer_competition_agent', 'data_quality_synthesis_agent'),
+          dataEdge('data_quality_synthesis_agent', 'verified_data_pack', workflowOutputBoundaryId(sourceDataWorkflowId), 'verified_data_pack'),
+          dataEdge('data_quality_synthesis_agent', 'source_register', workflowOutputBoundaryId(sourceDataWorkflowId), 'source_register'),
+          dataEdge('data_quality_synthesis_agent', 'data_gaps', workflowOutputBoundaryId(sourceDataWorkflowId), 'data_gaps'),
+        ],
+        { x: 470, y: 240 },
       ),
       inlineWorkflow(
         fundamentalsWorkflowId,
         '基本面工作流',
         'workflows/demo/core_v2/fundamentals',
-        [
-          port('target', '标的画像', 'input', true),
-          port('context', '市场上下文', 'input', true),
-        ],
+        [port('target', '标的画像', 'input', true), port('verified_data', '核验数据包', 'input', true)],
         [
           port('main', '基本面结论', 'output', true),
           port('evidence_pack', '基本面证据包', 'output', true),
@@ -15318,7 +16222,7 @@ function workspaceDemoCanvas(): WorkspaceCanvasModel {
             'Agent',
             DEMO_ANALYST_AGENT_ID,
             analysisSchema('业务模式分析'),
-            [port('target', '标的画像', 'input', true), port('context', '市场上下文', 'input', true)],
+            [port('target', '标的画像', 'input', true), port('verified_data', '核验数据包', 'input', true)],
           ),
           internalNode(
             'financial_quality_agent',
@@ -15327,7 +16231,7 @@ function workspaceDemoCanvas(): WorkspaceCanvasModel {
             'Agent',
             DEMO_ANALYST_AGENT_ID,
             analysisSchema('财务质量分析'),
-            [port('target', '标的画像', 'input', true)],
+            [port('target', '标的画像', 'input', true), port('verified_data', '核验数据包', 'input', true)],
           ),
           internalNode(
             'industry_position_agent',
@@ -15336,20 +16240,16 @@ function workspaceDemoCanvas(): WorkspaceCanvasModel {
             'Agent',
             DEMO_ANALYST_AGENT_ID,
             analysisSchema('行业位置分析'),
-            [port('target', '标的画像', 'input', true), port('context', '市场上下文', 'input', true)],
+            [port('target', '标的画像', 'input', true), port('verified_data', '核验数据包', 'input', true)],
           ),
           internalNode(
             'fundamentals_synthesis_agent',
             '基本面汇总',
-            '并行汇总业务、财务、行业三路结果，形成下游估值和风险可消费的结论。',
+            '从 main 控制聚合输入中读取业务、财务、行业三路结果，形成下游估值和风险可消费的结论。',
             'Agent',
             DEMO_SYNTHESIS_AGENT_ID,
             synthesisSchema('基本面汇总'),
-            [
-              port('business', '业务模式分析', 'input', true),
-              port('financials', '财务质量分析', 'input', true),
-              port('industry', '行业位置分析', 'input', true),
-            ],
+            [port('main', '三路基本面分析聚合', 'input', true)],
           ),
           internalNode(
             'fundamentals_evidence_agent',
@@ -15358,23 +16258,21 @@ function workspaceDemoCanvas(): WorkspaceCanvasModel {
             'Agent',
             DEMO_SYNTHESIS_AGENT_ID,
             synthesisSchema('证据包整理'),
-            [port('main', '基本面汇总', 'input', true)],
+            [port('main', '基本面汇总', 'input', true), port('verified_data', '核验数据包', 'input', true)],
           ),
         ],
         [
           dataEdge(workflowInputBoundaryId(fundamentalsWorkflowId), 'target', 'business_model_agent', 'target'),
-          dataEdge(workflowInputBoundaryId(fundamentalsWorkflowId), 'context', 'business_model_agent', 'context'),
+          dataEdge(workflowInputBoundaryId(fundamentalsWorkflowId), 'verified_data', 'business_model_agent', 'verified_data'),
           dataEdge(workflowInputBoundaryId(fundamentalsWorkflowId), 'target', 'financial_quality_agent', 'target'),
+          dataEdge(workflowInputBoundaryId(fundamentalsWorkflowId), 'verified_data', 'financial_quality_agent', 'verified_data'),
           dataEdge(workflowInputBoundaryId(fundamentalsWorkflowId), 'target', 'industry_position_agent', 'target'),
-          dataEdge(workflowInputBoundaryId(fundamentalsWorkflowId), 'context', 'industry_position_agent', 'context'),
+          dataEdge(workflowInputBoundaryId(fundamentalsWorkflowId), 'verified_data', 'industry_position_agent', 'verified_data'),
           controlEdge('business_model_agent', 'fundamentals_synthesis_agent'),
           controlEdge('financial_quality_agent', 'fundamentals_synthesis_agent'),
           controlEdge('industry_position_agent', 'fundamentals_synthesis_agent'),
-          dataEdge('business_model_agent', 'main', 'fundamentals_synthesis_agent', 'business'),
-          dataEdge('financial_quality_agent', 'main', 'fundamentals_synthesis_agent', 'financials'),
-          dataEdge('industry_position_agent', 'main', 'fundamentals_synthesis_agent', 'industry'),
           controlEdge('fundamentals_synthesis_agent', 'fundamentals_evidence_agent'),
-          dataEdge('fundamentals_synthesis_agent', 'main', 'fundamentals_evidence_agent', 'main'),
+          dataEdge(workflowInputBoundaryId(fundamentalsWorkflowId), 'verified_data', 'fundamentals_evidence_agent', 'verified_data'),
           dataEdge('fundamentals_synthesis_agent', 'main', workflowOutputBoundaryId(fundamentalsWorkflowId), 'main'),
           dataEdge('fundamentals_evidence_agent', 'main', workflowOutputBoundaryId(fundamentalsWorkflowId), 'evidence_pack'),
         ],
@@ -15387,53 +16285,63 @@ function workspaceDemoCanvas(): WorkspaceCanvasModel {
         [
           port('fundamentals', '基本面结论', 'input', true),
           port('constraints', '研究约束', 'input', true),
+          port('verified_data', '核验数据包', 'input', true),
         ],
-        [
-          port('main', '估值结论', 'output', true),
-          port('scenario_table', '情景表', 'output', true),
-        ],
+        [port('main', '估值结论', 'output', true)],
         [
           internalNode(
-            'valuation_model_agent',
-            '估值框架',
-            '基于基本面结论选择估值框架、关键假设和敏感变量。',
+            'operating_model_agent',
+            '经营模型假设',
+            '基于核验数据和基本面结论建立 revenue、gross margin、operating margin、FCF、share count、net cash 的建模假设。',
             'Agent',
             DEMO_ANALYST_AGENT_ID,
-            valuationComponentOutputSchema(),
-            [port('fundamentals', '基本面结论', 'input', true)],
+            operatingModelOutputSchema(),
+            [port('fundamentals', '基本面结论', 'input', true), port('verified_data', '核验数据包', 'input', true)],
           ),
           internalNode(
-            'scenario_agent',
-            '情景分析',
-            '并行构造 bull/base/bear 情景，说明每个情景成立条件。',
+            'scenario_valuation_agent',
+            '情景估值',
+            '构造 bull/base/bear 情景，输出关键变量、成立条件、估值结果或无法估值的具体缺失原因。',
             'Agent',
             DEMO_ANALYST_AGENT_ID,
-            valuationComponentOutputSchema(),
-            [port('fundamentals', '基本面结论', 'input', true), port('constraints', '研究约束', 'input', true)],
+            scenarioValuationOutputSchema(),
+            [
+              port('fundamentals', '基本面结论', 'input', true),
+              port('constraints', '研究约束', 'input', true),
+              port('verified_data', '核验数据包', 'input', true),
+            ],
+          ),
+          internalNode(
+            'comparables_agent',
+            '可比公司估值',
+            '基于核验市场数据整理 peers、multiples、premium/discount rationale；缺少共识或行情数据时必须显式说明。',
+            'Agent',
+            DEMO_ANALYST_AGENT_ID,
+            comparablesOutputSchema(),
+            [port('fundamentals', '基本面结论', 'input', true), port('verified_data', '核验数据包', 'input', true)],
           ),
           internalNode(
             'valuation_synthesis_agent',
             '估值汇总',
-            '串行整合估值框架和情景分析，输出风险收益判断。',
+            '从 main 控制聚合输入中整合经营模型、情景估值和可比公司估值，输出结论型估值判断；禁止只输出估值方法论。',
             'Agent',
             DEMO_SYNTHESIS_AGENT_ID,
             valuationSynthesisOutputSchema(),
-            [
-              port('valuation_model', '估值框架', 'input', true),
-              port('scenario_analysis', '情景分析', 'input', true),
-            ],
+            [port('main', '三路估值分析聚合', 'input', true)],
           ),
         ],
         [
-          dataEdge(workflowInputBoundaryId(valuationWorkflowId), 'fundamentals', 'valuation_model_agent', 'fundamentals'),
-          dataEdge(workflowInputBoundaryId(valuationWorkflowId), 'fundamentals', 'scenario_agent', 'fundamentals'),
-          dataEdge(workflowInputBoundaryId(valuationWorkflowId), 'constraints', 'scenario_agent', 'constraints'),
-          controlEdge('valuation_model_agent', 'valuation_synthesis_agent'),
-          controlEdge('scenario_agent', 'valuation_synthesis_agent'),
-          dataEdge('valuation_model_agent', 'main', 'valuation_synthesis_agent', 'valuation_model'),
-          dataEdge('scenario_agent', 'main', 'valuation_synthesis_agent', 'scenario_analysis'),
+          dataEdge(workflowInputBoundaryId(valuationWorkflowId), 'fundamentals', 'operating_model_agent', 'fundamentals'),
+          dataEdge(workflowInputBoundaryId(valuationWorkflowId), 'verified_data', 'operating_model_agent', 'verified_data'),
+          dataEdge(workflowInputBoundaryId(valuationWorkflowId), 'fundamentals', 'scenario_valuation_agent', 'fundamentals'),
+          dataEdge(workflowInputBoundaryId(valuationWorkflowId), 'constraints', 'scenario_valuation_agent', 'constraints'),
+          dataEdge(workflowInputBoundaryId(valuationWorkflowId), 'verified_data', 'scenario_valuation_agent', 'verified_data'),
+          dataEdge(workflowInputBoundaryId(valuationWorkflowId), 'fundamentals', 'comparables_agent', 'fundamentals'),
+          dataEdge(workflowInputBoundaryId(valuationWorkflowId), 'verified_data', 'comparables_agent', 'verified_data'),
+          controlEdge('operating_model_agent', 'valuation_synthesis_agent'),
+          controlEdge('scenario_valuation_agent', 'valuation_synthesis_agent'),
+          controlEdge('comparables_agent', 'valuation_synthesis_agent'),
           dataEdge('valuation_synthesis_agent', 'main', workflowOutputBoundaryId(valuationWorkflowId), 'main'),
-          dataEdge('scenario_agent', 'main', workflowOutputBoundaryId(valuationWorkflowId), 'scenario_table'),
         ],
         { x: 1360, y: 40 },
       ),
@@ -15444,6 +16352,7 @@ function workspaceDemoCanvas(): WorkspaceCanvasModel {
         [
           port('fundamentals', '基本面结论', 'input', true),
           port('watchlist', '候选关注点', 'input', true),
+          port('verified_data', '核验数据包', 'input', true),
         ],
         [
           port('main', '风险结论', 'output', true),
@@ -15457,7 +16366,7 @@ function workspaceDemoCanvas(): WorkspaceCanvasModel {
             'Agent',
             DEMO_ANALYST_AGENT_ID,
             riskComponentOutputSchema(),
-            [port('fundamentals', '基本面结论', 'input', true)],
+            [port('fundamentals', '基本面结论', 'input', true), port('verified_data', '核验数据包', 'input', true)],
           ),
           internalNode(
             'company_risk_agent',
@@ -15466,7 +16375,7 @@ function workspaceDemoCanvas(): WorkspaceCanvasModel {
             'Agent',
             DEMO_ANALYST_AGENT_ID,
             riskComponentOutputSchema(),
-            [port('fundamentals', '基本面结论', 'input', true)],
+            [port('fundamentals', '基本面结论', 'input', true), port('verified_data', '核验数据包', 'input', true)],
           ),
           internalNode(
             'catalyst_agent',
@@ -15475,33 +16384,33 @@ function workspaceDemoCanvas(): WorkspaceCanvasModel {
             'Agent',
             DEMO_ANALYST_AGENT_ID,
             catalystOutputSchema(),
-            [port('fundamentals', '基本面结论', 'input', true), port('watchlist', '候选关注点', 'input', true)],
+            [
+              port('fundamentals', '基本面结论', 'input', true),
+              port('watchlist', '候选关注点', 'input', true),
+              port('verified_data', '核验数据包', 'input', true),
+            ],
           ),
           internalNode(
             'risk_synthesis_agent',
             '风险催化剂汇总',
-            '汇总风险与催化剂，形成最终报告需要的风险矩阵。',
+            '从 main 控制聚合输入中汇总风险与催化剂，形成最终报告需要的风险矩阵。',
             'Agent',
             DEMO_SYNTHESIS_AGENT_ID,
             riskSynthesisOutputSchema(),
-            [
-              port('macro_risks', '宏观风险', 'input', true),
-              port('company_risks', '公司风险', 'input', true),
-              port('catalysts', '催化剂', 'input', true),
-            ],
+            [port('main', '三路风险与催化剂分析聚合', 'input', true)],
           ),
         ],
         [
           dataEdge(workflowInputBoundaryId(riskWorkflowId), 'fundamentals', 'macro_risk_agent', 'fundamentals'),
+          dataEdge(workflowInputBoundaryId(riskWorkflowId), 'verified_data', 'macro_risk_agent', 'verified_data'),
           dataEdge(workflowInputBoundaryId(riskWorkflowId), 'fundamentals', 'company_risk_agent', 'fundamentals'),
+          dataEdge(workflowInputBoundaryId(riskWorkflowId), 'verified_data', 'company_risk_agent', 'verified_data'),
           dataEdge(workflowInputBoundaryId(riskWorkflowId), 'fundamentals', 'catalyst_agent', 'fundamentals'),
           dataEdge(workflowInputBoundaryId(riskWorkflowId), 'watchlist', 'catalyst_agent', 'watchlist'),
+          dataEdge(workflowInputBoundaryId(riskWorkflowId), 'verified_data', 'catalyst_agent', 'verified_data'),
           controlEdge('macro_risk_agent', 'risk_synthesis_agent'),
           controlEdge('company_risk_agent', 'risk_synthesis_agent'),
           controlEdge('catalyst_agent', 'risk_synthesis_agent'),
-          dataEdge('macro_risk_agent', 'main', 'risk_synthesis_agent', 'macro_risks'),
-          dataEdge('company_risk_agent', 'main', 'risk_synthesis_agent', 'company_risks'),
-          dataEdge('catalyst_agent', 'main', 'risk_synthesis_agent', 'catalysts'),
           dataEdge('risk_synthesis_agent', 'main', workflowOutputBoundaryId(riskWorkflowId), 'main'),
           dataEdge('catalyst_agent', 'main', workflowOutputBoundaryId(riskWorkflowId), 'watchlist'),
         ],
@@ -15516,19 +16425,21 @@ function workspaceDemoCanvas(): WorkspaceCanvasModel {
           port('valuation', '估值结论', 'input', true),
           port('risk', '风险结论', 'input', true),
           port('evidence_pack', '证据包', 'input', true),
+          port('verified_data', '核验数据包', 'input', true),
+          port('source_register', '来源登记表', 'input', true),
         ],
         [
-          port('main', '投资调研报告', 'output', true),
+          port('report', '投资调研报告', 'output', true),
           port('appendix', '证据附录', 'output', true),
         ],
         [
           internalNode(
-            'thesis_writer_agent',
+            'investment_thesis_agent',
             '投资论点撰写',
-            '整合基本面、估值和风险，撰写核心投资论点。',
+            '整合基本面、估值和风险，输出投资观点、置信度和关键论点；不得只输出报告写作框架。',
             'Agent',
             DEMO_REPORT_AGENT_ID,
-            investmentReportOutputSchema(),
+            investmentThesisOutputSchema(),
             [
               port('fundamentals', '基本面结论', 'input', true),
               port('valuation', '估值结论', 'input', true),
@@ -15538,32 +16449,45 @@ function workspaceDemoCanvas(): WorkspaceCanvasModel {
           internalNode(
             'evidence_mapper_agent',
             '证据追踪整理',
-            '并行整理证据包和报告章节之间的追踪关系。',
+            '从 main 控制输入读取投资论点，并结合证据包、估值结论和来源登记表整理证据映射；不要生成报告章节正文。',
             'Agent',
             DEMO_REPORT_AGENT_ID,
-            reportSchema,
-            [port('evidence_pack', '证据包', 'input', true)],
+            evidenceMapOnlyOutputSchema(),
+            [
+              port('main', '投资论点', 'input', true),
+              port('evidence_pack', '证据包', 'input', true),
+              port('valuation', '估值结论', 'input', true),
+              port('source_register', '来源登记表', 'input', true),
+            ],
           ),
           internalNode(
             'report_compiler_agent',
             '报告合成',
-            '串行合成投资论点和证据追踪，输出可评审报告。',
+            '合成完整 NVIDIA 单股深研报告，必须输出 executive summary、investment stance、估值结论、风险收益和监控计划；不得只输出方法论或待办清单。',
             'Agent',
             DEMO_REPORT_AGENT_ID,
-            reportSchema,
-            [port('thesis', '投资论点', 'input', true), port('evidence', '证据追踪', 'input', true)],
+            finalInvestmentReportOutputSchema(),
+            [
+              port('main', '证据追踪', 'input', true),
+              port('thesis', '投资论点', 'input', true),
+              port('verified_data', '核验数据包', 'input', true),
+              port('source_register', '来源登记表', 'input', true),
+            ],
           ),
         ],
         [
-          dataEdge(workflowInputBoundaryId(reportWorkflowId), 'fundamentals', 'thesis_writer_agent', 'fundamentals'),
-          dataEdge(workflowInputBoundaryId(reportWorkflowId), 'valuation', 'thesis_writer_agent', 'valuation'),
-          dataEdge(workflowInputBoundaryId(reportWorkflowId), 'risk', 'thesis_writer_agent', 'risk'),
+          dataEdge(workflowInputBoundaryId(reportWorkflowId), 'fundamentals', 'investment_thesis_agent', 'fundamentals'),
+          dataEdge(workflowInputBoundaryId(reportWorkflowId), 'valuation', 'investment_thesis_agent', 'valuation'),
+          dataEdge(workflowInputBoundaryId(reportWorkflowId), 'risk', 'investment_thesis_agent', 'risk'),
           dataEdge(workflowInputBoundaryId(reportWorkflowId), 'evidence_pack', 'evidence_mapper_agent', 'evidence_pack'),
-          controlEdge('thesis_writer_agent', 'report_compiler_agent'),
+          dataEdge(workflowInputBoundaryId(reportWorkflowId), 'valuation', 'evidence_mapper_agent', 'valuation'),
+          dataEdge(workflowInputBoundaryId(reportWorkflowId), 'source_register', 'evidence_mapper_agent', 'source_register'),
+          dataEdge(workflowInputBoundaryId(reportWorkflowId), 'verified_data', 'report_compiler_agent', 'verified_data'),
+          dataEdge(workflowInputBoundaryId(reportWorkflowId), 'source_register', 'report_compiler_agent', 'source_register'),
+          controlEdge('investment_thesis_agent', 'evidence_mapper_agent'),
           controlEdge('evidence_mapper_agent', 'report_compiler_agent'),
-          dataEdge('thesis_writer_agent', 'main', 'report_compiler_agent', 'thesis'),
-          dataEdge('evidence_mapper_agent', 'main', 'report_compiler_agent', 'evidence'),
-          dataEdge('report_compiler_agent', 'main', workflowOutputBoundaryId(reportWorkflowId), 'main'),
+          dataEdge('investment_thesis_agent', 'main', 'report_compiler_agent', 'thesis'),
+          dataEdge('report_compiler_agent', 'main', workflowOutputBoundaryId(reportWorkflowId), 'report'),
           dataEdge('evidence_mapper_agent', 'main', workflowOutputBoundaryId(reportWorkflowId), 'appendix'),
         ],
         { x: 1860, y: 260 },
@@ -15588,25 +16512,29 @@ function workspaceDemoCanvas(): WorkspaceCanvasModel {
       ),
     ],
     edges: [
-      controlEdge('Market_Context_Agent', 'Target_Profile_Agent'),
-      dataEdge('Market_Context_Agent', 'main', 'Target_Profile_Agent', 'context'),
-      controlEdge('Target_Profile_Agent', fundamentalsWorkflowId),
-      dataEdge('Target_Profile_Agent', 'main', fundamentalsWorkflowId, 'target'),
-      dataEdge('Market_Context_Agent', 'main', fundamentalsWorkflowId, 'context'),
+      controlEdge('Research_Brief_Agent', sourceDataWorkflowId),
+      dataEdge('Research_Brief_Agent', 'target_profile', sourceDataWorkflowId, 'target'),
+      controlEdge(sourceDataWorkflowId, fundamentalsWorkflowId),
+      dataEdge('Research_Brief_Agent', 'target_profile', fundamentalsWorkflowId, 'target'),
+      dataEdge(sourceDataWorkflowId, 'verified_data_pack', fundamentalsWorkflowId, 'verified_data'),
       controlEdge(fundamentalsWorkflowId, valuationWorkflowId),
       controlEdge(fundamentalsWorkflowId, riskWorkflowId),
       dataEdge(fundamentalsWorkflowId, 'main', valuationWorkflowId, 'fundamentals'),
-      dataEdge('Target_Profile_Agent', 'constraints', valuationWorkflowId, 'constraints'),
+      dataEdge('Research_Brief_Agent', 'constraints', valuationWorkflowId, 'constraints'),
+      dataEdge(sourceDataWorkflowId, 'verified_data_pack', valuationWorkflowId, 'verified_data'),
       dataEdge(fundamentalsWorkflowId, 'main', riskWorkflowId, 'fundamentals'),
-      dataEdge('Market_Context_Agent', 'watchlist', riskWorkflowId, 'watchlist'),
+      dataEdge('Research_Brief_Agent', 'watchlist_seed', riskWorkflowId, 'watchlist'),
+      dataEdge(sourceDataWorkflowId, 'verified_data_pack', riskWorkflowId, 'verified_data'),
       controlEdge(valuationWorkflowId, reportWorkflowId),
       controlEdge(riskWorkflowId, reportWorkflowId),
       dataEdge(fundamentalsWorkflowId, 'main', reportWorkflowId, 'fundamentals'),
       dataEdge(fundamentalsWorkflowId, 'evidence_pack', reportWorkflowId, 'evidence_pack'),
       dataEdge(valuationWorkflowId, 'main', reportWorkflowId, 'valuation'),
       dataEdge(riskWorkflowId, 'main', reportWorkflowId, 'risk'),
+      dataEdge(sourceDataWorkflowId, 'verified_data_pack', reportWorkflowId, 'verified_data'),
+      dataEdge(sourceDataWorkflowId, 'source_register', reportWorkflowId, 'source_register'),
       controlEdge(reportWorkflowId, 'Final_Review_Agent'),
-      dataEdge(reportWorkflowId, 'main', 'Final_Review_Agent', 'report'),
+      dataEdge(reportWorkflowId, 'report', 'Final_Review_Agent', 'report'),
       dataEdge(valuationWorkflowId, 'main', 'Final_Review_Agent', 'valuation'),
       dataEdge(riskWorkflowId, 'watchlist', 'Final_Review_Agent', 'risk_watchlist'),
       dataEdge(reportWorkflowId, 'appendix', 'Final_Review_Agent', 'evidence_appendix'),
@@ -15659,19 +16587,124 @@ function fundamentalsSynthesisOutputSchema(): Record<string, unknown> {
   });
 }
 
-function valuationComponentOutputSchema(): Record<string, unknown> {
-  return objectOutputSchema(['status', 'summary', 'assumptions', 'valuation_view'], {
-    assumptions: stringArrayField('估值或情景假设'),
-    valuation_view: stringField('估值或情景判断'),
-    sensitivities: stringArrayField('关键敏感变量'),
+function sourceDataComponentOutputSchema(name: string): Record<string, unknown> {
+  return objectOutputSchema(['status', 'summary', 'facts', 'sources', 'data_gaps'], {
+    facts: stringArrayField(`${name} 提取出的可引用事实`),
+    sources: stringArrayField('来源标题、URL、发布日期或访问日期'),
+    data_gaps: stringArrayField('未取得或仍需复核的数据'),
+    as_of_date: stringField('数据采集日期'),
+  });
+}
+
+function verifiedDataPackOutputSchema(): Record<string, unknown> {
+  return objectOutputSchema(['status', 'summary', 'verified_data_pack', 'source_register', 'data_gaps', 'as_of_date'], {
+    verified_data_pack: {
+      type: 'object',
+      description: '下游节点可直接消费的核验事实、市场数据、新闻政策和同业竞争数据',
+      additionalProperties: true,
+    },
+    source_register: stringArrayField('可追踪来源清单'),
+    data_gaps: stringArrayField('影响报告或估值发布质量的数据缺口'),
+    as_of_date: stringField('数据包截至日期'),
+  });
+}
+
+function operatingModelOutputSchema(): Record<string, unknown> {
+  return objectOutputSchema(['status', 'summary', 'revenue_model', 'margin_model', 'cash_flow_model'], {
+    revenue_model: stringField('收入驱动、分部增长和关键假设'),
+    margin_model: stringField('gross margin、operating margin 和正常化假设'),
+    cash_flow_model: stringField('FCF、capex、working capital、share count、net cash 等假设'),
+    missing_inputs: stringArrayField('无法建模或需要补充的数据'),
+  });
+}
+
+function scenarioValuationOutputSchema(): Record<string, unknown> {
+  return objectOutputSchema(['status', 'summary', 'base_case', 'bull_case', 'bear_case'], {
+    base_case: stringField('base case 关键变量、成立条件和估值结果或缺失原因'),
+    bull_case: stringField('bull case 关键变量、成立条件和估值结果或缺失原因'),
+    bear_case: stringField('bear case 关键变量、成立条件和估值结果或缺失原因'),
+    valuation_status: stringField('complete 或 insufficient_data'),
+    missing_inputs: stringArrayField('阻止输出数值估值区间的数据缺口'),
+  });
+}
+
+function comparablesOutputSchema(): Record<string, unknown> {
+  return objectOutputSchema(['status', 'summary', 'peers', 'multiples_view', 'premium_discount_rationale'], {
+    peers: stringArrayField('可比公司或替代资产'),
+    multiples_view: stringField('EV/Revenue、EV/EBIT、P/E 等可比估值判断'),
+    premium_discount_rationale: stringField('相对 peers 应享有溢价或折价的理由'),
+    missing_inputs: stringArrayField('缺失的市场数据、共识或 peer multiple'),
   });
 }
 
 function valuationSynthesisOutputSchema(): Record<string, unknown> {
-  return objectOutputSchema(['status', 'summary', 'valuation_range', 'risk_reward'], {
-    valuation_range: stringField('估值区间或相对估值判断'),
-    risk_reward: stringField('风险收益比判断'),
-    uncertainty: stringArrayField('主要不确定性'),
+  return objectOutputSchema(
+    ['status', 'summary', 'valuation_conclusion', 'base_case', 'bull_case', 'bear_case', 'risk_reward_view', 'missing_inputs'],
+    {
+      valuation_conclusion: stringField('结论型估值判断；不能只描述估值方法'),
+      base_case: stringField('base case 结论'),
+      bull_case: stringField('bull case 结论'),
+      bear_case: stringField('bear case 结论'),
+      risk_reward_view: stringField('风险收益判断'),
+      valuation_status: stringField('complete 或 insufficient_data'),
+      missing_inputs: stringArrayField('缺失数据和对结论的影响'),
+    },
+  );
+}
+
+function investmentThesisOutputSchema(): Record<string, unknown> {
+  return objectOutputSchema(['status', 'summary', 'investment_stance', 'confidence', 'key_thesis'], {
+    investment_stance: stringField('研究建议口径的投资观点，例如偏正面/中性/偏谨慎及原因'),
+    confidence: stringField('高/中/低置信度及原因'),
+    key_thesis: stringArrayField('支撑投资观点的核心论点'),
+    thesis_risks: stringArrayField('可能推翻投资观点的关键风险'),
+  });
+}
+
+function evidenceMapOnlyOutputSchema(): Record<string, unknown> {
+  return objectOutputSchema(['status', 'summary', 'evidence_map', 'source_coverage', 'evidence_gaps'], {
+    evidence_map: stringArrayField('报告结论到上游证据和来源的映射'),
+    source_coverage: stringArrayField('披露、市场、新闻政策和同业数据的覆盖情况'),
+    evidence_gaps: stringArrayField('发布前必须补齐或在报告中披露的证据缺口'),
+    action_items: stringArrayField('补充证据的行动项'),
+  });
+}
+
+function finalInvestmentReportOutputSchema(): Record<string, unknown> {
+  return objectOutputSchema(['status', 'summary', 'report'], {
+    report: {
+      type: 'object',
+      additionalProperties: false,
+      required: [
+        'executive_summary',
+        'investment_stance',
+        'business_quality',
+        'financial_quality',
+        'industry_position',
+        'valuation_conclusion',
+        'risk_reward',
+        'key_risks',
+        'catalysts',
+        'monitoring_plan',
+        'source_notes',
+        'limitations',
+      ],
+      properties: {
+        executive_summary: stringField('一页式核心摘要'),
+        investment_stance: stringField('研究建议口径投资观点，不输出绝对化买卖指令'),
+        business_quality: stringField('业务质量结论'),
+        financial_quality: stringField('财务质量结论'),
+        industry_position: stringField('行业位置结论'),
+        valuation_conclusion: stringField('估值结论'),
+        risk_reward: stringField('风险收益判断'),
+        key_risks: stringArrayField('关键风险'),
+        catalysts: stringArrayField('正负催化剂'),
+        monitoring_plan: stringArrayField('后续跟踪指标'),
+        source_notes: stringArrayField('关键来源说明'),
+        limitations: stringArrayField('限制、免责声明和不可发布条件'),
+      },
+    },
+    action_items: stringArrayField('后续行动项'),
   });
 }
 
@@ -15695,14 +16728,6 @@ function riskSynthesisOutputSchema(): Record<string, unknown> {
     risk_matrix: stringArrayField('整合后的风险矩阵'),
     catalyst_watchlist: stringArrayField('催化剂跟踪清单'),
     mitigation_notes: stringArrayField('风险缓释或验证方式'),
-  });
-}
-
-function investmentReportOutputSchema(): Record<string, unknown> {
-  return objectOutputSchema(['status', 'summary', 'thesis', 'report_sections'], {
-    thesis: stringField('投资论点'),
-    report_sections: stringArrayField('最终报告章节摘要'),
-    evidence_gaps: stringArrayField('证据缺口和免责声明'),
   });
 }
 
@@ -15975,7 +17000,7 @@ function focusCanvas(
     bindingPath: workflow.bindingPath,
     status: node.status,
     inputPorts: node.inputPorts || [port('main', 'input', 'input')],
-    outputPorts: node.outputPorts || [port('main', 'output', 'output')],
+    outputPorts: internalNodeOutputPorts(node),
     internalNodes: [node],
     internalEdges: [],
     position: node.position || { x: 360 + index * 420, y: 260 },
@@ -16070,6 +17095,28 @@ function port(
   return { id, label, direction, required, cardinality, artifactTypes: ['artifact'] };
 }
 
+function internalNodeInputPorts(node: InternalNodeView): WorkflowPortView[] {
+  return node.inputPorts || [port('main', 'input', 'input')];
+}
+
+function internalNodeOutputPorts(node: InternalNodeView): WorkflowPortView[] {
+  return effectiveOutputPortsForNode({
+    outputSchema: node.outputSchema,
+    outputPorts: node.outputPorts || [port('main', 'output', 'output')],
+  });
+}
+
+function workflowOutputPorts(workflow: WorkflowContainerModel): WorkflowPortView[] {
+  if (workflow.sourceKind && workflow.sourceKind !== 'workflow') {
+    return outputPortsFromSchema(workflow.outputSchema, workflow.outputPorts);
+  }
+  return workflow.outputPorts;
+}
+
+function workflowOutputPortsReadonly(workflow: WorkflowContainerModel): boolean {
+  return Boolean(workflow.sourceKind && workflow.sourceKind !== 'workflow');
+}
+
 function internalNode(
   id: string,
   name: string,
@@ -16078,6 +17125,7 @@ function internalNode(
   callableId?: string,
   outputSchema?: Record<string, unknown>,
   inputPorts?: WorkflowPortView[],
+  outputPorts?: WorkflowPortView[],
 ): InternalNodeView {
   return {
     id,
@@ -16089,7 +17137,7 @@ function internalNode(
     input: { user_prompt: task || name },
     outputSchema,
     inputPorts: inputPorts || [port('main', '输入材料', 'input')],
-    outputPorts: [port('main', '输出产物', 'output', true)],
+    outputPorts: outputPorts || [port('main', '输出产物', 'output', true)],
   };
 }
 
@@ -16262,7 +17310,7 @@ function portViewToGraphPort(portView: WorkflowPortView): WorkflowPort {
 }
 
 function portHandleId(workflowId: string, direction: PortDirection, portId: string): string {
-  return `${workflowId}:${direction}:${portId}`;
+  return `${workflowId}:${direction}:${encodeURIComponent(portId)}`;
 }
 
 function controlSourceHandleId(flowNodeId: string): string {
@@ -16313,7 +17361,14 @@ function parsePortHandle(handle: string | null | undefined):
   if (!handle) {
     return null;
   }
-  const [workflowId, direction, portId] = handle.split(':');
+  const [workflowId, direction, ...portParts] = handle.split(':');
+  const encodedPortId = portParts.join(':');
+  let portId = '';
+  try {
+    portId = encodedPortId ? decodeURIComponent(encodedPortId) : '';
+  } catch {
+    return null;
+  }
   if (!workflowId || (direction !== 'input' && direction !== 'output') || !portId) {
     return null;
   }
@@ -16452,6 +17507,25 @@ function commitResolvedConnection(
       ],
     },
   };
+}
+
+type CommitConnectionAttempt =
+  | { ok: true; result: CommitConnectionResult }
+  | { ok: false; message: string };
+
+function tryCommitResolvedConnection(
+  canvas: WorkspaceCanvasModel,
+  resolved: Extract<ConnectionResolution, { accepted: true }>,
+): CommitConnectionAttempt {
+  try {
+    return { ok: true, result: commitResolvedConnection(canvas, resolved) };
+  } catch (error) {
+    return { ok: false, message: connectionCommitErrorMessage(error) };
+  }
+}
+
+function connectionCommitErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : '连接创建失败';
 }
 
 function canvasEdgesAreEquivalent(left: WorkflowCanvasEdge, right: WorkflowCanvasEdge): boolean {
@@ -16735,39 +17809,139 @@ function applyDataEdgeCommandOrKeep(
   }
 }
 
+function createDataEdgeToNodeBodyCommand(
+  canvas: WorkspaceCanvasModel,
+  visibleCanvas: WorkspaceCanvasModel,
+  pending: PendingCanvasConnection,
+  targetFlowNodeId: string,
+): DataEdgeCommandResult & { targetPortId: string } {
+  const plan = prepareDataEdgeToNodeBodyCommand(canvas, visibleCanvas, pending, targetFlowNodeId);
+  const result = createDataEdgeCommand(plan.canvasWithTargetPort, plan.request);
+  return { ...result, targetPortId: plan.targetPortId };
+}
+
+function prepareDataEdgeToNodeBodyCommand(
+  canvas: WorkspaceCanvasModel,
+  visibleCanvas: WorkspaceCanvasModel,
+  pending: PendingCanvasConnection,
+  targetFlowNodeId: string,
+): BodyDropDataEdgePlan {
+  if (pending.mode !== 'data' || !pending.endpoint || !endpointCanSource(pending.endpoint)) {
+    throw new Error('Data Edge 必须从 output port 拖到目标节点。');
+  }
+  const target = flowEndpointForCanvas(visibleCanvas, targetFlowNodeId);
+  if (!target.nodeId || workflowBoundaryKind(target.nodeId)) {
+    throw new Error('请释放到可执行节点，而不是 workflow 边界。');
+  }
+  const sourceScope = pending.endpoint.workflowId;
+  const targetScope = target.internal ? target.workflowId : null;
+  if (sourceScope !== targetScope) {
+    throw new Error('Data Edge 必须连接同一层级内的节点。');
+  }
+  const scopeWorkflowId = sourceScope || null;
+  const sourceNodeId = dataNodeIdForEndpoint(pending.endpoint);
+  const targetNodeId = target.nodeId;
+  if (sourceNodeId === targetNodeId) {
+    throw new Error('Data Edge 不能连接到同一个节点。');
+  }
+  const targetPortId = inputPortIdForBodyDrop(
+    canvas,
+    scopeWorkflowId,
+    targetNodeId,
+    pending.endpoint.portId,
+    sourceNodeId,
+  );
+  const targetNode = findDataConnectNode(canvas, scopeWorkflowId, targetNodeId);
+  const createdTargetPort = !targetNode?.inputPorts.some((portValue) => portValue.id === targetPortId);
+  const canvasWithTargetPort = createdTargetPort
+    ? addInputPortToDataConnectNode(canvas, scopeWorkflowId, targetNodeId, targetPortId)
+    : canvas;
+  return {
+    canvasWithTargetPort,
+    targetPortId,
+    createdTargetPort,
+    request: {
+      scopeWorkflowId,
+      sourceNodeId,
+      sourcePortId: pending.endpoint.portId,
+      targetNodeId,
+      targetPortId,
+      materialization: 'copy',
+    },
+  };
+}
+
+function dataNodeIdForEndpoint(endpoint: EndpointDescriptor): string {
+  if (endpoint.role === 'workflow_inner_input' || endpoint.role === 'focus_boundary_input_output') {
+    const workflowId = endpoint.workflowId || endpoint.nodeId;
+    return workflowInputBoundaryId(workflowId);
+  }
+  if (endpoint.role === 'workflow_inner_output' || endpoint.role === 'focus_boundary_output_input') {
+    const workflowId = endpoint.workflowId || endpoint.nodeId;
+    return workflowOutputBoundaryId(workflowId);
+  }
+  return endpoint.nodeId;
+}
+
+function inputPortIdForDataBodyPreview(
+  canvas: WorkspaceCanvasModel,
+  visibleCanvas: WorkspaceCanvasModel,
+  pending: PendingCanvasConnection,
+  targetFlowNodeId: string,
+): string {
+  if (pending.mode !== 'data' || !pending.endpoint || !endpointCanSource(pending.endpoint)) {
+    throw new Error('Data Edge 必须从 output port 拖到目标节点。');
+  }
+  const target = flowEndpointForCanvas(visibleCanvas, targetFlowNodeId);
+  const sourceScope = pending.endpoint.workflowId;
+  const targetScope = target.internal ? target.workflowId : null;
+  if (sourceScope !== targetScope || !target.nodeId || workflowBoundaryKind(target.nodeId)) {
+    throw new Error('Data Edge 必须连接同一层级内的节点。');
+  }
+  return inputPortIdForBodyDrop(
+    canvas,
+    sourceScope || null,
+    target.nodeId,
+    pending.endpoint.portId,
+    dataNodeIdForEndpoint(pending.endpoint),
+  );
+}
+
+function inputPortIdForBodyDrop(
+  canvas: WorkspaceCanvasModel,
+  scopeWorkflowId: string | null,
+  targetNodeId: string,
+  sourcePortId: string,
+  sourceNodeId: string,
+): string {
+  const requestedPortId = sourcePortId === 'main' ? `${sourceNodeId}_main` : sourcePortId;
+  const basePortId = slugId(requestedPortId);
+  const targetNode = findDataConnectNode(canvas, scopeWorkflowId, targetNodeId);
+  const existing = targetNode?.inputPorts.find((portValue) => portValue.id === basePortId);
+  if (!existing) {
+    return basePortId;
+  }
+  const conflicts = dataEdgesForNode(canvas, scopeWorkflowId, targetNodeId, 'input').filter(
+    (edge) => edge.target.portId === basePortId,
+  );
+  if (conflicts.length === 0 || (existing.cardinality || 'one') === 'many') {
+    return basePortId;
+  }
+  return uniqueInputPortIdForNode(canvas, scopeWorkflowId, targetNodeId, basePortId);
+}
+
 function dataConnectNodes(
   canvas: WorkspaceCanvasModel,
   scopeWorkflowId: string | null,
 ): DataConnectNodeOption[] {
   if (scopeWorkflowId) {
     const workflow = canvas.workflows.find((item) => item.id === scopeWorkflowId);
-    if (!workflow) {
-      return [];
-    }
-    return [
-      {
-        nodeId: workflowInputBoundaryId(workflow.id),
-        label: 'Workflow Inputs',
-        subtitle: workflowInvocationLabel(workflow),
-        inputPorts: [],
-        outputPorts: workflow.inputPorts.map((item) => boundaryPort(item, 'output')),
-      },
-      ...(workflow.internalNodes || []).map((node) => ({
-      nodeId: node.id,
-      label: internalInvocationLabel(node),
-      subtitle: node.callableId || node.runtime,
-      inputPorts: node.inputPorts || [port('main', 'input', 'input')],
-      outputPorts: node.outputPorts || [port('main', 'output', 'output')],
-      })),
-      {
-        nodeId: workflowOutputBoundaryId(workflow.id),
-        label: 'Workflow Outputs',
-        subtitle: workflowInvocationLabel(workflow),
-        inputPorts: workflow.outputPorts.map((item) => boundaryPort(item, 'input')),
-        outputPorts: [],
-      },
-    ];
+    return workflow ? workflowScopedDataConnectNodes(workflow) : [];
   }
+  return rootDataConnectNodes(canvas);
+}
+
+function rootDataConnectNodes(canvas: WorkspaceCanvasModel): DataConnectNodeOption[] {
   return canvas.workflows
     .filter((workflow) => !workflow.boundaryKind)
     .map((workflow) => ({
@@ -16775,8 +17949,89 @@ function dataConnectNodes(
       label: workflowInvocationLabel(workflow),
       subtitle: workflow.callableId || workflow.workflowRef,
       inputPorts: workflow.inputPorts,
-      outputPorts: workflow.outputPorts,
+      outputPorts: workflowOutputPorts(workflow),
     }));
+}
+
+function workflowScopedDataConnectNodes(workflow: WorkflowContainerModel): DataConnectNodeOption[] {
+  return [
+    {
+      nodeId: workflowInputBoundaryId(workflow.id),
+      label: 'Workflow Inputs',
+      subtitle: workflowInvocationLabel(workflow),
+      inputPorts: [],
+      outputPorts: workflow.inputPorts.map((item) => boundaryPort(item, 'output')),
+    },
+    ...(workflow.internalNodes || []).map((node) => ({
+      nodeId: node.id,
+      label: internalInvocationLabel(node),
+      subtitle: node.callableId || node.runtime,
+      inputPorts: internalNodeInputPorts(node),
+      outputPorts: internalNodeOutputPorts(node),
+    })),
+    {
+      nodeId: workflowOutputBoundaryId(workflow.id),
+      label: 'Workflow Outputs',
+      subtitle: workflowInvocationLabel(workflow),
+      inputPorts: workflow.outputPorts.map((item) => boundaryPort(item, 'input')),
+      outputPorts: [],
+    },
+  ];
+}
+
+function edgeDiagnosticsForCanvasEdge(
+  canvas: WorkspaceCanvasModel,
+  scopeWorkflowId: string | null,
+  edge: WorkflowCanvasEdge,
+): EdgeDiagnostic[] {
+  return edgeDiagnosticsForDataNodes(dataConnectNodes(canvas, scopeWorkflowId), edge);
+}
+
+function edgeDiagnosticsForWorkflowEdge(
+  workflow: WorkflowContainerModel,
+  edge: WorkflowCanvasEdge,
+): EdgeDiagnostic[] {
+  return edgeDiagnosticsForDataNodes(workflowScopedDataConnectNodes(workflow), edge);
+}
+
+function edgeDiagnosticsForDataNodes(
+  nodes: DataConnectNodeOption[],
+  edge: WorkflowCanvasEdge,
+): EdgeDiagnostic[] {
+  if (edge.kind !== 'data') {
+    return [];
+  }
+  const diagnostics: EdgeDiagnostic[] = [];
+  const source = nodes.find((node) => node.nodeId === edge.source.workflowId);
+  const sourcePort = source?.outputPorts.find((portValue) => portValue.id === edge.source.portId);
+  if (!source || !sourcePort) {
+    diagnostics.push({
+      code: 'dangling_data_edge_source',
+      message: source
+        ? `缺少 source output port: ${edge.source.workflowId}.${edge.source.portId}`
+        : `缺少 source node: ${edge.source.workflowId}`,
+      nodeId: edge.source.workflowId,
+      portId: edge.source.portId,
+      expectedSchemaPath: `/properties/outputs/properties/${jsonPointerToken(edge.source.portId)}`,
+    });
+  }
+  const target = nodes.find((node) => node.nodeId === edge.target.workflowId);
+  const targetPort = target?.inputPorts.find((portValue) => portValue.id === edge.target.portId);
+  if (!target || !targetPort) {
+    diagnostics.push({
+      code: 'dangling_data_edge_target',
+      message: target
+        ? `缺少 target input port: ${edge.target.workflowId}.${edge.target.portId}`
+        : `缺少 target node: ${edge.target.workflowId}`,
+      nodeId: edge.target.workflowId,
+      portId: edge.target.portId,
+    });
+  }
+  return diagnostics;
+}
+
+function jsonPointerToken(value: string): string {
+  return value.replace(/~/gu, '~0').replace(/\//gu, '~1');
 }
 
 function findDataConnectNode(
@@ -16849,7 +18104,103 @@ function addPortToDataConnectNode(
   if (!portId) {
     throw new Error('端口 id 不能为空');
   }
-  const nextPort = port(portId, portId, direction);
+  const storedDirection = storedPortDirectionForDataConnectNode(scopeWorkflowId, nodeId, direction);
+  const nextPort = port(portId, portId, storedDirection);
+  return updateDataConnectNodePorts(canvas, scopeWorkflowId, nodeId, direction, (ports) => {
+    if (ports.some((portValue) => portValue.id === portId)) {
+      throw new Error(`端口已存在: ${nodeId}.${portId}`);
+    }
+    if (ports.length >= AGENT_MAX_DATA_PORTS) {
+      throw new Error(`数据端口最多支持 ${AGENT_MAX_DATA_PORTS} 个`);
+    }
+    return [...ports, nextPort];
+  });
+}
+
+function renamePortOnDataConnectNode(
+  canvas: WorkspaceCanvasModel,
+  scopeWorkflowId: string | null,
+  nodeId: string,
+  direction: PortDirection,
+  portId: string,
+  requestedPortId: string,
+): WorkspaceCanvasModel {
+  const nextPortId = slugId(requestedPortId);
+  if (!nextPortId) {
+    throw new Error('端口 id 不能为空');
+  }
+  if (portId === nextPortId) {
+    return canvas;
+  }
+  const nextCanvas = updateDataConnectNodePorts(canvas, scopeWorkflowId, nodeId, direction, (ports) => {
+    if (!ports.some((portValue) => portValue.id === portId)) {
+      throw new Error(`端口不存在: ${nodeId}.${portId}`);
+    }
+    if (ports.some((portValue) => portValue.id === nextPortId)) {
+      throw new Error(`端口已存在: ${nodeId}.${nextPortId}`);
+    }
+    return ports.map((portValue) =>
+      portValue.id === portId
+        ? { ...portValue, id: nextPortId, label: portValue.label === portId ? nextPortId : portValue.label }
+        : portValue,
+    );
+  });
+  return mapDataConnectEdges(nextCanvas, scopeWorkflowId, (edge) => {
+    if (edge.kind !== 'data') {
+      return edge;
+    }
+    if (
+      direction === 'output' &&
+      edge.source.workflowId === nodeId &&
+      edge.source.portId === portId
+    ) {
+      return { ...edge, source: { ...edge.source, portId: nextPortId } };
+    }
+    if (
+      direction === 'input' &&
+      edge.target.workflowId === nodeId &&
+      edge.target.portId === portId
+    ) {
+      return { ...edge, target: { ...edge.target, portId: nextPortId } };
+    }
+    return edge;
+  });
+}
+
+function deletePortFromDataConnectNode(
+  canvas: WorkspaceCanvasModel,
+  scopeWorkflowId: string | null,
+  nodeId: string,
+  direction: PortDirection,
+  portId: string,
+): WorkspaceCanvasModel {
+  const relatedEdges = dataEdgesForNode(canvas, scopeWorkflowId, nodeId, direction).filter((edge) =>
+    direction === 'input' ? edge.target.portId === portId : edge.source.portId === portId,
+  );
+  if (relatedEdges.length > 0) {
+    throw new Error(`端口仍有 data edge，不能删除: ${nodeId}.${portId}`);
+  }
+  return updateDataConnectNodePorts(canvas, scopeWorkflowId, nodeId, direction, (ports) => {
+    if (!ports.some((portValue) => portValue.id === portId)) {
+      throw new Error(`端口不存在: ${nodeId}.${portId}`);
+    }
+    if (ports.length <= 1) {
+      throw new Error('至少需要保留一个端口');
+    }
+    return ports.filter((portValue) => portValue.id !== portId);
+  });
+}
+
+function updateDataConnectNodePorts(
+  canvas: WorkspaceCanvasModel,
+  scopeWorkflowId: string | null,
+  nodeId: string,
+  direction: PortDirection,
+  update: (ports: WorkflowPortView[]) => WorkflowPortView[],
+): WorkspaceCanvasModel {
+  const key = storedPortDirectionForDataConnectNode(scopeWorkflowId, nodeId, direction) === 'input'
+    ? 'inputPorts'
+    : 'outputPorts';
   if (scopeWorkflowId) {
     return {
       ...canvas,
@@ -16857,18 +18208,20 @@ function addPortToDataConnectNode(
         if (workflow.id !== scopeWorkflowId) {
           return workflow;
         }
+        if (nodeId === workflowInputBoundaryId(workflow.id)) {
+          return { ...workflow, inputPorts: update(workflow.inputPorts) };
+        }
+        if (nodeId === workflowOutputBoundaryId(workflow.id)) {
+          return { ...workflow, outputPorts: update(workflow.outputPorts) };
+        }
         return {
           ...workflow,
           internalNodes: workflow.internalNodes.map((node) => {
             if (node.id !== nodeId) {
               return node;
             }
-            const key = direction === 'input' ? 'inputPorts' : 'outputPorts';
             const ports = node[key] || [port('main', direction, direction)];
-            if (ports.some((portValue) => portValue.id === portId)) {
-              throw new Error(`端口已存在: ${nodeId}.${portId}`);
-            }
-            return { ...node, [key]: [...ports, nextPort] };
+            return { ...node, [key]: update(ports) };
           }),
         };
       }),
@@ -16880,14 +18233,47 @@ function addPortToDataConnectNode(
       if (workflow.id !== nodeId) {
         return workflow;
       }
-      const key = direction === 'input' ? 'inputPorts' : 'outputPorts';
-      const ports = workflow[key];
-      if (ports.some((portValue) => portValue.id === portId)) {
-        throw new Error(`端口已存在: ${nodeId}.${portId}`);
-      }
-      return { ...workflow, [key]: [...ports, nextPort] };
+      return { ...workflow, [key]: update(workflow[key]) };
     }),
   };
+}
+
+function storedPortDirectionForDataConnectNode(
+  scopeWorkflowId: string | null,
+  nodeId: string,
+  direction: PortDirection,
+): PortDirection {
+  if (scopeWorkflowId && nodeId === workflowInputBoundaryId(scopeWorkflowId)) {
+    if (direction !== 'output') {
+      throw new Error('Workflow Inputs boundary 只能维护输出侧端口');
+    }
+    return 'input';
+  }
+  if (scopeWorkflowId && nodeId === workflowOutputBoundaryId(scopeWorkflowId)) {
+    if (direction !== 'input') {
+      throw new Error('Workflow Outputs boundary 只能维护输入侧端口');
+    }
+    return 'output';
+  }
+  return direction;
+}
+
+function mapDataConnectEdges(
+  canvas: WorkspaceCanvasModel,
+  scopeWorkflowId: string | null,
+  update: (edge: WorkflowCanvasEdge) => WorkflowCanvasEdge,
+): WorkspaceCanvasModel {
+  if (scopeWorkflowId) {
+    return {
+      ...canvas,
+      workflows: canvas.workflows.map((workflow) =>
+        workflow.id === scopeWorkflowId
+          ? { ...workflow, internalEdges: workflow.internalEdges.map(update) }
+          : workflow,
+      ),
+    };
+  }
+  return { ...canvas, edges: canvas.edges.map(update) };
 }
 
 function uniqueInputPortIdForNode(
@@ -16990,6 +18376,63 @@ function nodeRunForWorkflow(
   });
 }
 
+function selectedNodeRunForSelection(
+  workflowRun: WorkflowRunResult | null,
+  selection: CanvasSelection,
+  selectedWorkflow: WorkflowContainerModel | undefined,
+  selectedInternalNode: InternalNodeView | undefined,
+  context?: NodeRunLookupContext,
+): NodeRunSummary | undefined {
+  if (!workflowRun) {
+    return undefined;
+  }
+  if (selection.type === 'workflow' && selectedWorkflow && isExecutableNodeWorkflow(selectedWorkflow)) {
+    return nodeRunForWorkflow(workflowRun, selectedWorkflow);
+  }
+  if (selection.type === 'internal' && selectedWorkflow && selectedInternalNode) {
+    return nodeRunForInternalNode(workflowRun, selectedWorkflow.id, selectedInternalNode.id, context);
+  }
+  return undefined;
+}
+
+function mergeWorkflowRunNodeDetails(
+  workflowRun: WorkflowRunResult | null,
+  runId: string | null,
+  detailsByKey: Record<string, NodeRunSummary>,
+): WorkflowRunResult | null {
+  if (!workflowRun || !runId) {
+    return workflowRun;
+  }
+  return {
+    ...workflowRun,
+    nodes: workflowRun.nodes.map((node) => {
+      const detail = detailsByKey[nodeRunDetailCacheKey(runId, node)];
+      return detail ? mergeNodeRunDetail(node, detail) : node;
+    }),
+  };
+}
+
+function mergeNodeRunDetail(base: NodeRunSummary, detail: NodeRunSummary): NodeRunSummary {
+  return {
+    ...base,
+    ...detail,
+    ui_node_id: base.ui_node_id || detail.ui_node_id,
+    parent_node_id: base.parent_node_id || detail.parent_node_id,
+    status: detail.status || base.status,
+    run_dir: detail.run_dir || base.run_dir,
+  };
+}
+
+function nodeRunDetailCacheKey(runId: string, nodeRun: NodeRunSummary): string {
+  return [
+    runId,
+    nodeRunProjectionKey(nodeRun),
+    normalizeRunDirKey(effectiveNodeRunDir(nodeRun)),
+  ]
+    .filter(Boolean)
+    .join('|');
+}
+
 function nodeLiveLogsFor(
   liveLogs: Record<string, NodeLiveLogs>,
   nodeRun?: NodeRunSummary,
@@ -16999,6 +18442,8 @@ function nodeLiveLogsFor(
   }
   for (const key of uniqueStrings([
     nodeRun.ui_node_id,
+    normalizeRunDirKey(effectiveNodeRunDir(nodeRun)),
+    effectiveNodeRunDir(nodeRun),
     normalizeRunDirKey(nodeRun.run_dir),
     nodeRun.run_dir,
     nodeRun.node_id,
@@ -17614,7 +19059,7 @@ function internalNodeFromExecutableWorkflow(
     runtime: workflow.callableId || wrapped?.runtime,
     input: workflow.sourceInput || wrapped?.input,
     inputPorts: workflow.inputPorts,
-    outputPorts: workflow.outputPorts,
+    outputPorts: workflowOutputPorts(workflow),
     control: workflow.control || wrapped?.control,
     outputSchema: workflow.outputSchema || wrapped?.outputSchema,
     forwardMainOutputOnControl:
@@ -17643,7 +19088,7 @@ function executableWorkflowFromInternalNode(
     directory: 'Root canvas environment',
     status: node.status,
     inputPorts: node.inputPorts || [port('main', 'input', 'input')],
-    outputPorts: node.outputPorts || [port('main', 'output', 'output')],
+    outputPorts: internalNodeOutputPorts(node),
     internalNodes: [],
     internalEdges: [],
     position,
@@ -17891,7 +19336,7 @@ function normalizeWorkbenchSelection(
     return { type: 'task_canvas', taskId: canvas.id };
   }
   if (selection.type === 'port') {
-    const ports = selection.direction === 'input' ? workflow.inputPorts : workflow.outputPorts;
+    const ports = selection.direction === 'input' ? workflow.inputPorts : workflowOutputPorts(workflow);
     return ports.some((portValue) => portValue.id === selection.portId)
       ? selection
       : { type: 'task_canvas', taskId: canvas.id };
@@ -18188,7 +19633,7 @@ function addCallableNodeFromPalette(
     directory: 'Root canvas environment',
     status: 'not_run',
     inputPorts: node.inputPorts || [port('main', 'input', 'input')],
-    outputPorts: node.outputPorts || [port('main', 'output', 'output')],
+    outputPorts: internalNodeOutputPorts(node),
     internalNodes: [],
     internalEdges: [],
     position,
@@ -18283,7 +19728,7 @@ function internalNodeFromPaletteItem(
     outputPorts:
       item.kind === 'file_source'
         ? [port('main', 'output', 'output')]
-        : item.outputPorts || [port('main', 'output', 'output')],
+        : outputPortsFromSchema(item.outputSchema, item.outputPorts || [port('main', 'output', 'output')]),
     outputSchema: item.kind === 'file_source' ? undefined : item.outputSchema,
     forwardMainOutputOnControl: null,
     position,
@@ -18406,7 +19851,7 @@ function selectedNodeSettingsModel({
       temporaryResourceId: selectedWorkflow.temporaryResourceId,
       input: selectedWorkflow.sourceInput || {},
       inputPorts: selectedWorkflow.inputPorts,
-      outputPorts: selectedWorkflow.outputPorts,
+      outputPorts: workflowOutputPorts(selectedWorkflow),
       outputSchema: selectedWorkflow.outputSchema,
       forwardMainOutputOnControl: selectedWorkflow.forwardMainOutputOnControl,
       emptyInputPolicy: selectedWorkflow.emptyInputPolicy,
@@ -18434,8 +19879,8 @@ function selectedNodeSettingsModel({
       codexExecutionMode: selectedInternalNode.codexExecutionMode,
       temporaryResourceId: selectedInternalNode.temporaryResourceId,
       input: selectedInternalNode.input || {},
-      inputPorts: selectedInternalNode.inputPorts || [port('main', 'input', 'input')],
-      outputPorts: selectedInternalNode.outputPorts || [port('main', 'output', 'output')],
+      inputPorts: internalNodeInputPorts(selectedInternalNode),
+      outputPorts: internalNodeOutputPorts(selectedInternalNode),
       outputSchema: selectedInternalNode.outputSchema,
       forwardMainOutputOnControl: selectedInternalNode.forwardMainOutputOnControl,
       emptyInputPolicy: selectedInternalNode.emptyInputPolicy,
@@ -18523,7 +19968,7 @@ function selectedEntityDetailsModel({
       status: workflowRun?.status || 'not_run',
       scopeLabel: selection.scopeWorkflowId ? `Workflow: ${selection.scopeWorkflowId}` : 'Root canvas',
       log: emptyLogModel(),
-      properties: edgePropertyGroups(selectedEdge, selection.scopeWorkflowId || null),
+      properties: edgePropertyGroups(selectedEdge, selection.scopeWorkflowId || null, canvas),
       evidenceActions: [],
       events: workflowEvents,
     };
@@ -18581,6 +20026,17 @@ function evidenceActionByLabel(
   label: string,
 ): SelectedDetailsEvidenceAction | undefined {
   return actions.find((action) => action.label === label);
+}
+
+async function readEvidenceContent(path: string, runId?: string | null): Promise<ArtifactContent> {
+  if (runId) {
+    try {
+      return await api.runEvidence(runId, path);
+    } catch {
+      // Non-run artifacts still use the registered artifact boundary.
+    }
+  }
+  return api.artifact(path);
 }
 
 function combinedLogText(log: SelectedEntityDetailsModel['log']): string {
@@ -18674,7 +20130,14 @@ function nodeEventsForRun(events: RunEvent[], nodeRun?: NodeRunSummary): RunEven
   }
   return events.filter((event) => {
     const eventNodeId = typeof event.node_id === 'string' ? event.node_id : '';
-    return eventNodeId === nodeRun.node_id || eventNodeId === nodeRun.ui_node_id;
+    const eventUiNodeId = typeof event.ui_node_id === 'string' ? event.ui_node_id : '';
+    const eventRunDir = typeof event.node_run_dir === 'string' ? event.node_run_dir : '';
+    return (
+      eventNodeId === nodeRun.node_id ||
+      eventNodeId === nodeRun.ui_node_id ||
+      (Boolean(nodeRun.ui_node_id) && eventUiNodeId === nodeRun.ui_node_id) ||
+      sameRunDir(eventRunDir, effectiveNodeRunDir(nodeRun))
+    );
   });
 }
 
@@ -18699,9 +20162,15 @@ function workflowContainerPropertyGroups(
   ];
 }
 
-function edgePropertyGroups(edge: WorkflowCanvasEdge, scopeWorkflowId: string | null): SelectedDetailsPropertyGroup[] {
+function edgePropertyGroups(
+  edge: WorkflowCanvasEdge,
+  scopeWorkflowId: string | null,
+  canvas: WorkspaceCanvasModel,
+): SelectedDetailsPropertyGroup[] {
   const source = edge.kind === 'control' ? edge.source.workflowId : `${edge.source.workflowId}.${edge.source.portId}`;
   const target = edge.kind === 'control' ? edge.target.workflowId : `${edge.target.workflowId}.${edge.target.portId}`;
+  const diagnostics = edgeDiagnosticsForCanvasEdge(canvas, scopeWorkflowId, edge);
+  const transferMode = controlEdgeMainTransferMode(canvas, scopeWorkflowId, edge);
   return [
     {
       title: edge.kind === 'control' ? '控制边' : '数据边',
@@ -18712,6 +20181,23 @@ function edgePropertyGroups(edge: WorkflowCanvasEdge, scopeWorkflowId: string | 
         { label: 'target', value: target },
         { label: 'kind', value: edge.kind },
         { label: 'materialization', value: edge.kind === 'data' ? edge.materialization : edge.context || 'none' },
+        ...(edge.kind === 'control'
+          ? [
+              { label: '数据传递', value: transferMode.label },
+              { label: '传递规则', value: transferMode.reason },
+            ]
+          : []),
+        ...(diagnostics.length
+          ? [
+              { label: 'diagnostics', value: diagnostics.map((diagnostic) => diagnostic.message).join('；') },
+              {
+                label: 'repair',
+                value: diagnostics.some((diagnostic) => diagnostic.code === 'dangling_data_edge_source')
+                  ? '更新上游 output_schema，或迁移 data edge source port'
+                  : '创建 target input port，或迁移 data edge target port',
+              },
+            ]
+          : []),
       ],
     },
   ];
@@ -19001,13 +20487,18 @@ export {
   captureAuthoringSnapshot,
   canvasToWorkflowGraph,
   canvasEdgeToFlowEdge,
-  workflowInternalEdgePaths,
   connectionCandidatesFromPendingEndpoint,
   connectionFromPendingEndpoint,
+  controlEdgeMainTransferMode,
   reverseConnection,
   resolveScopedConnection,
   isConnectionHandleForMode,
+  outputPortsFromSchema,
+  effectiveOutputPortsForNode,
   createDataEdgeCommand,
+  addPortToDataConnectNode,
+  renamePortOnDataConnectNode,
+  deletePortFromDataConnectNode,
   temporaryResourceIssueForCanvas,
   temporaryResourceIssueForGraph,
   validateCanvasAuthoringProposal,

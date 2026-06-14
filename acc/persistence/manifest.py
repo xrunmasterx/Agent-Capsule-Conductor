@@ -13,11 +13,10 @@ is wired in Phase 3 (STRATEGY §6.3).
 from __future__ import annotations
 
 import json
-import os
-import tempfile
-from contextlib import suppress
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+
+from acc.storage import write_text_atomic
 
 MANIFEST_FILENAME = "run_manifest.json"
 
@@ -54,11 +53,10 @@ class RunManifest:
 
 
 def write_atomic(manifest: RunManifest, run_dir: Path) -> None:
-    """Atomically write ``run_manifest.json`` using temp file + ``os.replace``.
+    """Atomically write ``run_manifest.json`` using ACC shared storage helpers.
 
-    The temp file is created in ``run_dir`` so that ``os.replace`` stays
-    on the same filesystem (POSIX atomic rename guarantee). Callers must
-    ensure ``run_dir`` exists.
+    The shared helper creates the temp file in the target directory, creates
+    parents as needed, and cleans up orphan temp files on write failure.
     """
 
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -69,21 +67,7 @@ def write_atomic(manifest: RunManifest, run_dir: Path) -> None:
         indent=2,
         sort_keys=True,
     )
-    fd, tmp_path = tempfile.mkstemp(
-        prefix=".run_manifest.",
-        suffix=".tmp",
-        dir=str(run_dir),
-    )
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(tmp_path, target)
-    except Exception:
-        with suppress(OSError):
-            os.unlink(tmp_path)
-        raise
+    write_text_atomic(target, payload)
 
 
 def read(run_dir: Path) -> RunManifest | None:

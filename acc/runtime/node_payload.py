@@ -12,6 +12,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from acc.engine.control_flow import (
+    control_main_source_nodes_for_target,
+    source_node_forwards_main_by_default,
+)
+from acc.engine.schema_ports import (
+    MAIN_OUTPUT_PORT,
+    effective_output_ports,
+    has_projected_output_ports,
+)
 from acc.models import AccError, NodeInvocationSpec, WorkflowFunctionTemplate
 
 MISSING_PORT_VALUE = object()
@@ -128,16 +137,11 @@ def resolve_node_payload(
         )
     if "main" not in payload:
         control_main_sources: list[tuple[str, Any]] = []
-        for edge in template.control_edges:
-            if edge.target != node.id:
-                continue
-            source_node = template.node_invocations.get(edge.source)
-            if source_node is None or not should_forward_main_output_on_control(source_node):
-                continue
-            key = (edge.source, "main")
+        for source_node_id in control_main_source_nodes_for_target(template, node.id):
+            key = (source_node_id, "main")
             if key not in outputs:
                 continue
-            control_main_sources.append((edge.source, outputs[key]))
+            control_main_sources.append((source_node_id, outputs[key]))
         if len(control_main_sources) == 1:
             source_node_id, value = control_main_sources[0]
             payload["main"] = value
@@ -182,7 +186,14 @@ def resolve_node_payload(
 
 
 def should_forward_main_output_on_control(node: NodeInvocationSpec) -> bool:
-    return node.control.forward_main_output_on_control is not False
+    template = WorkflowFunctionTemplate(
+        id="single_node_control_policy",
+        version="0.0.0",
+        node_invocations={node.id: node},
+        control_edges=[],
+        data_edges=[],
+    )
+    return source_node_forwards_main_by_default(template, node.id)
 
 
 def control_main_aggregate_payload(source_values: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -269,8 +280,11 @@ def output_port_ids(node: NodeInvocationSpec) -> tuple[str, ...]:
         return tuple(binding.parent_port for binding in node.workflow_call_output_bindings)
     if node.output_bindings:
         return tuple(binding.source_port for binding in node.output_bindings)
-    if node.output_ports:
-        return tuple(node.output_ports)
+    ports = effective_output_ports(node)
+    if node.output_ports or has_projected_output_ports(node.output_schema):
+        return tuple(ports)
+    if set(ports) != {MAIN_OUTPUT_PORT}:
+        return tuple(ports)
     return ("default", "main")
 
 

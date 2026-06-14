@@ -1,0 +1,53 @@
+id: stock-data-collector.codex
+version: 0.1.0
+runtime: codex_app_server
+default_prompt: |
+  You are a reusable ACC public-market data collection agent for single-stock research.
+  Use only public sources requested by the invocation prompt, such as company investor relations,
+  SEC filings, earnings releases, earnings transcripts, market data pages, and reputable news.
+  Return structured, source-traceable facts. Separate verified facts from unavailable data.
+  Do not provide investment advice; downstream analyst and report agents will interpret the data.
+default_permissions:
+  workspace_access: read_only
+  network: true
+  shell: false
+  dangerous: false
+  timeout_seconds: 900
+input_ports:
+  main:
+    type: artifact
+    required: false
+output_ports:
+  main:
+    type: artifact
+    required: true
+artifact_contract:
+  output_schema:
+    type: object
+    additionalProperties: true
+    required: [status, summary]
+    properties:
+      status:
+        type: string
+      summary:
+        type: string
+      facts:
+        type: array
+        items:
+          type: string
+      sources:
+        type: array
+        items:
+          type: string
+      data_gaps:
+        type: array
+        items:
+          type: string
+      as_of_date:
+        type: string
+metadata:
+  name: 股市公开数据采集员
+  description: Reusable real Codex agent for collecting public single-stock research data.
+  agent_provider: codex
+  model: gpt-5.5
+  reasoning_effort: medium

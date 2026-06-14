@@ -23,7 +23,7 @@ from acc.session import utc_now_iso
 from acc.storage import RUN_MARKER_FILENAME, validate_run_id, write_json_atomic
 from acc.storage_index import StorageIndex, rebuild_storage_index
 from acc.storage_refs import make_legacy_object_ref, make_run_ref, make_task_ref, parse_object_ref
-from acc.utils import load_json
+from acc.utils import iter_paths_no_symlink_targets, load_json, safe_path_size_bytes
 
 GC_PLAN_SCHEMA_VERSION = "acc.gc.plan.v1"
 GC_MANIFEST_SCHEMA_VERSION = "acc.gc.manifest.v1"
@@ -155,7 +155,7 @@ class StorageGCService:
             run_id = run_dir.name
             summary = summaries_by_run_id.get(run_id) or load_run_summary(run_dir)
             retention = self._run_retention(run_dir, summary)
-            size_bytes = path_size_bytes(run_dir)
+            size_bytes = safe_path_size_bytes(run_dir)
             total_run_bytes += size_bytes
             candidate = self._run_candidate(run_dir, summary, retention, size_bytes)
             decision = self._run_gc_decision(candidate, retention, now)
@@ -524,7 +524,7 @@ class StorageGCService:
                     "reason": "orphan_runtime_spec_requires_quarantine_review",
                     "path": str(spec_dir),
                     "state": "orphan",
-                    "size_bytes": path_size_bytes(spec_dir),
+                    "size_bytes": safe_path_size_bytes(spec_dir),
                 }
             )
 
@@ -550,7 +550,7 @@ class StorageGCService:
                         "reason": "malformed_session_requires_quarantine_review",
                         "path": str(session_dir),
                         "state": "invalid",
-                        "size_bytes": path_size_bytes(session_dir),
+                        "size_bytes": safe_path_size_bytes(session_dir),
                     }
                 )
                 continue
@@ -567,7 +567,7 @@ class StorageGCService:
                     "reason": "session_retention_independent_from_run",
                     "path": str(session_dir),
                     "state": payload.get("status"),
-                    "size_bytes": path_size_bytes(session_dir),
+                    "size_bytes": safe_path_size_bytes(session_dir),
                 }
             )
 
@@ -685,7 +685,7 @@ class StorageGCService:
             "reason": reason,
             "path": str(path),
             "extra_paths": [],
-            "size_bytes": path_size_bytes(path),
+            "size_bytes": safe_path_size_bytes(path),
             "digest": digest_path(path),
             "state": state,
         }
@@ -706,7 +706,7 @@ class StorageGCService:
             "reason": reason,
             "path": str(path),
             "state": state,
-            "size_bytes": path_size_bytes(path),
+            "size_bytes": safe_path_size_bytes(path),
         }
 
     def _apply_action(self, plan: dict[str, Any], action: dict[str, Any]) -> dict[str, Any]:
@@ -846,7 +846,7 @@ class StorageGCService:
                 "state": state,
                 "created_at": marker.get("created_at") if isinstance(marker, dict) else None,
                 "ended_at": summary.ended_at if summary is not None else None,
-                "size_bytes": path_size_bytes(run_dir),
+                "size_bytes": safe_path_size_bytes(run_dir),
             }
         )
 
@@ -1050,25 +1050,6 @@ def runtime_spec_dir_for_run(project_root: Path, run_dir: Path) -> Path:
     return project_root / "runs" / "_workflow_function_specs" / f"run-{digest}"
 
 
-def path_size_bytes(path: Path) -> int:
-    if not path.exists() and not path.is_symlink():
-        return 0
-    if path.is_symlink() or path.is_file():
-        try:
-            return path.lstat().st_size
-        except OSError:
-            return 0
-    total = 0
-    for child in iter_paths_no_symlink_targets(path):
-        if child.is_dir() and not child.is_symlink():
-            continue
-        try:
-            total += child.lstat().st_size
-        except OSError:
-            continue
-    return total
-
-
 def digest_path(path: Path) -> str:
     digest = hashlib.sha256()
     if not path.exists() and not path.is_symlink():
@@ -1092,17 +1073,6 @@ def digest_path(path: Path) -> str:
         elif item.is_dir():
             digest.update(b"dir")
     return "sha256:" + digest.hexdigest()
-
-
-def iter_paths_no_symlink_targets(path: Path) -> list[Path]:
-    if path.is_symlink() or path.is_file():
-        return [path]
-    result = [path]
-    for child in sorted(path.rglob("*")):
-        result.append(child)
-        if child.is_symlink():
-            continue
-    return result
 
 
 def has_active_lease(run_dir: Path) -> bool:

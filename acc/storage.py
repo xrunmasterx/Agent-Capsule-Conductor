@@ -4,6 +4,7 @@ import json
 import os
 import re
 import threading
+import time
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
@@ -89,7 +90,7 @@ def claim_run(
     )
     try:
         write_run_marker(handle, project_root, workflow_id=workflow_id, task_id=task_id)
-        _rebuild_storage_index(project_root)
+        _request_storage_index_refresh(project_root)
     except Exception:
         with suppress(OSError):
             run_dir.rmdir()
@@ -160,18 +161,61 @@ def write_json_atomic(path: Path, payload: Any) -> None:
 
 
 def write_text_atomic(path: Path, text: str) -> None:
+    write_bytes_atomic(path, text.encode("utf-8"))
+
+
+def write_bytes_atomic(path: Path, data: bytes) -> None:
+    lock = _file_lock_for(path)
+    with lock:
+        _write_bytes_atomic(path, data)
+
+
+def _write_bytes_atomic(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
-    with temp_path.open("w", encoding="utf-8") as handle:
-        handle.write(text)
-        handle.flush()
-        os.fsync(handle.fileno())
-    temp_path.replace(path)
-    _fsync_dir(path.parent)
+    temp_path = path.with_name(f".__acc_tmp_{uuid4().hex[:12]}.tmp")
+    try:
+        with temp_path.open("wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        _replace_with_retry(temp_path, path)
+        _fsync_dir(path.parent)
+    except Exception:
+        with suppress(OSError):
+            temp_path.unlink()
+        raise
+
+
+def append_text_locked(path: Path, text: str) -> None:
+    append_bytes_locked(path, text.encode("utf-8"))
+
+
+def append_bytes_locked(path: Path, data: bytes) -> None:
+    lock = _file_lock_for(path)
+    with lock:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("ab") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+
+
+def _replace_with_retry(source: Path, target: Path) -> None:
+    last_error: OSError | None = None
+    for _ in range(5):
+        try:
+            source.replace(target)
+            return
+        except PermissionError as exc:
+            last_error = exc
+            time.sleep(0.05)
+    if last_error is not None:
+        raise last_error
+    source.replace(target)
 
 
 def append_jsonl_locked(path: Path, event: dict[str, Any]) -> dict[str, Any]:
-    lock = _jsonl_lock_for(path)
+    lock = _file_lock_for(path)
     with lock:
         path.parent.mkdir(parents=True, exist_ok=True)
         next_sequence = _next_jsonl_sequence(path)
@@ -182,6 +226,23 @@ def append_jsonl_locked(path: Path, event: dict[str, Any]) -> dict[str, Any]:
             handle.flush()
             os.fsync(handle.fileno())
     return payload
+
+
+def truncate_jsonl_tail_locked(path: Path, max_lines: int) -> None:
+    if max_lines < 1:
+        raise ValueError("max_lines must be positive")
+    lock = _file_lock_for(path)
+    with lock:
+        if not path.exists():
+            return
+        try:
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            return
+        if len(lines) <= max_lines:
+            return
+        text = "\n".join(lines[-max_lines:]) + "\n"
+        _write_bytes_atomic(path, text.encode("utf-8"))
 
 
 def _next_jsonl_sequence(path: Path) -> int:
@@ -202,7 +263,7 @@ def _next_jsonl_sequence(path: Path) -> int:
     return max_sequence + 1
 
 
-def _jsonl_lock_for(path: Path) -> threading.Lock:
+def _file_lock_for(path: Path) -> threading.Lock:
     resolved = path.resolve()
     with _JSONL_LOCKS_GUARD:
         lock = _JSONL_LOCKS.get(resolved)
@@ -237,10 +298,7 @@ def _fsync_dir(path: Path) -> None:
         os.close(fd)
 
 
-def _rebuild_storage_index(project_root: Path) -> None:
-    try:
-        from acc.storage_index import rebuild_storage_index
+def _request_storage_index_refresh(project_root: Path) -> None:
+    from acc.storage_refresh import request_storage_index_refresh
 
-        rebuild_storage_index(project_root)
-    except Exception:
-        return
+    request_storage_index_refresh(project_root, reason="run_claimed")

@@ -1342,6 +1342,55 @@ def test_control_edge_forwards_main_output_by_default(tmp_path: Path) -> None:
     assert bindings["bindings"][0]["binding_kind"] == "control_main_default"
 
 
+def test_control_edge_does_not_forward_main_when_same_pair_has_data_edge(tmp_path: Path) -> None:
+    workflow_path = tmp_path / "control_with_data_edge.accflow.json"
+    write_v2(
+        workflow_path,
+        {
+            "schema_version": CORE_V2_SCHEMA_VERSION,
+            "id": "control_with_data_edge",
+            "version": "0.1.0",
+            "nodes": [
+                {
+                    "id": "produce",
+                    "callable_ref": {"kind": "tool_class", "id": "fake_producer"},
+                    "ports": {"outputs": {"main": {"type": "json"}}},
+                },
+                {
+                    "id": "consume",
+                    "callable_ref": {"kind": "agent_class", "id": "generic_fake_agent"},
+                    "ports": {"inputs": {"evidence": {"type": "json"}}},
+                },
+            ],
+            "control_edges": [{"from": "produce", "to": "consume"}],
+            "data_edges": [
+                {
+                    "source": {"node": "produce", "port": "main"},
+                    "target": {"node": "consume", "port": "evidence"},
+                    "materialization": "copy",
+                }
+            ],
+        },
+    )
+
+    record = asyncio.run(run_core_v2_workflow_path(workflow_path, tmp_path / "run"))
+    agent_payload = json.loads(
+        (tmp_path / "run" / "nodes" / "consume" / "agent_payload.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    bindings = json.loads(
+        (tmp_path / "run" / "nodes" / "consume" / "binding_manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert record.status == "success"
+    assert "main" not in agent_payload
+    assert agent_payload["evidence"]["producer_node_id"] == "produce"
+    assert [binding["binding_kind"] for binding in bindings["bindings"]] == ["data_edge"]
+
+
 def test_multiple_control_edges_aggregate_main_outputs(tmp_path: Path) -> None:
     workflow_path = tmp_path / "control_aggregates_main.accflow.json"
     write_v2(
@@ -1399,6 +1448,81 @@ def test_multiple_control_edges_aggregate_main_outputs(tmp_path: Path) -> None:
         "control_main_aggregate",
     ]
     assert bindings["bindings"][2]["aggregate_order"] == ["left", "right"]
+
+
+def test_control_main_aggregate_excludes_sources_suppressed_by_data_edge(tmp_path: Path) -> None:
+    workflow_path = tmp_path / "control_aggregate_with_data_override.accflow.json"
+    write_v2(
+        workflow_path,
+        {
+            "schema_version": CORE_V2_SCHEMA_VERSION,
+            "id": "control_aggregate_with_data_override",
+            "version": "0.1.0",
+            "nodes": [
+                {
+                    "id": "left",
+                    "callable_ref": {"kind": "tool_class", "id": "fake_producer"},
+                    "ports": {"outputs": {"main": {"type": "json"}}},
+                },
+                {
+                    "id": "middle",
+                    "callable_ref": {"kind": "tool_class", "id": "fake_producer"},
+                    "ports": {"outputs": {"main": {"type": "json"}}},
+                },
+                {
+                    "id": "right",
+                    "callable_ref": {"kind": "tool_class", "id": "fake_producer"},
+                    "ports": {"outputs": {"main": {"type": "json"}}},
+                },
+                {
+                    "id": "consume",
+                    "callable_ref": {"kind": "agent_class", "id": "generic_fake_agent"},
+                    "ports": {
+                        "inputs": {
+                            "main": {"type": "json"},
+                            "left_detail": {"type": "json"},
+                        }
+                    },
+                },
+            ],
+            "control_edges": [
+                {"from": "left", "to": "consume"},
+                {"from": "middle", "to": "consume"},
+                {"from": "right", "to": "consume"},
+            ],
+            "data_edges": [
+                {
+                    "source": {"node": "left", "port": "main"},
+                    "target": {"node": "consume", "port": "left_detail"},
+                    "materialization": "copy",
+                }
+            ],
+        },
+    )
+
+    record = asyncio.run(run_core_v2_workflow_path(workflow_path, tmp_path / "run"))
+    agent_payload = json.loads(
+        (tmp_path / "run" / "nodes" / "consume" / "agent_payload.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    bindings = json.loads(
+        (tmp_path / "run" / "nodes" / "consume" / "binding_manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert record.status == "success"
+    assert agent_payload["left_detail"]["producer_node_id"] == "left"
+    assert agent_payload["main"]["kind"] == "control_main_aggregate"
+    assert agent_payload["main"]["order"] == ["middle", "right"]
+    assert [binding["binding_kind"] for binding in bindings["bindings"]] == [
+        "data_edge",
+        "control_main_default",
+        "control_main_default",
+        "control_main_aggregate",
+    ]
+    assert bindings["bindings"][3]["aggregate_order"] == ["middle", "right"]
 
 
 def test_multiple_control_edges_do_not_override_explicit_main(tmp_path: Path) -> None:

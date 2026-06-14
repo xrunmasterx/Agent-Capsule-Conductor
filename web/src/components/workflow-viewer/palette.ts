@@ -11,6 +11,12 @@ export type WorkflowPortView = {
   required?: boolean;
   cardinality?: string;
   artifactTypes?: string[];
+  description?: string;
+  jsonPath?: string;
+  schemaType?: string;
+  projectionSource?: 'output_schema' | 'manual' | 'template';
+  diagnostic?: string;
+  readonly?: boolean;
 };
 
 export type PaletteItem =

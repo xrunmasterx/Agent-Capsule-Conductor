@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from acc.session import utc_now_iso
+from acc.storage import append_text_locked
 
 TRANSCRIPT_PROJECTION_SCHEMA_VERSION = "acc.transcript_projection.v1"
 MAX_PROJECTION_SUMMARY_LENGTH = 240
@@ -93,16 +94,12 @@ def append_agent_event(
         "payload": event_payload,
         "projection": project_agent_event(event_type, event_payload),
     }
-    event_log_path.parent.mkdir(parents=True, exist_ok=True)
-    with event_log_path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
+    append_text_locked(event_log_path, json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
     return event
 
 
 def append_provider_event(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
+    append_text_locked(path, json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
 
 
 def next_agent_event_seq(event_log_path: Path) -> int:

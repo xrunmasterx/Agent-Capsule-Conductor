@@ -234,6 +234,10 @@ export const api = {
     ),
   artifact: (path: string) =>
     getJson<ArtifactContent>(`/api/artifacts/read?path=${encodeURIComponent(path)}`),
+  runEvidence: (runId: string, path: string) =>
+    getJson<ArtifactContent>(
+      `/api/runs/${encodeURIComponent(runId)}/evidence?path=${encodeURIComponent(path)}`,
+    ),
   callables: () => getJson<{ callables: CallableSummary[] }>('/api/callables'),
   callable: (callableId: string) =>
     getJson<{ callable: CallableDetail }>(`/api/callables/${encodeURIComponent(callableId)}`),
@@ -358,9 +362,11 @@ export const api = {
       `/api/runs/${encodeURIComponent(runId)}/interactions/${encodeURIComponent(interactionId)}/answer`,
       { answer },
     ),
-  nodeEvents: (runId: string, nodeId: string, limit = 200) =>
+  nodeEvents: (runId: string, nodeId: string, limit = 200, options?: { nodeRunDir?: string | null }) =>
     getJson<{ run_id: string; node_id: string; event_log: string; events: RunEvent[] }>(
-      `/api/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/events?limit=${encodeURIComponent(String(limit))}`,
+      `/api/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/events?limit=${encodeURIComponent(String(limit))}${
+        options?.nodeRunDir ? `&node_run_dir=${encodeURIComponent(options.nodeRunDir)}` : ''
+      }`,
     ),
   nodeLog: (runId: string, nodeId: string, stream: 'stdout' | 'stderr', offset = 0, limit = 65536) =>
     getJson<NodeLogDelta>(

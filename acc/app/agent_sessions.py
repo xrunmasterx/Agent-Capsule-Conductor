@@ -348,7 +348,7 @@ class AgentTurnService:
         write_json(node_dir / "agent_payload.json", input_payload)
         write_json(node_dir / "input.json", input_payload)
         write_json(node_dir / "output_schema.json", schema)
-        (node_dir / "resolved_prompt.md").write_text(prompt, encoding="utf-8")
+        write_text_atomic(node_dir / "resolved_prompt.md", prompt)
 
         permissions = effective_permission_profile(template, node)
         session_dir, session_payload = self._ensure_session(
@@ -749,16 +749,16 @@ class AgentTurnService:
                     "updated_at": utc_now_iso(),
                 },
             )
-        (turn_dir / "resolved_prompt.md").write_text(prompt, encoding="utf-8")
+        write_text_atomic(turn_dir / "resolved_prompt.md", prompt)
         write_json(turn_dir / "input.json", input_payload)
         write_json(
             turn_dir / "output_schema.json",
             state.get("output_schema") if isinstance(state.get("output_schema"), dict) else {},
         )
-        (turn_dir / "events.jsonl").write_text("", encoding="utf-8")
-        (turn_dir / "provider_events.jsonl").write_text("", encoding="utf-8")
-        (turn_dir / "stdout.log").write_text("", encoding="utf-8")
-        (turn_dir / "stderr.log").write_text("", encoding="utf-8")
+        write_text_atomic(turn_dir / "events.jsonl", "")
+        write_text_atomic(turn_dir / "provider_events.jsonl", "")
+        write_text_atomic(turn_dir / "stdout.log", "")
+        write_text_atomic(turn_dir / "stderr.log", "")
         self._write_turn(
             turn_dir,
             session_id=session_id,

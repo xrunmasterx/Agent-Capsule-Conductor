@@ -2,39 +2,21 @@
   "control_edges": [
     {
       "context": "none",
-      "from": "valuation_model_agent",
+      "from": "operating_model_agent",
       "to": "valuation_synthesis_agent"
     },
     {
       "context": "none",
-      "from": "scenario_agent",
+      "from": "scenario_valuation_agent",
+      "to": "valuation_synthesis_agent"
+    },
+    {
+      "context": "none",
+      "from": "comparables_agent",
       "to": "valuation_synthesis_agent"
     }
   ],
-  "data_edges": [
-    {
-      "materialization": "copy",
-      "source": {
-        "node": "valuation_model_agent",
-        "port": "main"
-      },
-      "target": {
-        "node": "valuation_synthesis_agent",
-        "port": "valuation_model"
-      }
-    },
-    {
-      "materialization": "copy",
-      "source": {
-        "node": "scenario_agent",
-        "port": "main"
-      },
-      "target": {
-        "node": "valuation_synthesis_agent",
-        "port": "scenario_analysis"
-      }
-    }
-  ],
+  "data_edges": [],
   "description": "Child workflow compiled from Workbench container Valuation_Workflow.",
   "exposed_inputs": {
     "constraints": {
@@ -46,15 +28,15 @@
       "cardinality": "one",
       "required": true,
       "type": "artifact"
+    },
+    "verified_data": {
+      "cardinality": "one",
+      "required": true,
+      "type": "artifact"
     }
   },
   "exposed_outputs": {
     "main": {
-      "cardinality": "one",
-      "required": true,
-      "type": "artifact"
-    },
-    "scenario_table": {
       "cardinality": "one",
       "required": true,
       "type": "artifact"
@@ -69,27 +51,35 @@
       "layout": null,
       "nodes": [
         {
-          "id": "valuation_model_agent",
-          "label": "估值框架",
+          "id": "operating_model_agent",
+          "label": "经营模型假设",
           "position": {
-            "x": 137.0,
-            "y": 146.0
+            "x": 137,
+            "y": 146
           }
         },
         {
-          "id": "scenario_agent",
-          "label": "情景分析",
+          "id": "scenario_valuation_agent",
+          "label": "情景估值",
           "position": {
-            "x": 137.0,
-            "y": 332.0
+            "x": 137,
+            "y": 332
+          }
+        },
+        {
+          "id": "comparables_agent",
+          "label": "可比公司估值",
+          "position": {
+            "x": 137,
+            "y": 518
           }
         },
         {
           "id": "valuation_synthesis_agent",
           "label": "估值汇总",
           "position": {
-            "x": 485.0,
-            "y": 156.0
+            "x": 485,
+            "y": 332
           }
         }
       ],
@@ -104,28 +94,33 @@
         "id": "stock-research-analyst.codex",
         "kind": "agent_class"
       },
-      "id": "valuation_model_agent",
+      "id": "operating_model_agent",
       "metadata": {
-        "label": "估值框架",
-        "ui_label": "估值框架",
+        "label": "经营模型假设",
+        "ui_label": "经营模型假设",
         "workbench_kind": "agent_session"
       },
       "output_schema": {
         "additionalProperties": false,
         "properties": {
-          "assumptions": {
-            "description": "估值或情景假设",
+          "cash_flow_model": {
+            "description": "FCF、capex、working capital、share count、net cash 等假设",
+            "type": "string"
+          },
+          "margin_model": {
+            "description": "gross margin、operating margin 和正常化假设",
+            "type": "string"
+          },
+          "missing_inputs": {
+            "description": "无法建模或需要补充的数据",
             "items": {
               "type": "string"
             },
             "type": "array"
           },
-          "sensitivities": {
-            "description": "关键敏感变量",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
+          "revenue_model": {
+            "description": "收入驱动、分部增长和关键假设",
+            "type": "string"
           },
           "status": {
             "description": "success 或 failed",
@@ -134,17 +129,14 @@
           "summary": {
             "description": "面向下游节点的简明结论",
             "type": "string"
-          },
-          "valuation_view": {
-            "description": "估值或情景判断",
-            "type": "string"
           }
         },
         "required": [
           "status",
           "summary",
-          "assumptions",
-          "valuation_view"
+          "revenue_model",
+          "margin_model",
+          "cash_flow_model"
         ],
         "type": "object"
       },
@@ -154,6 +146,11 @@
       "ports": {
         "inputs": {
           "fundamentals": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          },
+          "verified_data": {
             "cardinality": "one",
             "required": true,
             "type": "artifact"
@@ -168,7 +165,7 @@
         }
       },
       "prompt_policy": {
-        "user_prompt": "基于基本面结论选择估值框架、关键假设和敏感变量。"
+        "user_prompt": "基于核验数据和基本面结论建立 revenue、gross margin、operating margin、FCF、share count、net cash 的建模假设。"
       }
     },
     {
@@ -176,24 +173,29 @@
         "id": "stock-research-analyst.codex",
         "kind": "agent_class"
       },
-      "id": "scenario_agent",
+      "id": "scenario_valuation_agent",
       "metadata": {
-        "label": "情景分析",
-        "ui_label": "情景分析",
+        "label": "情景估值",
+        "ui_label": "情景估值",
         "workbench_kind": "agent_session"
       },
       "output_schema": {
         "additionalProperties": false,
         "properties": {
-          "assumptions": {
-            "description": "估值或情景假设",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
+          "base_case": {
+            "description": "base case 关键变量、成立条件和估值结果或缺失原因",
+            "type": "string"
           },
-          "sensitivities": {
-            "description": "关键敏感变量",
+          "bear_case": {
+            "description": "bear case 关键变量、成立条件和估值结果或缺失原因",
+            "type": "string"
+          },
+          "bull_case": {
+            "description": "bull case 关键变量、成立条件和估值结果或缺失原因",
+            "type": "string"
+          },
+          "missing_inputs": {
+            "description": "阻止输出数值估值区间的数据缺口",
             "items": {
               "type": "string"
             },
@@ -207,16 +209,17 @@
             "description": "面向下游节点的简明结论",
             "type": "string"
           },
-          "valuation_view": {
-            "description": "估值或情景判断",
+          "valuation_status": {
+            "description": "complete 或 insufficient_data",
             "type": "string"
           }
         },
         "required": [
           "status",
           "summary",
-          "assumptions",
-          "valuation_view"
+          "base_case",
+          "bull_case",
+          "bear_case"
         ],
         "type": "object"
       },
@@ -234,6 +237,11 @@
             "cardinality": "one",
             "required": true,
             "type": "artifact"
+          },
+          "verified_data": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
           }
         },
         "outputs": {
@@ -245,7 +253,89 @@
         }
       },
       "prompt_policy": {
-        "user_prompt": "并行构造 bull/base/bear 情景，说明每个情景成立条件。"
+        "user_prompt": "构造 bull/base/bear 情景，输出关键变量、成立条件、估值结果或无法估值的具体缺失原因。"
+      }
+    },
+    {
+      "callable_ref": {
+        "id": "stock-research-analyst.codex",
+        "kind": "agent_class"
+      },
+      "id": "comparables_agent",
+      "metadata": {
+        "label": "可比公司估值",
+        "ui_label": "可比公司估值",
+        "workbench_kind": "agent_session"
+      },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "missing_inputs": {
+            "description": "缺失的市场数据、共识或 peer multiple",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "multiples_view": {
+            "description": "EV/Revenue、EV/EBIT、P/E 等可比估值判断",
+            "type": "string"
+          },
+          "peers": {
+            "description": "可比公司或替代资产",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "premium_discount_rationale": {
+            "description": "相对 peers 应享有溢价或折价的理由",
+            "type": "string"
+          },
+          "status": {
+            "description": "success 或 failed",
+            "type": "string"
+          },
+          "summary": {
+            "description": "面向下游节点的简明结论",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "summary",
+          "peers",
+          "multiples_view",
+          "premium_discount_rationale"
+        ],
+        "type": "object"
+      },
+      "overrides": {
+        "static_input": {}
+      },
+      "ports": {
+        "inputs": {
+          "fundamentals": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          },
+          "verified_data": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          }
+        },
+        "outputs": {
+          "main": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          }
+        }
+      },
+      "prompt_policy": {
+        "user_prompt": "基于核验市场数据整理 peers、multiples、premium/discount rationale；缺少共识或行情数据时必须显式说明。"
       }
     },
     {
@@ -262,8 +352,27 @@
       "output_schema": {
         "additionalProperties": false,
         "properties": {
-          "risk_reward": {
-            "description": "风险收益比判断",
+          "base_case": {
+            "description": "base case 结论",
+            "type": "string"
+          },
+          "bear_case": {
+            "description": "bear case 结论",
+            "type": "string"
+          },
+          "bull_case": {
+            "description": "bull case 结论",
+            "type": "string"
+          },
+          "missing_inputs": {
+            "description": "缺失数据和对结论的影响",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "risk_reward_view": {
+            "description": "风险收益判断",
             "type": "string"
           },
           "status": {
@@ -274,23 +383,24 @@
             "description": "面向下游节点的简明结论",
             "type": "string"
           },
-          "uncertainty": {
-            "description": "主要不确定性",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
+          "valuation_conclusion": {
+            "description": "结论型估值判断；不能只描述估值方法",
+            "type": "string"
           },
-          "valuation_range": {
-            "description": "估值区间或相对估值判断",
+          "valuation_status": {
+            "description": "complete 或 insufficient_data",
             "type": "string"
           }
         },
         "required": [
           "status",
           "summary",
-          "valuation_range",
-          "risk_reward"
+          "valuation_conclusion",
+          "base_case",
+          "bull_case",
+          "bear_case",
+          "risk_reward_view",
+          "missing_inputs"
         ],
         "type": "object"
       },
@@ -299,15 +409,11 @@
       },
       "ports": {
         "inputs": {
-          "scenario_analysis": {
+          "main": {
             "cardinality": "one",
             "required": true,
-            "type": "artifact"
-          },
-          "valuation_model": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
+            "type": "artifact",
+            "description": "三路估值分析聚合"
           }
         },
         "outputs": {
@@ -319,7 +425,7 @@
         }
       },
       "prompt_policy": {
-        "user_prompt": "串行整合估值框架和情景分析，输出风险收益判断。"
+        "user_prompt": "从 main 控制聚合输入中整合经营模型、情景估值和可比公司估值，输出结论型估值判断；禁止只输出估值方法论。"
       }
     }
   ],
@@ -335,8 +441,17 @@
       "required": false,
       "source_port": "fundamentals",
       "target": {
-        "node": "valuation_model_agent",
+        "node": "operating_model_agent",
         "port": "fundamentals"
+      }
+    },
+    {
+      "materialization": "copy",
+      "required": false,
+      "source_port": "verified_data",
+      "target": {
+        "node": "operating_model_agent",
+        "port": "verified_data"
       }
     },
     {
@@ -344,7 +459,7 @@
       "required": false,
       "source_port": "fundamentals",
       "target": {
-        "node": "scenario_agent",
+        "node": "scenario_valuation_agent",
         "port": "fundamentals"
       }
     },
@@ -353,8 +468,35 @@
       "required": false,
       "source_port": "constraints",
       "target": {
-        "node": "scenario_agent",
+        "node": "scenario_valuation_agent",
         "port": "constraints"
+      }
+    },
+    {
+      "materialization": "copy",
+      "required": false,
+      "source_port": "verified_data",
+      "target": {
+        "node": "scenario_valuation_agent",
+        "port": "verified_data"
+      }
+    },
+    {
+      "materialization": "copy",
+      "required": false,
+      "source_port": "fundamentals",
+      "target": {
+        "node": "comparables_agent",
+        "port": "fundamentals"
+      }
+    },
+    {
+      "materialization": "copy",
+      "required": false,
+      "source_port": "verified_data",
+      "target": {
+        "node": "comparables_agent",
+        "port": "verified_data"
       }
     }
   ],
@@ -367,15 +509,6 @@
         "port": "main"
       },
       "target_port": "main"
-    },
-    {
-      "materialization": "copy",
-      "required": true,
-      "source": {
-        "node": "scenario_agent",
-        "port": "main"
-      },
-      "target_port": "scenario_table"
     }
   ]
 }

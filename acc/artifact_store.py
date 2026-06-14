@@ -5,6 +5,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from acc.storage import append_text_locked, write_json_atomic, write_text_atomic
 from acc.utils import AccError
 
 
@@ -32,9 +33,9 @@ class ArtifactStore:
         self.artifacts_dir.mkdir(parents=True, exist_ok=True)
         self.template_snapshot_dir.mkdir(parents=True, exist_ok=True)
         self.lifecycle_logs_dir.mkdir(parents=True, exist_ok=True)
-        self.stdout_log_path.write_text("", encoding="utf-8")
-        self.stderr_log_path.write_text("", encoding="utf-8")
-        self.events_log_path.write_text("", encoding="utf-8")
+        write_text_atomic(self.stdout_log_path, "")
+        write_text_atomic(self.stderr_log_path, "")
+        write_text_atomic(self.events_log_path, "")
 
     def _reset_existing_run_dir(self) -> None:
         children = list(self.run_dir.iterdir())
@@ -56,7 +57,7 @@ class ArtifactStore:
         self.write_json(self.input_path, payload)
 
     def write_prompt(self, rendered_prompt: str) -> None:
-        self.prompt_path.write_text(rendered_prompt, encoding="utf-8")
+        write_text_atomic(self.prompt_path, rendered_prompt)
 
     def write_manifest(self, payload: dict[str, Any]) -> None:
         self.write_json(self.session_manifest_path, payload)
@@ -69,16 +70,14 @@ class ArtifactStore:
         self.write_json(self.conductor_output_path, payload)
 
     def append_event(self, payload: dict[str, Any]) -> None:
-        with self.events_log_path.open("a", encoding="utf-8") as file:
-            file.write(json.dumps(payload, sort_keys=True) + "\n")
+        append_text_locked(self.events_log_path, json.dumps(payload, sort_keys=True) + "\n")
 
     def append_stderr(self, message: str) -> None:
-        with self.stderr_log_path.open("a", encoding="utf-8") as file:
-            file.write(message.rstrip() + "\n")
+        append_text_locked(self.stderr_log_path, message.rstrip() + "\n")
 
     @staticmethod
     def write_json(path: Path, payload: Any) -> None:
-        path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        write_json_atomic(path, payload)
 
     @staticmethod
     def _copy_path(source: Path, target: Path) -> None:

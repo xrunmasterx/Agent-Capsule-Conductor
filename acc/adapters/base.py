@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from acc.models import AgentCapabilities
+from acc.storage import append_text_locked
 
 
 @dataclass(frozen=True)
@@ -104,5 +105,4 @@ def build_shared_acc_env(request: AgentRunRequest) -> dict[str, str]:
 
 
 def write_jsonl(path: Path, payload: dict[str, Any]) -> None:
-    with path.open("a", encoding="utf-8") as file:
-        file.write(json.dumps(payload, sort_keys=True) + "\n")
+    append_text_locked(path, json.dumps(payload, sort_keys=True) + "\n")

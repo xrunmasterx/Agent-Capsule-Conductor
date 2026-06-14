@@ -3,10 +3,12 @@ from __future__ import annotations
 from acc.callable_runner import (
     codex_sandbox_for_permissions,
     effective_permission_profile,
+    hermetic_stub_output,
     normalize_output_schema_for_structured_output,
     output_schema_for_agent,
     render_agent_prompt,
     structured_output_schema_errors,
+    validate_output_schema,
 )
 from acc.engine.workflow_validation import collect_callable_validation_issues
 from acc.models import (
@@ -211,6 +213,69 @@ def test_output_value_for_port_falls_back_to_legacy_top_level_field() -> None:
 
 def test_output_value_for_port_returns_missing_sentinel_for_absent_non_main_port() -> None:
     assert output_value_for_port({"outputs": {}}, "risk_table") is MISSING_PORT_VALUE
+
+
+def test_hermetic_stub_output_materializes_schema_outputs_container() -> None:
+    schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "status": {"type": "string", "enum": ["success", "partial", "failed"]},
+            "summary": {"type": "string"},
+            "outputs": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "alpha_signal": {"type": "string"},
+                    "risk_score": {"type": "number"},
+                    "watchlist": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["alpha_signal"],
+            },
+        },
+        "required": ["status", "summary", "outputs"],
+    }
+    template = AgentClassTemplate(id="worker.codex", version="0.1.0", runtime="codex_cli")
+    node = NodeInvocationSpec(
+        id="worker",
+        callable_ref=CallableRef(kind="agent_class", id="worker.codex"),
+        output_schema=schema,
+    )
+
+    output = hermetic_stub_output(template, node, {"ticker": "NVDA"})
+    validate_output_schema(output, output_schema_for_agent(template, node))
+
+    assert output["status"] == "success"
+    assert output["outputs"]["alpha_signal"] == "hermetic:worker:alpha_signal"
+    assert output["outputs"]["risk_score"] == 0
+    assert output["outputs"]["watchlist"] == []
+
+
+def test_hermetic_stub_output_respects_strict_schema_without_default_fields() -> None:
+    schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "outputs": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {"verdict": {"type": "string"}},
+                "required": ["verdict"],
+            },
+        },
+        "required": ["outputs"],
+    }
+    template = AgentClassTemplate(id="worker.codex", version="0.1.0", runtime="codex_cli")
+    node = NodeInvocationSpec(
+        id="worker",
+        callable_ref=CallableRef(kind="agent_class", id="worker.codex"),
+        output_schema=schema,
+    )
+
+    output = hermetic_stub_output(template, node, {"topic": "schema ports"})
+    validate_output_schema(output, output_schema_for_agent(template, node))
+
+    assert output == {"outputs": {"verdict": "hermetic:worker:verdict"}}
 
 
 def test_agent_non_main_output_port_must_be_declared_by_output_schema() -> None:
@@ -523,6 +588,153 @@ def test_required_main_input_can_be_satisfied_by_control_main_default() -> None:
     assert not [
         issue
         for issue in issues
+        if issue.code == "unbound_input_port" and issue.node_id == "target"
+    ]
+
+
+def test_control_main_does_not_satisfy_required_main_when_same_pair_has_data_edge() -> None:
+    template = WorkflowFunctionTemplate(
+        id="flow",
+        version="0.1.0",
+        node_invocations={
+            "source": NodeInvocationSpec(
+                id="source",
+                callable_ref=CallableRef(kind="agent_class", id="source.codex"),
+                output_ports={
+                    "main": PortContract(id="main", direction="output"),
+                    "detail": PortContract(id="detail", direction="output"),
+                },
+            ),
+            "target": NodeInvocationSpec(
+                id="target",
+                callable_ref=CallableRef(kind="agent_class", id="target.codex"),
+                input_ports={
+                    "main": PortContract(id="main", direction="input", required=True),
+                    "detail": PortContract(id="detail", direction="input", required=True),
+                },
+            ),
+        },
+        control_edges=[ControlEdge(source="source", target="target")],
+        data_edges=[
+            DataEdge(
+                source=DataEndpoint(node="source", port="detail"),
+                target=DataEndpoint(node="target", port="detail"),
+            )
+        ],
+    )
+
+    issues = collect_callable_validation_issues(template)
+
+    assert any(
+        issue.code == "unbound_input_port" and issue.node_id == "target" and issue.port == "main"
+        for issue in issues
+    )
+    assert not [
+        issue
+        for issue in issues
+        if issue.code == "unbound_input_port" and issue.node_id == "target" and issue.port == "detail"
+    ]
+    assert any(
+        issue.code == "control_main_suppressed_by_data_edge"
+        and issue.severity == "warning"
+        and issue.node_id == "source"
+        for issue in issues
+    )
+
+
+def test_same_source_data_edge_does_not_disable_other_control_only_target() -> None:
+    template = WorkflowFunctionTemplate(
+        id="flow",
+        version="0.1.0",
+        node_invocations={
+            "source": NodeInvocationSpec(
+                id="source",
+                callable_ref=CallableRef(kind="agent_class", id="source.codex"),
+                output_ports={
+                    "main": PortContract(id="main", direction="output"),
+                    "detail": PortContract(id="detail", direction="output"),
+                },
+            ),
+            "data_target": NodeInvocationSpec(
+                id="data_target",
+                callable_ref=CallableRef(kind="agent_class", id="target.codex"),
+                input_ports={"detail": PortContract(id="detail", direction="input", required=True)},
+            ),
+            "control_target": NodeInvocationSpec(
+                id="control_target",
+                callable_ref=CallableRef(kind="agent_class", id="target.codex"),
+                input_ports={"main": PortContract(id="main", direction="input", required=True)},
+            ),
+        },
+        control_edges=[
+            ControlEdge(source="source", target="data_target"),
+            ControlEdge(source="source", target="control_target"),
+        ],
+        data_edges=[
+            DataEdge(
+                source=DataEndpoint(node="source", port="detail"),
+                target=DataEndpoint(node="data_target", port="detail"),
+            )
+        ],
+    )
+
+    issues = collect_callable_validation_issues(template)
+
+    assert not [
+        issue
+        for issue in issues
+        if issue.code == "unbound_input_port" and issue.node_id == "control_target"
+    ]
+
+
+def test_workflow_function_control_main_requires_required_parent_main_output() -> None:
+    without_main = WorkflowFunctionTemplate(
+        id="flow",
+        version="0.1.0",
+        node_invocations={
+            "child": NodeInvocationSpec(
+                id="child",
+                callable_ref=CallableRef(kind="workflow_function", id="child_flow"),
+                workflow_call_output_bindings=[
+                    WorkflowCallOutputBinding(workflow_output="report", parent_port="report")
+                ],
+            ),
+            "target": NodeInvocationSpec(
+                id="target",
+                callable_ref=CallableRef(kind="agent_class", id="target.codex"),
+                input_ports={"main": PortContract(id="main", direction="input", required=True)},
+            ),
+        },
+        control_edges=[ControlEdge(source="child", target="target")],
+        data_edges=[],
+    )
+    with_main = WorkflowFunctionTemplate(
+        id="flow",
+        version="0.1.0",
+        node_invocations={
+            **without_main.node_invocations,
+            "child": NodeInvocationSpec(
+                id="child",
+                callable_ref=CallableRef(kind="workflow_function", id="child_flow"),
+                workflow_call_output_bindings=[
+                    WorkflowCallOutputBinding(workflow_output="main", parent_port="main")
+                ],
+            ),
+        },
+        control_edges=without_main.control_edges,
+        data_edges=[],
+    )
+
+    without_main_issues = collect_callable_validation_issues(without_main)
+    with_main_issues = collect_callable_validation_issues(with_main)
+
+    assert any(
+        issue.code == "unbound_input_port" and issue.node_id == "target" and issue.port == "main"
+        for issue in without_main_issues
+    )
+    assert not [
+        issue
+        for issue in with_main_issues
         if issue.code == "unbound_input_port" and issue.node_id == "target"
     ]
 

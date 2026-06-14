@@ -15,9 +15,10 @@ from acc.storage_refs import (
     make_session_ref,
     make_task_ref,
 )
-from acc.utils import AccError, load_json
+from acc.utils import AccError, load_json, log_stderr, safe_path_size_bytes
 
 SQLITE_SCHEMA_VERSION = "acc.storage.index.sqlite.v1"
+STORAGE_INDEX_SIZE_EXCLUDES = ("codex_home/.tmp",)
 
 
 @dataclass(frozen=True)
@@ -132,6 +133,14 @@ def rebuild_storage_index(project_root: Path) -> dict[str, Any]:
     return StorageIndex(project_root).rebuild()
 
 
+def rebuild_storage_index_best_effort(project_root: Path) -> dict[str, Any] | None:
+    try:
+        return rebuild_storage_index(project_root)
+    except Exception as exc:  # noqa: BLE001 - storage index is a projection
+        log_stderr(f"storage index rebuild skipped: {exc}")
+        return None
+
+
 def ensure_schema(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute(
@@ -174,17 +183,24 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
 def build_inventory_rows(project_root: Path) -> list[StorageObjectRow]:
     project_root = project_root.resolve()
     rows: list[StorageObjectRow] = []
-    rows.extend(iter_run_rows(project_root))
-    rows.extend(iter_task_rows(project_root))
-    rows.extend(iter_session_rows(project_root))
-    rows.extend(iter_artifact_rows(project_root))
-    rows.extend(iter_canvas_snapshot_rows(project_root))
-    rows.extend(iter_graphops_rows(project_root))
-    rows.extend(iter_runtime_spec_rows(project_root))
-    rows.extend(iter_trash_rows(project_root))
-    rows.extend(iter_tombstone_rows(project_root))
-    rows.extend(iter_gc_manifest_rows(project_root))
-    rows.extend(iter_runner_job_rows(project_root))
+    producers = (
+        iter_run_rows,
+        iter_task_rows,
+        iter_session_rows,
+        iter_artifact_rows,
+        iter_canvas_snapshot_rows,
+        iter_graphops_rows,
+        iter_runtime_spec_rows,
+        iter_trash_rows,
+        iter_tombstone_rows,
+        iter_gc_manifest_rows,
+        iter_runner_job_rows,
+    )
+    for producer in producers:
+        try:
+            rows.extend(producer(project_root))
+        except Exception as exc:  # noqa: BLE001 - one broken object family must not block index
+            log_stderr(f"storage index skipped {producer.__name__}: {exc}")
     return sorted(rows, key=lambda row: row.object_ref)
 
 
@@ -193,41 +209,48 @@ def iter_run_rows(project_root: Path) -> list[StorageObjectRow]:
     if not runs_root.exists():
         return []
     rows: list[StorageObjectRow] = []
-    for run_dir in sorted(path for path in runs_root.iterdir() if path.is_dir()):
-        if run_dir.name.startswith("_"):
-            continue
-        if (run_dir / "tombstone.json").exists() and not (
-            run_dir / RUN_MARKER_FILENAME
-        ).exists():
-            continue
-        marker = load_optional_json(run_dir / RUN_MARKER_FILENAME)
-        summary = load_run_summary(run_dir)
-        retention = load_optional_json(run_dir / "retention.json")
-        owner_ref = None
-        if isinstance(marker, dict) and marker.get("task_id"):
-            owner_ref = make_task_ref(str(marker["task_id"]))
-        rows.append(
-            StorageObjectRow(
-                object_ref=make_run_ref(run_dir.name),
-                legacy_ref=make_legacy_object_ref("run", run_dir.name),
-                object_kind="run",
-                object_id=run_dir.name,
-                owner_ref=owner_ref,
-                path=relative_project_path(project_root, run_dir),
-                state=summary.status if summary is not None else "unknown",
-                created_at=marker.get("created_at") if isinstance(marker, dict) else None,
-                ended_at=summary.ended_at if summary is not None else None,
-                size_bytes=path_size_bytes(run_dir),
-                pinned=bool(retention.get("pinned")) if isinstance(retention, dict) else False,
-                exported=bool(retention.get("exported")) if isinstance(retention, dict) else False,
-                retention_class=(
-                    str(retention.get("retention_class") or "normal")
-                    if isinstance(retention, dict)
-                    else "normal"
-                ),
-                lease_state=run_lease_state(project_root, run_dir.name, run_dir),
+    try:
+        run_dirs = sorted(path for path in runs_root.iterdir() if path.is_dir())
+    except OSError:
+        return []
+    for run_dir in run_dirs:
+        try:
+            if run_dir.name.startswith("_"):
+                continue
+            if (run_dir / "tombstone.json").exists() and not (
+                run_dir / RUN_MARKER_FILENAME
+            ).exists():
+                continue
+            marker = load_optional_json(run_dir / RUN_MARKER_FILENAME)
+            summary = load_run_summary(run_dir)
+            retention = load_optional_json(run_dir / "retention.json")
+            owner_ref = None
+            if isinstance(marker, dict) and marker.get("task_id"):
+                owner_ref = make_task_ref(str(marker["task_id"]))
+            rows.append(
+                StorageObjectRow(
+                    object_ref=make_run_ref(run_dir.name),
+                    legacy_ref=make_legacy_object_ref("run", run_dir.name),
+                    object_kind="run",
+                    object_id=run_dir.name,
+                    owner_ref=owner_ref,
+                    path=relative_project_path(project_root, run_dir),
+                    state=summary.status if summary is not None else "unknown",
+                    created_at=marker.get("created_at") if isinstance(marker, dict) else None,
+                    ended_at=summary.ended_at if summary is not None else None,
+                    size_bytes=storage_index_path_size_bytes(run_dir),
+                    pinned=bool(retention.get("pinned")) if isinstance(retention, dict) else False,
+                    exported=bool(retention.get("exported")) if isinstance(retention, dict) else False,
+                    retention_class=(
+                        str(retention.get("retention_class") or "normal")
+                        if isinstance(retention, dict)
+                        else "normal"
+                    ),
+                    lease_state=run_lease_state(project_root, run_dir.name, run_dir),
+                )
             )
-        )
+        except Exception as exc:  # noqa: BLE001 - skip one broken run row
+            log_stderr(f"storage index skipped run {run_dir.name}: {exc}")
     return rows
 
 
@@ -260,7 +283,7 @@ def iter_task_rows(project_root: Path) -> list[StorageObjectRow]:
                 state=state,
                 created_at=payload.get("created_at") if isinstance(payload, dict) else None,
                 updated_at=payload.get("updated_at") if isinstance(payload, dict) else None,
-                size_bytes=path_size_bytes(task_dir),
+                size_bytes=storage_index_path_size_bytes(task_dir),
                 pinned=bool(retention.get("pinned")) if isinstance(retention, dict) else False,
             )
         )
@@ -314,7 +337,7 @@ def iter_session_rows(project_root: Path) -> list[StorageObjectRow]:
                     state=state,
                     created_at=payload.get("created_at") if isinstance(payload, dict) else None,
                     updated_at=payload.get("updated_at") if isinstance(payload, dict) else None,
-                    size_bytes=path_size_bytes(session_dir),
+                    size_bytes=storage_index_path_size_bytes(session_dir),
                     pinned=bool(
                         payload.get("retention", {}).get("pinned")
                         if isinstance(payload, dict) and isinstance(payload.get("retention"), dict)
@@ -343,7 +366,7 @@ def iter_artifact_rows(project_root: Path) -> list[StorageObjectRow]:
                 owner_ref=make_run_ref(run_id),
                 path=relative_project_path(project_root, artifact_dir),
                 state="present",
-                size_bytes=path_size_bytes(artifact_dir),
+                size_bytes=storage_index_path_size_bytes(artifact_dir),
             )
         )
     for artifact_dir in sorted(runs_root.glob("*/nodes/*/artifacts")):
@@ -361,7 +384,7 @@ def iter_artifact_rows(project_root: Path) -> list[StorageObjectRow]:
                 owner_ref=make_run_ref(run_id),
                 path=relative_project_path(project_root, artifact_dir),
                 state="present",
-                size_bytes=path_size_bytes(artifact_dir),
+                size_bytes=storage_index_path_size_bytes(artifact_dir),
             )
         )
     return rows
@@ -388,7 +411,7 @@ def iter_canvas_snapshot_rows(project_root: Path) -> list[StorageObjectRow]:
                 state="present",
                 created_at=payload.get("published_at") if isinstance(payload, dict) else None,
                 updated_at=payload.get("published_at") if isinstance(payload, dict) else None,
-                size_bytes=path_size_bytes(snapshot_path),
+                size_bytes=storage_index_path_size_bytes(snapshot_path),
             )
         )
     return rows
@@ -421,7 +444,7 @@ def iter_graphops_rows(project_root: Path) -> list[StorageObjectRow]:
                 state=state,
                 created_at=payload.get("created_at") if isinstance(payload, dict) else None,
                 updated_at=payload.get("updated_at") if isinstance(payload, dict) else None,
-                size_bytes=path_size_bytes(proposal_dir),
+                size_bytes=storage_index_path_size_bytes(proposal_dir),
             )
         )
     return rows
@@ -439,7 +462,7 @@ def iter_runtime_spec_rows(project_root: Path) -> list[StorageObjectRow]:
             object_id=spec_dir.name,
             path=relative_project_path(project_root, spec_dir),
             state="present",
-            size_bytes=path_size_bytes(spec_dir),
+            size_bytes=storage_index_path_size_bytes(spec_dir),
         )
         for spec_dir in sorted(path for path in root.iterdir() if path.is_dir())
     ]
@@ -469,7 +492,7 @@ def iter_trash_rows(project_root: Path) -> list[StorageObjectRow]:
                 path=relative_project_path(project_root, trash_dir),
                 state="trash",
                 created_at=payload.get("moved_at") if isinstance(payload, dict) else None,
-                size_bytes=path_size_bytes(trash_dir),
+                size_bytes=storage_index_path_size_bytes(trash_dir),
             )
         )
     return rows
@@ -497,7 +520,7 @@ def iter_tombstone_rows(project_root: Path) -> list[StorageObjectRow]:
                 path=relative_project_path(project_root, path),
                 state="tombstoned",
                 created_at=payload.get("deleted_at") if isinstance(payload, dict) else None,
-                size_bytes=path_size_bytes(path),
+                size_bytes=storage_index_path_size_bytes(path),
             )
         )
     return rows
@@ -524,7 +547,7 @@ def iter_gc_manifest_rows(project_root: Path) -> list[StorageObjectRow]:
                     if isinstance(payload, dict)
                     else None
                 ),
-                size_bytes=path_size_bytes(path),
+                size_bytes=storage_index_path_size_bytes(path),
             )
         )
     return rows
@@ -556,7 +579,7 @@ def iter_runner_job_rows(project_root: Path) -> list[StorageObjectRow]:
                 ),
                 created_at=payload.get("created_at") if isinstance(payload, dict) else None,
                 updated_at=payload.get("updated_at") if isinstance(payload, dict) else None,
-                size_bytes=path_size_bytes(path),
+                size_bytes=storage_index_path_size_bytes(path),
             )
         )
     return rows
@@ -601,19 +624,8 @@ def load_optional_json(path: Path) -> Any:
         return None
 
 
-def path_size_bytes(path: Path) -> int:
-    if not path.exists():
-        return 0
-    if path.is_file() or path.is_symlink():
-        return path.lstat().st_size
-    total = 0
-    for child in path.rglob("*"):
-        try:
-            if child.is_file() or child.is_symlink():
-                total += child.lstat().st_size
-        except OSError:
-            continue
-    return total
+def storage_index_path_size_bytes(path: Path) -> int:
+    return safe_path_size_bytes(path, exclude_relative_parts=STORAGE_INDEX_SIZE_EXCLUDES)
 
 
 def relative_project_path(project_root: Path, path: Path) -> str:

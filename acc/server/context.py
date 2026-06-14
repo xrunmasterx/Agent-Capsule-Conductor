@@ -20,7 +20,12 @@ def get_workbench_run_manager(request: Request) -> WorkbenchRunManager:
     project_root = get_project_root(request)
     if isinstance(manager, WorkbenchRunManager) and manager.project_root == project_root:
         return manager
-    manager = WorkbenchRunManager(project_root)
+    refresh_service = getattr(request.app.state, "storage_index_refresh_service", None)
+    refresh_trigger = getattr(refresh_service, "trigger", None)
+    manager = WorkbenchRunManager(
+        project_root,
+        storage_refresh_trigger=refresh_trigger if callable(refresh_trigger) else None,
+    )
     request.app.state.workbench_run_manager = manager
     return manager
 
@@ -61,4 +66,3 @@ def relative_project_path(project_root: Path, path: Path) -> str:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail="Path is outside project root") from exc
     return str(relative).replace("\\", "/")
-

@@ -96,9 +96,9 @@ def update_project_run_index(run_dir: Path) -> None:
     index = rebuild_run_index(runs_root)
     runs_root.mkdir(parents=True, exist_ok=True)
     write_json(runs_root / "index.json", index.model_dump())
-    from acc.storage_index import rebuild_storage_index
+    from acc.storage_refresh import request_storage_index_refresh
 
-    rebuild_storage_index(runs_root.parent)
+    request_storage_index_refresh(runs_root.parent, reason="run_index_updated")
 
 
 def load_or_rebuild_run_index(runs_root: Path = Path("runs")) -> RunIndex:
@@ -106,7 +106,6 @@ def load_or_rebuild_run_index(runs_root: Path = Path("runs")) -> RunIndex:
     if index_path.exists():
         try:
             index = normalize_run_index(RunIndex.model_validate(load_json(index_path)))
-            write_json(index_path, index.model_dump())
             return index
         except (AccError, ValidationError):
             return rebuild_run_index(runs_root)

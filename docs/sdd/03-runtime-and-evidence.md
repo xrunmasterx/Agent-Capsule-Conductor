@@ -587,6 +587,13 @@ nodes/<node_id>/artifacts/payload.json
 - 否则如果 `output[port_id]` 存在，使用它。
 - 否则是 missing。
 
+Schema-driven ports 的 runtime 边界：
+
+- 新的业务 output port 只从 `output_schema.properties.outputs.properties` 投影。
+- legacy top-level 字段仍可被 `output_value_for_port()` 读取，保证旧 workflow runtime 兼容。
+- UI/validation 的 port contract 以 schema projection 为准；手写 `output_ports` 只是兼容 snapshot。
+- schema 改名后，已有 data edge 不应被静默删除；它应变成 validation diagnostic，由用户显式迁移。
+
 required port missing 会抛 `AccError`。
 
 每个 materialized port 写入：

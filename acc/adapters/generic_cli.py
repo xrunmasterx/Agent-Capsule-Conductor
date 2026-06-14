@@ -14,6 +14,7 @@ from acc.adapters.base import (
 )
 from acc.adapters.capabilities import default_adapter_capabilities
 from acc.models import AccError, AgentCapabilities
+from acc.storage import write_bytes_atomic, write_text_atomic
 
 
 class GenericCliAdapter:
@@ -57,7 +58,7 @@ class GenericCliAdapter:
         except TimeoutError:
             process.kill()
             await process.wait()
-            request.stderr_log_path.write_text("Adapter timed out\n", encoding="utf-8")
+            write_text_atomic(request.stderr_log_path, "Adapter timed out\n")
             write_event(request, {"event": "timeout", "command": command})
             return AgentRunResult(
                 status="timeout",
@@ -69,8 +70,8 @@ class GenericCliAdapter:
                 error="timeout",
             )
 
-        request.stdout_log_path.write_bytes(stdout)
-        request.stderr_log_path.write_bytes(stderr)
+        write_bytes_atomic(request.stdout_log_path, stdout)
+        write_bytes_atomic(request.stderr_log_path, stderr)
         write_event(
             request,
             {"event": "process_exit", "command": command, "exit_code": process.returncode},
@@ -108,7 +109,7 @@ class GenericCliAdapter:
         error: str,
         exit_code: int | None = None,
     ) -> AgentRunResult:
-        request.stderr_log_path.write_text(error + "\n", encoding="utf-8")
+        write_text_atomic(request.stderr_log_path, error + "\n")
         write_event(request, {"event": "failed", "error": error})
         return AgentRunResult(
             status="failed",
@@ -136,7 +137,7 @@ def maybe_write_json_stdout(stdout: bytes, output_path) -> None:
     except (json.JSONDecodeError, UnicodeDecodeError):
         return
     if isinstance(payload, dict):
-        output_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        write_text_atomic(output_path, json.dumps(payload, indent=2, sort_keys=True))
 
 
 def write_event(request: AgentRunRequest, payload: dict) -> None:

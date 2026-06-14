@@ -21,49 +21,15 @@
       "to": "fundamentals_evidence_agent"
     }
   ],
-  "data_edges": [
-    {
-      "materialization": "copy",
-      "source": {
-        "node": "business_model_agent",
-        "port": "main"
-      },
-      "target": {
-        "node": "fundamentals_synthesis_agent",
-        "port": "business"
-      }
-    },
-    {
-      "materialization": "copy",
-      "source": {
-        "node": "financial_quality_agent",
-        "port": "main"
-      },
-      "target": {
-        "node": "fundamentals_synthesis_agent",
-        "port": "financials"
-      }
-    },
-    {
-      "materialization": "copy",
-      "source": {
-        "node": "industry_position_agent",
-        "port": "main"
-      },
-      "target": {
-        "node": "fundamentals_synthesis_agent",
-        "port": "industry"
-      }
-    }
-  ],
+  "data_edges": [],
   "description": "Child workflow compiled from Workbench container Fundamentals_Workflow.",
   "exposed_inputs": {
-    "context": {
+    "target": {
       "cardinality": "one",
       "required": true,
       "type": "artifact"
     },
-    "target": {
+    "verified_data": {
       "cardinality": "one",
       "required": true,
       "type": "artifact"
@@ -93,40 +59,40 @@
           "id": "business_model_agent",
           "label": "业务模式分析",
           "position": {
-            "x": 137.0,
-            "y": 146.0
+            "x": 137,
+            "y": 146
           }
         },
         {
           "id": "financial_quality_agent",
           "label": "财务质量分析",
           "position": {
-            "x": 137.0,
-            "y": 332.0
+            "x": 137,
+            "y": 332
           }
         },
         {
           "id": "industry_position_agent",
           "label": "行业位置分析",
           "position": {
-            "x": 137.0,
-            "y": 518.0
+            "x": 137,
+            "y": 518
           }
         },
         {
           "id": "fundamentals_synthesis_agent",
           "label": "基本面汇总",
           "position": {
-            "x": 485.0,
-            "y": 332.0
+            "x": 485,
+            "y": 332
           }
         },
         {
           "id": "fundamentals_evidence_agent",
           "label": "证据包整理",
           "position": {
-            "x": 833.0,
-            "y": 384.0
+            "x": 833,
+            "y": 611
           }
         }
       ],
@@ -186,12 +152,12 @@
       },
       "ports": {
         "inputs": {
-          "context": {
+          "target": {
             "cardinality": "one",
             "required": true,
             "type": "artifact"
           },
-          "target": {
+          "verified_data": {
             "cardinality": "one",
             "required": true,
             "type": "artifact"
@@ -263,6 +229,11 @@
             "cardinality": "one",
             "required": true,
             "type": "artifact"
+          },
+          "verified_data": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
           }
         },
         "outputs": {
@@ -327,12 +298,12 @@
       },
       "ports": {
         "inputs": {
-          "context": {
+          "target": {
             "cardinality": "one",
             "required": true,
             "type": "artifact"
           },
-          "target": {
+          "verified_data": {
             "cardinality": "one",
             "required": true,
             "type": "artifact"
@@ -403,20 +374,11 @@
       },
       "ports": {
         "inputs": {
-          "business": {
+          "main": {
             "cardinality": "one",
             "required": true,
-            "type": "artifact"
-          },
-          "financials": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          },
-          "industry": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
+            "type": "artifact",
+            "description": "三路基本面分析聚合"
           }
         },
         "outputs": {
@@ -428,7 +390,7 @@
         }
       },
       "prompt_policy": {
-        "user_prompt": "并行汇总业务、财务、行业三路结果，形成下游估值和风险可消费的结论。"
+        "user_prompt": "从 main 控制聚合输入中读取业务、财务、行业三路结果，形成下游估值和风险可消费的结论。"
       }
     },
     {
@@ -485,6 +447,11 @@
             "cardinality": "one",
             "required": true,
             "type": "artifact"
+          },
+          "verified_data": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
           }
         },
         "outputs": {
@@ -519,10 +486,10 @@
     {
       "materialization": "copy",
       "required": false,
-      "source_port": "context",
+      "source_port": "verified_data",
       "target": {
         "node": "business_model_agent",
-        "port": "context"
+        "port": "verified_data"
       }
     },
     {
@@ -537,6 +504,15 @@
     {
       "materialization": "copy",
       "required": false,
+      "source_port": "verified_data",
+      "target": {
+        "node": "financial_quality_agent",
+        "port": "verified_data"
+      }
+    },
+    {
+      "materialization": "copy",
+      "required": false,
       "source_port": "target",
       "target": {
         "node": "industry_position_agent",
@@ -546,10 +522,19 @@
     {
       "materialization": "copy",
       "required": false,
-      "source_port": "context",
+      "source_port": "verified_data",
       "target": {
         "node": "industry_position_agent",
-        "port": "context"
+        "port": "verified_data"
+      }
+    },
+    {
+      "materialization": "copy",
+      "required": false,
+      "source_port": "verified_data",
+      "target": {
+        "node": "fundamentals_evidence_agent",
+        "port": "verified_data"
       }
     }
   ],

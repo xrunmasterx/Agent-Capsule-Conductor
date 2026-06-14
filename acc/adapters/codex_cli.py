@@ -16,6 +16,7 @@ from acc.adapters.base import (
 )
 from acc.adapters.capabilities import default_adapter_capabilities
 from acc.models import AccError, AgentCapabilities
+from acc.storage import append_bytes_locked, write_bytes_atomic, write_text_atomic
 
 
 class CodexCliAdapter:
@@ -55,8 +56,8 @@ class CodexCliAdapter:
                     process.communicate(input=prompt_bytes),
                     timeout=request.timeout_seconds,
                 )
-                request.stdout_log_path.write_bytes(stdout)
-                request.stderr_log_path.write_bytes(stderr)
+                write_bytes_atomic(request.stdout_log_path, stdout)
+                write_bytes_atomic(request.stderr_log_path, stderr)
             else:
                 stdout, stderr, cancelled = await asyncio.wait_for(
                     stream_process(process, prompt_bytes, request),
@@ -255,7 +256,7 @@ def write_authoring_codex_config(source_config: Path, target_config: Path) -> No
             key = stripped.split("=", 1)[0].strip()
             if key in AUTHORING_CONFIG_KEYS and "=" in stripped:
                 lines.append(stripped)
-    target_config.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    write_text_atomic(target_config, "\n".join(lines) + "\n")
 
 
 def timeout_salvage_output(request: AgentRunRequest) -> dict[str, Any] | None:
@@ -268,9 +269,9 @@ def timeout_salvage_output(request: AgentRunRequest) -> dict[str, Any] | None:
     payload = latest_agent_message_json_from_stdout(request.stdout_log_path)
     if payload is None:
         return None
-    request.output_json_path.write_text(
+    write_text_atomic(
+        request.output_json_path,
         json.dumps(payload, ensure_ascii=False, sort_keys=True),
-        encoding="utf-8",
     )
     return {
         "output_json_path": str(request.output_json_path),
@@ -313,7 +314,7 @@ def failed(
     error: str,
     exit_code: int | None = None,
 ) -> AgentRunResult:
-    request.stderr_log_path.write_text(error + "\n", encoding="utf-8")
+    write_text_atomic(request.stderr_log_path, error + "\n")
     write_jsonl(request.events_log_path, {"type": "failed", "error": error})
     return AgentRunResult(
         status="failed",
@@ -365,8 +366,7 @@ async def capture_stream(stream, primary_path) -> bytes:
 
 
 def append_bytes(path, payload: bytes) -> None:
-    with path.open("ab") as file:
-        file.write(payload)
+    append_bytes_locked(path, payload)
 
 
 async def terminate_process_tree(process) -> None:

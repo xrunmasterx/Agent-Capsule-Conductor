@@ -130,6 +130,68 @@ def test_workbench_run_manager_rewrites_terminal_success_summary(tmp_path: Path)
     assert summary.status == "success"
 
 
+def test_workbench_run_manager_submit_requests_storage_refresh_without_rebuild(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    def fail_rebuild(self: Any) -> dict[str, Any]:
+        raise AssertionError("submit must not synchronously rebuild sqlite storage index")
+
+    monkeypatch.setattr("acc.storage_index.StorageIndex.rebuild", fail_rebuild)
+
+    async def scenario() -> dict[str, Any]:
+        manager = WorkbenchRunManager(tmp_path, max_active_runs=1)
+        job = _job(
+            tmp_path,
+            run_id="run-index-failure",
+            task_id="task-stock",
+            service=_SuccessfulService(),
+        )
+        submit_result = await manager.submit(job)
+        assert submit_result["status"] == "running"
+        assert job.run_dir.name in manager._active or any(
+            queued.run_dir.name == job.run_dir.name for queued in manager._queued
+        )
+        return await _wait_for_terminal(job.run_dir)
+
+    payload = asyncio.run(scenario())
+
+    assert payload["status"] == "success"
+    refresh_marker = tmp_path / ".acc" / "storage" / "index_refresh_dirty.json"
+    assert json.loads(refresh_marker.read_text(encoding="utf-8"))["reason"]
+
+
+def test_workbench_run_manager_uses_injected_storage_refresh_trigger(
+    tmp_path: Path,
+) -> None:
+    calls: list[dict[str, Any]] = []
+
+    def trigger(**kwargs: Any) -> None:
+        calls.append(kwargs)
+
+    async def scenario() -> dict[str, Any]:
+        manager = WorkbenchRunManager(
+            tmp_path,
+            max_active_runs=1,
+            storage_refresh_trigger=trigger,
+        )
+        job = _job(
+            tmp_path,
+            run_id="run-trigger",
+            task_id="task-stock",
+            service=_SuccessfulService(),
+        )
+        submit_result = await manager.submit(job)
+        assert submit_result["status"] == "running"
+        return await _wait_for_terminal(job.run_dir)
+
+    payload = asyncio.run(scenario())
+
+    assert payload["status"] == "success"
+    assert calls
+    assert all(call["reason"] == "workbench_run_summary_updated" for call in calls)
+
+
 def test_workbench_run_manager_preserves_waiting_status_as_non_terminal(
     tmp_path: Path,
 ) -> None:
@@ -179,12 +241,16 @@ def test_workbench_run_manager_reconcile_preserves_waiting_but_crashes_interrupt
     tmp_path: Path,
 ) -> None:
     runs_root = tmp_path / "runs"
+    _write_existing_summary(runs_root / "run-queued", "queued")
     _write_existing_summary(runs_root / "run-waiting", "waiting_interaction")
     _write_existing_summary(runs_root / "run-running", "running")
     _write_existing_summary(runs_root / "run-resuming", "resuming")
 
     WorkbenchRunManager(tmp_path, max_active_runs=1)
 
+    queued = json.loads(
+        (runs_root / "run-queued" / "run_summary.json").read_text(encoding="utf-8")
+    )
     waiting = json.loads(
         (runs_root / "run-waiting" / "run_summary.json").read_text(encoding="utf-8")
     )
@@ -194,6 +260,7 @@ def test_workbench_run_manager_reconcile_preserves_waiting_but_crashes_interrupt
     resuming = json.loads(
         (runs_root / "run-resuming" / "run_summary.json").read_text(encoding="utf-8")
     )
+    assert queued["status"] == "crashed"
     assert waiting["status"] == "waiting_interaction"
     assert running["status"] == "crashed"
     assert resuming["status"] == "crashed"

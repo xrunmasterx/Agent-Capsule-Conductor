@@ -13,6 +13,7 @@ from acc.app.workbench_adapter import (
 )
 from acc.callable_registry import CallableRegistry
 from acc.engine import parse_workflow_function_template
+from acc.engine.workflow_validation import collect_callable_validation_issues
 from acc.utils import AccError
 
 
@@ -99,6 +100,185 @@ def test_workbench_draft_canonicalizes_to_core_v2_payload(tmp_path: Path) -> Non
         assert "topic" not in node["overrides"]["static_input"]
         assert node["metadata"]["ui_label"] == node["metadata"]["label"]
 
+    parse_workflow_function_template(payload, source_path=path)
+
+
+def test_workbench_root_node_outputs_promote_to_workflow_outputs(tmp_path: Path) -> None:
+    path = tmp_path / "stock_report_flow.accflow.json"
+    draft = stock_workbench_draft()
+    draft["metadata"]["root_workflow_id"] = "analyst"
+    for node in draft["nodes"]:
+        if node["id"] == "analyst":
+            node["output_ports"] = [
+                {"id": "main", "required": True},
+                {"id": "action_items", "required": True},
+            ]
+            node["output_schema"] = {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["status", "summary", "action_items"],
+                "properties": {
+                    "status": {"type": "string"},
+                    "summary": {"type": "string"},
+                    "action_items": {"type": "array", "items": {"type": "string"}},
+                },
+            }
+
+    payload = canonicalize_workbench_workflow_payload(draft, source_path=path)
+
+    assert payload["workflow_output_bindings"] == [
+        {
+            "source": {"node": "analyst", "port": "main"},
+            "target_port": "main",
+            "materialization": "copy",
+            "required": True,
+        },
+        {
+            "source": {"node": "analyst", "port": "action_items"},
+            "target_port": "action_items",
+            "materialization": "copy",
+            "required": True,
+        },
+    ]
+    assert payload["exposed_outputs"] == {
+        "main": {"type": "artifact", "required": True, "cardinality": "one"},
+        "action_items": {"type": "artifact", "required": True, "cardinality": "one"},
+    }
+    parse_workflow_function_template(payload, source_path=path)
+
+
+def test_workbench_schema_derived_outputs_replace_stale_port_snapshot(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "schema_derived_outputs.accflow.json"
+    draft = stock_workbench_draft()
+    draft["metadata"]["root_workflow_id"] = "analyst"
+    for node in draft["nodes"]:
+        if node["id"] == "analyst":
+            node["output_ports"] = [
+                {"id": "main", "required": True},
+                {"id": "stale_report", "required": True},
+            ]
+            node["output_schema"] = {
+                "type": "object",
+                "properties": {
+                    "outputs": {
+                        "type": "object",
+                        "required": ["report"],
+                        "properties": {
+                            "report": {
+                                "type": "string",
+                                "description": "Complete investment report.",
+                            }
+                        },
+                    }
+                },
+            }
+
+    payload = canonicalize_workbench_workflow_payload(draft, source_path=path)
+    analyst = next(node for node in payload["nodes"] if node["id"] == "analyst")
+
+    assert set(analyst["ports"]["outputs"]) == {"main", "report"}
+    assert "stale_report" not in analyst["ports"]["outputs"]
+    assert payload["workflow_output_bindings"] == [
+        {
+            "source": {"node": "analyst", "port": "main"},
+            "target_port": "main",
+            "materialization": "copy",
+            "required": True,
+        },
+        {
+            "source": {"node": "analyst", "port": "report"},
+            "target_port": "report",
+            "materialization": "copy",
+            "required": True,
+        },
+    ]
+    parse_workflow_function_template(payload, source_path=path)
+
+
+def test_workbench_preserves_stale_data_edge_for_validation_diagnostics(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "schema_rename_preserves_edge.accflow.json"
+    draft = stock_workbench_draft()
+    for node in draft["nodes"]:
+        if node["id"] == "market_news":
+            node["output_ports"] = [
+                {"id": "main", "required": True},
+                {"id": "valuation_conclusion", "required": True},
+            ]
+            node["output_schema"] = {
+                "type": "object",
+                "properties": {
+                    "outputs": {
+                        "type": "object",
+                        "properties": {
+                            "valuation_view": {"type": "string"},
+                        },
+                    }
+                },
+            }
+        if node["id"] == "cleaner":
+            node["input_ports"] = [
+                {"id": "main", "required": False},
+                {"id": "valuation_conclusion", "required": False},
+            ]
+    draft["data_edges"] = [
+        {
+            "id": "stale_valuation_edge",
+            "from": {"node": "market_news", "port": "valuation_conclusion"},
+            "to": {"node": "cleaner", "port": "valuation_conclusion"},
+            "materialization": "copy",
+        }
+    ]
+
+    payload = canonicalize_workbench_workflow_payload(
+        draft,
+        source_path=path,
+        allow_repairable_port_issues=True,
+    )
+    source = next(node for node in payload["nodes"] if node["id"] == "market_news")
+    template = parse_workflow_function_template(payload, source_path=path)
+
+    assert set(source["ports"]["outputs"]) == {"main", "valuation_view"}
+    assert payload["data_edges"] == [
+        {
+            "source": {"node": "market_news", "port": "valuation_conclusion"},
+            "target": {"node": "cleaner", "port": "valuation_conclusion"},
+            "materialization": "copy",
+        }
+    ]
+    issue = next(
+        issue
+        for issue in collect_callable_validation_issues(template)
+        if issue.code == "dangling_data_edge_source"
+    )
+    assert issue.metadata == {
+        "edge_id": "market_news.valuation_conclusion->cleaner.valuation_conclusion",
+        "source": {"node": "market_news", "port": "valuation_conclusion"},
+        "target": {"node": "cleaner", "port": "valuation_conclusion"},
+        "expected_schema_path": "/properties/outputs/properties/valuation_conclusion",
+    }
+
+
+def test_workbench_root_output_promotion_preserves_explicit_bindings(tmp_path: Path) -> None:
+    path = tmp_path / "stock_report_flow.accflow.json"
+    draft = stock_workbench_draft()
+    draft["metadata"]["root_workflow_id"] = "analyst"
+    draft["exposed_outputs"] = [{"id": "cleaned", "required": True}]
+    draft["workflow_output_bindings"] = [
+        {
+            "source": {"node": "cleaner", "port": "main"},
+            "target_port": "cleaned",
+            "materialization": "copy",
+            "required": True,
+        }
+    ]
+
+    payload = canonicalize_workbench_workflow_payload(draft, source_path=path)
+
+    assert payload["workflow_output_bindings"] == draft["workflow_output_bindings"]
     parse_workflow_function_template(payload, source_path=path)
 
 
@@ -517,6 +697,87 @@ def test_workbench_container_deduplicates_identical_boundary_output_edges(
     assert child["workflow_output_bindings"] == [
         {
             "source": {"node": "agent1", "port": "main"},
+            "target_port": "main",
+            "materialization": "copy",
+            "required": True,
+        }
+    ]
+
+
+def test_workbench_container_does_not_expose_internal_schema_ports_without_boundary_edge(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "workflows" / "schema_internal_boundary.accflow.json"
+    path.parent.mkdir()
+    draft = {
+        "id": "schema_internal_boundary",
+        "version": "0.4.0",
+        "nodes": [
+            {
+                "id": "Research_Workflow",
+                "kind": "workflow",
+                "label": "Research Workflow",
+                "callable_ref": {"kind": "workflow_function", "id": "Research_Workflow"},
+                "input_ports": [{"id": "main"}],
+                "output_ports": [{"id": "main"}],
+                "ui": {
+                    "semantic_kind": "workflow_container",
+                    "internal_nodes": [
+                        {
+                            "id": "analyst",
+                            "name": "Analyst",
+                            "task": "Produce structured report.",
+                            "kind": "Agent",
+                            "callableId": "stock-market-research.codex",
+                            "inputPorts": [{"id": "main"}],
+                            "outputPorts": [
+                                {"id": "main"},
+                                {"id": "report"},
+                            ],
+                            "outputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "outputs": {
+                                        "type": "object",
+                                        "properties": {
+                                            "report": {"type": "string"},
+                                        },
+                                    }
+                                },
+                            },
+                        }
+                    ],
+                    "internal_edges": [
+                        {
+                            "id": "analyst_main_workflow_output",
+                            "kind": "data",
+                            "from": {"node": "analyst", "port": "main"},
+                            "to": {"node": "Research_Workflow__workflow_outputs", "port": "main"},
+                            "materialization": "copy",
+                        }
+                    ],
+                },
+            }
+        ],
+        "control_edges": [],
+        "data_edges": [],
+    }
+
+    bundle = compile_workbench_workflow_bundle(draft, source_path=path)
+    root_node = bundle.root["nodes"][0]
+    child = bundle.children["schema_internal_boundary__Research_Workflow.accflow.json"]
+    analyst = child["nodes"][0]
+
+    assert set(analyst["ports"]["outputs"]) == {"main", "report"}
+    assert root_node["ports"]["outputs"] == {
+        "main": {"type": "artifact", "required": False, "cardinality": "one"}
+    }
+    assert root_node["workflow_call_output_bindings"] == [
+        {"workflow_output": "main", "parent_port": "main", "required": False}
+    ]
+    assert child["workflow_output_bindings"] == [
+        {
+            "source": {"node": "analyst", "port": "main"},
             "target_port": "main",
             "materialization": "copy",
             "required": True,

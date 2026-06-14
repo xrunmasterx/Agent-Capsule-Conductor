@@ -7,6 +7,7 @@ from typing import Any
 from uuid import uuid4
 
 from acc.session import utc_now_iso
+from acc.storage import append_text_locked
 
 EVENT_PAYLOAD_MAX_BYTES = 4096
 LOG_EXCERPT_MAX_CHARS = 2048
@@ -115,9 +116,10 @@ class JsonlEventEmitter:
             event.get("payload") if isinstance(event.get("payload"), dict) else {},
             log_ref=_default_log_ref(self.event_log_path),
         )
-        self.event_log_path.parent.mkdir(parents=True, exist_ok=True)
-        with self.event_log_path.open("a", encoding="utf-8") as file:
-            file.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
+        append_text_locked(
+            self.event_log_path,
+            json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n",
+        )
         return event
 
 

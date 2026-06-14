@@ -15,6 +15,7 @@ from acc.adapters.streaming import (
 )
 from acc.agent_events import append_agent_event, append_provider_event
 from acc.runtime.codex_models import normalize_codex_model, normalize_codex_reasoning_effort
+from acc.storage import append_bytes_locked, write_text_atomic
 from acc.utils import AccError
 
 APPROVAL_METHODS = frozenset(
@@ -42,10 +43,10 @@ class CodexAppServerAdapter:
         env.update(request.env)
         env.setdefault("CODEX_HOME", str(prepare_codex_app_server_home(request)))
         request.run_dir.mkdir(parents=True, exist_ok=True)
-        request.stdout_log_path.write_text("", encoding="utf-8")
-        request.stderr_log_path.write_text("", encoding="utf-8")
-        request.events_log_path.write_text("", encoding="utf-8")
-        request.provider_events_log_path.write_text("", encoding="utf-8")
+        write_text_atomic(request.stdout_log_path, "")
+        write_text_atomic(request.stderr_log_path, "")
+        write_text_atomic(request.events_log_path, "")
+        write_text_atomic(request.provider_events_log_path, "")
 
         client: CodexJsonRpcClient | None = None
         process = None
@@ -138,7 +139,7 @@ class CodexAppServerAdapter:
                 await gather_cancelled(stderr_task)
             return result
         except FileNotFoundError:
-            request.stderr_log_path.write_text("codex executable not found\n", encoding="utf-8")
+            write_text_atomic(request.stderr_log_path, "codex executable not found\n")
             return failed_result(request, "codex executable not found")
         except Exception as exc:
             if process is not None:
@@ -188,10 +189,9 @@ async def run_codex_turn(
         raise AccError("Codex app-server did not produce a JSON object agent message")
     output_json_path = None
     if output is not None:
-        request.output_json_path.parent.mkdir(parents=True, exist_ok=True)
-        request.output_json_path.write_text(
+        write_text_atomic(
+            request.output_json_path,
             json.dumps(output, ensure_ascii=False, indent=2, sort_keys=True),
-            encoding="utf-8",
         )
         output_json_path = request.output_json_path
         append_agent_event(
@@ -693,7 +693,7 @@ def failed_result(
     error: str,
     provider_session_id: str | None = None,
 ) -> StreamingAgentTurnResult:
-    request.stderr_log_path.write_text(error + "\n", encoding="utf-8")
+    write_text_atomic(request.stderr_log_path, error + "\n")
     append_agent_event(
         request.events_log_path,
         "agent_turn_failed",
@@ -726,9 +726,7 @@ async def capture_stream_text(stream: asyncio.StreamReader, path: Path) -> bytes
 
 
 def append_bytes(path: Path, payload: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("ab") as handle:
-        handle.write(payload)
+    append_bytes_locked(path, payload)
 
 
 async def terminate_process_tree(process: asyncio.subprocess.Process) -> None:

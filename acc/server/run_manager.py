@@ -38,10 +38,16 @@ class WorkbenchRunManager:
     process-local execution handles and a bounded FIFO queue.
     """
 
-    def __init__(self, project_root: Path, max_active_runs: int | None = None) -> None:
+    def __init__(
+        self,
+        project_root: Path,
+        max_active_runs: int | None = None,
+        storage_refresh_trigger: Callable[..., None] | None = None,
+    ) -> None:
         self.project_root = project_root.resolve()
         self.runs_root = self.project_root / "runs"
         self.max_active_runs = max(1, max_active_runs or configured_max_active_runs())
+        self.storage_refresh_trigger = storage_refresh_trigger
         self._lock = asyncio.Lock()
         self._queued: deque[WorkbenchRunJob] = deque()
         self._active: dict[str, asyncio.Task[None]] = {}
@@ -231,9 +237,15 @@ class WorkbenchRunManager:
     def _write_index(self) -> None:
         self.runs_root.mkdir(parents=True, exist_ok=True)
         write_json(self.runs_root / "index.json", rebuild_run_index(self.runs_root).model_dump())
-        from acc.storage_index import rebuild_storage_index
+        if self.storage_refresh_trigger is not None:
+            self.storage_refresh_trigger(reason="workbench_run_summary_updated")
+            return
+        from acc.storage_refresh import request_storage_index_refresh
 
-        rebuild_storage_index(self.runs_root.parent)
+        request_storage_index_refresh(
+            self.runs_root.parent,
+            reason="workbench_run_summary_updated",
+        )
 
     def _load_existing_summary(self, run_dir: Path) -> RunSummary | None:
         path = run_dir / "run_summary.json"

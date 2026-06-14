@@ -248,6 +248,9 @@ def strip_canvas_runtime_state(value: Any) -> Any:
         return copy.deepcopy(value)
     stripped: dict[str, Any] = {}
     for key, item in value.items():
+        if key in {"outputSchema", "output_schema"} and isinstance(item, dict):
+            stripped[key] = copy.deepcopy(item)
+            continue
         if key in RUNTIME_ONLY_KEYS:
             continue
         if key == "ui" and isinstance(item, dict):

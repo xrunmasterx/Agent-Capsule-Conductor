@@ -6,6 +6,10 @@ from typing import Any
 
 from acc.callable_registry import CallableRegistry
 from acc.callable_runner import DEFAULT_AGENT_OUTPUT_SCHEMA
+from acc.engine.schema_ports import (
+    has_projected_output_ports,
+    project_output_port_contracts,
+)
 from acc.models import AccError, AgentClassTemplate, CallableRef, PortContract
 
 MAIN_PORTS = {"main", "default"}
@@ -66,6 +70,7 @@ def normalize_workflow_payload_contracts(
     if callable_registry is not None:
         _snapshot_callable_instance_defaults(normalized, callable_registry, summary)
     _normalize_main_data_edges(normalized, summary, force=force)
+    _warn_control_main_suppressed_by_data_edges(normalized, summary)
     if summary.conflicts and not force and not allow_conflicts:
         raise AccError(
             "Workflow normalization has conflicts; rerun with explicit force after review: "
@@ -119,15 +124,26 @@ def _snapshot_callable_instance_defaults(
             ports["inputs"] = _port_contracts_to_wire(template.input_ports)
             summary.snapshotted_input_ports += 1
             node_changed = True
-        outputs = ports.get("outputs")
-        if (not isinstance(outputs, dict) or not outputs) and template.output_ports:
-            ports["outputs"] = _port_contracts_to_wire(template.output_ports)
-            summary.snapshotted_output_ports += 1
-            node_changed = True
         if kind == "agent_class" and not isinstance(node.get("output_schema"), dict):
             schema = _agent_template_output_schema(template)
             node["output_schema"] = copy.deepcopy(schema)
             summary.snapshotted_output_schemas += 1
+            node_changed = True
+        outputs = ports.get("outputs")
+        output_schema = node.get("output_schema")
+        projected_outputs = (
+            _schema_output_ports_to_wire(output_schema)
+            if isinstance(output_schema, dict)
+            else None
+        )
+        if projected_outputs is not None:
+            if outputs != projected_outputs:
+                ports["outputs"] = projected_outputs
+                summary.snapshotted_output_ports += 1
+                node_changed = True
+        elif (not isinstance(outputs, dict) or not outputs) and template.output_ports:
+            ports["outputs"] = _port_contracts_to_wire(template.output_ports)
+            summary.snapshotted_output_ports += 1
             node_changed = True
         if node_changed:
             summary.snapshotted_nodes += 1
@@ -165,6 +181,12 @@ def _port_contracts_to_wire(ports: dict[str, PortContract]) -> dict[str, dict[st
         }
         for port_id, port in ports.items()
     }
+
+
+def _schema_output_ports_to_wire(schema: dict[str, Any]) -> dict[str, dict[str, Any]] | None:
+    if not has_projected_output_ports(schema):
+        return None
+    return _port_contracts_to_wire(project_output_port_contracts(schema, include_main=True))
 
 
 def _normalize_main_data_edges(
@@ -247,6 +269,50 @@ def _normalize_main_data_edges(
             )
         if force or not _source_has_conflict(summary, source):
             _set_forward_main_output_on_control(node, True)
+
+
+def _warn_control_main_suppressed_by_data_edges(
+    payload: dict[str, Any],
+    summary: WorkflowNormalizationSummary,
+) -> None:
+    data_edges = payload.get("data_edges")
+    control_edges = payload.get("control_edges")
+    if not isinstance(data_edges, list) or not isinstance(control_edges, list):
+        return
+    data_pairs = {
+        (source, target)
+        for edge in data_edges
+        if isinstance(edge, dict)
+        for source, target in [(
+            _edge_node(edge.get("source") or edge.get("from")),
+            _edge_node(edge.get("target") or edge.get("to")),
+        )]
+        if source and target
+    }
+    seen: set[tuple[str, str]] = set()
+    for edge in control_edges:
+        if not isinstance(edge, dict):
+            continue
+        source = edge.get("from") or edge.get("source")
+        target = edge.get("to") or edge.get("target")
+        if not isinstance(source, str) or not isinstance(target, str):
+            continue
+        pair = (source, target)
+        if pair not in data_pairs or pair in seen:
+            continue
+        seen.add(pair)
+        summary.warnings.append(
+            {
+                "code": "control_main_suppressed_by_data_edge",
+                "source": source,
+                "target": target,
+                "suppressed_port": "main",
+                "message": (
+                    "Control edge will only order execution because the same source/target "
+                    "pair has an explicit data edge"
+                ),
+            }
+        )
 
 
 def _is_main_to_main_data_edge(edge: dict[str, Any]) -> bool:

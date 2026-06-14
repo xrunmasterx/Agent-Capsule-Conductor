@@ -137,6 +137,36 @@ def list_node_artifacts(run_id: str, node_id: str, request: Request) -> dict[str
     return {"run_id": run_id, "node_id": node_id, "artifacts": artifacts}
 
 
+@router.get("/{run_id}/evidence")
+def read_run_evidence(run_id: str, path: str, request: Request) -> dict[str, Any]:
+    project_root = get_project_root(request)
+    run_dir = resolve_run_dir_or_404(run_id, request)
+    evidence_path = resolve_run_evidence_path(path, project_root=project_root, run_dir=run_dir)
+    try:
+        reject_secret_like_path(evidence_path)
+    except SecretLikePathError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "artifact_policy_denied", "message": str(exc)},
+        ) from exc
+    if not evidence_path.exists() or not evidence_path.is_file():
+        raise HTTPException(status_code=404, detail=f"Run evidence not found: {path}")
+    try:
+        content = evidence_path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=415, detail=f"Run evidence is not UTF-8 text: {path}") from exc
+    except OSError as exc:
+        raise HTTPException(status_code=404, detail=f"Run evidence not readable: {path}") from exc
+    return {
+        "artifact_ref": path,
+        "path": relative_project_path(project_root, evidence_path),
+        "name": evidence_path.name,
+        "type": infer_evidence_type(evidence_path),
+        "size_bytes": evidence_path.stat().st_size,
+        "content": content,
+    }
+
+
 @router.get("/{run_id}/events")
 def get_run_events(
     run_id: str,
@@ -173,17 +203,28 @@ def get_node_events(
     node_id: str,
     request: Request,
     limit: int = Query(200, ge=1, le=1000),
+    node_run_dir: str | None = Query(None),
 ) -> dict[str, Any]:
     project_root = get_project_root(request)
     run_dir = resolve_run_dir_or_404(run_id, request)
     validate_path_component(node_id, "node_id")
-    event_log = run_dir / "nodes" / node_id / "events.jsonl"
+    if node_run_dir:
+        node_dir = resolve_run_evidence_path(node_run_dir, project_root=project_root, run_dir=run_dir)
+        if not node_dir.is_dir() or node_dir.name != node_id:
+            raise HTTPException(status_code=400, detail="node_run_dir does not match node_id")
+    else:
+        node_dir = run_dir / "nodes" / node_id
+    event_log = node_dir / "events.jsonl"
     event_projection = RunEventProjectionService(run_dir)
     return {
         "run_id": run_id,
         "node_id": node_id,
         "event_log": relative_project_path(project_root, event_log),
-        "events": event_projection.read_node_events_with_agent(node_id, limit=limit),
+        "events": event_projection.read_node_events_with_agent(
+            node_id,
+            limit=limit,
+            node_run_dir=str(node_dir.resolve()) if node_run_dir else None,
+        ),
     }
 
 
@@ -414,6 +455,35 @@ def effective_node_log_path_for_dir(node_dir: Path, stream: str) -> Path:
         node_dir,
         stream,
     )
+
+
+def resolve_run_evidence_path(path: str, *, project_root: Path, run_dir: Path) -> Path:
+    if not path:
+        raise HTTPException(status_code=400, detail="Evidence path is required")
+    candidate = Path(path)
+    resolved = candidate.resolve() if candidate.is_absolute() else (project_root / candidate).resolve()
+    if not is_relative_to(resolved, run_dir):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "artifact_policy_denied",
+                "message": "Run evidence path must stay inside the requested run directory",
+            },
+        )
+    return resolved
+
+
+def infer_evidence_type(path: Path) -> str:
+    suffix = path.suffix.lower()
+    if suffix == ".md":
+        return "markdown"
+    if suffix == ".json":
+        return "json"
+    if suffix in {".log", ".jsonl"}:
+        return "log"
+    if suffix in {".patch", ".diff"}:
+        return "patch"
+    return "text"
 
 
 def is_valid_agent_session_dir_for_node(node_dir: Path, session_dir: Path) -> bool:

@@ -6,7 +6,7 @@ import re
 import shlex
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from acc.models import AccError
 
@@ -71,6 +71,113 @@ def validate_authoring_session_id(session_id: str) -> None:
 
 def log_stderr(message: str) -> None:
     print(message, file=sys.stderr)
+
+
+def iter_paths_no_symlink_targets(
+    path: Path,
+    *,
+    exclude_relative_parts: Iterable[str] = (),
+) -> list[Path]:
+    """Return paths below path without traversing symlink or junction targets."""
+    root = Path(path)
+    excluded = _normalized_exclude_parts(exclude_relative_parts)
+    if _path_is_missing(root):
+        return []
+    result = [root]
+    if _is_file_symlink_or_junction(root):
+        return result
+
+    stack = [root]
+    while stack:
+        current = stack.pop()
+        try:
+            with os.scandir(current) as entries:
+                children = sorted(entries, key=lambda entry: entry.name)
+        except OSError:
+            continue
+        for entry in children:
+            child = Path(entry.path)
+            if _is_excluded_relative_path(root, child, excluded):
+                continue
+            result.append(child)
+            try:
+                is_dir = entry.is_dir(follow_symlinks=False)
+                is_symlink = entry.is_symlink()
+            except OSError:
+                continue
+            if is_dir and not is_symlink and not _is_junction(child):
+                stack.append(child)
+    return result
+
+
+def safe_path_size_bytes(
+    path: Path,
+    *,
+    exclude_relative_parts: Iterable[str] = (),
+) -> int:
+    """Best-effort size calculation for live runtime directories."""
+    root = Path(path)
+    if _path_is_missing(root):
+        return 0
+    if _is_file_symlink_or_junction(root):
+        try:
+            return root.lstat().st_size
+        except OSError:
+            return 0
+    total = 0
+    for child in iter_paths_no_symlink_targets(
+        root,
+        exclude_relative_parts=exclude_relative_parts,
+    ):
+        try:
+            if child.is_dir() and not child.is_symlink():
+                continue
+            total += child.lstat().st_size
+        except OSError:
+            continue
+    return total
+
+
+def _normalized_exclude_parts(exclude_relative_parts: Iterable[str]) -> tuple[str, ...]:
+    return tuple(
+        part.replace("\\", "/").strip("/")
+        for part in exclude_relative_parts
+        if part.replace("\\", "/").strip("/")
+    )
+
+
+def _is_excluded_relative_path(root: Path, path: Path, excluded: tuple[str, ...]) -> bool:
+    if not excluded:
+        return False
+    try:
+        relative = path.relative_to(root).as_posix()
+    except ValueError:
+        return False
+    return any(relative == part or relative.startswith(f"{part}/") for part in excluded)
+
+
+def _path_is_missing(path: Path) -> bool:
+    try:
+        return not path.exists() and not path.is_symlink()
+    except OSError:
+        return True
+
+
+def _is_file_symlink_or_junction(path: Path) -> bool:
+    try:
+        return path.is_file() or path.is_symlink() or _is_junction(path)
+    except OSError:
+        return False
+
+
+def _is_junction(path: Path) -> bool:
+    is_junction = getattr(path, "is_junction", None)
+    if is_junction is None:
+        return False
+    try:
+        return bool(is_junction())
+    except OSError:
+        return False
 
 
 def repo_root() -> Path:

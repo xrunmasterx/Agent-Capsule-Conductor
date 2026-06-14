@@ -2,8 +2,8 @@
   "control_edges": [
     {
       "context": "none",
-      "from": "thesis_writer_agent",
-      "to": "report_compiler_agent"
+      "from": "investment_thesis_agent",
+      "to": "evidence_mapper_agent"
     },
     {
       "context": "none",
@@ -15,23 +15,12 @@
     {
       "materialization": "copy",
       "source": {
-        "node": "thesis_writer_agent",
+        "node": "investment_thesis_agent",
         "port": "main"
       },
       "target": {
         "node": "report_compiler_agent",
         "port": "thesis"
-      }
-    },
-    {
-      "materialization": "copy",
-      "source": {
-        "node": "evidence_mapper_agent",
-        "port": "main"
-      },
-      "target": {
-        "node": "report_compiler_agent",
-        "port": "evidence"
       }
     }
   ],
@@ -52,7 +41,17 @@
       "required": true,
       "type": "artifact"
     },
+    "source_register": {
+      "cardinality": "one",
+      "required": true,
+      "type": "artifact"
+    },
     "valuation": {
+      "cardinality": "one",
+      "required": true,
+      "type": "artifact"
+    },
+    "verified_data": {
       "cardinality": "one",
       "required": true,
       "type": "artifact"
@@ -64,7 +63,7 @@
       "required": true,
       "type": "artifact"
     },
-    "main": {
+    "report": {
       "cardinality": "one",
       "required": true,
       "type": "artifact"
@@ -79,27 +78,27 @@
       "layout": null,
       "nodes": [
         {
-          "id": "thesis_writer_agent",
+          "id": "investment_thesis_agent",
           "label": "投资论点撰写",
           "position": {
-            "x": 137.0,
-            "y": 146.0
+            "x": 137,
+            "y": 249
           }
         },
         {
           "id": "evidence_mapper_agent",
           "label": "证据追踪整理",
           "position": {
-            "x": 137.0,
-            "y": 332.0
+            "x": 485,
+            "y": 146
           }
         },
         {
           "id": "report_compiler_agent",
           "label": "报告合成",
           "position": {
-            "x": 485.0,
-            "y": 156.0
+            "x": 833,
+            "y": 146
           }
         }
       ],
@@ -114,7 +113,7 @@
         "id": "stock-report-writer.codex",
         "kind": "agent_class"
       },
-      "id": "thesis_writer_agent",
+      "id": "investment_thesis_agent",
       "metadata": {
         "label": "投资论点撰写",
         "ui_label": "投资论点撰写",
@@ -123,15 +122,16 @@
       "output_schema": {
         "additionalProperties": false,
         "properties": {
-          "evidence_gaps": {
-            "description": "证据缺口和免责声明",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
+          "confidence": {
+            "description": "高/中/低置信度及原因",
+            "type": "string"
           },
-          "report_sections": {
-            "description": "最终报告章节摘要",
+          "investment_stance": {
+            "description": "研究建议口径的投资观点，例如偏正面/中性/偏谨慎及原因",
+            "type": "string"
+          },
+          "key_thesis": {
+            "description": "支撑投资观点的核心论点",
             "items": {
               "type": "string"
             },
@@ -145,16 +145,20 @@
             "description": "面向下游节点的简明结论",
             "type": "string"
           },
-          "thesis": {
-            "description": "投资论点",
-            "type": "string"
+          "thesis_risks": {
+            "description": "可能推翻投资观点的关键风险",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           }
         },
         "required": [
           "status",
           "summary",
-          "thesis",
-          "report_sections"
+          "investment_stance",
+          "confidence",
+          "key_thesis"
         ],
         "type": "object"
       },
@@ -188,7 +192,7 @@
         }
       },
       "prompt_policy": {
-        "user_prompt": "整合基本面、估值和风险，撰写核心投资论点。"
+        "user_prompt": "整合基本面、估值和风险，输出投资观点、置信度和关键论点；不得只输出报告写作框架。"
       }
     },
     {
@@ -206,21 +210,28 @@
         "additionalProperties": false,
         "properties": {
           "action_items": {
-            "description": "发布前行动项",
+            "description": "补充证据的行动项",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "evidence_gaps": {
+            "description": "发布前必须补齐或在报告中披露的证据缺口",
             "items": {
               "type": "string"
             },
             "type": "array"
           },
           "evidence_map": {
-            "description": "章节到上游产物的追踪关系",
+            "description": "报告结论到上游证据和来源的映射",
             "items": {
               "type": "string"
             },
             "type": "array"
           },
-          "report_sections": {
-            "description": "最终报告章节",
+          "source_coverage": {
+            "description": "披露、市场、新闻政策和同业数据的覆盖情况",
             "items": {
               "type": "string"
             },
@@ -238,8 +249,9 @@
         "required": [
           "status",
           "summary",
-          "report_sections",
-          "evidence_map"
+          "evidence_map",
+          "source_coverage",
+          "evidence_gaps"
         ],
         "type": "object"
       },
@@ -248,10 +260,29 @@
       },
       "ports": {
         "inputs": {
+          "main": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact",
+            "description": "投资论点"
+          },
           "evidence_pack": {
             "cardinality": "one",
             "required": true,
-            "type": "artifact"
+            "type": "artifact",
+            "description": "证据包"
+          },
+          "valuation": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact",
+            "description": "估值结论"
+          },
+          "source_register": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact",
+            "description": "来源登记表"
           }
         },
         "outputs": {
@@ -263,7 +294,7 @@
         }
       },
       "prompt_policy": {
-        "user_prompt": "并行整理证据包和报告章节之间的追踪关系。"
+        "user_prompt": "从 main 控制输入读取投资论点，并结合证据包、估值结论和来源登记表整理证据映射；不要生成报告章节正文。"
       }
     },
     {
@@ -281,25 +312,94 @@
         "additionalProperties": false,
         "properties": {
           "action_items": {
-            "description": "发布前行动项",
+            "description": "后续行动项",
             "items": {
               "type": "string"
             },
             "type": "array"
           },
-          "evidence_map": {
-            "description": "章节到上游产物的追踪关系",
-            "items": {
-              "type": "string"
+          "report": {
+            "additionalProperties": false,
+            "properties": {
+              "business_quality": {
+                "description": "业务质量结论",
+                "type": "string"
+              },
+              "catalysts": {
+                "description": "正负催化剂",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "executive_summary": {
+                "description": "一页式核心摘要",
+                "type": "string"
+              },
+              "financial_quality": {
+                "description": "财务质量结论",
+                "type": "string"
+              },
+              "industry_position": {
+                "description": "行业位置结论",
+                "type": "string"
+              },
+              "investment_stance": {
+                "description": "研究建议口径投资观点，不输出绝对化买卖指令",
+                "type": "string"
+              },
+              "key_risks": {
+                "description": "关键风险",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "limitations": {
+                "description": "限制、免责声明和不可发布条件",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "monitoring_plan": {
+                "description": "后续跟踪指标",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "risk_reward": {
+                "description": "风险收益判断",
+                "type": "string"
+              },
+              "source_notes": {
+                "description": "关键来源说明",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "valuation_conclusion": {
+                "description": "估值结论",
+                "type": "string"
+              }
             },
-            "type": "array"
-          },
-          "report_sections": {
-            "description": "最终报告章节",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
+            "required": [
+              "executive_summary",
+              "investment_stance",
+              "business_quality",
+              "financial_quality",
+              "industry_position",
+              "valuation_conclusion",
+              "risk_reward",
+              "key_risks",
+              "catalysts",
+              "monitoring_plan",
+              "source_notes",
+              "limitations"
+            ],
+            "type": "object"
           },
           "status": {
             "description": "success 或 failed",
@@ -313,8 +413,7 @@
         "required": [
           "status",
           "summary",
-          "report_sections",
-          "evidence_map"
+          "report"
         ],
         "type": "object"
       },
@@ -323,15 +422,29 @@
       },
       "ports": {
         "inputs": {
-          "evidence": {
+          "main": {
             "cardinality": "one",
             "required": true,
-            "type": "artifact"
+            "type": "artifact",
+            "description": "证据追踪"
           },
           "thesis": {
             "cardinality": "one",
             "required": true,
-            "type": "artifact"
+            "type": "artifact",
+            "description": "投资论点"
+          },
+          "verified_data": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact",
+            "description": "核验数据包"
+          },
+          "source_register": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact",
+            "description": "来源登记表"
           }
         },
         "outputs": {
@@ -343,7 +456,7 @@
         }
       },
       "prompt_policy": {
-        "user_prompt": "串行合成投资论点和证据追踪，输出可评审报告。"
+        "user_prompt": "合成完整 NVIDIA 单股深研报告，必须输出 executive summary、investment stance、估值结论、风险收益和监控计划；不得只输出方法论或待办清单。"
       }
     }
   ],
@@ -359,7 +472,7 @@
       "required": false,
       "source_port": "fundamentals",
       "target": {
-        "node": "thesis_writer_agent",
+        "node": "investment_thesis_agent",
         "port": "fundamentals"
       }
     },
@@ -368,7 +481,7 @@
       "required": false,
       "source_port": "valuation",
       "target": {
-        "node": "thesis_writer_agent",
+        "node": "investment_thesis_agent",
         "port": "valuation"
       }
     },
@@ -377,7 +490,7 @@
       "required": false,
       "source_port": "risk",
       "target": {
-        "node": "thesis_writer_agent",
+        "node": "investment_thesis_agent",
         "port": "risk"
       }
     },
@@ -389,6 +502,42 @@
         "node": "evidence_mapper_agent",
         "port": "evidence_pack"
       }
+    },
+    {
+      "materialization": "copy",
+      "required": false,
+      "source_port": "valuation",
+      "target": {
+        "node": "evidence_mapper_agent",
+        "port": "valuation"
+      }
+    },
+    {
+      "materialization": "copy",
+      "required": false,
+      "source_port": "source_register",
+      "target": {
+        "node": "evidence_mapper_agent",
+        "port": "source_register"
+      }
+    },
+    {
+      "materialization": "copy",
+      "required": false,
+      "source_port": "verified_data",
+      "target": {
+        "node": "report_compiler_agent",
+        "port": "verified_data"
+      }
+    },
+    {
+      "materialization": "copy",
+      "required": false,
+      "source_port": "source_register",
+      "target": {
+        "node": "report_compiler_agent",
+        "port": "source_register"
+      }
     }
   ],
   "workflow_output_bindings": [
@@ -399,7 +548,7 @@
         "node": "report_compiler_agent",
         "port": "main"
       },
-      "target_port": "main"
+      "target_port": "report"
     },
     {
       "materialization": "copy",

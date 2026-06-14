@@ -16,6 +16,16 @@ from acc.engine import (
     validate_workflow_call_input_boundary,
     validate_workflow_call_output_boundary,
 )
+from acc.engine.control_flow import (
+    control_edge_forwards_main,
+    control_main_source_nodes_for_target,
+    data_edge_node_pairs,
+)
+from acc.engine.schema_ports import (
+    effective_output_ports,
+    has_projected_output_ports,
+    schema_declares_output_port,
+)
 from acc.models import (
     CallableRef,
     NodeInvocationSpec,
@@ -34,6 +44,7 @@ class ValidationIssue:
     node_id: str | None = None
     port: str | None = None
     severity: ValidationSeverity = "error"
+    metadata: dict[str, Any] | None = None
 
     def as_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -45,6 +56,8 @@ class ValidationIssue:
             payload["node_id"] = self.node_id
         if self.port is not None:
             payload["port"] = self.port
+        if self.metadata:
+            payload["metadata"] = self.metadata
         return payload
 
 
@@ -195,28 +208,21 @@ def _collect_unknown_workflow_refs(
     return issues
 
 
-def _control_main_can_satisfy_input(source_node: NodeInvocationSpec) -> bool:
-    if source_node.control.forward_main_output_on_control is False:
-        return False
-    if (
-        source_node.callable_ref.kind == "workflow_function"
-        and source_node.workflow_call_output_bindings
-    ):
-        return any(
-            binding.parent_port == "main" and binding.required
-            for binding in source_node.workflow_call_output_bindings
-        )
-    return True
+def _has_declared_output_port_contract(node: NodeInvocationSpec) -> bool:
+    return bool(
+        node.workflow_call_output_bindings
+        or node.output_ports
+        or has_projected_output_ports(node.output_schema)
+    )
 
 
 def _incoming_data_ports(template: WorkflowFunctionTemplate) -> dict[str, set[str]]:
     incoming: dict[str, set[str]] = {node_id: set() for node_id in template.node_invocations}
     for edge in template.data_edges:
         incoming[edge.target.node].add(edge.target.port)
-    for edge in template.control_edges:
-        source_node = template.node_invocations.get(edge.source)
-        if source_node is not None and _control_main_can_satisfy_input(source_node):
-            incoming[edge.target].add("main")
+    for node_id in template.node_invocations:
+        if control_main_source_nodes_for_target(template, node_id):
+            incoming[node_id].add("main")
     for binding in template.workflow_input_bindings:
         if binding.target.node in incoming:
             incoming[binding.target.node].add(binding.target.port)
@@ -243,11 +249,14 @@ def _collect_port_binding_issues(
     connected_targets: set[tuple[str, str]] = {
         (edge.target.node, edge.target.port) for edge in template.data_edges
     }
+    issues.extend(_collect_control_data_semantic_warnings(template))
 
     for edge in template.data_edges:
         if edge.source.node in template.node_invocations:
             source_node = template.node_invocations[edge.source.node]
-            if source_node.output_ports and edge.source.port not in source_node.output_ports:
+            source_ports = effective_output_ports(source_node)
+            has_source_contract = _has_declared_output_port_contract(source_node)
+            if has_source_contract and edge.source.port not in source_ports:
                 issues.append(
                     ValidationIssue(
                         code="dangling_data_edge_source",
@@ -257,6 +266,12 @@ def _collect_port_binding_issues(
                         ),
                         node_id=edge.source.node,
                         port=edge.source.port,
+                        metadata=_data_edge_issue_metadata(
+                            edge,
+                            expected_schema_path=_expected_output_schema_path(edge.source.port)
+                            if has_projected_output_ports(source_node.output_schema)
+                            else None,
+                        ),
                     )
                 )
         if edge.target.node not in template.node_invocations:
@@ -269,6 +284,7 @@ def _collect_port_binding_issues(
                     ),
                     node_id=edge.target.node,
                     port=edge.target.port,
+                    metadata=_data_edge_issue_metadata(edge),
                 )
             )
             continue
@@ -283,6 +299,7 @@ def _collect_port_binding_issues(
                     ),
                     node_id=edge.target.node,
                     port=edge.target.port,
+                    metadata=_data_edge_issue_metadata(edge),
                 )
             )
 
@@ -298,6 +315,14 @@ def _collect_port_binding_issues(
                     message=f"Required input port {node_id}.{port_id} has no binding or data edge",
                     node_id=node_id,
                     port=port_id,
+                    metadata={
+                        "input_port": {"node": node_id, "port": port_id},
+                        "available_sources": _available_sources_for_required_input(
+                            template,
+                            node_id,
+                            port_id,
+                        ),
+                    },
                 )
             )
         if node.callable_ref.kind == "workflow_function":
@@ -390,6 +415,81 @@ def _validate_workflow_input_binding(
     return issues
 
 
+def _data_edge_issue_metadata(edge: Any, *, expected_schema_path: str | None = None) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "edge_id": (
+            f"{edge.source.node}.{edge.source.port}->"
+            f"{edge.target.node}.{edge.target.port}"
+        ),
+        "source": {"node": edge.source.node, "port": edge.source.port},
+        "target": {"node": edge.target.node, "port": edge.target.port},
+    }
+    if expected_schema_path:
+        metadata["expected_schema_path"] = expected_schema_path
+    return metadata
+
+
+def _expected_output_schema_path(port_id: str) -> str:
+    return f"/properties/outputs/properties/{_json_pointer_token(port_id)}"
+
+
+def _json_pointer_token(value: str) -> str:
+    return value.replace("~", "~0").replace("/", "~1")
+
+
+def _available_sources_for_required_input(
+    template: WorkflowFunctionTemplate,
+    node_id: str,
+    port_id: str,
+) -> list[dict[str, str]]:
+    sources: list[dict[str, str]] = []
+    for edge in template.data_edges:
+        if edge.target.node == node_id and edge.target.port == port_id:
+            sources.append(
+                {
+                    "kind": "data_edge",
+                    "node": edge.source.node,
+                    "port": edge.source.port,
+                }
+            )
+    for edge in template.control_edges:
+        if edge.target != node_id or port_id != "main":
+            continue
+        if control_edge_forwards_main(template, edge):
+            sources.append({"kind": "control_main_default", "node": edge.source, "port": "main"})
+    for binding in template.workflow_input_bindings:
+        if binding.target.node == node_id and binding.target.port == port_id:
+            sources.append({"kind": "workflow_input", "port": binding.source_port})
+    return sources
+
+
+def _collect_control_data_semantic_warnings(
+    template: WorkflowFunctionTemplate,
+) -> list[ValidationIssue]:
+    pairs = data_edge_node_pairs(template)
+    issues: list[ValidationIssue] = []
+    for edge in template.control_edges:
+        if (edge.source, edge.target) not in pairs:
+            continue
+        issues.append(
+            ValidationIssue(
+                code="control_main_suppressed_by_data_edge",
+                message=(
+                    "Control edge will only order execution because the same source/target "
+                    "pair has an explicit data edge"
+                ),
+                node_id=edge.source,
+                severity="warning",
+                metadata={
+                    "source": edge.source,
+                    "target": edge.target,
+                    "suppressed_port": "main",
+                },
+            )
+        )
+    return issues
+
+
 def _collect_workflow_boundary_issues(
     template: WorkflowFunctionTemplate,
 ) -> list[ValidationIssue]:
@@ -440,7 +540,9 @@ def _collect_workflow_boundary_issues(
                 )
             )
             continue
-        if source_node.output_ports and binding.source.port not in source_node.output_ports:
+        source_ports = effective_output_ports(source_node)
+        has_source_contract = _has_declared_output_port_contract(source_node)
+        if has_source_contract and binding.source.port not in source_ports:
             issues.append(
                 ValidationIssue(
                     code="unbound_workflow_output",
@@ -510,7 +612,7 @@ def _collect_output_schema_port_issues(
                 )
             continue
         for port_id in non_main_ports:
-            if _output_schema_declares_port(node.output_schema, port_id):
+            if schema_declares_output_port(node.output_schema, port_id):
                 continue
             issues.append(
                 ValidationIssue(
@@ -522,21 +624,14 @@ def _collect_output_schema_port_issues(
                     ),
                     node_id=node.id,
                     port=port_id,
+                    severity=(
+                        "warning"
+                        if has_projected_output_ports(node.output_schema)
+                        else "error"
+                    ),
                 )
             )
     return issues
-
-
-def _output_schema_declares_port(schema: dict[str, Any], port_id: str) -> bool:
-    properties = schema.get("properties")
-    if not isinstance(properties, dict):
-        return False
-    outputs = properties.get("outputs")
-    if isinstance(outputs, dict):
-        output_properties = outputs.get("properties")
-        if isinstance(output_properties, dict) and port_id in output_properties:
-            return True
-    return port_id in properties
 
 
 def _port_type_compatible(source_type: str, target_type: str) -> bool:
@@ -577,8 +672,9 @@ def _collect_port_type_issues(
 
 
 def _resolve_output_port_type(node: NodeInvocationSpec, port_id: str) -> str:
-    if port_id in node.output_ports:
-        return node.output_ports[port_id].type
+    output_ports = effective_output_ports(node)
+    if port_id in output_ports:
+        return output_ports[port_id].type
     return "artifact"
 
 

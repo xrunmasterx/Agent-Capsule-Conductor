@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -10,11 +9,14 @@ import pytest
 from acc.models import AccError
 from acc.storage import (
     RUN_MARKER_FILENAME,
+    append_bytes_locked,
     append_jsonl_locked,
+    append_text_locked,
     claim_run,
     parse_legacy_run_dir,
     prepare_runtime_run_dir,
     validate_run_id,
+    write_bytes_atomic,
     write_json_atomic,
 )
 from acc.storage_refs import (
@@ -54,9 +56,9 @@ def test_claim_run_writes_marker_and_rejects_duplicate(tmp_path: Path) -> None:
     with pytest.raises(AccError, match="Run already exists"):
         claim_run(tmp_path, run_id="run_claimed")
 
-    with sqlite3.connect(tmp_path / ".acc" / "index.sqlite") as conn:
-        rows = conn.execute("SELECT object_ref, owner_ref FROM objects").fetchall()
-    assert rows == [("run:v1:run_claimed", "task:v1:task")]
+    refresh_marker = tmp_path / ".acc" / "storage" / "index_refresh_dirty.json"
+    assert json.loads(refresh_marker.read_text(encoding="utf-8"))["reason"] == "run_claimed"
+    assert not (tmp_path / ".acc" / "index.sqlite").exists()
 
 
 def test_prepare_runtime_run_dir_refuses_unknown_non_empty_directory(tmp_path: Path) -> None:
@@ -77,6 +79,60 @@ def test_write_json_atomic_writes_complete_json(tmp_path: Path) -> None:
 
     assert json.loads(path.read_text(encoding="utf-8")) == {"a": 1, "b": 2}
     assert list(path.parent.glob("*.tmp")) == []
+
+
+def test_write_bytes_atomic_cleans_temp_file_on_replace_failure(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "nested" / "payload.bin"
+    original_replace = Path.replace
+
+    def fail_replace(self: Path, target: Path) -> Path:
+        if self.parent == path.parent:
+            raise OSError("replace failed")
+        return original_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", fail_replace)
+
+    with pytest.raises(OSError, match="replace failed"):
+        write_bytes_atomic(path, b"payload")
+
+    assert list(path.parent.glob("*.tmp")) == []
+
+
+def test_write_bytes_atomic_retries_transient_replace_permission_error(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "nested" / "payload.bin"
+    original_replace = Path.replace
+    attempts = 0
+
+    def flaky_replace(self: Path, target: Path) -> Path:
+        nonlocal attempts
+        if self.parent == path.parent and attempts < 2:
+            attempts += 1
+            raise PermissionError("locked")
+        return original_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", flaky_replace)
+
+    write_bytes_atomic(path, b"payload")
+
+    assert path.read_bytes() == b"payload"
+    assert attempts == 2
+
+
+def test_append_text_and_bytes_locked_create_parent(tmp_path: Path) -> None:
+    text_path = tmp_path / "logs" / "events.jsonl"
+    bytes_path = tmp_path / "logs" / "stdout.log"
+
+    append_text_locked(text_path, "a\n")
+    append_bytes_locked(bytes_path, b"b\n")
+
+    assert text_path.read_text(encoding="utf-8") == "a\n"
+    assert bytes_path.read_bytes() == b"b\n"
 
 
 def test_append_jsonl_locked_allocates_unique_monotonic_sequences(tmp_path: Path) -> None:

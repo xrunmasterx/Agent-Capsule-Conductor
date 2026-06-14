@@ -89,9 +89,12 @@ def write_core_v2_run_summary(
     write_json(run_dir / "run_summary.json", summary.model_dump())
     if run_dir.parent.name == "runs":
         write_json(run_dir.parent / "index.json", rebuild_run_index(run_dir.parent).model_dump())
-        from acc.storage_index import rebuild_storage_index
+        from acc.storage_refresh import request_storage_index_refresh
 
-        rebuild_storage_index(run_dir.parent.parent)
+        request_storage_index_refresh(
+            run_dir.parent.parent,
+            reason="workflow_summary_updated",
+        )
 
 
 def node_summary_from_session_manifest(run_dir: Path, node_id: str) -> NodeRunSummary:
@@ -105,7 +108,7 @@ def node_summary_from_session_manifest(run_dir: Path, node_id: str) -> NodeRunSu
         session_id=manifest.get("session_id"),
         status=status,
         summary=str(error or ""),
-        run_dir=str(run_dir.resolve()),
+        run_dir=str(node_dir.resolve()),
         input_path=str((node_dir / "agent_payload.json").resolve())
         if (node_dir / "agent_payload.json").exists()
         else None,

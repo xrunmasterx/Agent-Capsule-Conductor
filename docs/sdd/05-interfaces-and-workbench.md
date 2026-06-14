@@ -740,6 +740,15 @@ Workbench canvas 与 runtime graph 的转换核心在 `canvasToWorkflowGraph()`�
 
 `stripRuntimeStateFromCanvas()` 和 `sanitizeWorkflowClassNodeUi()` 的存在说明 Workbench 必须主动清理 runtime state，避免把 `status`、`runId`、`sessionId`、`event_log`、`output_path` 等字段写入 template。
 
+Schema-driven data port 的 Workbench 规则：
+
+- Agent/Tool 节点的业务 output ports 来自 `output_schema.properties.outputs.properties`。
+- `main` output port 表示完整 `output.json`，不对应 `outputs.main` 字段。
+- 无 `output_schema.properties.outputs.properties` 的旧节点继续使用 legacy `output_ports`。
+- Input ports 不从 schema 推导；用户从 output port 拖到目标节点时，Workbench 可自动创建接收 input port。
+- Workflow container 的对外 outputs 只由 boundary data edge / `workflow_output_bindings` 决定，内部 agent schema fields 不能自动泄漏到父图。
+- schema 改名后，已存在的 data edge 要显示为 broken diagnostic，不应在保存或投影时被静默删除。
+
 ### 7.5 Run Submission
 
 当前 `runWorkflowGraph()` 的路径：

@@ -99,6 +99,41 @@ def test_legacy_run_index_missing_callable_id_loads_as_unknown(tmp_path: Path) -
     assert loaded.runs[0].nodes[0].callable_id == "unknown"
 
 
+def test_load_cached_run_index_does_not_write_on_read_path(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    runs_root = tmp_path / "runs"
+    runs_root.mkdir()
+    (runs_root / "index.json").write_text(
+        """
+{
+  "version": "2.0",
+  "runs": [
+    {
+      "run_id": "legacy_run",
+      "status": "success",
+      "run_dir": "runs/legacy_run",
+      "node_count": 0,
+      "failed_nodes": [],
+      "nodes": []
+    }
+  ]
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    def fail_write(*args, **kwargs) -> None:
+        raise AssertionError("load_or_rebuild_run_index must not write cached index")
+
+    monkeypatch.setattr("acc.run_index.write_json", fail_write)
+
+    loaded = load_or_rebuild_run_index(runs_root)
+
+    assert loaded.runs[0].run_id == "legacy_run"
+
+
 def test_invalid_cached_index_rebuilds_from_run_directories(tmp_path: Path) -> None:
     runs_root = tmp_path / "runs"
     run_dir = runs_root / "run_001"

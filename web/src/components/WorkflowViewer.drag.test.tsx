@@ -7,7 +7,6 @@ import {
   WorkspaceCanvas as _WorkspaceCanvas,
   createDataEdgeCommand as _createDataEdgeCommand,
   canvasEdgeToFlowEdge as _canvasEdgeToFlowEdge,
-  workflowInternalEdgePaths as _workflowInternalEdgePaths,
   resolveScopedConnection as _resolveScopedConnection,
   connectionCandidatesFromPendingEndpoint as _connectionCandidatesFromPendingEndpoint,
   connectionFromPendingEndpoint as _connectionFromPendingEndpoint,
@@ -22,6 +21,8 @@ import {
   deleteSelectionFromCanvas as _deleteSelectionFromCanvas,
   normalizeSelectionIntent as _normalizeSelectionIntent,
   isConnectionHandleForMode as _isConnectionHandleForMode,
+  outputPortsFromSchema as _outputPortsFromSchema,
+  addPortToDataConnectNode as _addPortToDataConnectNode,
 } from './WorkflowViewer';
 import { applyRunOverlayToCanvas, liveWorkflowRunFromEvents, runOverlayFromRun } from './workflow-viewer/runState';
 
@@ -63,13 +64,6 @@ const canvasEdgeToFlowEdge = _canvasEdgeToFlowEdge as unknown as (
   showDataPorts?: boolean,
   workflowContainerIds?: Set<string>,
 ) => Array<Record<string, unknown>>;
-const workflowInternalEdgePaths = _workflowInternalEdgePaths as unknown as (
-  workflow: Record<string, unknown>,
-  selection: Record<string, unknown>,
-  connectionMode: string,
-  edgeViewMode: string,
-  layoutOverlay?: Map<string, { x: number; y: number }>,
-) => Array<{ address: { scopeWorkflowId: string | null; edgeId: string }; edge: Record<string, unknown>; path: string }>;
 const resolveScopedConnection = _resolveScopedConnection as unknown as (
   canvas: ReturnType<typeof canvasFixture>,
   connection: Record<string, unknown>,
@@ -138,6 +132,17 @@ const isConnectionHandleForMode = _isConnectionHandleForMode as unknown as (
   handle: HTMLElement,
   mode: string,
 ) => boolean;
+const outputPortsFromSchema = _outputPortsFromSchema as unknown as (
+  outputSchema: Record<string, unknown> | undefined,
+  fallbackPorts: Array<Record<string, unknown>>,
+) => Array<Record<string, unknown>>;
+const addPortToDataConnectNode = _addPortToDataConnectNode as unknown as (
+  canvas: ReturnType<typeof canvasFixture>,
+  scopeWorkflowId: string | null,
+  nodeId: string,
+  direction: string,
+  requestedPortId: string,
+) => ReturnType<typeof canvasFixture>;
 
 function workflow(id: string, x: number, y: number, internalNodes: unknown[] = []) {
   return {
@@ -276,6 +281,83 @@ afterEach(() => {
 });
 
 describe('WorkspaceCanvas data edges', () => {
+  test('output schema outputs properties generate schema-derived output ports', () => {
+    const ports = outputPortsFromSchema(
+      {
+        type: 'object',
+        properties: {
+          outputs: {
+            type: 'object',
+            properties: {
+              alpha: { type: 'string', description: 'Alpha signal' },
+              beta: { type: 'array', items: { type: 'string' } },
+              gamma: { type: 'object', title: 'Gamma view' },
+            },
+            required: ['alpha', 'gamma'],
+            additionalProperties: false,
+          },
+        },
+        required: ['outputs'],
+        additionalProperties: false,
+      },
+      [{ id: 'stale', label: 'stale', direction: 'output' }],
+    );
+
+    expect(ports.map((port) => port.id)).toEqual(['main', 'alpha', 'beta', 'gamma']);
+    expect(ports.find((port) => port.id === 'alpha')).toMatchObject({
+      required: true,
+      jsonPath: '/outputs/alpha',
+      projectionSource: 'output_schema',
+      readonly: true,
+    });
+    expect(ports.find((port) => port.id === 'beta')).toMatchObject({
+      cardinality: 'many',
+      schemaType: 'array',
+    });
+  });
+
+  test('canvas projection and save payload use schema-derived output ports over stale snapshots', async () => {
+    const base = canvasFixture();
+    const canvas = {
+      ...base,
+      workflows: base.workflows.map((workflowValue) =>
+        workflowValue.id === 'source_agent'
+          ? {
+              ...workflowValue,
+              outputPorts: [{ id: 'stale_report', label: 'stale', direction: 'output' }],
+              outputSchema: {
+                type: 'object',
+                properties: {
+                  outputs: {
+                    type: 'object',
+                    properties: {
+                      report: { type: 'string', description: 'Final report' },
+                    },
+                    required: ['report'],
+                    additionalProperties: false,
+                  },
+                },
+                required: ['outputs'],
+                additionalProperties: false,
+              },
+            }
+          : workflowValue,
+      ),
+    };
+
+    renderCanvas(canvas, { type: 'workflow', id: 'source_agent' }, 'data');
+    await waitForFlowNodes();
+    const nodes = flowMock.props?.nodes as Array<{ id: string; data: { outputPorts?: Array<Record<string, unknown>> } }>;
+    const sourceNode = nodes.find((item) => item.id === 'source_agent');
+    expect(sourceNode?.data.outputPorts?.map((port) => port.id)).toEqual(['main', 'report']);
+
+    const graph = canvasToWorkflowGraph(canvas) as { nodes: Array<Record<string, unknown>> };
+    const savedSource = graph.nodes.find((node) => node.id === 'source_agent') as {
+      output_ports: Array<{ id: string }>;
+    };
+    expect(savedSource.output_ports.map((port) => port.id)).toEqual(['main', 'report']);
+  });
+
   test('CanvasAuthoringProposal adds existing callable nodes and serializes output_schema', () => {
     const canvas = { ...canvasFixture(), workflows: [], edges: [] };
     const callables = [callableFixture('research.codex'), callableFixture('review.generic', 'tool_class')];
@@ -1426,6 +1508,133 @@ describe('WorkspaceCanvas data edges', () => {
     ]);
   });
 
+  test('document release fallback creates target input port when data output is dropped on node body', async () => {
+    const base = canvasFixture();
+    const canvas = {
+      ...base,
+      workflows: base.workflows.map((workflowValue) =>
+        workflowValue.id === 'source_agent'
+          ? {
+              ...workflowValue,
+              outputPorts: [{ id: 'main', label: 'output', direction: 'output' }],
+              outputSchema: {
+                type: 'object',
+                properties: {
+                  outputs: {
+                    type: 'object',
+                    properties: {
+                      alpha_signal: { type: 'string', description: 'Alpha signal' },
+                    },
+                    required: ['alpha_signal'],
+                    additionalProperties: false,
+                  },
+                },
+                required: ['outputs'],
+                additionalProperties: false,
+              },
+            }
+          : workflowValue,
+      ),
+    };
+    const { onCanvasChange, onNotice } = renderCanvas(canvas, { type: 'workflow', id: 'source_agent' }, 'data');
+    await waitForFlowNodes();
+
+    const sourceHandle = document.createElement('div');
+    sourceHandle.className = 'react-flow__handle workflow-port-handle output source';
+    sourceHandle.setAttribute('data-nodeid', 'source_agent');
+    sourceHandle.setAttribute('data-handleid', 'source_agent:output:alpha_signal');
+    sourceHandle.setAttribute('data-acc-connection-mode', 'data');
+    sourceHandle.setAttribute('data-acc-connection-side', 'source');
+    const targetNodeBody = document.createElement('div');
+    targetNodeBody.className = 'react-flow__node';
+    targetNodeBody.setAttribute('data-id', 'target_flow');
+    document.body.append(sourceHandle, targetNodeBody);
+    const originalElementFromPoint = document.elementFromPoint;
+    Object.defineProperty(document, 'elementFromPoint', {
+      configurable: true,
+      value: vi.fn(() => targetNodeBody),
+    });
+
+    try {
+      fireEvent.pointerDown(sourceHandle, { button: 0, clientX: 10, clientY: 10 });
+      fireEvent.pointerUp(targetNodeBody, { button: 0, clientX: 200, clientY: 120 });
+
+      await waitFor(() => expect(onCanvasChange).toHaveBeenCalledTimes(2));
+    } finally {
+      Object.defineProperty(document, 'elementFromPoint', {
+        configurable: true,
+        value: originalElementFromPoint,
+      });
+      sourceHandle.remove();
+      targetNodeBody.remove();
+    }
+
+    const addPortUpdater = onCanvasChange.mock.calls[0][0] as (current: typeof canvas) => typeof canvas;
+    const addEdgeUpdater = onCanvasChange.mock.calls[1][0] as (current: typeof canvas) => typeof canvas;
+    const canvasWithInputPort = addPortUpdater(canvas);
+    const nextCanvas = addEdgeUpdater(canvasWithInputPort);
+    const target = nextCanvas.workflows.find((item) => item.id === 'target_flow');
+    expect(target?.inputPorts).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 'alpha_signal' })]),
+    );
+    expect(nextCanvas.edges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'data',
+          source: { workflowId: 'source_agent', portId: 'alpha_signal' },
+          target: { workflowId: 'target_flow', portId: 'alpha_signal' },
+        }),
+        expect.objectContaining({
+          kind: 'control',
+          source: { workflowId: 'source_agent' },
+          target: { workflowId: 'target_flow' },
+        }),
+      ]),
+    );
+    expect(onNotice).toHaveBeenCalledWith(expect.stringContaining('已创建输入端口 target_flow.alpha_signal'));
+  });
+
+  test('schema-derived data ports expand node height in data connection mode', async () => {
+    const outputFields = Object.fromEntries(
+      Array.from({ length: 7 }, (_, index) => [
+        `field_${index + 1}`,
+        { type: 'string', description: `Field ${index + 1}` },
+      ]),
+    );
+    const base = canvasFixture();
+    const canvas = {
+      ...base,
+      workflows: base.workflows.map((workflowValue) =>
+        workflowValue.id === 'source_agent'
+          ? {
+              ...workflowValue,
+              outputSchema: {
+                type: 'object',
+                properties: {
+                  outputs: {
+                    type: 'object',
+                    properties: outputFields,
+                    required: ['field_1'],
+                    additionalProperties: false,
+                  },
+                },
+                required: ['outputs'],
+                additionalProperties: false,
+              },
+            }
+          : workflowValue,
+      ),
+    };
+
+    renderCanvas(canvas, { type: 'workflow', id: 'source_agent' }, 'data');
+    await waitForFlowNodes();
+
+    const source = (flowMock.props?.nodes as Array<{ id: string; data?: { size?: { height?: number } } }>).find(
+      (node) => node.id === 'source_agent',
+    );
+    expect(source?.data?.size?.height).toBeGreaterThan(132);
+  });
+
   test('visible control handles start control connections even when global mode is data', async () => {
     const { canvas, onCanvasChange } = renderCanvas(canvasFixture(), { type: 'workflow', id: 'source_flow' }, 'data');
     await waitForFlowNodes();
@@ -2205,12 +2414,190 @@ describe('WorkspaceCanvas data edges', () => {
       expect.objectContaining({
         source: 'source_agent',
         target: 'target_flow',
+        type: 'step',
         sourceHandle: 'source_agent:output:main',
         targetHandle: 'target_flow:input:news_research',
         className: 'workflow-edge-data',
         markerEnd: expect.objectContaining({ type: 'arrowclosed' }),
       }),
     );
+  });
+
+  test('workflow internals remain projected when a root node is selected', async () => {
+    const base = canvasFixture();
+    const canvas = {
+      ...base,
+      workflows: base.workflows.map((item) =>
+        item.id === 'source_flow'
+          ? {
+              ...item,
+              internalNodes: [
+                ...item.internalNodes,
+                {
+                  id: 'reviewer',
+                  name: 'Reviewer',
+                  task: 'review',
+                  kind: 'Agent',
+                  status: 'not_run',
+                  callableId: 'fake-agent.generic',
+                  position: { x: 240, y: 72 },
+                },
+              ],
+              internalEdges: [
+                {
+                  id: 'control_codex_reviewer',
+                  kind: 'control',
+                  source: { workflowId: 'codex', portId: 'main' },
+                  target: { workflowId: 'reviewer', portId: 'main' },
+                },
+              ],
+            }
+          : item,
+      ),
+    };
+
+    renderCanvas(
+      canvas as ReturnType<typeof canvasFixture>,
+      { type: 'workflow', id: 'source_agent' },
+      'control',
+    );
+    await waitForFlowNodes();
+
+    const nodes = flowMock.props?.nodes as Array<Record<string, unknown>>;
+    const edges = flowMock.props?.edges as Array<Record<string, unknown>>;
+
+    expect(nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'source_flow', zIndex: 0 }),
+        expect.objectContaining({
+          id: 'source_flow__internal__codex',
+          parentId: 'source_flow',
+          zIndex: 4,
+        }),
+        expect.objectContaining({
+          id: 'source_flow__internal__reviewer',
+          parentId: 'source_flow',
+          zIndex: 4,
+        }),
+      ]),
+    );
+    expect(edges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'workflow:source_flow::control_codex_reviewer',
+          source: 'source_flow__internal__codex',
+          target: 'source_flow__internal__reviewer',
+          zIndex: 2,
+        }),
+      ]),
+    );
+  });
+
+  test('invalid data edge commit reports a notice instead of crashing the canvas', async () => {
+    const base = canvasWithTargetEvidencePort();
+    const canvas = {
+      ...base,
+      edges: [
+        {
+          id: 'data_source_flow_main_target_flow_evidence',
+          kind: 'data' as const,
+          source: { workflowId: 'source_flow', portId: 'main' },
+          target: { workflowId: 'target_flow', portId: 'evidence' },
+          materialization: 'copy' as const,
+        },
+      ],
+    };
+
+    const { onCanvasChange, onNotice, onSelect } = renderCanvas(
+      canvas as ReturnType<typeof canvasFixture>,
+      { type: 'task_canvas', taskId: 'acc_workspace_canvas' },
+      'data',
+    );
+    await waitForFlowNodes();
+
+    act(() => {
+      (flowMock.props?.onConnect as (connection: Record<string, unknown>) => void)({
+        source: 'source_agent',
+        sourceHandle: 'source_agent:output:main',
+        target: 'target_flow',
+        targetHandle: 'target_flow:input:evidence',
+      });
+    });
+
+    expect(onCanvasChange).not.toHaveBeenCalled();
+    expect(onSelect).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'edge' }));
+    expect(onNotice).toHaveBeenCalledWith('Target input port 已有 data edge: target_flow.evidence');
+  });
+
+  test('schema removed source output port marks data edge broken', async () => {
+    const baseCanvas = canvasFixture();
+    const canvas = {
+      ...baseCanvas,
+      workflows: baseCanvas.workflows.map((workflowValue) => {
+        if (workflowValue.id === 'source_agent') {
+          return {
+            ...workflowValue,
+            outputSchema: {
+              type: 'object',
+              properties: {
+                outputs: {
+                  type: 'object',
+                  properties: {
+                    valuation_view: { type: 'string' },
+                  },
+                },
+              },
+            },
+            outputPorts: [
+              { id: 'main', label: 'main', direction: 'output' },
+              { id: 'valuation_conclusion', label: 'stale', direction: 'output' },
+            ],
+          };
+        }
+        if (workflowValue.id === 'target_flow') {
+          return {
+            ...workflowValue,
+            inputPorts: [
+              { id: 'main', label: 'input', direction: 'input' },
+              { id: 'valuation_conclusion', label: 'valuation', direction: 'input' },
+            ],
+          };
+        }
+        return workflowValue;
+      }),
+      edges: [
+        {
+          id: 'data_stale_valuation',
+          kind: 'data' as const,
+          source: { workflowId: 'source_agent', portId: 'valuation_conclusion' },
+          target: { workflowId: 'target_flow', portId: 'valuation_conclusion' },
+          materialization: 'copy' as const,
+        },
+      ],
+    };
+
+    renderCanvas(
+      canvas as ReturnType<typeof canvasFixture>,
+      { type: 'edge', id: 'data_stale_valuation', scopeWorkflowId: null },
+      'data',
+    );
+    await waitForFlowNodes();
+
+    const edges = flowMock.props?.edges as Array<{
+      id: string;
+      className?: string;
+      data?: { diagnostics?: Array<Record<string, unknown>> };
+    }>;
+    const [edge] = edges.filter((item) => item.id === 'root::data_stale_valuation');
+    expect(edge.className).toContain('workflow-edge-broken');
+    expect(edge.data?.diagnostics).toEqual([
+      expect.objectContaining({
+        code: 'dangling_data_edge_source',
+        nodeId: 'source_agent',
+        portId: 'valuation_conclusion',
+        expectedSchemaPath: '/properties/outputs/properties/valuation_conclusion',
+      }),
+    ]);
   });
 
   test('agent nodes keep hidden data handles when data ports are not visible', () => {
@@ -2242,6 +2629,28 @@ describe('WorkspaceCanvas data edges', () => {
     expect(container.querySelector('#source_agent\\:output\\:main.workflow-port-handle.hidden.output')).toBeTruthy();
   });
 
+  test('manual data port creation is capped at ten ports per side', () => {
+    const canvas = {
+      ...canvasFixture(),
+      workflows: canvasFixture().workflows.map((item) =>
+        item.id === 'target_flow'
+          ? {
+              ...item,
+              inputPorts: Array.from({ length: 10 }, (_, index) => ({
+                id: `input_${index}`,
+                label: `input_${index}`,
+                direction: 'input',
+              })),
+            }
+          : item,
+      ),
+    };
+
+    expect(() => addPortToDataConnectNode(canvas, null, 'target_flow', 'input', 'input_10')).toThrow(
+      '数据端口最多支持 10 个',
+    );
+  });
+
   test('internal data edge projection connects to internal data port handles', () => {
     const edge = {
       id: 'data_source_internal_target_internal',
@@ -2263,6 +2672,7 @@ describe('WorkspaceCanvas data edges', () => {
       expect.objectContaining({
         source: 'source_flow__internal__source_internal',
         target: 'source_flow__internal__target_internal',
+        type: 'step',
         sourceHandle: 'source_flow__internal__source_internal:output:main',
         targetHandle: 'source_flow__internal__target_internal:input:sentiment_research',
         className: 'workflow-edge-data',
@@ -2291,9 +2701,10 @@ describe('WorkspaceCanvas data edges', () => {
       expect.objectContaining({
         source: 'source_flow',
         target: 'source_flow__internal__codex',
+        type: 'step',
         sourceHandle: 'source_flow:workflow-input-inner-source',
         targetHandle: 'source_flow__internal__codex:control:target',
-        className: 'workflow-edge-control workflow-edge-boundary-main',
+        className: 'workflow-edge-data workflow-edge-boundary-main',
       }),
     );
   });
@@ -2337,6 +2748,7 @@ describe('WorkspaceCanvas data edges', () => {
       expect.objectContaining({
         source: 'source_flow__workflow_inputs',
         target: 'codex',
+        type: 'step',
         sourceHandle: 'source_flow__workflow_inputs:output:main',
         targetHandle: 'codex:input:main',
         className: 'workflow-edge-data',
@@ -2365,9 +2777,10 @@ describe('WorkspaceCanvas data edges', () => {
       expect.objectContaining({
         source: 'source_flow__internal__codex',
         target: 'source_flow',
+        type: 'step',
         sourceHandle: 'source_flow__internal__codex:control:source',
         targetHandle: 'source_flow:workflow-output-inner-target',
-        className: 'workflow-edge-control workflow-edge-boundary-main',
+        className: 'workflow-edge-data workflow-edge-boundary-main',
       }),
     );
   });
@@ -2494,105 +2907,31 @@ describe('WorkspaceCanvas data edges', () => {
     renderCanvas(canvas as ReturnType<typeof canvasFixture>, { type: 'task_canvas', taskId: 'acc_workspace_canvas' }, 'control');
     await waitForFlowNodes();
 
-    const edges = flowMock.props?.edges as Array<{ id: string; data?: { edgeAddress?: { scopeWorkflowId: string | null; edgeId: string } } }>;
+    const edges = flowMock.props?.edges as Array<{
+      id: string;
+      source?: string;
+      target?: string;
+      sourceHandle?: string;
+      targetHandle?: string;
+      data?: { edgeAddress?: { scopeWorkflowId: string | null; edgeId: string } };
+    }>;
     const ids = edges.map((edgeValue) => edgeValue.id);
     expect(new Set(ids).size).toBe(ids.length);
-    expect(ids).toEqual([`root::${sharedEdgeId}`]);
+    expect(ids).toEqual([`root::${sharedEdgeId}`, `workflow:source_flow::${sharedEdgeId}`]);
     expect(edges.map((edgeValue) => edgeValue.data?.edgeAddress)).toEqual(
-      [{ scopeWorkflowId: null, edgeId: sharedEdgeId }],
+      [
+        { scopeWorkflowId: null, edgeId: sharedEdgeId },
+        { scopeWorkflowId: 'source_flow', edgeId: sharedEdgeId },
+      ],
     );
-    const childPaths = workflowInternalEdgePaths(
-      canvas.workflows.find((workflowValue) => workflowValue.id === 'source_flow') as unknown as Record<string, unknown>,
-      { type: 'task_canvas', taskId: 'acc_workspace_canvas' },
-      'control',
-      'all',
+    expect(edges.find((edgeValue) => edgeValue.id === `workflow:source_flow::${sharedEdgeId}`)).toEqual(
+      expect.objectContaining({
+        source: 'source_flow__internal__codex',
+        target: 'source_flow__internal__reviewer',
+        sourceHandle: 'source_flow__internal__codex:control:source',
+        targetHandle: 'source_flow__internal__reviewer:control:target',
+      }),
     );
-    expect(childPaths.map((item) => item.address)).toEqual([
-      { scopeWorkflowId: 'source_flow', edgeId: sharedEdgeId },
-    ]);
-  });
-
-  test('workflow internal edge paths use transient layout overlay while dragging', () => {
-    const base = canvasFixture();
-    const workflowValue = {
-      ...base.workflows.find((workflowItem) => workflowItem.id === 'source_flow')!,
-      internalNodes: [
-        ...(base.workflows.find((workflowItem) => workflowItem.id === 'source_flow')?.internalNodes || []),
-        {
-          id: 'reviewer',
-          name: 'Reviewer',
-          task: 'agent',
-          kind: 'Agent',
-          status: 'not_run',
-          callableId: 'fake-agent.generic',
-          position: { x: 260, y: 72 },
-        },
-      ],
-      internalEdges: [
-        {
-          id: 'control_codex_reviewer',
-          kind: 'control' as const,
-          source: { workflowId: 'codex' },
-          target: { workflowId: 'reviewer' },
-        },
-      ],
-    };
-
-    const committedPath = workflowInternalEdgePaths(
-      workflowValue as unknown as Record<string, unknown>,
-      { type: 'task_canvas', taskId: 'acc_workspace_canvas' },
-      'control',
-      'all',
-    )[0].path;
-    const draggingPath = workflowInternalEdgePaths(
-      workflowValue as unknown as Record<string, unknown>,
-      { type: 'task_canvas', taskId: 'acc_workspace_canvas' },
-      'control',
-      'all',
-      new Map([['codex', { x: 180, y: 140 }]]),
-    )[0].path;
-
-    expect(draggingPath).not.toEqual(committedPath);
-    expect(draggingPath.startsWith('M 456 ')).toBe(true);
-  });
-
-  test('workflow internal control edge paths anchor at the visual center of agent nodes', () => {
-    const base = canvasFixture();
-    const workflowValue = {
-      ...base.workflows.find((workflowItem) => workflowItem.id === 'source_flow')!,
-      internalNodes: [
-        ...(base.workflows.find((workflowItem) => workflowItem.id === 'source_flow')?.internalNodes || []),
-        {
-          id: 'reviewer',
-          name: 'Reviewer',
-          task: 'agent',
-          kind: 'Agent',
-          status: 'not_run',
-          callableId: 'fake-agent.generic',
-          position: { x: 360, y: 72 },
-        },
-      ],
-      internalEdges: [
-        {
-          id: 'control_codex_reviewer',
-          kind: 'control' as const,
-          source: { workflowId: 'codex' },
-          target: { workflowId: 'reviewer' },
-        },
-      ],
-    };
-
-    const [pathInfo] = workflowInternalEdgePaths(
-      workflowValue as unknown as Record<string, unknown>,
-      { type: 'task_canvas', taskId: 'acc_workspace_canvas' },
-      'control',
-      'all',
-    );
-    const pathNumbers = pathInfo.path.match(/-?\d+(?:\.\d+)?/g)?.map(Number);
-
-    expect(pathInfo.edge.kind).toBe('control');
-    expect(pathNumbers?.[1]).toBe(138);
-    expect(pathNumbers?.[7]).toBe(138);
   });
 
   test('scoped edge deletion does not remove an edge with the same id in another scope', () => {
@@ -2702,16 +3041,7 @@ describe('WorkspaceCanvas data edges', () => {
     await waitForFlowNodes();
 
     const edges = flowMock.props?.edges as Array<{ id: string }>;
-    expect(edges.filter((edge) => edge.id.includes('workflow_outputs'))).toHaveLength(0);
-    const workflowValue = canvas.workflows.find((workflow) => workflow.id === 'source_flow');
-    expect(workflowValue).toBeTruthy();
-    const childPaths = workflowInternalEdgePaths(
-      workflowValue as unknown as Record<string, unknown>,
-      { type: 'workflow', id: 'source_flow' },
-      'control',
-      'all',
-    );
-    expect(childPaths.filter((edge) => edge.address.edgeId.includes('workflow_outputs'))).toHaveLength(1);
+    expect(edges.filter((edge) => edge.id.includes('workflow_outputs'))).toHaveLength(1);
   });
 
   test('data mode creates a data edge by clicking output then input ports', async () => {

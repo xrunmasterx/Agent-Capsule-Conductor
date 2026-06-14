@@ -6,12 +6,15 @@ import { App } from './App';
 import {
   addCallableNodeFromPalette,
   addInternalNodeFromPalette,
+  addPortToDataConnectNode,
   addWorkflowFromPalette,
   assistantDisplayStatus,
   buildAssistantTranscriptItems,
   boundedLiveEvents,
   canvasToWorkflowGraph,
+  controlEdgeMainTransferMode,
   deleteSelectionFromCanvas,
+  createDataEdgeCommand,
   expandWorkflowToFitChildren,
   expandWorkflowToFitChildrenCenterLocked,
   filterLiveEvents,
@@ -27,6 +30,8 @@ import {
   nodeRunForInternalNode,
   normalizeSelectionIntent,
   promptFromInvocationInput,
+  deletePortFromDataConnectNode,
+  renamePortOnDataConnectNode,
   selectionCanBeDeleted,
   shouldDisconnectEdgeOnClick,
   staticInputFromInvocationInput,
@@ -38,12 +43,15 @@ import {
 const helpers: Record<string, any> = {
   addCallableNodeFromPalette,
   addInternalNodeFromPalette,
+  addPortToDataConnectNode,
   addWorkflowFromPalette,
   assistantDisplayStatus,
   buildAssistantTranscriptItems,
   boundedLiveEvents,
   canvasToWorkflowGraph,
+  controlEdgeMainTransferMode,
   deleteSelectionFromCanvas,
+  createDataEdgeCommand,
   expandWorkflowToFitChildren,
   expandWorkflowToFitChildrenCenterLocked,
   filterLiveEvents,
@@ -59,6 +67,8 @@ const helpers: Record<string, any> = {
   nodeRunForInternalNode,
   normalizeSelectionIntent,
   promptFromInvocationInput,
+  deletePortFromDataConnectNode,
+  renamePortOnDataConnectNode,
   selectionCanBeDeleted,
   shouldDisconnectEdgeOnClick,
   staticInputFromInvocationInput,
@@ -3161,6 +3171,119 @@ describe('Agent Callable Workbench editable UI', () => {
     }
   });
 
+  test('Loaded workspace demo data edges only reference declared ports', () => {
+    const canvas = workspaceDemoCanvas() as any;
+
+    function portIds(ports: Array<{ id?: string }> | undefined): Set<string> {
+      return new Set((ports || []).map((item) => item.id || 'main'));
+    }
+
+    function assertEdgesHavePorts(scopeLabel: string, nodes: any[], edges: any[]) {
+      const nodePorts = new Map<string, { inputs: Set<string>; outputs: Set<string> }>();
+      for (const node of nodes) {
+        nodePorts.set(node.id, {
+          inputs: portIds(node.inputPorts),
+          outputs: portIds(node.outputPorts),
+        });
+      }
+      for (const edge of edges.filter((item) => item.kind === 'data')) {
+        const sourcePorts = nodePorts.get(edge.source.workflowId)?.outputs;
+        const targetPorts = nodePorts.get(edge.target.workflowId)?.inputs;
+        expect(
+          sourcePorts?.has(edge.source.portId),
+          `${scopeLabel}: missing source port ${edge.source.workflowId}.${edge.source.portId}`,
+        ).toBe(true);
+        expect(
+          targetPorts?.has(edge.target.portId),
+          `${scopeLabel}: missing target port ${edge.target.workflowId}.${edge.target.portId}`,
+        ).toBe(true);
+      }
+    }
+
+    assertEdgesHavePorts('root', canvas.workflows, canvas.edges);
+    for (const workflow of canvas.workflows) {
+      if (!workflow.internalNodes?.length) {
+        continue;
+      }
+      assertEdgesHavePorts(
+        workflow.id,
+        [
+          {
+            id: `${workflow.id}__workflow_inputs`,
+            inputPorts: [],
+            outputPorts: workflow.inputPorts,
+          },
+          ...workflow.internalNodes,
+          {
+            id: `${workflow.id}__workflow_outputs`,
+            inputPorts: workflow.outputPorts,
+            outputPorts: [],
+          },
+        ],
+        workflow.internalEdges,
+      );
+    }
+  });
+
+  test('Data connection port helpers maintain edge contracts', () => {
+    const canvas: any = {
+      id: 'root',
+      name: 'Root',
+      rootWorkflowId: 'source',
+      workflows: [
+        {
+          id: 'source',
+          title: 'Source',
+          sourceKind: 'agent_session',
+          inputPorts: [{ id: 'main', direction: 'input' }],
+          outputPorts: [{ id: 'main', direction: 'output' }],
+          internalNodes: [],
+          internalEdges: [],
+          position: { x: 0, y: 0 },
+          size: { width: 300, height: 160 },
+          warnings: [],
+        },
+        {
+          id: 'target',
+          title: 'Target',
+          sourceKind: 'agent_session',
+          inputPorts: [{ id: 'main', direction: 'input' }],
+          outputPorts: [{ id: 'main', direction: 'output' }],
+          internalNodes: [],
+          internalEdges: [],
+          position: { x: 400, y: 0 },
+          size: { width: 300, height: 160 },
+          warnings: [],
+        },
+      ],
+      edges: [],
+    };
+
+    const withSourcePort = addPortToDataConnectNode(canvas, null, 'source', 'output', 'summary');
+    const withTargetPort = addPortToDataConnectNode(withSourcePort, null, 'target', 'input', 'research_input');
+    const connected = createDataEdgeCommand(withTargetPort, {
+      scopeWorkflowId: null,
+      sourceNodeId: 'source',
+      sourcePortId: 'summary',
+      targetNodeId: 'target',
+      targetPortId: 'research_input',
+      materialization: 'copy',
+    }).canvas;
+
+    const renamed = renamePortOnDataConnectNode(connected, null, 'source', 'output', 'summary', 'final_summary');
+    expect(renamed.edges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: { workflowId: 'source', portId: 'final_summary' },
+          target: { workflowId: 'target', portId: 'research_input' },
+        }),
+      ]),
+    );
+    expect(() =>
+      deletePortFromDataConnectNode(renamed, null, 'source', 'output', 'final_summary'),
+    ).toThrow(/仍有 data edge/);
+  });
+
   test('Selected workflow auto layout only changes that workflow internals', () => {
     const canvas: any = {
       id: 'root',
@@ -3346,6 +3469,10 @@ describe('Agent Callable Workbench editable UI', () => {
     expect(saveCall).toBeTruthy();
     const savedPayload = JSON.parse(String(saveCall?.[1]?.body));
     expect(savedPayload.graph.nodes).toHaveLength(7);
+    expect(savedPayload.graph.nodes.some((node: { id?: string }) => node.id === 'Research_Brief_Agent')).toBe(true);
+    expect(savedPayload.graph.nodes.some((node: { id?: string }) => node.id === 'Source_Data_Workflow')).toBe(true);
+    expect(savedPayload.graph.nodes.some((node: { id?: string }) => node.id === 'Market_Context_Agent')).toBe(false);
+    expect(savedPayload.graph.nodes.some((node: { id?: string }) => node.id === 'Target_Profile_Agent')).toBe(false);
     expect(savedPayload.graph.nodes.some((node: { kind?: string }) => node.kind === 'agent_session')).toBe(true);
     expect(savedPayload.graph.nodes.some((node: { kind?: string }) => node.kind === 'workflow')).toBe(true);
     expect(savedPayload.graph.nodes.every((node: { input_ports?: unknown[] }) => (node.input_ports || []).length > 0)).toBe(
@@ -3358,16 +3485,92 @@ describe('Agent Callable Workbench editable UI', () => {
     expect(savedPayload.graph.data_edges).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          from: { node: 'Target_Profile_Agent', port: 'main' },
-          to: { node: demoWorkflowNodeId, port: 'target' },
+          from: { node: 'Research_Brief_Agent', port: 'target_profile' },
+          to: { node: 'Source_Data_Workflow', port: 'target' },
+        }),
+        expect.objectContaining({
+          from: { node: 'Source_Data_Workflow', port: 'verified_data_pack' },
+          to: { node: demoWorkflowNodeId, port: 'verified_data' },
+        }),
+        expect.objectContaining({
+          from: { node: 'Research_Brief_Agent', port: 'constraints' },
+          to: { node: 'Valuation_Workflow', port: 'constraints' },
+        }),
+        expect.objectContaining({
+          from: { node: 'Research_Brief_Agent', port: 'watchlist_seed' },
+          to: { node: 'Risk_Catalyst_Workflow', port: 'watchlist' },
         }),
         expect.objectContaining({
           from: { node: demoWorkflowNodeId, port: 'main' },
           to: { node: 'Report_Workflow', port: 'fundamentals' },
         }),
         expect.objectContaining({
-          from: { node: 'Report_Workflow', port: 'main' },
+          from: { node: 'Report_Workflow', port: 'report' },
           to: { node: 'Final_Review_Agent', port: 'report' },
+        }),
+      ]),
+    );
+    expect(savedPayload.graph.data_edges).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          from: { node: 'Valuation_Workflow', port: 'scenario_table' },
+        }),
+      ]),
+    );
+    const reportWorkflow = savedPayload.graph.nodes.find(
+      (node: { id?: string }) => node.id === 'Report_Workflow',
+    );
+    const evidenceMapper = reportWorkflow.ui.internal_nodes.find(
+      (node: { id?: string }) => node.id === 'evidence_mapper_agent',
+    );
+    expect(evidenceMapper.inputPorts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'main' }),
+        expect.objectContaining({ id: 'evidence_pack' }),
+        expect.objectContaining({ id: 'valuation' }),
+        expect.objectContaining({ id: 'source_register' }),
+      ]),
+    );
+    const valuationWorkflow = savedPayload.graph.nodes.find(
+      (node: { id?: string }) => node.id === 'Valuation_Workflow',
+    );
+    const valuationSynthesis = valuationWorkflow.ui.internal_nodes.find(
+      (node: { id?: string }) => node.id === 'valuation_synthesis_agent',
+    );
+    expect(valuationSynthesis.outputSchema.required).toEqual(
+      expect.arrayContaining(['valuation_conclusion', 'base_case', 'bull_case', 'bear_case', 'risk_reward_view']),
+    );
+    const reportCompiler = reportWorkflow.ui.internal_nodes.find(
+      (node: { id?: string }) => node.id === 'report_compiler_agent',
+    );
+    expect(reportCompiler.outputSchema.properties.report.required).toEqual(
+      expect.arrayContaining(['executive_summary', 'investment_stance', 'valuation_conclusion', 'risk_reward', 'monitoring_plan']),
+    );
+    expect(reportWorkflow.ui.internal_edges).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          from: { node: 'investment_thesis_agent', port: 'main' },
+          to: { node: 'evidence_mapper_agent', port: 'thesis' },
+        }),
+      ]),
+    );
+    expect(savedPayload.graph.workflow_output_bindings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: { node: 'Report_Workflow', port: 'report' },
+          target_port: 'main',
+        }),
+        expect.objectContaining({
+          source: { node: 'Final_Review_Agent', port: 'main' },
+          target_port: 'review',
+        }),
+        expect.objectContaining({
+          source: { node: 'Source_Data_Workflow', port: 'source_register' },
+          target_port: 'source_register',
+        }),
+        expect.objectContaining({
+          source: { node: 'Valuation_Workflow', port: 'main' },
+          target_port: 'valuation',
         }),
       ]),
     );
@@ -3380,6 +3583,26 @@ describe('Agent Callable Workbench editable UI', () => {
     expect(JSON.stringify(savedPayload.graph)).not.toContain('F:\\UE5_Project_A');
     expect(JSON.stringify(savedPayload.graph)).not.toContain('binding_ref');
     expect(savedPayload.graph.nodes.every((node: { status?: unknown }) => node.status === undefined)).toBe(true);
+  });
+
+  test('Control edge transfer mode reflects same-pair data edge override', () => {
+    const canvas = workspaceDemoCanvas() as any;
+    const rootControl = canvas.edges.find(
+      (edge: any) =>
+        edge.kind === 'control' &&
+        edge.source.workflowId === 'Research_Brief_Agent' &&
+        edge.target.workflowId === 'Source_Data_Workflow',
+    );
+    const sourceDataWorkflow = canvas.workflows.find((workflow: any) => workflow.id === 'Source_Data_Workflow');
+    const internalControl = sourceDataWorkflow.internalEdges.find(
+      (edge: any) =>
+        edge.kind === 'control' &&
+        edge.source.workflowId === 'company_disclosure_agent' &&
+        edge.target.workflowId === 'data_quality_synthesis_agent',
+    );
+
+    expect(controlEdgeMainTransferMode(canvas, null, rootControl).label).toBe('仅控制顺序');
+    expect(controlEdgeMainTransferMode(canvas, 'Source_Data_Workflow', internalControl).label).toBe('传递 main');
   });
 
   test('Workflow binding dialog fills workspace root from native directory selection', async () => {
@@ -3684,6 +3907,10 @@ describe('Agent Callable Workbench editable UI', () => {
           to: 'fundamentals_synthesis_agent',
           context: 'none',
         }),
+      ]),
+    );
+    expect(researchFlow.ui.internal_edges).not.toEqual(
+      expect.arrayContaining([
         expect.objectContaining({
           from: { node: 'business_model_agent', port: 'main' },
           to: { node: 'fundamentals_synthesis_agent', port: 'business' },
@@ -3695,9 +3922,7 @@ describe('Agent Callable Workbench editable UI', () => {
     );
     expect(researchSynthesis.inputPorts).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ id: 'business' }),
-        expect.objectContaining({ id: 'financials' }),
-        expect.objectContaining({ id: 'industry' }),
+        expect.objectContaining({ id: 'main' }),
       ]),
     );
   });
@@ -3961,6 +4186,15 @@ describe('Agent Callable Workbench editable UI', () => {
     const savedPayload = JSON.parse(String(saveCall?.[1]?.body));
     const runPayload = JSON.parse(String(runCall?.[1]?.body));
     expect(savedPayload.graph.nodes).toHaveLength(7);
+    expect(savedPayload.graph.nodes.some((node: { id?: string }) => node.id === 'Source_Data_Workflow')).toBe(true);
+    expect(savedPayload.graph.workflow_output_bindings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: { node: 'Report_Workflow', port: 'report' },
+          target_port: 'main',
+        }),
+      ]),
+    );
     expect(savedPayload.graph.data_edges.length).toBeGreaterThan(0);
     expect(savedPayload.graph.control_edges.length).toBeGreaterThan(0);
     expect(workflowSaveCalls).toHaveLength(2);
@@ -4035,7 +4269,7 @@ describe('Agent Callable Workbench editable UI', () => {
     expect(nodeOverlay).toHaveTextContent('系统提示词');
     expect(within(nodeOverlay).queryByRole('textbox', { name: /系统提示词/ })).not.toBeInTheDocument();
     expect(nodeOverlay).toHaveTextContent('User Prompt');
-    expect(nodeOverlay).toHaveTextContent('输出信息到下一节点');
+    expect(nodeOverlay).toHaveTextContent('控制线传递完整输出');
     expect(nodeOverlay).not.toHaveTextContent('通过控制线传递 main 输出');
     expect(nodeOverlay).not.toHaveTextContent('运行状态');
     expect(nodeOverlay).not.toHaveTextContent('Scope');

@@ -298,6 +298,7 @@ def test_storage_rebuild_index_includes_legacy_authoring_session(tmp_path: Path)
 def test_storage_doctor_reports_missing_and_stale_sqlite_rows(tmp_path: Path) -> None:
     _run(tmp_path, "run_indexed", "success", ended_days_ago=1)
     service = StorageGCService(tmp_path)
+    service.rebuild_index()
     (tmp_path / ".acc" / "index.sqlite").unlink()
 
     missing_report = service.doctor()

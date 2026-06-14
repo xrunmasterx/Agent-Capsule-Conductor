@@ -301,6 +301,7 @@ class RunEventProjectionService:
 
     def _allowed_agent_session_roots(self, node_dir: Path) -> list[Path]:
         roots = [
+            (node_dir.resolve() / "sessions").resolve(),
             (self.run_dir.parent / "_agent_sessions" / self.run_id).resolve(),
             (self.run_dir / "_agent_sessions").resolve(),
         ]

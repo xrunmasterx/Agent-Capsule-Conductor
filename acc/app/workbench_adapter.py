@@ -13,15 +13,19 @@ from acc.app.workflow_normalization import (
 )
 from acc.callable_registry import CallableRegistry
 from acc.callable_runner import normalize_output_schema_for_structured_output
-from acc.models import CORE_V2_SCHEMA_VERSION
-from acc.engine import is_clean_workflow_payload, parse_workflow_function_template
-from acc.engine.workflow_validation import collect_callable_validation_issues
-from acc.store import is_clean_workflow_path
 from acc.constants import (
     CODEX_DANGER_FULL_ACCESS,
     CODEX_EXECUTION_MODES,
     CODEX_LOCAL_READONLY_NO_SANDBOX,
 )
+from acc.engine import is_clean_workflow_payload, parse_workflow_function_template
+from acc.engine.schema_ports import (
+    has_projected_output_ports,
+    project_output_port_contracts,
+)
+from acc.engine.workflow_validation import collect_callable_validation_issues
+from acc.models import CORE_V2_SCHEMA_VERSION
+from acc.store import is_clean_workflow_path
 from acc.utils import AccError
 
 CANONICAL_TEMPLATE_KEYS = {
@@ -60,6 +64,11 @@ CANONICAL_NODE_KEYS = {
     "metadata",
 }
 
+REPAIRABLE_PORT_ISSUE_CODES = {
+    "dangling_data_edge_source",
+    "dangling_data_edge_target",
+}
+
 EXECUTABLE_UI_NODE_KEYS = {
     "kind",
     "label",
@@ -88,6 +97,7 @@ def canonicalize_workbench_workflow_payload(
     payload: dict[str, Any],
     *,
     source_path: Path | None = None,
+    allow_repairable_port_issues: bool = False,
 ) -> dict[str, Any]:
     """Return a canonical Core v2 workflow payload from a Workbench draft or payload."""
 
@@ -96,7 +106,11 @@ def canonicalize_workbench_workflow_payload(
         canonical = normalize_core_v2_payload(copied, source_path=source_path)
     else:
         canonical = workbench_draft_to_core_v2_payload(copied, source_path=source_path)
-    validate_canonical_workflow_payload(canonical, source_path=source_path)
+    validate_canonical_workflow_payload(
+        canonical,
+        source_path=source_path,
+        allow_repairable_port_issues=allow_repairable_port_issues,
+    )
     return canonical
 
 
@@ -252,6 +266,7 @@ def validate_canonical_workflow_payload(
     payload: dict[str, Any],
     *,
     source_path: Path | None,
+    allow_repairable_port_issues: bool = False,
 ) -> None:
     template = parse_workflow_function_template(payload, source_path=source_path)
     errors = [
@@ -259,6 +274,8 @@ def validate_canonical_workflow_payload(
         for issue in collect_callable_validation_issues(template)
         if issue.severity == "error"
     ]
+    if allow_repairable_port_issues:
+        errors = [issue for issue in errors if issue.code not in REPAIRABLE_PORT_ISSUE_CODES]
     if not errors:
         return
     details = "; ".join(f"{issue.code}: {issue.message}" for issue in errors)
@@ -350,9 +367,18 @@ def workbench_draft_to_core_v2_payload(
         raise AccError("Workbench workflow draft id is required")
     copy_optional_ports(draft, canonical, "exposed_inputs")
     copy_optional_ports(draft, canonical, "exposed_outputs")
+    has_explicit_workflow_outputs = isinstance(draft.get("workflow_output_bindings"), list)
     for key in ("workflow_input_bindings", "workflow_output_bindings"):
         if isinstance(draft.get(key), list):
             canonical[key] = draft[key]
+    if not has_explicit_workflow_outputs:
+        root_outputs = root_workflow_output_bindings(canonical)
+        if root_outputs:
+            canonical["workflow_output_bindings"] = root_outputs
+            canonical.setdefault(
+                "exposed_outputs",
+                root_workflow_exposed_outputs(root_outputs),
+            )
     policies = draft.get("policies") or draft.get("policy")
     if isinstance(policies, dict):
         canonical["policies"] = {
@@ -792,9 +818,16 @@ def normalize_core_v2_node(
             **callable_ref,
             "id": workflow_function_ref(str(callable_ref.get("id") or ""), source_path=source_path),
         }
+    output_schema = canonical.get("output_schema")
+    if isinstance(output_schema, dict):
+        canonical["output_schema"] = normalize_output_schema_for_structured_output(output_schema)
     if "input_ports" in node or "output_ports" in node:
-        canonical["ports"] = ports_from_legacy_fields(node)
+        canonical["ports"] = ports_from_legacy_fields(
+            node,
+            output_schema=canonical.get("output_schema"),
+        )
     canonical.setdefault("ports", {"inputs": {}, "outputs": {}})
+    refresh_schema_derived_output_ports(canonical)
     return prune_none(canonical)
 
 
@@ -822,10 +855,11 @@ def workbench_node_to_core_v2_node(
             "workbench_kind": str(node.get("kind") or ""),
         }
     )
+    output_schema = normalized_output_schema_from_node(node)
     canonical: dict[str, Any] = {
         "id": node_id,
         "callable_ref": callable_ref,
-        "ports": ports_from_legacy_fields(node),
+        "ports": ports_from_legacy_fields(node, output_schema=output_schema),
         "overrides": {"static_input": static_input},
         "prompt_policy": {"user_prompt": user_prompt} if isinstance(user_prompt, str) else {},
         "input_bindings": input_bindings_from_mapping(node),
@@ -843,9 +877,9 @@ def workbench_node_to_core_v2_node(
     ):
         if key in node:
             canonical[key] = node[key]
-    output_schema = node.get("output_schema") or node.get("outputSchema")
     if isinstance(output_schema, dict):
-        canonical["output_schema"] = normalize_output_schema_for_structured_output(output_schema)
+        canonical["output_schema"] = output_schema
+        refresh_schema_derived_output_ports(canonical)
     if callable_ref["kind"] == "workflow_function" and not canonical.get(
         "workflow_call_output_bindings"
     ):
@@ -858,6 +892,13 @@ def workbench_node_to_core_v2_node(
             }
         ]
     return prune_none(canonical)
+
+
+def normalized_output_schema_from_node(node: dict[str, Any]) -> dict[str, Any] | None:
+    output_schema = node.get("output_schema") or node.get("outputSchema")
+    if not isinstance(output_schema, dict):
+        return None
+    return normalize_output_schema_for_structured_output(output_schema)
 
 
 def invocation_static_input(input_value: dict[str, Any]) -> dict[str, Any]:
@@ -923,10 +964,48 @@ def workflow_function_ref(ref_id: str, *, source_path: Path | None) -> str:
     return ref_id
 
 
-def ports_from_legacy_fields(node: dict[str, Any]) -> dict[str, dict[str, Any]]:
+def ports_from_legacy_fields(
+    node: dict[str, Any],
+    *,
+    output_schema: dict[str, Any] | None = None,
+) -> dict[str, dict[str, Any]]:
     return {
         "inputs": ports_from_value(node.get("input_ports"), "input"),
-        "outputs": ports_from_value(node.get("output_ports"), "output"),
+        "outputs": schema_output_ports_to_wire(output_schema)
+        or ports_from_value(node.get("output_ports"), "output"),
+    }
+
+
+def refresh_schema_derived_output_ports(node: dict[str, Any]) -> None:
+    callable_ref = node.get("callable_ref")
+    if not isinstance(callable_ref, dict) or callable_ref.get("kind") != "agent_class":
+        return
+    ports = node.get("ports")
+    if not isinstance(ports, dict):
+        ports = {}
+        node["ports"] = ports
+    output_schema = node.get("output_schema")
+    if isinstance(output_schema, dict):
+        outputs = schema_output_ports_to_wire(output_schema)
+        if outputs:
+            ports["outputs"] = outputs
+
+
+def schema_output_ports_to_wire(
+    output_schema: dict[str, Any] | None,
+) -> dict[str, dict[str, Any]] | None:
+    if not has_projected_output_ports(output_schema):
+        return None
+    return {
+        port_id: {
+            "type": port.type,
+            "required": port.required,
+            "cardinality": port.cardinality,
+        }
+        for port_id, port in project_output_port_contracts(
+            output_schema,
+            include_main=True,
+        ).items()
     }
 
 
@@ -1001,6 +1080,48 @@ def copy_optional_ports(source: dict[str, Any], target: dict[str, Any], key: str
         }
     elif isinstance(value, dict):
         target[key] = value
+
+
+def root_workflow_output_bindings(canonical: dict[str, Any]) -> list[dict[str, Any]]:
+    metadata = canonical.get("metadata")
+    if not isinstance(metadata, dict):
+        return []
+    root_id = metadata.get("root_workflow_id")
+    if not isinstance(root_id, str) or not root_id:
+        return []
+    root_node = next(
+        (
+            node
+            for node in canonical.get("nodes") or []
+            if isinstance(node, dict) and node.get("id") == root_id
+        ),
+        None,
+    )
+    if not isinstance(root_node, dict):
+        return []
+    outputs = (root_node.get("ports") or {}).get("outputs")
+    if not isinstance(outputs, dict):
+        return []
+    return [
+        {
+            "source": {"node": root_id, "port": str(port_id)},
+            "target_port": str(port_id),
+            "materialization": "copy",
+            "required": bool(port.get("required", True)) if isinstance(port, dict) else True,
+        }
+        for port_id, port in outputs.items()
+    ]
+
+
+def root_workflow_exposed_outputs(bindings: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {
+        str(binding["target_port"]): {
+            "type": "artifact",
+            "required": bool(binding.get("required", True)),
+            "cardinality": "one",
+        }
+        for binding in bindings
+    }
 
 
 def safe_metadata(value: Any) -> dict[str, Any]:

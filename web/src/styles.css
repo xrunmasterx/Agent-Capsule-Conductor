@@ -3144,20 +3144,22 @@ small {
   will-change: transform;
 }
 
-.workflow-control-handle {
+.workflow-control-handle,
+.workflow-port-handle {
   --handle-fill: #4f5f6d;
   --handle-border: #ffffff;
   --handle-shadow: rgb(79 95 109 / 18%);
   width: 22px;
   height: 22px;
   border: 0;
-  background: transparent;
+  background: transparent !important;
   box-shadow: none;
   visibility: visible;
-  z-index: 4;
+  z-index: 8;
 }
 
-.workflow-control-handle::before {
+.workflow-control-handle::before,
+.workflow-port-handle::before {
   content: "";
   position: absolute;
   inset: 3px;
@@ -3165,6 +3167,11 @@ small {
   border-radius: 999px;
   background: var(--handle-fill);
   box-shadow: 0 0 0 2px var(--handle-shadow);
+}
+
+.workflow-control-handle:hover::before,
+.workflow-port-handle:hover::before {
+  box-shadow: 0 0 0 3px var(--handle-shadow), 0 0 14px var(--handle-shadow);
 }
 
 .acc-connect-hitbox {
@@ -3210,50 +3217,6 @@ small {
 
 .workspace-canvas-surface .react-flow__nodes {
   z-index: 3;
-}
-
-.workflow-internal-edge-layer {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  overflow: visible;
-}
-
-.workflow-internal-edge-visible {
-  fill: none;
-  stroke: #f8fafc;
-  stroke-width: 2.8;
-  stroke-linecap: round;
-  filter: drop-shadow(0 0 8px rgb(255 255 255 / 22%));
-  pointer-events: none;
-}
-
-.workflow-internal-edge-data .workflow-internal-edge-visible {
-  stroke-dasharray: 8 6;
-}
-
-.workflow-internal-edge-boundary-main .workflow-internal-edge-visible {
-  stroke-dasharray: none;
-}
-
-.workflow-internal-edge-visible.selected {
-  stroke: var(--wb-selection, #16b89e);
-  stroke-width: 4;
-  stroke-dasharray: 14 8;
-  animation: acc-edge-flow 1.1s linear infinite;
-  filter: drop-shadow(0 0 10px var(--wb-selection-glow, rgb(22 184 158 / 30%)));
-}
-
-.workflow-internal-edge-hit {
-  fill: none;
-  stroke: transparent;
-  stroke-width: 18;
-  stroke-linecap: round;
-  cursor: pointer;
-  pointer-events: stroke;
 }
 
 .acc-connect-hitbox.source,
@@ -3326,6 +3289,24 @@ small {
   right: 0;
   top: 50%;
   transform: translate(50%, -50%);
+}
+
+.workflow-container > .workflow-port-handle.input {
+  left: -11px;
+  right: auto;
+}
+
+.workflow-container > .workflow-port-handle.output {
+  left: auto;
+  right: -11px;
+}
+
+.workflow-container > .workflow-port-click-target.input {
+  left: -30px;
+}
+
+.workflow-container > .workflow-port-click-target.output {
+  right: -30px;
 }
 
 .agent-tool-node > .agent-control-handle {
@@ -3561,19 +3542,8 @@ small {
 }
 
 .workflow-port-handle {
-  width: 14px;
-  height: 14px;
-  border: 2px solid #ffffff !important;
-  box-shadow: 0 0 0 2px rgb(29 120 214 / 22%);
-  z-index: 8;
-}
-
-.workflow-port-handle.input {
-  background: #0b84ff !important;
-}
-
-.workflow-port-handle.output {
-  background: #0b84ff !important;
+  --handle-fill: #0b84ff;
+  --handle-shadow: rgb(11 132 255 / 24%);
 }
 
 .workflow-port-handle.hidden {
@@ -3582,18 +3552,18 @@ small {
 }
 
 .agent-tool-node > .workflow-port-handle.input {
-  left: -7px;
+  left: -11px;
 }
 
 .agent-tool-node > .workflow-port-handle.output {
-  right: -7px;
+  right: -11px;
 }
 
 .workflow-port-click-target {
   position: absolute;
   z-index: 7;
-  width: 32px;
-  height: 32px;
+  width: 38px;
+  height: 38px;
   padding: 0;
   border: 0;
   border-radius: 999px;
@@ -3603,11 +3573,11 @@ small {
 }
 
 .workflow-port-click-target.input {
-  left: -23px;
+  left: -30px;
 }
 
 .workflow-port-click-target.output {
-  right: -23px;
+  right: -30px;
 }
 
 .workflow-port-click-target:hover,
@@ -3646,25 +3616,32 @@ small {
   transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
 }
 
-.agent-tool-node.data-ports-visible::before,
-.agent-tool-node.data-ports-visible::after {
+.workflow-port-label {
   position: absolute;
-  left: 10px;
-  right: 10px;
-  z-index: 0;
-  height: 1px;
-  content: "";
+  z-index: 6;
+  max-width: 104px;
+  padding: 2px 6px;
+  border: 1px solid rgb(11 132 255 / 24%);
+  border-radius: 999px;
+  background: rgb(11 18 27 / 82%);
+  color: #d8ecff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   pointer-events: none;
+  transform: translateY(-50%);
 }
 
-.agent-tool-node.data-ports-visible::before {
-  top: 43px;
-  background: linear-gradient(90deg, rgb(88 102 117 / 22%), transparent 28%, transparent 72%, rgb(88 102 117 / 22%));
+.workflow-port-label.input {
+  left: 12px;
 }
 
-.agent-tool-node.data-ports-visible::after {
-  top: 88px;
-  background: linear-gradient(90deg, rgb(29 120 214 / 28%), transparent 28%, transparent 72%, rgb(29 120 214 / 28%));
+.workflow-port-label.output {
+  right: 12px;
+  text-align: right;
 }
 
 .agent-tool-node.tool {
@@ -3675,6 +3652,30 @@ small {
 .agent-tool-node.selected {
   border-color: #16b89e;
   box-shadow: 0 0 0 2px rgb(22 184 158 / 22%), 0 18px 42px rgb(0 0 0 / 34%);
+}
+
+.agent-tool-node.data-drop-target,
+.workflow-container.data-drop-target {
+  border-color: #16b89e;
+  box-shadow: 0 0 0 3px rgb(22 184 158 / 28%), 0 18px 42px rgb(0 0 0 / 34%);
+}
+
+.data-drop-hint {
+  position: absolute;
+  right: 12px;
+  bottom: 10px;
+  z-index: 9;
+  max-width: min(260px, calc(100% - 24px));
+  padding: 5px 8px;
+  border: 1px solid rgb(22 184 158 / 42%);
+  border-radius: 7px;
+  color: #8ff5df;
+  background: rgb(12 18 23 / 88%);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  pointer-events: none;
 }
 
 .agent-tool-node:active {
@@ -3859,6 +3860,11 @@ small {
   stroke: #f8fafc;
   stroke-dasharray: 8 6;
   stroke-linecap: round;
+}
+
+.workflow-edge-broken .react-flow__edge-path {
+  stroke: #ef4444;
+  stroke-dasharray: 3 5;
 }
 
 .workflow-edge-control .react-flow__edge-path {
@@ -5289,10 +5295,16 @@ small {
 }
 
 .graph-workbench-v2 .workflow-edge-data .react-flow__edge-path {
-  stroke: #f8fafc;
-  filter: drop-shadow(0 0 5px rgb(248 250 252 / 28%));
+  stroke: #38bdf8;
+  filter: drop-shadow(0 0 5px rgb(56 189 248 / 28%));
   stroke-dasharray: 8 6;
   stroke-linecap: round;
+}
+
+.graph-workbench-v2 .workflow-edge-broken .react-flow__edge-path {
+  stroke: #ef4444;
+  filter: drop-shadow(0 0 7px rgb(239 68 68 / 36%));
+  stroke-dasharray: 3 5;
 }
 
 .graph-workbench-v2 .react-flow__edge.selected .react-flow__edge-path {

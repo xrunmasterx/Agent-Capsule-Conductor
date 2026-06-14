@@ -16,44 +16,15 @@
       "to": "risk_synthesis_agent"
     }
   ],
-  "data_edges": [
-    {
-      "materialization": "copy",
-      "source": {
-        "node": "macro_risk_agent",
-        "port": "main"
-      },
-      "target": {
-        "node": "risk_synthesis_agent",
-        "port": "macro_risks"
-      }
-    },
-    {
-      "materialization": "copy",
-      "source": {
-        "node": "company_risk_agent",
-        "port": "main"
-      },
-      "target": {
-        "node": "risk_synthesis_agent",
-        "port": "company_risks"
-      }
-    },
-    {
-      "materialization": "copy",
-      "source": {
-        "node": "catalyst_agent",
-        "port": "main"
-      },
-      "target": {
-        "node": "risk_synthesis_agent",
-        "port": "catalysts"
-      }
-    }
-  ],
+  "data_edges": [],
   "description": "Child workflow compiled from Workbench container Risk_Catalyst_Workflow.",
   "exposed_inputs": {
     "fundamentals": {
+      "cardinality": "one",
+      "required": true,
+      "type": "artifact"
+    },
+    "verified_data": {
       "cardinality": "one",
       "required": true,
       "type": "artifact"
@@ -88,32 +59,32 @@
           "id": "macro_risk_agent",
           "label": "宏观与监管风险",
           "position": {
-            "x": 137.0,
-            "y": 146.0
+            "x": 137,
+            "y": 146
           }
         },
         {
           "id": "company_risk_agent",
           "label": "公司特有风险",
           "position": {
-            "x": 137.0,
-            "y": 332.0
+            "x": 137,
+            "y": 332
           }
         },
         {
           "id": "catalyst_agent",
           "label": "催化剂扫描",
           "position": {
-            "x": 137.0,
-            "y": 518.0
+            "x": 137,
+            "y": 518
           }
         },
         {
           "id": "risk_synthesis_agent",
           "label": "风险催化剂汇总",
           "position": {
-            "x": 485.0,
-            "y": 332.0
+            "x": 485,
+            "y": 332
           }
         }
       ],
@@ -173,6 +144,11 @@
       "ports": {
         "inputs": {
           "fundamentals": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          },
+          "verified_data": {
             "cardinality": "one",
             "required": true,
             "type": "artifact"
@@ -240,6 +216,11 @@
       "ports": {
         "inputs": {
           "fundamentals": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          },
+          "verified_data": {
             "cardinality": "one",
             "required": true,
             "type": "artifact"
@@ -319,6 +300,11 @@
             "required": true,
             "type": "artifact"
           },
+          "verified_data": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          },
           "watchlist": {
             "cardinality": "one",
             "required": true,
@@ -394,20 +380,11 @@
       },
       "ports": {
         "inputs": {
-          "catalysts": {
+          "main": {
             "cardinality": "one",
             "required": true,
-            "type": "artifact"
-          },
-          "company_risks": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          },
-          "macro_risks": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
+            "type": "artifact",
+            "description": "三路风险与催化剂分析聚合"
           }
         },
         "outputs": {
@@ -419,7 +396,7 @@
         }
       },
       "prompt_policy": {
-        "user_prompt": "汇总风险与催化剂，形成最终报告需要的风险矩阵。"
+        "user_prompt": "从 main 控制聚合输入中汇总风险与催化剂，形成最终报告需要的风险矩阵。"
       }
     }
   ],
@@ -442,10 +419,28 @@
     {
       "materialization": "copy",
       "required": false,
+      "source_port": "verified_data",
+      "target": {
+        "node": "macro_risk_agent",
+        "port": "verified_data"
+      }
+    },
+    {
+      "materialization": "copy",
+      "required": false,
       "source_port": "fundamentals",
       "target": {
         "node": "company_risk_agent",
         "port": "fundamentals"
+      }
+    },
+    {
+      "materialization": "copy",
+      "required": false,
+      "source_port": "verified_data",
+      "target": {
+        "node": "company_risk_agent",
+        "port": "verified_data"
       }
     },
     {
@@ -464,6 +459,15 @@
       "target": {
         "node": "catalyst_agent",
         "port": "watchlist"
+      }
+    },
+    {
+      "materialization": "copy",
+      "required": false,
+      "source_port": "verified_data",
+      "target": {
+        "node": "catalyst_agent",
+        "port": "verified_data"
       }
     }
   ],

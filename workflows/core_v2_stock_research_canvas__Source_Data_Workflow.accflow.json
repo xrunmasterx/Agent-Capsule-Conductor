@@ -1,0 +1,594 @@
+{
+  "control_edges": [
+    {
+      "context": "none",
+      "from": "company_disclosure_agent",
+      "to": "data_quality_synthesis_agent"
+    },
+    {
+      "context": "none",
+      "from": "market_data_agent",
+      "to": "data_quality_synthesis_agent"
+    },
+    {
+      "context": "none",
+      "from": "news_policy_agent",
+      "to": "data_quality_synthesis_agent"
+    },
+    {
+      "context": "none",
+      "from": "peer_competition_agent",
+      "to": "data_quality_synthesis_agent"
+    }
+  ],
+  "data_edges": [],
+  "description": "Child workflow compiled from Workbench container Source_Data_Workflow.",
+  "exposed_inputs": {
+    "target": {
+      "cardinality": "one",
+      "required": true,
+      "type": "artifact"
+    }
+  },
+  "exposed_outputs": {
+    "data_gaps": {
+      "cardinality": "one",
+      "required": true,
+      "type": "artifact"
+    },
+    "source_register": {
+      "cardinality": "one",
+      "required": true,
+      "type": "artifact"
+    },
+    "verified_data_pack": {
+      "cardinality": "one",
+      "required": true,
+      "type": "artifact"
+    }
+  },
+  "id": "core_v2_stock_research_canvas__Source_Data_Workflow",
+  "metadata": {
+    "canonical_format": "accflow",
+    "compiled_child_path": "core_v2_stock_research_canvas__Source_Data_Workflow.accflow.json",
+    "compiled_from_workbench_container": "Source_Data_Workflow",
+    "ui_layout": {
+      "layout": null,
+      "nodes": [
+        {
+          "id": "company_disclosure_agent",
+          "label": "公司披露采集",
+          "position": {
+            "x": 137,
+            "y": 146
+          }
+        },
+        {
+          "id": "market_data_agent",
+          "label": "市场数据采集",
+          "position": {
+            "x": 137,
+            "y": 332
+          }
+        },
+        {
+          "id": "news_policy_agent",
+          "label": "新闻政策采集",
+          "position": {
+            "x": 137,
+            "y": 518
+          }
+        },
+        {
+          "id": "peer_competition_agent",
+          "label": "同业竞争采集",
+          "position": {
+            "x": 137,
+            "y": 704
+          }
+        },
+        {
+          "id": "data_quality_synthesis_agent",
+          "label": "数据质量汇总",
+          "position": {
+            "x": 485,
+            "y": 425
+          }
+        }
+      ],
+      "root_workflow_id": null
+    },
+    "workbench_draft": true
+  },
+  "name": "公开数据核验工作流",
+  "nodes": [
+    {
+      "callable_ref": {
+        "id": "stock-data-collector.codex",
+        "kind": "agent_class"
+      },
+      "id": "company_disclosure_agent",
+      "metadata": {
+        "label": "公司披露采集",
+        "ui_label": "公司披露采集",
+        "workbench_kind": "agent_session"
+      },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "as_of_date": {
+            "description": "数据采集日期",
+            "type": "string"
+          },
+          "data_gaps": {
+            "description": "未取得或仍需复核的数据",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "facts": {
+            "description": "公司披露采集 提取出的可引用事实",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "sources": {
+            "description": "来源标题、URL、发布日期或访问日期",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "status": {
+            "description": "success 或 failed",
+            "type": "string"
+          },
+          "summary": {
+            "description": "面向下游节点的简明结论",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "summary",
+          "facts",
+          "sources",
+          "data_gaps"
+        ],
+        "type": "object"
+      },
+      "overrides": {
+        "static_input": {}
+      },
+      "ports": {
+        "inputs": {
+          "target": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          }
+        },
+        "outputs": {
+          "main": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          }
+        }
+      },
+      "prompt_policy": {
+        "user_prompt": "联网读取 NVIDIA 10-K、10-Q、earnings release、investor presentation 和 transcript，提取可引用事实。"
+      }
+    },
+    {
+      "callable_ref": {
+        "id": "stock-data-collector.codex",
+        "kind": "agent_class"
+      },
+      "id": "market_data_agent",
+      "metadata": {
+        "label": "市场数据采集",
+        "ui_label": "市场数据采集",
+        "workbench_kind": "agent_session"
+      },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "as_of_date": {
+            "description": "数据采集日期",
+            "type": "string"
+          },
+          "data_gaps": {
+            "description": "未取得或仍需复核的数据",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "facts": {
+            "description": "市场数据采集 提取出的可引用事实",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "sources": {
+            "description": "来源标题、URL、发布日期或访问日期",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "status": {
+            "description": "success 或 failed",
+            "type": "string"
+          },
+          "summary": {
+            "description": "面向下游节点的简明结论",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "summary",
+          "facts",
+          "sources",
+          "data_gaps"
+        ],
+        "type": "object"
+      },
+      "overrides": {
+        "static_input": {}
+      },
+      "ports": {
+        "inputs": {
+          "target": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          }
+        },
+        "outputs": {
+          "main": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          }
+        }
+      },
+      "prompt_policy": {
+        "user_prompt": "联网读取股价、市值、forward multiples、consensus estimates 和 peer multiples；无法取得时必须列入 data_gaps。"
+      }
+    },
+    {
+      "callable_ref": {
+        "id": "stock-data-collector.codex",
+        "kind": "agent_class"
+      },
+      "id": "news_policy_agent",
+      "metadata": {
+        "label": "新闻政策采集",
+        "ui_label": "新闻政策采集",
+        "workbench_kind": "agent_session"
+      },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "as_of_date": {
+            "description": "数据采集日期",
+            "type": "string"
+          },
+          "data_gaps": {
+            "description": "未取得或仍需复核的数据",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "facts": {
+            "description": "新闻政策采集 提取出的可引用事实",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "sources": {
+            "description": "来源标题、URL、发布日期或访问日期",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "status": {
+            "description": "success 或 failed",
+            "type": "string"
+          },
+          "summary": {
+            "description": "面向下游节点的简明结论",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "summary",
+          "facts",
+          "sources",
+          "data_gaps"
+        ],
+        "type": "object"
+      },
+      "overrides": {
+        "static_input": {}
+      },
+      "ports": {
+        "inputs": {
+          "target": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          }
+        },
+        "outputs": {
+          "main": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          }
+        }
+      },
+      "prompt_policy": {
+        "user_prompt": "联网整理近 3-6 个月 export control、Blackwell/Rubin、hyperscaler capex 和 AI demand 相关新闻。"
+      }
+    },
+    {
+      "callable_ref": {
+        "id": "stock-data-collector.codex",
+        "kind": "agent_class"
+      },
+      "id": "peer_competition_agent",
+      "metadata": {
+        "label": "同业竞争采集",
+        "ui_label": "同业竞争采集",
+        "workbench_kind": "agent_session"
+      },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "as_of_date": {
+            "description": "数据采集日期",
+            "type": "string"
+          },
+          "data_gaps": {
+            "description": "未取得或仍需复核的数据",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "facts": {
+            "description": "同业竞争采集 提取出的可引用事实",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "sources": {
+            "description": "来源标题、URL、发布日期或访问日期",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "status": {
+            "description": "success 或 failed",
+            "type": "string"
+          },
+          "summary": {
+            "description": "面向下游节点的简明结论",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "summary",
+          "facts",
+          "sources",
+          "data_gaps"
+        ],
+        "type": "object"
+      },
+      "overrides": {
+        "static_input": {}
+      },
+      "ports": {
+        "inputs": {
+          "target": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          }
+        },
+        "outputs": {
+          "main": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          }
+        }
+      },
+      "prompt_policy": {
+        "user_prompt": "联网整理 AMD、Broadcom/custom ASIC、Google TPU、hyperscaler internal silicon 和推理替代方案。"
+      }
+    },
+    {
+      "callable_ref": {
+        "id": "stock-research-synthesis.codex",
+        "kind": "agent_class"
+      },
+      "id": "data_quality_synthesis_agent",
+      "metadata": {
+        "label": "数据质量汇总",
+        "ui_label": "数据质量汇总",
+        "workbench_kind": "agent_session"
+      },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "as_of_date": {
+            "description": "数据包截至日期",
+            "type": "string"
+          },
+          "data_gaps": {
+            "description": "影响报告或估值发布质量的数据缺口",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "source_register": {
+            "description": "可追踪来源清单",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "status": {
+            "description": "success 或 failed",
+            "type": "string"
+          },
+          "summary": {
+            "description": "面向下游节点的简明结论",
+            "type": "string"
+          },
+          "verified_data_pack": {
+            "additionalProperties": true,
+            "description": "下游节点可直接消费的核验事实、市场数据、新闻政策和同业竞争数据",
+            "type": "object"
+          }
+        },
+        "required": [
+          "status",
+          "summary",
+          "verified_data_pack",
+          "source_register",
+          "data_gaps",
+          "as_of_date"
+        ],
+        "type": "object"
+      },
+      "overrides": {
+        "static_input": {}
+      },
+      "ports": {
+        "inputs": {
+          "main": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact",
+            "description": "四路采集结果聚合"
+          }
+        },
+        "outputs": {
+          "data_gaps": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          },
+          "main": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          },
+          "source_register": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          },
+          "verified_data_pack": {
+            "cardinality": "one",
+            "required": true,
+            "type": "artifact"
+          }
+        }
+      },
+      "prompt_policy": {
+        "user_prompt": "从 main 控制聚合输入中读取四路公开数据采集结果，压缩为可供下游消费的核验数据包、来源登记表、数据缺口和 as_of_date；不要复制上游原文。"
+      }
+    }
+  ],
+  "policies": {
+    "failure_mode": "fail_fast",
+    "max_concurrency": 8
+  },
+  "schema_version": "acc.core.v2",
+  "version": "0.1.0",
+  "workflow_input_bindings": [
+    {
+      "materialization": "copy",
+      "required": false,
+      "source_port": "target",
+      "target": {
+        "node": "company_disclosure_agent",
+        "port": "target"
+      }
+    },
+    {
+      "materialization": "copy",
+      "required": false,
+      "source_port": "target",
+      "target": {
+        "node": "market_data_agent",
+        "port": "target"
+      }
+    },
+    {
+      "materialization": "copy",
+      "required": false,
+      "source_port": "target",
+      "target": {
+        "node": "news_policy_agent",
+        "port": "target"
+      }
+    },
+    {
+      "materialization": "copy",
+      "required": false,
+      "source_port": "target",
+      "target": {
+        "node": "peer_competition_agent",
+        "port": "target"
+      }
+    }
+  ],
+  "workflow_output_bindings": [
+    {
+      "materialization": "copy",
+      "required": true,
+      "source": {
+        "node": "data_quality_synthesis_agent",
+        "port": "verified_data_pack"
+      },
+      "target_port": "verified_data_pack"
+    },
+    {
+      "materialization": "copy",
+      "required": true,
+      "source": {
+        "node": "data_quality_synthesis_agent",
+        "port": "source_register"
+      },
+      "target_port": "source_register"
+    },
+    {
+      "materialization": "copy",
+      "required": true,
+      "source": {
+        "node": "data_quality_synthesis_agent",
+        "port": "data_gaps"
+      },
+      "target_port": "data_gaps"
+    }
+  ]
+}

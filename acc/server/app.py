@@ -4,6 +4,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 
+from acc.storage_refresh import StorageIndexRefreshService
 from acc.server.routes import (
     agent_sessions,
     artifacts,
@@ -25,6 +26,10 @@ from acc.server.security import local_runner_security_middleware
 def create_app(project_root: Path | str | None = None) -> FastAPI:
     app = FastAPI(title="Agent Callable Workbench Server", version="0.1.0")
     app.state.project_root = Path(project_root or Path.cwd()).resolve()
+    refresh_service = StorageIndexRefreshService(app.state.project_root)
+    app.state.storage_index_refresh_service = refresh_service
+    app.router.on_startup.append(refresh_service.start)
+    app.router.on_shutdown.append(refresh_service.stop)
     app.middleware("http")(local_runner_security_middleware)
     app.include_router(health.router, prefix="/api")
     app.include_router(agent_sessions.router, prefix="/api")
