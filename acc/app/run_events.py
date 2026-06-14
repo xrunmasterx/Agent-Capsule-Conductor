@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from acc.agent_events import ensure_agent_event_projection
+from acc.run_index import NodeRunSummary, load_run_summary
 
 
 @dataclass(frozen=True)
@@ -80,6 +81,30 @@ class RunEventProjectionService:
             parent_ui_node_id=None,
             limit=limit,
         )
+
+    def read_run_state_snapshot(self) -> dict[str, Any]:
+        summary = load_run_summary(self.run_dir)
+        if summary is None:
+            return {
+                "workflow_id": self.run_id,
+                "status": "not_run",
+                "run_dir": str(self.run_dir),
+                "nodes": [],
+                "edges": [],
+                "errors": [],
+            }
+        nodes = [node.model_dump() for node in summary.nodes]
+        nodes.extend(self._read_nested_state_nodes(self.run_dir, parent_ui_node_id=None))
+        return {
+            "workflow_id": summary.workflow_id or self.run_id,
+            "status": summary.status,
+            "run_dir": summary.run_dir,
+            "started_at": summary.started_at,
+            "ended_at": summary.ended_at,
+            "nodes": nodes,
+            "edges": [],
+            "errors": [],
+        }
 
     def read_node_events_with_agent(
         self,
@@ -277,6 +302,107 @@ class RunEventProjectionService:
             )
         return nested_events
 
+    def _read_nested_state_nodes(
+        self,
+        run_dir: Path,
+        *,
+        parent_ui_node_id: str | None,
+    ) -> list[dict[str, Any]]:
+        nodes: list[dict[str, Any]] = []
+        for node_dir in iter_node_dirs(run_dir):
+            nested_run_dir = node_dir / "nested_workflow"
+            if not nested_run_dir.exists() or not nested_run_dir.is_dir():
+                continue
+            nested_parent_ui_node_id = (
+                f"{parent_ui_node_id}__internal__{node_dir.name}"
+                if parent_ui_node_id
+                else node_dir.name
+            )
+            nested_summary = load_run_summary(nested_run_dir)
+            if nested_summary is not None and nested_summary.nodes:
+                for nested_node in nested_summary.nodes:
+                    nodes.append(
+                        self._project_nested_node_summary(
+                            nested_node,
+                            parent_ui_node_id=nested_parent_ui_node_id,
+                            nested_run_dir=nested_run_dir,
+                        )
+                    )
+            else:
+                for nested_node_dir in iter_node_dirs(nested_run_dir):
+                    nodes.append(
+                        self._project_nested_node_summary(
+                            self._best_effort_node_summary(nested_node_dir),
+                            parent_ui_node_id=nested_parent_ui_node_id,
+                            nested_run_dir=nested_run_dir,
+                        )
+                    )
+            nodes.extend(
+                self._read_nested_state_nodes(
+                    nested_run_dir,
+                    parent_ui_node_id=nested_parent_ui_node_id,
+                )
+            )
+        return nodes
+
+    def _project_nested_node_summary(
+        self,
+        node: NodeRunSummary,
+        *,
+        parent_ui_node_id: str,
+        nested_run_dir: Path,
+    ) -> dict[str, Any]:
+        payload = node.model_dump()
+        node_id = str(payload.get("node_id") or "")
+        payload["parent_node_id"] = parent_ui_node_id
+        payload["ui_node_id"] = f"{parent_ui_node_id}__internal__{node_id}"
+        payload["node_run_dir"] = str((nested_run_dir / "nodes" / node_id).resolve())
+        payload["run_dir"] = payload.get("run_dir") or payload["node_run_dir"]
+        return payload
+
+    def _best_effort_node_summary(self, node_dir: Path) -> NodeRunSummary:
+        runtime = load_json_tolerant(node_dir / "runtime.json")
+        callable_ref = runtime.get("callable_ref")
+        callable_id = (
+            callable_ref.get("id")
+            if isinstance(callable_ref, dict) and isinstance(callable_ref.get("id"), str)
+            else runtime.get("callable_id")
+        )
+        status = self._best_effort_node_status(node_dir)
+        return NodeRunSummary(
+            node_id=node_dir.name,
+            callable_id=str(callable_id or "unknown"),
+            session_id=runtime.get("session_id") if isinstance(runtime.get("session_id"), str) else None,
+            status=status,
+            run_dir=str(node_dir.resolve()),
+            input_path=existing_file_path(node_dir / "agent_payload.json")
+            or existing_file_path(node_dir / "input.json"),
+            prompt_path=existing_file_path(node_dir / "resolved_prompt.md"),
+            output_path=existing_file_path(node_dir / "output.json"),
+            artifact_dir=existing_dir_path(node_dir / "artifacts"),
+            event_log=existing_file_path(node_dir / "events.jsonl"),
+            stdout_log=existing_file_path(node_dir / "stdout.log"),
+            stderr_log=existing_file_path(node_dir / "stderr.log"),
+            errors=[],
+        )
+
+    def _best_effort_node_status(self, node_dir: Path) -> str:
+        events = read_jsonl_tolerant(node_dir / "events.jsonl", limit=1000)
+        status = "not_run"
+        for event in events:
+            event_type = str(event.get("type") or event.get("event") or "")
+            if event_type == "node_started" or event_type in {"input_materialized", "inbox_materialized"}:
+                status = "running"
+            elif event_type == "node_completed":
+                status = "success"
+            elif event_type == "node_failed":
+                return str(event.get("status") or "failed")
+        if (node_dir / "output.json").exists():
+            return "success"
+        if (node_dir / "runtime.json").exists() and status == "not_run":
+            return "running"
+        return status
+
     def _resolve_agent_session_dir(self, node_dir: Path, runtime: dict[str, Any]) -> Path | None:
         session_ref = runtime.get("agent_session_ref")
         if not isinstance(session_ref, str) or not session_ref:
@@ -318,6 +444,14 @@ def iter_node_dirs(run_dir: Path) -> list[Path]:
     if not nodes_dir.exists() or not nodes_dir.is_dir():
         return []
     return sorted(item for item in nodes_dir.iterdir() if item.is_dir())
+
+
+def existing_file_path(path: Path) -> str | None:
+    return str(path.resolve()) if path.exists() and path.is_file() else None
+
+
+def existing_dir_path(path: Path) -> str | None:
+    return str(path.resolve()) if path.exists() and path.is_dir() else None
 
 
 def read_log_delta(

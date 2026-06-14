@@ -131,6 +131,7 @@ import {
 import {
   applyRunOverlayToCanvas,
   liveWorkflowRunFromEvents,
+  mergeWorkflowRunWithEvents,
   runOverlayFromRun,
   stripRuntimeStateFromCanvas,
   stripRuntimeStateFromWorkflow,
@@ -3002,7 +3003,10 @@ export function WorkflowViewer({
         if (ignore) {
           return;
         }
-        const restoredRun = workflowRunFromRunSummary(summary, taskGraph);
+        const restoredRun = await api
+          .runState(runId)
+          .then((state) => workflowRunFromRunStateSnapshot(state, taskGraph))
+          .catch(() => workflowRunFromRunSummary(summary, taskGraph));
         const events = await api.runEvents(runId).catch(() => null);
         if (ignore) {
           return;
@@ -3319,12 +3323,16 @@ export function WorkflowViewer({
       if (!current) {
         return;
       }
-      const [summary, result] = await Promise.all([
+      const [summary, stateSnapshot, result] = await Promise.all([
         api.run(runId),
+        api.runState(runId).catch(() => null),
         api.runEvents(runId).catch(() => ({ events: [] as RunEvent[] })),
       ]);
+      const snapshotRun = stateSnapshot
+        ? workflowRunFromRunStateSnapshot(stateSnapshot, current.graph)
+        : workflowRunFromRunSummary(summary, current.graph);
       const liveRun = mergeWorkflowRunWithEvents(
-        workflowRunFromRunSummary(summary, current.graph),
+        snapshotRun,
         liveWorkflowRunFromEvents(current.graph, summary.run_dir || current.runDir, result.events),
       );
       const runStatus = normalizeTaskRunStatus(summary.status || liveRun.status);
@@ -3890,12 +3898,16 @@ export function WorkflowViewer({
 
     async function pollRunUntilTerminal() {
       try {
-        const [summary, result] = await Promise.all([
+        const [summary, stateSnapshot, result] = await Promise.all([
           api.run(runId),
+          api.runState(runId).catch(() => null),
           api.runEvents(runId).catch(() => ({ events: [] as RunEvent[] })),
         ]);
+        const snapshotRun = stateSnapshot
+          ? workflowRunFromRunStateSnapshot(stateSnapshot, runnableGraph)
+          : workflowRunFromRunSummary(summary, runnableGraph);
         const liveRun = mergeWorkflowRunWithEvents(
-          workflowRunFromRunSummary(summary, runnableGraph),
+          snapshotRun,
           liveWorkflowRunFromEvents(runnableGraph, summary.run_dir || runDir, result.events),
         );
         const runStatus = normalizeTaskRunStatus(summary.status || liveRun.status);
@@ -15868,31 +15880,14 @@ function workflowRunFromRunSummary(summary: RunSummary, graph: WorkflowGraph): W
   };
 }
 
-function mergeWorkflowRunWithEvents(
-  summaryRun: WorkflowRunResult,
-  eventRun: WorkflowRunResult,
-): WorkflowRunResult {
-  const nodesByKey = new Map<string, NodeRunSummary>();
-  summaryRun.nodes.forEach((node) => {
-    nodesByKey.set(nodeRunProjectionKey(node), node);
-  });
-  eventRun.nodes.forEach((eventNode) => {
-    const key = nodeRunProjectionKey(eventNode);
-    const summaryNode = nodesByKey.get(key);
-    nodesByKey.set(key, summaryNode
-      ? {
-          ...eventNode,
-          ...summaryNode,
-          status: eventNode.status || summaryNode.status,
-          ui_node_id: summaryNode.ui_node_id || eventNode.ui_node_id,
-          parent_node_id: summaryNode.parent_node_id || eventNode.parent_node_id,
-        }
-      : eventNode);
-  });
+function workflowRunFromRunStateSnapshot(snapshot: WorkflowRunResult, graph: WorkflowGraph): WorkflowRunResult {
   return {
-    ...summaryRun,
-    status: eventRun.status !== 'not_run' ? eventRun.status : summaryRun.status,
-    nodes: Array.from(nodesByKey.values()),
+    ...snapshot,
+    workflow_id: snapshot.workflow_id || graph.id,
+    run_dir: snapshot.run_dir,
+    nodes: snapshot.nodes || [],
+    edges: graph.edges,
+    errors: snapshot.errors || [],
   };
 }
 

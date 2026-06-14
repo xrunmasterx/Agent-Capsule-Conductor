@@ -204,6 +204,37 @@ export function liveWorkflowRunFromEvents(
   };
 }
 
+export function mergeWorkflowRunWithEvents(
+  snapshotRun: WorkflowRunResult,
+  eventRun: WorkflowRunResult,
+): WorkflowRunResult {
+  const nodesByKey = new Map<string, NodeRunSummary>();
+  snapshotRun.nodes.forEach((node) => {
+    nodesByKey.set(nodeRunProjectionKey(node), node);
+  });
+  eventRun.nodes.forEach((eventNode) => {
+    const key = nodeRunProjectionKey(eventNode);
+    const snapshotNode = nodesByKey.get(key);
+    nodesByKey.set(
+      key,
+      snapshotNode
+        ? {
+            ...eventNode,
+            ...snapshotNode,
+            status: mergeProjectedStatus(snapshotNode.status, eventNode.status),
+            ui_node_id: snapshotNode.ui_node_id || eventNode.ui_node_id,
+            parent_node_id: snapshotNode.parent_node_id || eventNode.parent_node_id,
+          }
+        : eventNode,
+    );
+  });
+  return {
+    ...snapshotRun,
+    status: mergeProjectedStatus(snapshotRun.status, eventRun.status),
+    nodes: Array.from(nodesByKey.values()),
+  };
+}
+
 export function workflowRunFailureText(result: WorkflowRunResult): string {
   const lines = [
     `workflow_id: ${result.workflow_id}`,
@@ -229,6 +260,59 @@ export function workflowRunFailureText(result: WorkflowRunResult): string {
     });
   }
   return lines.join('\n');
+}
+
+function nodeRunProjectionKey(node: NodeRunSummary): string {
+  if (node.ui_node_id) {
+    return node.ui_node_id;
+  }
+  if (node.parent_node_id) {
+    return internalFlowNodeId(node.parent_node_id, node.node_id);
+  }
+  return node.node_id;
+}
+
+function mergeProjectedStatus(baseStatus: string, deltaStatus: string): WorkflowStatus {
+  const base = normalizeWorkflowStatus(baseStatus || 'not_run');
+  const delta = normalizeWorkflowStatus(deltaStatus || 'not_run');
+  if (delta === 'not_run') {
+    return base;
+  }
+  if (isTerminalWorkflowStatus(base) && !isTerminalWorkflowStatus(delta)) {
+    return base;
+  }
+  if (base === 'not_run') {
+    return delta;
+  }
+  return statusRank(delta) >= statusRank(base) ? delta : base;
+}
+
+function statusRank(status: WorkflowStatus): number {
+  if (status === 'not_run') {
+    return 0;
+  }
+  if (status === 'queued') {
+    return 1;
+  }
+  if (status === 'scheduled') {
+    return 2;
+  }
+  if (status === 'running' || status === 'cancel_requested') {
+    return 3;
+  }
+  return 4;
+}
+
+function isTerminalWorkflowStatus(status: WorkflowStatus): boolean {
+  return (
+    status === 'success' ||
+    status === 'failed' ||
+    status === 'cancelled' ||
+    status === 'crashed' ||
+    status === 'schema_error' ||
+    status === 'artifact_error' ||
+    status === 'manual_review'
+  );
 }
 
 function aggregateWorkflowStatus(nodes: RunStateInternalNode[]): WorkflowStatus | null {

@@ -56,6 +56,12 @@ def get_run(run_id: str, request: Request) -> dict[str, Any]:
     return load_run_or_404(run_id, request).model_dump()
 
 
+@router.get("/{run_id}/state")
+def get_run_state(run_id: str, request: Request) -> dict[str, Any]:
+    run_dir = resolve_run_dir_or_404(run_id, request)
+    return RunEventProjectionService(run_dir).read_run_state_snapshot()
+
+
 @router.get("/{run_id}/plan")
 def get_run_plan(run_id: str, request: Request) -> dict[str, Any]:
     run_dir = resolve_run_dir_or_404(run_id, request)

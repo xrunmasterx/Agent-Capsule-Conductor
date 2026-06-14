@@ -354,6 +354,8 @@ export const api = {
     getJson<{ run_id: string; event_log: string; events: RunEvent[] }>(
       `/api/runs/${encodeURIComponent(runId)}/events?limit=${encodeURIComponent(String(limit))}`,
     ),
+  runState: (runId: string) =>
+    getJson<WorkflowRunResult>(`/api/runs/${encodeURIComponent(runId)}/state`),
   runInteractions: (runId: string) =>
     getJson<InteractionList>(`/api/runs/${encodeURIComponent(runId)}/interactions`),
   answerInteraction: (runId: string, interactionId: string, answer: Record<string, unknown>) =>

@@ -114,6 +114,66 @@ def test_read_run_evidence_rejects_paths_outside_run(client, project_root) -> No
     assert response.json()["detail"]["code"] == "artifact_policy_denied"
 
 
+def test_run_state_includes_recursive_nested_node_snapshot(client, project_root) -> None:
+    run_dir = project_root / "runs" / "state_snapshot_run"
+    workflow_a_dir = run_dir / "nodes" / "workflow_a"
+    workflow_a_nested = workflow_a_dir / "nested_workflow"
+    workflow_b_dir = workflow_a_nested / "nodes" / "workflow_b"
+    workflow_b_nested = workflow_b_dir / "nested_workflow"
+    workflow_c_dir = run_dir / "nodes" / "workflow_c"
+    workflow_c_nested = workflow_c_dir / "nested_workflow"
+    fallback_node_dir = workflow_c_nested / "nodes" / "fallback_agent"
+    agent_1_dir = workflow_a_nested / "nodes" / "agent_1"
+    agent_2_dir = workflow_b_nested / "nodes" / "agent_2"
+    for path in [workflow_a_dir, workflow_b_dir, workflow_c_dir, fallback_node_dir, agent_1_dir, agent_2_dir]:
+        path.mkdir(parents=True, exist_ok=True)
+    (fallback_node_dir / "output.json").write_text(json.dumps({"ok": True}), encoding="utf-8")
+    (fallback_node_dir / "runtime.json").write_text(
+        json.dumps({"callable_ref": {"id": "fallback-agent.generic"}}),
+        encoding="utf-8",
+    )
+    (run_dir / "events.jsonl").write_text(
+        json.dumps({"type": "node_completed", "node_id": "workflow_c", "timestamp": "2026-06-05T00:00:04Z"})
+        + "\n",
+        encoding="utf-8",
+    )
+    write_run_summary_payload(
+        run_dir,
+        "state_snapshot_run",
+        [
+            node_summary_payload(workflow_a_dir, "workflow_a", "workflow-a.accflow", "success"),
+            node_summary_payload(workflow_c_dir, "workflow_c", "workflow-c.accflow", "success"),
+        ],
+    )
+    write_run_summary_payload(
+        workflow_a_nested,
+        "nested_workflow",
+        [
+            node_summary_payload(agent_1_dir, "agent_1", "agent-one.generic", "success"),
+            node_summary_payload(workflow_b_dir, "workflow_b", "workflow-b.accflow", "success"),
+        ],
+    )
+    write_run_summary_payload(
+        workflow_b_nested,
+        "nested_workflow",
+        [node_summary_payload(agent_2_dir, "agent_2", "agent-two.generic", "success")],
+    )
+
+    events_response = client.get("/api/runs/state_snapshot_run/events", params={"limit": 1})
+    assert events_response.status_code == 200, events_response.text
+
+    response = client.get("/api/runs/state_snapshot_run/state")
+
+    assert response.status_code == 200, response.text
+    nodes = {node.get("ui_node_id") or node["node_id"]: node for node in response.json()["nodes"]}
+    assert nodes["workflow_a"]["status"] == "success"
+    assert nodes["workflow_a__internal__agent_1"]["status"] == "success"
+    assert nodes["workflow_a__internal__workflow_b"]["node_run_dir"] == str(workflow_b_dir.resolve())
+    assert nodes["workflow_a__internal__workflow_b__internal__agent_2"]["status"] == "success"
+    assert nodes["workflow_c__internal__fallback_agent"]["status"] == "success"
+    assert nodes["workflow_c__internal__fallback_agent"]["callable_id"] == "fallback-agent.generic"
+
+
 def test_node_events_include_agent_session_timeline(client, project_root) -> None:
     run_dir = project_root / "runs" / "agent_events_run"
     node_dir = run_dir / "nodes" / "agent"
@@ -497,3 +557,33 @@ def test_run_events_include_recursive_nested_workflow_scope(client, project_root
             "node_run_dir": str(agent_node_dir.resolve()),
         },
     ]
+
+
+def node_summary_payload(node_dir, node_id: str, callable_id: str, status: str) -> dict:
+    return {
+        "node_id": node_id,
+        "callable_id": callable_id,
+        "status": status,
+        "run_dir": str(node_dir.resolve()),
+        "output_path": str((node_dir / "output.json").resolve()),
+        "event_log": str((node_dir / "events.jsonl").resolve()),
+        "errors": [],
+    }
+
+
+def write_run_summary_payload(run_dir, run_id: str, nodes: list[dict]) -> None:
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "run_summary.json").write_text(
+        json.dumps(
+            {
+                "run_id": run_id,
+                "workflow_id": run_id,
+                "status": "success",
+                "run_dir": str(run_dir.resolve()),
+                "node_count": len(nodes),
+                "failed_nodes": [],
+                "nodes": nodes,
+            }
+        ),
+        encoding="utf-8",
+    )

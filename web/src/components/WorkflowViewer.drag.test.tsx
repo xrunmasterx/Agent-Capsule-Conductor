@@ -24,7 +24,12 @@ import {
   outputPortsFromSchema as _outputPortsFromSchema,
   addPortToDataConnectNode as _addPortToDataConnectNode,
 } from './WorkflowViewer';
-import { applyRunOverlayToCanvas, liveWorkflowRunFromEvents, runOverlayFromRun } from './workflow-viewer/runState';
+import {
+  applyRunOverlayToCanvas,
+  liveWorkflowRunFromEvents,
+  mergeWorkflowRunWithEvents,
+  runOverlayFromRun,
+} from './workflow-viewer/runState';
 
 const flowMock = vi.hoisted(() => ({
   props: null as Record<string, unknown> | null,
@@ -3236,6 +3241,121 @@ describe('WorkspaceCanvas drag buffer', () => {
         }),
       ]),
     );
+  });
+
+  test('run state merge keeps snapshot success when event tail omits early nested node', () => {
+    const graph = {
+      id: 'task_run',
+      version: '1.0',
+      nodes: [{ id: 'New_Workflow', callable_ref: { kind: 'workflow_function', id: 'New_Workflow' }, kind: 'workflow' }],
+      edges: [],
+    };
+    const snapshotRun = {
+      workflow_id: 'task_run',
+      status: 'running',
+      run_dir: 'runs/task_run',
+      nodes: [
+        {
+          node_id: 'inner_early',
+          ui_node_id: 'New_Workflow__internal__inner_early',
+          parent_node_id: 'New_Workflow',
+          callable_id: 'fake-agent.generic',
+          status: 'success',
+          run_dir: 'runs/task_run/nodes/New_Workflow/nested_workflow/nodes/inner_early',
+        },
+      ],
+      edges: [],
+      errors: [],
+    };
+    const eventRun = liveWorkflowRunFromEvents(graph as any, 'runs/task_run', [
+      {
+        type: 'node_started',
+        node_id: 'inner_late',
+        ui_node_id: 'New_Workflow__internal__inner_late',
+        parent_node_id: 'New_Workflow',
+        callable_id: 'fake-agent.generic',
+      },
+    ]);
+
+    const merged = mergeWorkflowRunWithEvents(snapshotRun as any, eventRun);
+
+    expect(merged.nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          ui_node_id: 'New_Workflow__internal__inner_early',
+          status: 'success',
+        }),
+        expect.objectContaining({
+          ui_node_id: 'New_Workflow__internal__inner_late',
+          status: 'running',
+        }),
+      ]),
+    );
+  });
+
+  test('run state merge is monotonic for not_run, running, and terminal statuses', () => {
+    const snapshotRun = {
+      workflow_id: 'task_run',
+      status: 'success',
+      run_dir: 'runs/task_run',
+      nodes: [
+        {
+          node_id: 'done',
+          callable_id: 'fake-agent.generic',
+          status: 'success',
+          run_dir: 'runs/task_run/nodes/done',
+        },
+        {
+          node_id: 'pending',
+          callable_id: 'fake-agent.generic',
+          status: 'not_run',
+          run_dir: 'runs/task_run/nodes/pending',
+        },
+        {
+          node_id: 'active',
+          callable_id: 'fake-agent.generic',
+          status: 'running',
+          run_dir: 'runs/task_run/nodes/active',
+        },
+      ],
+      edges: [],
+      errors: [],
+    };
+    const eventRun = {
+      workflow_id: 'task_run',
+      status: 'running',
+      run_dir: 'runs/task_run',
+      nodes: [
+        {
+          node_id: 'done',
+          callable_id: 'fake-agent.generic',
+          status: 'not_run',
+          run_dir: 'runs/task_run/nodes/done',
+        },
+        {
+          node_id: 'pending',
+          callable_id: 'fake-agent.generic',
+          status: 'running',
+          run_dir: 'runs/task_run/nodes/pending',
+        },
+        {
+          node_id: 'active',
+          callable_id: 'fake-agent.generic',
+          status: 'success',
+          run_dir: 'runs/task_run/nodes/active',
+        },
+      ],
+      edges: [],
+      errors: [],
+    };
+
+    const merged = mergeWorkflowRunWithEvents(snapshotRun as any, eventRun as any);
+    const statuses = Object.fromEntries(merged.nodes.map((node) => [node.node_id, node.status]));
+
+    expect(merged.status).toBe('success');
+    expect(statuses.done).toBe('success');
+    expect(statuses.pending).toBe('running');
+    expect(statuses.active).toBe('success');
   });
 
   test('run overlay does not project a root node status onto same-id internal nodes', () => {
