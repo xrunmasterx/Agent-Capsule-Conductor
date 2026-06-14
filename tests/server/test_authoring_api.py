@@ -50,9 +50,10 @@ def test_authoring_session_message_returns_proposal_and_evidence(
     payload = response.json()
     assert payload["validation"]["status"] == "valid"
     assert payload["proposal"]["operations"][0]["op"] == "add_existing_callable_node"
-    session_dir = project_root / "runs" / "_authoring_sessions" / session_id
+    session_dir = project_root / ".acc" / "sessions" / "authoring" / session_id
     assert (session_dir / "session.json").exists()
     assert (session_dir / "agent_output_raw.txt").exists()
+    assert not (project_root / "runs" / "_authoring_sessions" / session_id).exists()
 
 
 def test_authoring_temporary_resource_requires_approval_without_persistence(

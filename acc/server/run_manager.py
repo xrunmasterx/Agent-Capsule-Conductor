@@ -15,6 +15,7 @@ from acc.app.run_lifecycle import (
 )
 from acc.run_index import NodeRunSummary, RunSummary, rebuild_run_index, write_json
 from acc.session import utc_now_iso
+from acc.storage import write_json_atomic, write_text_atomic
 from acc.utils import AccError
 
 
@@ -49,6 +50,15 @@ class WorkbenchRunManager:
     async def submit(self, job: WorkbenchRunJob) -> dict[str, Any]:
         run_id = job.run_dir.name
         async with self._lock:
+            if not self.has_capacity_locked():
+                raise AccError("Local runner queue is full")
+            if run_id in self._active or any(
+                queued.run_dir.name == run_id for queued in self._queued
+            ):
+                raise AccError(f"Run already queued or active: {run_id}")
+            existing_summary = self._load_existing_summary(job.run_dir)
+            if existing_summary is not None and not is_terminal_run_status(existing_summary.status):
+                raise AccError(f"Run already non-terminal: {run_id} ({existing_summary.status})")
             self._write_summary(job, "queued")
             self._queued.append(job)
             self._start_queued_locked()
@@ -61,6 +71,7 @@ class WorkbenchRunManager:
             if queued_job is not None:
                 self._write_cancel_marker(queued_job.run_dir)
                 self._write_summary(queued_job, "cancelled", ended_at=utc_now_iso())
+                self._release_run_lease(run_id)
                 return {"run_id": run_id, "status": "cancelled"}
 
             active_task = self._active.get(run_id)
@@ -73,6 +84,20 @@ class WorkbenchRunManager:
                 return {"run_id": run_id, "status": "cancel_requested"}
 
         raise AccError(f"Run is not queued or running: {run_id}")
+
+    def has_capacity(self) -> bool:
+        return self.has_capacity_locked()
+
+    def has_capacity_locked(self) -> bool:
+        return len(self._queued) < configured_max_queued_runs()
+
+    def capacity_payload(self) -> dict[str, Any]:
+        return {
+            "active_runs": len(self._active),
+            "queued_runs": len(self._queued),
+            "max_active_runs": self.max_active_runs,
+            "max_queued_runs": configured_max_queued_runs(),
+        }
 
     def _start_queued_locked(self) -> None:
         while len(self._active) < self.max_active_runs and self._queued:
@@ -109,6 +134,7 @@ class WorkbenchRunManager:
         finally:
             async with self._lock:
                 self._active.pop(run_id, None)
+                self._release_run_lease(run_id)
                 self._start_queued_locked()
 
     def _pop_queued_locked(self, run_id: str) -> WorkbenchRunJob | None:
@@ -196,11 +222,18 @@ class WorkbenchRunManager:
         if extra:
             payload.update(extra)
         write_json(run_dir / "run_summary.json", payload)
+        if is_active_run_status(summary.status):
+            self._write_run_lease(summary.run_id, summary.status)
+        elif is_terminal_run_status(summary.status):
+            self._release_run_lease(summary.run_id)
         self._write_index()
 
     def _write_index(self) -> None:
         self.runs_root.mkdir(parents=True, exist_ok=True)
         write_json(self.runs_root / "index.json", rebuild_run_index(self.runs_root).model_dump())
+        from acc.storage_index import rebuild_storage_index
+
+        rebuild_storage_index(self.runs_root.parent)
 
     def _load_existing_summary(self, run_dir: Path) -> RunSummary | None:
         path = run_dir / "run_summary.json"
@@ -230,10 +263,28 @@ class WorkbenchRunManager:
 
     def _write_cancel_marker(self, run_dir: Path) -> None:
         run_dir.mkdir(parents=True, exist_ok=True)
-        self._cancel_marker(run_dir).write_text(utc_now_iso(), encoding="utf-8")
+        write_text_atomic(self._cancel_marker(run_dir), utc_now_iso())
 
     def _cancel_marker(self, run_dir: Path) -> Path:
         return run_dir / "cancel_requested"
+
+    def _lease_path(self, run_id: str) -> Path:
+        return self.project_root / ".acc" / "leases" / "runs" / f"{run_id}.json"
+
+    def _write_run_lease(self, run_id: str, status: str) -> None:
+        write_json_atomic(
+            self._lease_path(run_id),
+            {
+                "schema_version": "acc.run_lease.v1",
+                "run_id": run_id,
+                "status": status,
+                "lease_state": "active",
+                "updated_at": utc_now_iso(),
+            },
+        )
+
+    def _release_run_lease(self, run_id: str) -> None:
+        self._lease_path(run_id).unlink(missing_ok=True)
 
     def _submit_payload(self, job: WorkbenchRunJob, status: str) -> dict[str, Any]:
         return {
@@ -252,3 +303,13 @@ def configured_max_active_runs() -> int:
         return max(1, int(value))
     except ValueError:
         return 3
+
+
+def configured_max_queued_runs() -> int:
+    value = os.getenv("ACC_WORKBENCH_MAX_QUEUED_RUNS", "").strip()
+    if not value:
+        return 100
+    try:
+        return max(1, int(value))
+    except ValueError:
+        return 100

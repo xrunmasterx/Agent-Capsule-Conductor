@@ -8,6 +8,7 @@ import yaml
 from acc.app.workbench_snapshots import WorkbenchCanvasSnapshotService
 from acc.mcp_server.server import create_mcp_server
 from acc.mcp_server.tools import AccMcpTools
+from acc.storage import RunHandle, write_run_marker
 
 
 def test_mcp_read_tools_and_artifact_secret_rejection(tmp_path: Path) -> None:
@@ -18,8 +19,8 @@ def test_mcp_read_tools_and_artifact_secret_rejection(tmp_path: Path) -> None:
 
     callables = tools.acc_list_callables()
     workflow = tools.acc_show_workflow("demo")
-    artifact = tools.acc_read_artifact("runs/server_run/artifacts/report.md")
-    secret = tools.acc_read_artifact("runs/server_run/artifacts/secret-token.txt")
+    artifact = tools.acc_read_artifact("run:server_run:artifact:report.md")
+    secret = tools.acc_read_artifact("run:server_run:artifact:secret-token.txt")
 
     assert callables["status"] == "valid"
     assert callables["data"]["callables"][0]["id"] == "echo-test.generic"
@@ -199,6 +200,14 @@ def create_run(root: Path) -> None:
     run_dir = root / "runs" / "server_run"
     artifact_dir = run_dir / "artifacts"
     artifact_dir.mkdir(parents=True, exist_ok=True)
+    write_run_marker(
+        RunHandle(
+            run_id="server_run",
+            run_dir=run_dir,
+            marker_path=run_dir / ".acc-run-marker.json",
+        ),
+        root,
+    )
     (artifact_dir / "report.md").write_text("# Report\n", encoding="utf-8")
     (artifact_dir / "secret-token.txt").write_text("secret\n", encoding="utf-8")
     (run_dir / "events.jsonl").write_text('{"type":"started"}\n', encoding="utf-8")
@@ -210,6 +219,7 @@ def create_run(root: Path) -> None:
                 "run_dir": str(run_dir.resolve()),
                 "node_count": 0,
                 "failed_nodes": [],
+                "artifact_dir": str(artifact_dir.resolve()),
                 "nodes": [],
             }
         ),

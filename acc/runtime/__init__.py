@@ -45,7 +45,7 @@ DEFAULT_ACC_ENV_KEYS = {
 
 
 def validate_permission_profile(profile: PermissionProfile) -> None:
-    if profile.workspace_access not in {"read_only", "writes_workspace", "none"}:
+    if profile.workspace_access not in {"read_only", "writes_run_only", "writes_workspace", "none"}:
         raise AccError(f"Unsupported workspace_access: {profile.workspace_access}")
     for key in profile.allowed_env:
         if key in {"*", "ALL"}:

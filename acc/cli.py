@@ -34,6 +34,8 @@ from acc.migration.graph_importer import (
 )
 from acc.port_io import inspect_ports_run
 from acc.run_index import load_or_rebuild_run_index, load_run_summary
+from acc.session_migration import migrate_sessions
+from acc.storage_gc import StorageGCService
 from acc.store import is_clean_workflow_path, write_json
 from acc.utils import AccError, dump_json, load_json, log_stderr
 
@@ -53,6 +55,7 @@ environment_app = typer.Typer(help="Environment inspection commands.")
 ports_app = typer.Typer(help="Port inbox/outbox inspection commands.")
 template_app = typer.Typer(help="Template bundle export/import commands.")
 mcp_app = typer.Typer(help="MCP stdio server commands.")
+storage_app = typer.Typer(help="Storage inspection and retention commands.")
 app.add_typer(session_app, name="session")
 app.add_typer(graphops_app, name="graphops")
 app.add_typer(runs_app, name="runs")
@@ -68,6 +71,7 @@ app.add_typer(environment_app, name="environment")
 app.add_typer(ports_app, name="ports")
 app.add_typer(template_app, name="template")
 app.add_typer(mcp_app, name="mcp")
+app.add_typer(storage_app, name="storage")
 
 
 @app.callback()
@@ -207,6 +211,159 @@ def mcp_serve(
         log_stderr(f"MCP dependencies are not installed: {exc}")
         raise typer.Exit(1) from exc
     run_stdio_server(project_root.resolve())
+
+
+@storage_app.command("doctor")
+def storage_doctor(
+    project_root: Annotated[
+        Path,
+        typer.Option("--project-root", help="ACC project root."),
+    ] = Path("."),
+) -> None:
+    payload = StorageGCService(project_root.resolve()).doctor()
+    typer.echo(dump_json(payload))
+
+
+@storage_app.command("rebuild-index")
+def storage_rebuild_index(
+    project_root: Annotated[
+        Path,
+        typer.Option("--project-root", help="ACC project root."),
+    ] = Path("."),
+) -> None:
+    payload = StorageGCService(project_root.resolve()).rebuild_index()
+    typer.echo(dump_json(payload))
+
+
+@storage_app.command("gc")
+def storage_gc(
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="Create an inspectable GC plan."),
+    ] = False,
+    apply: Annotated[bool, typer.Option("--apply", help="Apply an existing GC plan.")] = False,
+    plan_id: Annotated[
+        str | None,
+        typer.Option("--plan-id", help="GC plan id from dry-run."),
+    ] = None,
+    plan_digest: Annotated[
+        str | None,
+        typer.Option("--plan-digest", help="Expected GC plan digest."),
+    ] = None,
+    project_root: Annotated[
+        Path,
+        typer.Option("--project-root", help="ACC project root."),
+    ] = Path("."),
+) -> None:
+    service = StorageGCService(project_root.resolve())
+    try:
+        if dry_run == apply:
+            raise AccError("Use exactly one of --dry-run or --apply")
+        if dry_run:
+            payload = service.create_plan(write=True)
+        else:
+            if not plan_id:
+                raise AccError("--apply requires --plan-id")
+            payload = service.apply_plan(plan_id, expected_digest=plan_digest)
+    except AccError as exc:
+        log_stderr(str(exc))
+        raise typer.Exit(1) from exc
+    typer.echo(dump_json(payload))
+
+
+@storage_app.command("purge")
+def storage_purge(
+    grace_expired: Annotated[
+        bool,
+        typer.Option("--grace-expired", help="Purge trash entries whose grace period expired."),
+    ] = False,
+    project_root: Annotated[
+        Path,
+        typer.Option("--project-root", help="ACC project root."),
+    ] = Path("."),
+) -> None:
+    try:
+        if not grace_expired:
+            raise AccError("Use --grace-expired to purge expired trash entries")
+        payload = StorageGCService(project_root.resolve()).purge_expired_trash()
+    except AccError as exc:
+        log_stderr(str(exc))
+        raise typer.Exit(1) from exc
+    typer.echo(dump_json(payload))
+
+
+@storage_app.command("migrate-sessions")
+def storage_migrate_sessions(
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="Plan legacy session migration without writing files."),
+    ] = False,
+    apply: Annotated[
+        bool,
+        typer.Option("--apply", help="Copy legacy sessions into .acc/sessions."),
+    ] = False,
+    project_root: Annotated[
+        Path,
+        typer.Option("--project-root", help="ACC project root."),
+    ] = Path("."),
+) -> None:
+    try:
+        if dry_run == apply:
+            raise AccError("Use exactly one of --dry-run or --apply")
+        payload = migrate_sessions(project_root.resolve(), apply=apply)
+    except AccError as exc:
+        log_stderr(str(exc))
+        raise typer.Exit(1) from exc
+    typer.echo(dump_json(payload))
+
+
+@storage_app.command("pin")
+def storage_pin(
+    object_ref: str,
+    project_root: Annotated[
+        Path,
+        typer.Option("--project-root", help="ACC project root."),
+    ] = Path("."),
+) -> None:
+    try:
+        payload = StorageGCService(project_root.resolve()).set_pinned(object_ref, True)
+    except AccError as exc:
+        log_stderr(str(exc))
+        raise typer.Exit(1) from exc
+    typer.echo(dump_json(payload))
+
+
+@storage_app.command("unpin")
+def storage_unpin(
+    object_ref: str,
+    project_root: Annotated[
+        Path,
+        typer.Option("--project-root", help="ACC project root."),
+    ] = Path("."),
+) -> None:
+    try:
+        payload = StorageGCService(project_root.resolve()).set_pinned(object_ref, False)
+    except AccError as exc:
+        log_stderr(str(exc))
+        raise typer.Exit(1) from exc
+    typer.echo(dump_json(payload))
+
+
+@storage_app.command("export-run")
+def storage_export_run(
+    run_id: str,
+    out: Annotated[Path, typer.Option("--out", help="Output archive path.")],
+    project_root: Annotated[
+        Path,
+        typer.Option("--project-root", help="ACC project root."),
+    ] = Path("."),
+) -> None:
+    try:
+        payload = StorageGCService(project_root.resolve()).export_run(run_id, out)
+    except AccError as exc:
+        log_stderr(str(exc))
+        raise typer.Exit(1) from exc
+    typer.echo(dump_json(payload))
 
 
 @runs_app.command("list")

@@ -37,6 +37,10 @@ import type {
   InteractionRequest,
   NodeLogDelta,
   RuntimeConfig,
+  RunnerCapabilities,
+  RunnerJob,
+  RunnerRunProjection,
+  RunnerWorkspaces,
 } from './types';
 
 async function getJson<T>(path: string): Promise<T> {
@@ -176,6 +180,42 @@ export const api = {
     getJson<Record<string, unknown>>(
       `/api/workbench/canvas-snapshots/${encodeURIComponent(taskId)}`,
     ),
+  workbenchTasks: () => getJson<{ tasks: Record<string, unknown>[] }>('/api/workbench/tasks'),
+  createWorkbenchTask: (payload: {
+    task_id: string;
+    title: string;
+    saved_workflow_ref?: string | null;
+    active_run_id?: string | null;
+    latest_run_id?: string | null;
+  }) => sendJson<Record<string, unknown>>('POST', '/api/workbench/tasks', payload),
+  updateWorkbenchTask: (
+    taskId: string,
+    payload: {
+      title?: string | null;
+      saved_workflow_ref?: string | null;
+      active_run_id?: string | null;
+      latest_run_id?: string | null;
+    },
+  ) => sendJson<Record<string, unknown>>('PUT', `/api/workbench/tasks/${encodeURIComponent(taskId)}`, payload),
+  deleteWorkbenchTask: (taskId: string) =>
+    sendJson<Record<string, unknown>>('DELETE', `/api/workbench/tasks/${encodeURIComponent(taskId)}`, {}),
+  putWorkbenchTaskCanvas: (
+    taskId: string,
+    payload: {
+      canvas_hash: string;
+      canvas_snapshot: Record<string, unknown>;
+      selection?: Record<string, unknown>;
+      temporary_resources?: Record<string, unknown>;
+      base_canvas_hash?: string | null;
+    },
+  ) =>
+    sendJson<Record<string, unknown>>(
+      'PUT',
+      `/api/workbench/tasks/${encodeURIComponent(taskId)}/canvas`,
+      payload,
+    ),
+  getWorkbenchTaskCanvas: (taskId: string) =>
+    getJson<Record<string, unknown>>(`/api/workbench/tasks/${encodeURIComponent(taskId)}/canvas`),
   runs: () => getJson<RunIndex>('/api/runs'),
   run: (runId: string) => getJson<RunSummary>(`/api/runs/${encodeURIComponent(runId)}`),
   cancelRun: (runId: string) =>
@@ -468,4 +508,50 @@ export const api = {
       `/api/graphops/proposals/${encodeURIComponent(proposalId)}/apply`,
       {},
     ),
+};
+
+export const controlPlaneApi = api;
+
+export const runnerApi = {
+  health: () => getJson<{ status: string; runner_id: string; mode: string }>('/api/runner/health'),
+  capabilities: () => getJson<RunnerCapabilities>('/api/runner/capabilities'),
+  providers: () =>
+    getJson<{ runner_id: string; provider_status: Record<string, string> }>(
+      '/api/runner/providers',
+    ),
+  workspaces: () => getJson<RunnerWorkspaces>('/api/runner/workspaces'),
+  createWorkspace: (payload: {
+    alias: string;
+    display_name?: string | null;
+    local_path: string;
+  }) => sendJson<RunnerWorkspaces>('POST', '/api/runner/workspaces', payload),
+  submitJob: (
+    graph: WorkflowGraph,
+    options?: {
+      jobId?: string;
+      runId?: string;
+      taskId?: string;
+      workspaceAlias?: string;
+      bindingRef?: string;
+      input?: Record<string, unknown>;
+    },
+  ) =>
+    sendJson<RunnerJob>('POST', '/api/runner/jobs', {
+      graph,
+      ...(options?.jobId ? { job_id: options.jobId } : {}),
+      ...(options?.runId ? { run_id: options.runId } : {}),
+      ...(options?.taskId ? { task_id: options.taskId } : {}),
+      workspace_alias: options?.workspaceAlias || 'default',
+      ...(options?.bindingRef ? { binding_ref: options.bindingRef } : {}),
+      ...(options?.input ? { input: options.input } : {}),
+    }),
+  job: (jobId: string) => getJson<RunnerJob>(`/api/runner/jobs/${encodeURIComponent(jobId)}`),
+  cancelJob: (jobId: string) =>
+    sendJson<RunnerJob>('POST', `/api/runner/jobs/${encodeURIComponent(jobId)}/cancel`, {}),
+  runProjection: (runId: string) =>
+    getJson<RunnerRunProjection>(
+      `/api/runner/runs/${encodeURIComponent(runId)}/projection`,
+    ),
+  runStreamUrl: (runId: string, afterSeq = 0) =>
+    `/api/runner/runs/${encodeURIComponent(runId)}/stream?after_seq=${encodeURIComponent(String(afterSeq))}`,
 };

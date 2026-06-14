@@ -9,13 +9,13 @@ import json
 from pathlib import Path
 from typing import Any
 
+from acc.app.runtime.executor import put_result_store_value
 from acc.models import (
     AccError,
     WorkflowFunctionTemplate,
 )
 from acc.result_store.filesystem import FilesystemResultStore
 from acc.run_index import NodeRunSummary, RunSummary, rebuild_run_index
-from acc.app.runtime.executor import put_result_store_value
 from acc.store import write_json
 
 
@@ -89,6 +89,9 @@ def write_core_v2_run_summary(
     write_json(run_dir / "run_summary.json", summary.model_dump())
     if run_dir.parent.name == "runs":
         write_json(run_dir.parent / "index.json", rebuild_run_index(run_dir.parent).model_dump())
+        from acc.storage_index import rebuild_storage_index
+
+        rebuild_storage_index(run_dir.parent.parent)
 
 
 def node_summary_from_session_manifest(run_dir: Path, node_id: str) -> NodeRunSummary:

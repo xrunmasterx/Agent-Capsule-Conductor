@@ -311,10 +311,15 @@ def test_authoring_session_service_hermetic_generates_valid_canvas_proposal(
     assert response["validation"]["status"] == "valid"
     assert response["proposal"]["base_canvas_hash"] == "hash_1"
     assert response["proposal"]["operations"][0]["op"] == "add_existing_callable_node"
-    evidence_root = tmp_path / "runs" / "_authoring_sessions" / session["session_id"]
+    evidence_root = tmp_path / ".acc" / "sessions" / "authoring" / session["session_id"]
     assert (evidence_root / "session.json").exists()
     assert (evidence_root / "context_snapshot.json").exists()
     assert (evidence_root / "agent_output_raw.txt").exists()
+    state = json.loads((evidence_root / "session.json").read_text(encoding="utf-8"))
+    assert state["schema_version"] == "acc.authoring.session.v1"
+    assert state["session_ref"] == f"session:v1:{session['session_id']}"
+    assert state["owner_ref"] == "task:v1:task_1"
+    assert not (tmp_path / "runs" / "_authoring_sessions" / session["session_id"]).exists()
 
 
 def test_authoring_external_request_records_prompt_policy(
@@ -341,7 +346,7 @@ def test_authoring_external_request_records_prompt_policy(
         )
     )
 
-    evidence_root = tmp_path / "runs" / "_authoring_sessions" / session["session_id"]
+    evidence_root = tmp_path / ".acc" / "sessions" / "authoring" / session["session_id"]
     input_payload = json.loads(
         (evidence_root / "agent_run" / "input.json").read_text(encoding="utf-8")
     )
@@ -505,8 +510,9 @@ def test_authoring_context_uses_real_callable_catalog_not_only_authoring_agents(
     context = json.loads(
         (
             tmp_path
-            / "runs"
-            / "_authoring_sessions"
+            / ".acc"
+            / "sessions"
+            / "authoring"
             / session["session_id"]
             / "context_snapshot.json"
         ).read_text(encoding="utf-8")
@@ -520,6 +526,36 @@ def test_authoring_context_uses_real_callable_catalog_not_only_authoring_agents(
     assert [agent["id"] for agent in agents] == ["ok.generic"]
     assert callable_ids == {"ok.generic", "ordinary.native"}
     assert capability_by_id == {"ok.generic": True, "ordinary.native": False}
+
+
+def test_authoring_legacy_session_remains_readable(tmp_path: Path) -> None:
+    create_agent(tmp_path, "ok.generic", "generic_cli")
+    legacy_dir = tmp_path / "runs" / "_authoring_sessions" / "authoring_legacy"
+    legacy_dir.mkdir(parents=True)
+    (legacy_dir / "messages.jsonl").write_text("", encoding="utf-8")
+    (legacy_dir / "session.json").write_text(
+        json.dumps(
+            {
+                "session_id": "authoring_legacy",
+                "agent_id": "ok.generic",
+                "task_id": "task_legacy",
+                "status": "ready",
+                "created_at": "2026-01-01T00:00:00Z",
+                "updated_at": "2026-01-01T00:00:00Z",
+                "context_snapshot_ref": "context_snapshot.json",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (legacy_dir / "context_snapshot.json").write_text("{}", encoding="utf-8")
+
+    payload = AuthoringSessionService(tmp_path).get_session("authoring_legacy")
+
+    assert payload["session_id"] == "authoring_legacy"
+    assert (
+        payload["evidence"]["session"]
+        == "runs/_authoring_sessions/authoring_legacy/session.json"
+    )
 
 
 def test_authoring_validation_gates_stale_unknown_duplicate_and_temporary(

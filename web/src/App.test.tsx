@@ -966,15 +966,18 @@ beforeEach(() => {
           );
         }
       }
-      if (method === 'POST' && url === '/api/workflows/run-graph/submit') {
+      if (method === 'POST' && url === '/api/runner/jobs') {
         const body = JSON.parse(String(init?.body || '{}'));
-        const runId = String(body.run_dir || '').split('/').pop() || body.graph?.id || `${demoRunPrefix}_fixture`;
+        const runId = body.run_id || body.graph?.id || `${demoRunPrefix}_fixture`;
         return new Response(
           JSON.stringify({
+            job_id: body.job_id || `job_${runId}`,
             run_id: runId,
             task_id: body.task_id,
+            workspace_alias: body.workspace_alias || 'default',
+            workflow_id: body.graph?.id,
             status: 'running',
-            run_dir: `runs/${runId}`,
+            stream_url: `/api/runner/runs/${runId}/stream`,
           }),
           {
             status: 200,
@@ -1476,7 +1479,7 @@ describe('Agent Callable Workbench editable UI', () => {
     await screen.findByText(new RegExp(`${demoRunPrefix}.*:`, 'i'));
 
     const runCallsBeforeSwitch = vi.mocked(fetch).mock.calls.filter(
-      ([url, init]) => url === '/api/workflows/run-graph/submit' && init?.method === 'POST',
+      ([url, init]) => url === '/api/runner/jobs' && init?.method === 'POST',
     ).length;
 
     const workbench = await screen.findByLabelText('ACC Workbench');
@@ -1499,7 +1502,7 @@ describe('Agent Callable Workbench editable UI', () => {
     );
 
     const runCallsAfterSwitch = vi.mocked(fetch).mock.calls.filter(
-      ([url, init]) => url === '/api/workflows/run-graph/submit' && init?.method === 'POST',
+      ([url, init]) => url === '/api/runner/jobs' && init?.method === 'POST',
     ).length;
     expect(runCallsAfterSwitch).toBe(runCallsBeforeSwitch);
   });
@@ -3869,7 +3872,7 @@ describe('Agent Callable Workbench editable UI', () => {
           init?.method === 'POST',
       ),
     ).toBe(false);
-    expect(calls.some(([url, init]) => url === '/api/workflows/run-graph/submit' && init?.method === 'POST')).toBe(false);
+    expect(calls.some(([url, init]) => url === '/api/runner/jobs' && init?.method === 'POST')).toBe(false);
   });
 
   test('Workbench AI temporary agent persists through GraphOps proposal approval', async () => {
@@ -3951,7 +3954,7 @@ describe('Agent Callable Workbench editable UI', () => {
     const validateCall = calls.find(
       ([url, init]) => url === `/api/workflows/${demoRootId}/validate` && init?.method === 'POST',
     );
-    const runCall = calls.find(([url, init]) => url === '/api/workflows/run-graph/submit' && init?.method === 'POST');
+    const runCall = calls.find(([url, init]) => url === '/api/runner/jobs' && init?.method === 'POST');
     expect(saveCall).toBeTruthy();
     expect(validateCall).toBeTruthy();
     expect(runCall).toBeTruthy();
@@ -3994,7 +3997,7 @@ describe('Agent Callable Workbench editable UI', () => {
     await user.click(await screen.findByRole('button', { name: '运行当前任务' }));
 
     const runCall = vi.mocked(fetch).mock.calls.find(
-      ([url, init]) => url === '/api/workflows/run-graph/submit' && init?.method === 'POST',
+      ([url, init]) => url === '/api/runner/jobs' && init?.method === 'POST',
     );
     expect(runCall).toBeTruthy();
     const runPayload = JSON.parse(String(runCall?.[1]?.body));

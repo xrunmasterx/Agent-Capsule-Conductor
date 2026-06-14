@@ -33,6 +33,8 @@ from acc.server.context import (
     relative_project_path,
 )
 from acc.server.run_manager import WorkbenchRunJob
+from acc.runner import LocalRunnerService, RunnerCapabilityError
+from acc.storage import RunHandle, claim_run, parse_legacy_run_dir, resolve_run_dir as storage_run_dir
 from acc.utils import AccError, load_json
 
 router = APIRouter(prefix="/workflows", tags=["workflows"])
@@ -49,9 +51,12 @@ class WorkflowSaveRequest(BaseModel):
 class WorkflowRunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    run_dir: str
+    run_id: str | None = None
+    run_dir: str | None = None
     binding_path: str | None = None
+    binding_ref: str | None = None
     workspace: str | None = None
+    workspace_alias: str | None = None
     input: dict[str, Any] | None = None
 
 
@@ -119,15 +124,26 @@ def list_workflows(request: Request) -> dict[str, Any]:
 @router.post("/run-graph")
 def run_graph_endpoint(payload: WorkflowRunGraphRequest, request: Request) -> dict[str, Any]:
     project_root = get_project_root(request)
-    run_dir = resolve_run_dir(project_root, payload.run_dir)
-    graph_path = prepare_runtime_graph(payload.graph, run_dir, request, task_id=payload.task_id)
-    workspace, binding_path = resolve_run_environment(project_root, payload)
+    preflight_runtime_graph(payload.graph, request, task_id=payload.task_id)
+    resolved = resolve_runner_environment_before_evidence(
+        project_root,
+        payload,
+        request,
+        graph=payload.graph,
+    )
+    handle = claim_run_for_payload(
+        project_root,
+        payload,
+        workflow_id=str(payload.graph.get("id") or ""),
+        task_id=payload.task_id,
+    )
+    graph_path = prepare_runtime_graph(payload.graph, handle.run_dir, request, task_id=payload.task_id)
     try:
         result = WorkflowAppService(project_root=project_root).run_sync(
             graph_path,
-            run_dir,
-            workspace=workspace,
-            binding_path=binding_path,
+            handle.run_dir,
+            workspace=resolved["workspace"],
+            binding_path=resolved["binding_path"],
             input_payload=payload.input,
         )
         return project_run_response(result)
@@ -141,20 +157,32 @@ async def submit_run_graph_endpoint(
     request: Request,
 ) -> dict[str, Any]:
     project_root = get_project_root(request)
-    run_dir = resolve_run_dir(project_root, payload.run_dir)
-    graph_path = prepare_runtime_graph(payload.graph, run_dir, request, task_id=payload.task_id)
-    workspace, binding_path = resolve_run_environment(project_root, payload)
-    workflow_id = str(load_json_or_500(graph_path).get("id") or graph_path.stem)
+    preflight_runtime_graph(payload.graph, request, task_id=payload.task_id)
     manager = get_workbench_run_manager(request)
+    resolved = resolve_runner_environment_before_evidence(
+        project_root,
+        payload,
+        request,
+        graph=payload.graph,
+        manager=manager,
+    )
+    handle = claim_run_for_payload(
+        project_root,
+        payload,
+        workflow_id=str(payload.graph.get("id") or ""),
+        task_id=payload.task_id,
+    )
+    graph_path = prepare_runtime_graph(payload.graph, handle.run_dir, request, task_id=payload.task_id)
+    workflow_id = str(load_json_or_500(graph_path).get("id") or graph_path.stem)
     try:
         return await manager.submit(
             WorkbenchRunJob(
                 graph_path=graph_path,
-                run_dir=run_dir,
+                run_dir=handle.run_dir,
                 workflow_id=workflow_id,
                 task_id=payload.task_id,
-                workspace=workspace,
-                binding_path=binding_path,
+                workspace=resolved["workspace"],
+                binding_path=resolved["binding_path"],
                 input_payload=payload.input,
                 service_factory=lambda: WorkflowAppService(project_root=project_root),
             )
@@ -211,6 +239,37 @@ def prepare_runtime_graph(
         child_names=sorted(bundle.children),
     )
     return accflow_path
+
+
+def preflight_runtime_graph(
+    graph_payload: dict[str, Any],
+    request: Request,
+    *,
+    task_id: str | None = None,
+) -> None:
+    project_root = get_project_root(request)
+    graph = graph_with_latest_workbench_node_modes(graph_payload, project_root, task_id)
+    workflow_id = str(graph.get("id") or "")
+    if not workflow_id:
+        raise HTTPException(status_code=400, detail="Workflow graph id is required")
+    workflows_dir = configured_project_dir(project_root, "ACC_WORKFLOWS_DIR", "workflows")
+    source_path = project_root / "runs" / "_workflow_function_specs" / "_preflight" / "root.accflow.json"
+    bundle = graph_bundle_for_accflow_save(
+        graph,
+        source_path=source_path,
+        callable_registry=CallableRegistry.from_project_root(project_root),
+    )
+    bundle, _child_name_map = runtime_named_workflow_bundle(bundle)
+    try:
+        resolve_bundle_workflow_refs(
+            bundle,
+            project_root=project_root,
+            workflows_dir=workflows_dir,
+            accflow_path=source_path,
+            mode="runtime",
+        )
+    except AccError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 def runtime_workflow_spec_dir(project_root: Path, run_dir: Path) -> Path:
@@ -525,33 +584,55 @@ def run_workflow_endpoint(
 ) -> dict[str, Any]:
     project_root = get_project_root(request)
     graph_path = find_graph_path(workflow_id, request)
-    run_dir = resolve_run_dir(project_root, payload.run_dir)
-    workspace, binding_path = resolve_run_environment(project_root, payload)
+    resolved = resolve_runner_environment_before_evidence(project_root, payload, request)
+    handle = claim_run_for_payload(project_root, payload, workflow_id=workflow_id)
     try:
         return WorkflowAppService(project_root=project_root).run_sync(
             graph_path,
-            run_dir,
-            workspace=workspace,
-            binding_path=binding_path,
+            handle.run_dir,
+            workspace=resolved["workspace"],
+            binding_path=resolved["binding_path"],
             input_payload=payload.input,
         )
     except AccError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+def claim_run_for_payload(
+    project_root: Path,
+    payload: WorkflowRunRequest,
+    *,
+    workflow_id: str | None = None,
+    task_id: str | None = None,
+) -> RunHandle:
+    if payload.run_id and payload.run_dir:
+        raise HTTPException(status_code=400, detail="Provide run_id or run_dir, not both")
+    try:
+        run_id = payload.run_id
+        if payload.run_dir:
+            run_id = parse_legacy_run_dir(payload.run_dir)
+        return claim_run(project_root, run_id=run_id, workflow_id=workflow_id, task_id=task_id)
+    except AccError as exc:
+        status_code = 409 if str(exc).startswith("Run already exists:") else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+
+
 def resolve_run_dir(project_root: Path, run_dir_value: str) -> Path:
-    run_dir = (project_root / run_dir_value).resolve()
-    if not run_dir.is_relative_to(project_root):
-        raise HTTPException(status_code=400, detail="Run directory is outside project root")
-    return run_dir
+    try:
+        run_id = parse_legacy_run_dir(run_dir_value)
+        return storage_run_dir(project_root, run_id)
+    except AccError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 def resolve_run_environment(
     project_root: Path,
     payload: WorkflowRunRequest,
 ) -> tuple[Path | None, Path | None]:
-    if payload.workspace and payload.binding_path:
-        raise HTTPException(status_code=400, detail="Provide workspace or binding_path, not both")
+    if payload.workspace and (payload.binding_path or payload.binding_ref):
+        raise HTTPException(status_code=400, detail="Provide workspace or binding, not both")
+    if payload.binding_path and payload.binding_ref:
+        raise HTTPException(status_code=400, detail="Provide binding_path or binding_ref, not both")
     workspace = None
     binding_path = None
     if payload.workspace:
@@ -564,6 +645,54 @@ def resolve_run_environment(
     if payload.binding_path:
         binding_path = resolve_binding_path(project_root, payload.binding_path)
     return workspace, binding_path
+
+
+def resolve_runner_environment_before_evidence(
+    project_root: Path,
+    payload: WorkflowRunRequest,
+    request: Request,
+    *,
+    graph: dict[str, Any] | None = None,
+    manager: Any | None = None,
+) -> dict[str, Path | None]:
+    if payload.binding_ref:
+        try:
+            resolved = LocalRunnerService(project_root).validate_job_before_evidence(
+                graph=graph or {"nodes": []},
+                workspace_alias=payload.workspace_alias,
+                binding_ref=payload.binding_ref,
+                raw_workspace=payload.workspace,
+                manager=manager,
+            )
+            return {
+                "workspace": None if resolved["binding_path"] else resolved["workspace"],
+                "binding_path": resolved["binding_path"],
+            }
+        except RunnerCapabilityError as exc:
+            raise HTTPException(status_code=400, detail=exc.to_payload()) from exc
+    if payload.workspace_alias:
+        try:
+            resolved = LocalRunnerService(project_root).validate_job_before_evidence(
+                graph=graph or {"nodes": []},
+                workspace_alias=payload.workspace_alias,
+                raw_workspace=payload.workspace,
+                manager=manager,
+            )
+            return {"workspace": resolved["workspace"], "binding_path": None}
+        except RunnerCapabilityError as exc:
+            raise HTTPException(status_code=400, detail=exc.to_payload()) from exc
+    if graph is not None:
+        try:
+            LocalRunnerService(project_root).validate_job_before_evidence(
+                graph=graph,
+                workspace_alias=None,
+                raw_workspace=payload.workspace,
+                manager=manager,
+            )
+        except RunnerCapabilityError as exc:
+            raise HTTPException(status_code=400, detail=exc.to_payload()) from exc
+    workspace, binding_path = resolve_run_environment(project_root, payload)
+    return {"workspace": workspace, "binding_path": binding_path}
 
 
 def load_yaml(path: Path) -> dict[str, Any]:

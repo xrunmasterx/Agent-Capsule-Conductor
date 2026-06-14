@@ -29,6 +29,7 @@ from acc.models import (
 )
 from acc.runtime.policy import HERMETIC_RUN_MODE, acc_run_mode
 from acc.session import utc_now_iso
+from acc.storage_refs import make_session_ref, make_task_ref
 from acc.store import load_json, write_json
 from acc.utils import validate_authoring_session_id
 
@@ -428,7 +429,9 @@ ALLOWED_AUTHORING_OPERATIONS = frozenset(
     }
 )
 TEMPORARY_CALLABLE_PREFIX = "tmp_agent_"
-AUTHORING_SESSION_ROOT = Path("runs") / "_authoring_sessions"
+AUTHORING_SESSION_SCHEMA_VERSION = "acc.authoring.session.v1"
+AUTHORING_SESSION_ROOT = Path(".acc") / "sessions" / "authoring"
+LEGACY_AUTHORING_SESSION_ROOT = Path("runs") / "_authoring_sessions"
 
 
 class AuthoringSessionService:
@@ -472,19 +475,40 @@ class AuthoringSessionService:
             canvas_snapshot=canvas_snapshot,
             selection=selection,
         )
+        now = utc_now_iso()
+        session_ref = make_session_ref(session_id)
+        owner_ref = make_task_ref(task_id)
         state = {
+            "schema_version": AUTHORING_SESSION_SCHEMA_VERSION,
             "session_id": session_id,
+            "session_ref": session_ref,
+            "owner_ref": owner_ref,
             "agent_id": selected_agent.template.id,
             "task_id": task_id,
             "status": "ready",
-            "created_at": utc_now_iso(),
-            "updated_at": utc_now_iso(),
+            "created_at": now,
+            "updated_at": now,
+            "retention": {"pinned": False, "retention_class": "normal"},
             "context_snapshot_ref": "context_snapshot.json",
             "last_proposal": None,
             "validation": None,
             "required_actions": [],
         }
         write_json(session_dir / "session.json", state)
+        write_json(
+            session_dir / "refs.json",
+            {
+                "schema_version": "acc.authoring.session.refs.v1",
+                "session_id": session_id,
+                "session_ref": session_ref,
+                "owner_ref": owner_ref,
+                "task_id": task_id,
+            },
+        )
+        write_json(
+            session_dir / "retention.json",
+            {"pinned": False, "retention_class": "normal"},
+        )
         write_json(session_dir / "context_snapshot.json", context)
         return self._session_payload(session_id)
 
@@ -715,7 +739,7 @@ class AuthoringSessionService:
         message: str,
         context: dict[str, Any],
     ) -> dict[str, Any]:
-        session_dir = self._session_dir(session_id)
+        session_dir = self._require_session(session_id)
         if acc_run_mode() == HERMETIC_RUN_MODE:
             output = hermetic_authoring_output(message=message, context=context)
             write_json(session_dir / "agent_output.json", output)
@@ -735,7 +759,7 @@ class AuthoringSessionService:
             state,
         )
         return parse_authoring_output(
-            self._session_dir(session_id) / "agent_output_raw.txt",
+            session_dir / "agent_output_raw.txt",
             json.dumps(output, ensure_ascii=False) if isinstance(output, dict) else str(output),
         )
 
@@ -749,7 +773,7 @@ class AuthoringSessionService:
     ) -> dict[str, Any]:
         if not isinstance(asset.template, AgentClassTemplate):
             raise AccError(f"Authoring callable is not an agent: {asset.source_id}")
-        session_dir = self._session_dir(session_id)
+        session_dir = self._require_session(session_id)
         run_dir = session_dir / "agent_run"
         workspace_dir = session_dir / "workspace"
         for path in (
@@ -841,7 +865,7 @@ class AuthoringSessionService:
             ),
         )
         raw = json.dumps(output, ensure_ascii=False)
-        (self._session_dir(session_id) / "agent_output_raw.txt").write_text(raw, encoding="utf-8")
+        (session_dir / "agent_output_raw.txt").write_text(raw, encoding="utf-8")
         return output
 
     def _operation_errors(
@@ -1113,14 +1137,21 @@ class AuthoringSessionService:
         validate_authoring_session_id(session_id)
         return self.project_root / AUTHORING_SESSION_ROOT / session_id
 
+    def _legacy_session_dir(self, session_id: str) -> Path:
+        validate_authoring_session_id(session_id)
+        return self.project_root / LEGACY_AUTHORING_SESSION_ROOT / session_id
+
     def _require_session(self, session_id: str) -> Path:
         session_dir = self._session_dir(session_id)
-        if not (session_dir / "session.json").exists():
-            raise AccError(f"Authoring session not found: {session_id}")
-        return session_dir
+        if (session_dir / "session.json").exists():
+            return session_dir
+        legacy_dir = self._legacy_session_dir(session_id)
+        if (legacy_dir / "session.json").exists():
+            return legacy_dir
+        raise AccError(f"Authoring session not found: {session_id}")
 
     def _load_state(self, session_id: str) -> dict[str, Any]:
-        payload = load_json(self._session_dir(session_id) / "session.json")
+        payload = load_json(self._require_session(session_id) / "session.json")
         if not isinstance(payload, dict):
             raise AccError(f"Authoring session state is invalid: {session_id}")
         return payload

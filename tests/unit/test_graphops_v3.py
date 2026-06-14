@@ -92,11 +92,19 @@ def test_graphops_v3_valid_create_transaction_dry_run_and_apply(tmp_path: Path) 
         },
     )
     assert approval["status"] == "approved"
+    assert approval["approval_nonce"].startswith("approval_")
+    assert approval["runner_id"].startswith("runner_")
+    assert approval["workspace_binding_fingerprint"].startswith("sha256:")
     manifest = service.apply("graphops_tx_create")
     assert manifest["status"] == "applied"
+    assert manifest["audit"]["before"][0]["digest"] == "absent"
+    assert manifest["audit"]["after"][0]["digest"].startswith("sha256:")
     assert manifest["targets"][0]["operation"] in {"create_agent_class", "create_workflow"}
     assert manifest["targets"][0]["created_hash"].startswith("sha256:")
     assert (tmp_path / "callables" / "agents" / "reviewer.codex.yaml").exists()
+    audit_log = (tmp_path / ".acc" / "audit" / "events.jsonl").read_text(encoding="utf-8")
+    assert "graphops.approve" in audit_log
+    assert "graphops.apply" in audit_log
     saved_workflow = json.loads(
         (tmp_path / "workflows" / "research.accflow.json").read_text(encoding="utf-8")
     )
@@ -190,3 +198,33 @@ def test_graphops_v3_stale_target_blocks_apply_without_mutating(tmp_path: Path) 
         service.apply("graphops_tx_create")
 
     assert not (tmp_path / "workflows" / "research.accflow.json").exists()
+
+
+def test_graphops_v3_apply_rejects_tampered_approval_nonce(tmp_path: Path) -> None:
+    service = GraphOpsService(tmp_path)
+    service.create_proposal(valid_transaction())
+    dry_run = service.dry_run("graphops_tx_create")
+    service.approve(
+        "graphops_tx_create",
+        {
+            "proposal_id": "graphops_tx_create",
+            "target_paths": dry_run["target_paths"],
+            "base_hashes": {
+                "callables/agents/reviewer.codex.yaml": "absent",
+                "workflows/research.accflow.json": "absent",
+            },
+            "dry_run_digest": dry_run["dry_run_digest"],
+            "approver": "tester",
+        },
+    )
+    approval_path = (
+        tmp_path / "runs" / "_graphops_proposals" / "graphops_tx_create" / "approval.json"
+    )
+    approval = json.loads(approval_path.read_text(encoding="utf-8"))
+    approval.pop("approval_nonce")
+    approval_path.write_text(json.dumps(approval), encoding="utf-8")
+
+    with pytest.raises(AccError, match="nonce"):
+        service.apply("graphops_tx_create")
+
+    assert not (tmp_path / "callables" / "agents" / "reviewer.codex.yaml").exists()

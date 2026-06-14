@@ -6,6 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from acc.storage import write_json_atomic
 from acc.utils import AccError, load_json
 
 INDEX_VERSION = "2.0"
@@ -83,6 +84,7 @@ def write_node_summary(
 def write_run_summary(run_dir: Path, node_summary: NodeRunSummary) -> RunSummary:
     summary = build_run_summary(run_dir, [node_summary])
     write_json(run_dir / "run_summary.json", summary.model_dump())
+    update_project_run_index(run_dir)
     return summary
 
 
@@ -94,6 +96,9 @@ def update_project_run_index(run_dir: Path) -> None:
     index = rebuild_run_index(runs_root)
     runs_root.mkdir(parents=True, exist_ok=True)
     write_json(runs_root / "index.json", index.model_dump())
+    from acc.storage_index import rebuild_storage_index
+
+    rebuild_storage_index(runs_root.parent)
 
 
 def load_or_rebuild_run_index(runs_root: Path = Path("runs")) -> RunIndex:
@@ -358,7 +363,7 @@ def existing_path(path: Path) -> str | None:
 
 
 def write_json(path: Path, payload: Any) -> None:
-    path.write_text(json_dumps(payload), encoding="utf-8")
+    write_json_atomic(path, payload)
 
 
 def json_dumps(payload: Any) -> str:

@@ -21,6 +21,7 @@ from acc.models import (
     SessionInstance,
 )
 from acc.session import utc_now_iso
+from acc.storage import append_jsonl_locked
 
 
 def function_invocation_payload(invocation: FunctionInvocation) -> dict[str, Any]:
@@ -91,8 +92,7 @@ def append_event(
         node_id=node_id,
         payload=payload or {},
     )
-    with event_log_path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(event_record_payload(event), ensure_ascii=False) + "\n")
+    append_jsonl_locked(event_log_path, event_record_payload(event))
 
 
 def append_runtime_error_to_stderr_log(path: Path, message: str) -> None:

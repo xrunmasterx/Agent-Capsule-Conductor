@@ -68,8 +68,12 @@ def test_workbench_assistant_session_creates_unbound_callable_agent(
     payload = response.json()
     assert payload["session_kind"] == "workbench_assistant"
     assert payload["bound_run_id"] is None
+    assert payload["owner_ref"] == "task:task_canvas_default"
+    assert payload["retention"] == {"pinned": False, "retention_class": "normal"}
     assert payload["runtime"] == "codex_app_server"
     assert Path(payload["session_dir"], "context_snapshot.json").exists()
+    assert Path(payload["session_dir"]).is_relative_to(project_root / ".acc" / "sessions")
+    assert Path(payload["session_dir"], "retention.json").exists()
 
 
 def test_workbench_assistant_chat_turn_succeeds_without_draft(
@@ -198,8 +202,62 @@ def test_create_agent_session_from_nested_run_node_accepts_safe_node_run_dir(
     payload = response.json()
     assert payload["bound_run_id"] == "server_run"
     assert payload["bound_node_id"] == "agent_node"
+    assert payload["owner_ref"] == "run_node:server_run/agent_node"
+    assert Path(payload["session_dir"]).is_relative_to(node_dir / "sessions")
     runtime = json.loads((node_dir / "runtime.json").read_text(encoding="utf-8"))
     assert runtime["agent_session_ref"] == payload["session_dir"]
+
+
+def test_agent_session_lookup_uses_new_session_index_after_service_reload(
+    project_root: Path,
+) -> None:
+    service = AgentTurnService(project_root=project_root)
+    session = service.create_workbench_assistant_session(
+        task_id="task_canvas_default",
+        canvas_hash="hash_1",
+        canvas_snapshot=assistant_canvas_snapshot(),
+        selection={"type": "canvas"},
+    )
+
+    reloaded_service = AgentTurnService(project_root=project_root)
+    loaded = reloaded_service.get_session(session["session_id"])
+
+    assert loaded["session_id"] == session["session_id"]
+    assert Path(loaded["session_dir"]).is_relative_to(project_root / ".acc" / "sessions")
+    index = json.loads((project_root / ".acc" / "session_index.json").read_text(encoding="utf-8"))
+    assert session["session_id"] in index["sessions"]
+
+
+def test_legacy_agent_session_folder_still_loads(project_root: Path) -> None:
+    legacy_dir = project_root / "runs" / "_agent_sessions" / "task_legacy" / "node_legacy"
+    legacy_dir.mkdir(parents=True)
+    write_json(
+        legacy_dir / "session.json",
+        {
+            "schema_version": "acc.agent_session.v1",
+            "session_id": "agent_session_legacy",
+            "task_id": "task_legacy",
+            "node_id": "node_legacy",
+            "callable_ref": {"kind": "agent_class", "id": "legacy.codex", "version": None},
+            "runtime": "codex_app_server",
+            "provider_session_id": None,
+            "workspace_ref": str(project_root),
+            "status": "ready",
+            "created_at": "2026-06-13T00:00:00Z",
+            "updated_at": "2026-06-13T00:00:00Z",
+        },
+    )
+    (legacy_dir / "messages.jsonl").write_text(
+        json.dumps({"role": "assistant", "content": "legacy"}) + "\n",
+        encoding="utf-8",
+    )
+
+    service = AgentTurnService(project_root=project_root)
+    loaded = service.get_session("agent_session_legacy")
+    messages = service.messages("agent_session_legacy")
+
+    assert loaded["session_dir"] == str(legacy_dir.resolve())
+    assert messages["messages"][0]["content"] == "legacy"
 
 
 def test_create_agent_session_from_run_node_rejects_outside_node_run_dir(

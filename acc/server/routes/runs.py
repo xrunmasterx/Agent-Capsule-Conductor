@@ -36,6 +36,8 @@ from acc.server.live_events import (
 )
 from acc.server.run_projection import RunProjection
 from acc.session import utc_now_iso
+from acc.storage import validate_run_id
+from acc.storage_refs import make_node_artifact_ref
 from acc.utils import AccError
 
 router = APIRouter(prefix="/runs", tags=["runs"])
@@ -50,6 +52,7 @@ def list_runs(request: Request) -> dict[str, Any]:
 
 @router.get("/{run_id}")
 def get_run(run_id: str, request: Request) -> dict[str, Any]:
+    validate_http_run_id(run_id)
     return load_run_or_404(run_id, request).model_dump()
 
 
@@ -85,7 +88,7 @@ def get_run_control_ledger(run_id: str, request: Request) -> dict[str, Any]:
 
 @router.post("/{run_id}/cancel")
 async def cancel_run(run_id: str, request: Request) -> dict[str, Any]:
-    validate_path_component(run_id, "run_id")
+    validate_http_run_id(run_id)
     try:
         return await get_workbench_run_manager(request).cancel(run_id)
     except AccError as exc:
@@ -117,12 +120,17 @@ def list_node_artifacts(run_id: str, node_id: str, request: Request) -> dict[str
             reject_secret_like_path(path)
         except SecretLikePathError:
             continue
+        artifact_relative_path = str(path.relative_to(artifact_dir)).replace("\\", "/")
+        artifact_ref = make_node_artifact_ref(run_id, node_id, artifact_relative_path)
+        legacy_artifact_ref = f"run:{run_id}:node:{node_id}:artifact:{artifact_relative_path}"
         rel_path = relative_project_path(project_root, path)
         artifacts.append(
             {
                 "name": path.name,
                 "path": rel_path,
-                "read_url": f"/api/artifacts/read?path={rel_path}",
+                "artifact_ref": artifact_ref,
+                "legacy_artifact_ref": legacy_artifact_ref,
+                "read_url": f"/api/artifacts/read?path={artifact_ref}",
                 "size_bytes": path.stat().st_size,
             }
         )
@@ -143,7 +151,7 @@ def get_run_events(
             raise
         if not run_id.startswith("ui_workflow_"):
             raise
-        validate_path_component(run_id, "run_id")
+        validate_http_run_id(run_id)
         event_log = project_root / "runs" / run_id / "events.jsonl"
         return {
             "run_id": run_id,
@@ -215,7 +223,6 @@ async def stream_run(
         sequence = 0
         while not await request.is_disconnected():
             for node_identity in event_projection.iter_node_identities():
-                node_id = node_identity.node_id
                 for stream_name in ("stdout", "stderr"):
                     key = (node_identity.node_run_dir, stream_name)
                     payload = event_projection.read_node_log_delta_from_identity(
@@ -497,6 +504,7 @@ def project_events_ref(payload: dict[str, Any], request: Request) -> dict[str, A
 
 
 def load_run_or_404(run_id: str, request: Request):
+    validate_http_run_id(run_id)
     try:
         return load_run_summary_by_id(run_id, get_project_root(request) / "runs")
     except AccError as exc:
@@ -512,7 +520,7 @@ def find_node_or_404(run_id: str, node_id: str, request: Request) -> NodeRunSumm
 
 
 def resolve_run_dir_or_404(run_id: str, request: Request) -> Path:
-    validate_path_component(run_id, "run_id")
+    validate_http_run_id(run_id)
     project_root = get_project_root(request)
     run_dir = (project_root / "runs" / run_id).resolve()
     runs_root = (project_root / "runs").resolve()
@@ -524,6 +532,13 @@ def resolve_run_dir_or_404(run_id: str, request: Request) -> Path:
 def validate_path_component(value: str, label: str) -> None:
     if value in {"", ".", ".."} or Path(value).name != value or "/" in value or "\\" in value:
         raise HTTPException(status_code=400, detail=f"Invalid {label}: {value}")
+
+
+def validate_http_run_id(run_id: str) -> None:
+    try:
+        validate_run_id(run_id)
+    except AccError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 def read_jsonl_tolerant(path: Path, limit: int = 200) -> list[dict[str, Any]]:
@@ -595,9 +610,9 @@ def read_nested_workflow_events(
     parent_ui_node_id: str | None,
     limit: int,
 ) -> list[dict[str, Any]]:
-    events = RunEventProjectionService(root_run_dir_for_node_dir(run_dir)).read_nested_workflow_events(
-        limit=limit,
-    )
+    events = RunEventProjectionService(
+        root_run_dir_for_node_dir(run_dir)
+    ).read_nested_workflow_events(limit=limit)
     if parent_ui_node_id is None:
         return events
     return [

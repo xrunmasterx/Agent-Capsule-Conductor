@@ -14,13 +14,19 @@ from acc.callable_registry import CallableAsset, CallableRegistry, template_kind
 from acc.callable_runner import DEFAULT_AGENT_OUTPUT_SCHEMA
 from acc.run_index import load_run_summary, load_run_summary_by_id
 from acc.runtime.codex_models import normalize_codex_model, normalize_codex_reasoning_effort
+from acc.storage import assert_acc_run_dir
+from acc.storage_refs import parse_artifact_ref
 from acc.store import is_clean_workflow_path
 from acc.utils import AccError, load_json, repo_root
 
 SECRET_EXACT_NAMES = {
+    ".codex",
     ".env",
     ".env.local",
     ".envrc",
+    "auth.json",
+    "codex_home",
+    "config.toml",
     "credentials",
     "credentials.json",
     "id_dsa",
@@ -28,13 +34,20 @@ SECRET_EXACT_NAMES = {
     "id_ed25519",
     "id_rsa",
     "known_hosts",
+    "provider_events.jsonl",
+    "stderr.log",
+    "stdout.log",
 }
 SECRET_SUBSTRINGS = {
+    "access_token",
     "api_key",
     "apikey",
+    "cookie",
     "credential",
+    "oauth",
     "password",
     "private_key",
+    "refresh_token",
     "secret",
     "token",
 }
@@ -59,6 +72,10 @@ class ArtifactTooLargeError(AccError):
 
 
 class ArtifactEncodingError(AccError):
+    pass
+
+
+class ArtifactPolicyDeniedError(AccError):
     pass
 
 
@@ -232,7 +249,7 @@ def read_artifact_payload(
     project_root: Path | None = None,
 ) -> dict[str, Any]:
     project_root = (project_root or repo_root()).resolve()
-    path = resolve_artifact_reference(project_root, artifact_ref)
+    path = resolve_registered_artifact_reference(project_root, artifact_ref)
     reject_secret_like_path(path)
     if not path.exists() or not path.is_file():
         raise ArtifactNotFoundError(f"Artifact not found: {artifact_ref}")
@@ -463,6 +480,91 @@ def resolve_artifact_reference(project_root: Path, artifact_ref: str) -> Path:
     if candidate.drive or candidate.exists() or "/" in artifact_ref or "\\" in artifact_ref:
         return resolve_inside_project(project_root, candidate)
     return resolve_inside_project(project_root, candidate)
+
+
+def resolve_registered_artifact_reference(project_root: Path, artifact_ref: str) -> Path:
+    ref = str(artifact_ref or "").strip()
+    try:
+        parsed = parse_artifact_ref(ref)
+    except AccError as exc:
+        raise ArtifactPolicyDeniedError(
+            "Artifact ref must be a registered run artifact ref"
+        ) from exc
+    if parsed.node_id is None:
+        return _resolve_run_artifact_ref(project_root, parsed.run_id, parsed.relative_path)
+    return _resolve_node_artifact_ref(
+        project_root,
+        parsed.run_id,
+        parsed.node_id,
+        parsed.relative_path,
+    )
+
+
+def _resolve_run_artifact_ref(project_root: Path, run_id: str, relative_path: str) -> Path:
+    run_dir, summary = _load_owned_run(project_root, run_id)
+    if not summary.artifact_dir:
+        raise ArtifactNotFoundError(f"Run has no registered artifact directory: {run_id}")
+    artifact_dir = Path(summary.artifact_dir or "")
+    return _resolve_registered_artifact_path(
+        project_root,
+        run_dir,
+        artifact_dir,
+        relative_path,
+    )
+
+
+def _resolve_node_artifact_ref(
+    project_root: Path,
+    run_id: str,
+    node_id: str,
+    relative_path: str,
+) -> Path:
+    run_dir, summary = _load_owned_run(project_root, run_id)
+    for node in summary.nodes:
+        if node.node_id != node_id:
+            continue
+        if not node.artifact_dir:
+            raise ArtifactNotFoundError(f"Node has no registered artifact directory: {node_id}")
+        artifact_dir = Path(node.artifact_dir or "")
+        return _resolve_registered_artifact_path(
+            project_root,
+            run_dir,
+            artifact_dir,
+            relative_path,
+        )
+    raise ArtifactNotFoundError(f"Node is not registered in run evidence: {node_id}")
+
+
+def _load_owned_run(project_root: Path, run_id: str) -> tuple[Path, Any]:
+    run_dir = (project_root / "runs" / run_id).resolve()
+    assert_acc_run_dir(run_dir, project_root=project_root)
+    return run_dir, load_run_summary_by_id(run_id, project_root / "runs")
+
+
+def _resolve_registered_artifact_path(
+    project_root: Path,
+    run_dir: Path,
+    artifact_dir: Path,
+    relative_path: str,
+) -> Path:
+    if not relative_path or relative_path in {".", ".."}:
+        raise ArtifactPolicyDeniedError("Artifact relative path is required")
+    rel = Path(relative_path)
+    if rel.is_absolute() or rel.drive or ".." in rel.parts:
+        raise ArtifactPolicyDeniedError("Artifact ref contains an unsafe relative path")
+    artifact_root = artifact_dir.resolve()
+    if not artifact_root.is_relative_to(run_dir) or not artifact_root.is_relative_to(project_root):
+        raise ArtifactPolicyDeniedError("Registered artifact root is outside ACC run evidence")
+    path = (artifact_root / rel).resolve()
+    if not path.is_relative_to(artifact_root):
+        raise ArtifactPolicyDeniedError("Artifact ref escapes its registered artifact root")
+    return path
+
+
+def _validate_ref_component(value: str, label: str) -> str:
+    if value in {"", ".", ".."} or Path(value).name != value or "/" in value or "\\" in value:
+        raise ArtifactPolicyDeniedError(f"Invalid {label}: {value}")
+    return value
 
 
 def resolve_inside_project(project_root: Path, value: str | Path) -> Path:

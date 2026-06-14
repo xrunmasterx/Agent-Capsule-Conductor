@@ -13,13 +13,15 @@ import hashlib
 import json
 import re
 import shutil
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 from uuid import uuid4
 
 import yaml
 
 from acc.app.workbench_adapter import compile_workbench_workflow_bundle
+from acc.audit import write_audit_event
 from acc.callable_registry import CallableRegistry
 from acc.control_plane import agent_payload_to_yaml, reject_secret_like_path, validate_callable_id
 from acc.engine import parse_workflow_function_template
@@ -321,6 +323,9 @@ class GraphOpsService:
         approved = {
             "status": "approved",
             "proposal_id": proposal_id,
+            "approval_nonce": f"approval_{uuid4().hex[:16]}",
+            "runner_id": local_runner_id(self.project_root),
+            "workspace_binding_fingerprint": workspace_binding_fingerprint(self.project_root),
             "approver": str(approval.get("approver") or "human"),
             "target_paths": sorted(expected_paths),
             "base_hashes": expected_hashes,
@@ -329,12 +334,24 @@ class GraphOpsService:
         }
         self._write_evidence(proposal_id, "approval.json", approved)
         self._set_status(proposal_id, "approved")
+        write_audit_event(
+            self.project_root,
+            "graphops.approve",
+            {
+                "proposal_id": proposal_id,
+                "runner_id": approved["runner_id"],
+                "target_paths": approved["target_paths"],
+                "dry_run_digest": approved["dry_run_digest"],
+            },
+        )
         return approved
 
     def apply(self, proposal_id: str) -> dict[str, Any]:
         envelope = self._load_envelope(proposal_id)
         if envelope["status"] != "approved":
             raise AccError("GraphOps proposal must be approved before apply")
+        approval = self._read_evidence(proposal_id, "approval.json")
+        self._validate_apply_approval(proposal_id, envelope["proposal"], approval)
         stale_errors = stale_base_errors(self.project_root, envelope["proposal"])
         if stale_errors:
             self._write_evidence(
@@ -361,6 +378,7 @@ class GraphOpsService:
                 envelope["proposal"],
                 staging_dir,
             )
+            before_audit = before_apply_audit(self.project_root, envelope["proposal"])
             for rel_path, target in materialized["targets"].items():
                 destination = (self.project_root / rel_path).resolve()
                 if destination.exists():
@@ -378,18 +396,32 @@ class GraphOpsService:
                 "created_files": [
                     _relative_project_path(self.project_root, path) for path in created_paths
                 ],
-                "approval": self._read_evidence(proposal_id, "approval.json"),
+                "approval": approval,
                 "targets": _apply_target_manifests(
                     self.project_root,
                     envelope["proposal"],
                     materialized,
                     created_paths,
                 ),
+                "audit": {
+                    "before": before_audit,
+                    "after": after_apply_audit(self.project_root, envelope["proposal"]),
+                },
                 "semantic_diff": semantic_diff_for_materialized(materialized),
                 "applied_at": utc_now_iso(),
             }
             self._write_evidence(proposal_id, "apply_manifest.json", manifest)
             self._set_status(proposal_id, "applied")
+            write_audit_event(
+                self.project_root,
+                "graphops.apply",
+                {
+                    "proposal_id": proposal_id,
+                    "runner_id": approval.get("runner_id"),
+                    "target_paths": approval.get("target_paths"),
+                    "status": "applied",
+                },
+            )
             return manifest
         except Exception as exc:
             for temp_path, _destination in pending_writes:
@@ -411,6 +443,11 @@ class GraphOpsService:
                 },
             )
             self._set_status(proposal_id, "apply_failed")
+            write_audit_event(
+                self.project_root,
+                "graphops.apply",
+                {"proposal_id": proposal_id, "status": "apply_failed", "error": str(exc)},
+            )
             raise AccError(str(exc)) from exc
         finally:
             shutil.rmtree(staging_dir, ignore_errors=True)
@@ -454,6 +491,28 @@ class GraphOpsService:
         envelope["status"] = status
         envelope["updated_at"] = utc_now_iso()
         write_json(path, envelope)
+
+    def _validate_apply_approval(
+        self,
+        proposal_id: str,
+        proposal: dict[str, Any],
+        approval: dict[str, Any],
+    ) -> None:
+        if approval.get("proposal_id") != proposal_id:
+            raise AccError("Approval proposal_id does not match")
+        if not approval.get("approval_nonce"):
+            raise AccError("GraphOps approval nonce is missing")
+        if approval.get("runner_id") != local_runner_id(self.project_root):
+            raise AccError("GraphOps approval runner_id does not match local runner")
+        if approval.get("workspace_binding_fingerprint") != workspace_binding_fingerprint(
+            self.project_root
+        ):
+            raise AccError("GraphOps approval workspace binding fingerprint is stale")
+        dry_run = self._read_evidence(proposal_id, "dry_run.json")
+        if approval.get("dry_run_digest") != dry_run.get("dry_run_digest"):
+            raise AccError("GraphOps approval dry_run_digest does not match latest dry-run")
+        if approval.get("base_hashes") != base_hashes_for_targets(proposal):
+            raise AccError("GraphOps approval base_hashes do not match proposal")
 
 
 # ---------------------------------------------------------------------------
@@ -875,13 +934,78 @@ def base_hashes_for_targets(proposal: dict[str, Any]) -> dict[str, str]:
     }
 
 
+def before_apply_audit(project_root: Path, proposal: dict[str, Any]) -> list[dict[str, Any]]:
+    return apply_audit_for_targets(project_root, proposal)
+
+
+def after_apply_audit(project_root: Path, proposal: dict[str, Any]) -> list[dict[str, Any]]:
+    return apply_audit_for_targets(project_root, proposal)
+
+
+def apply_audit_for_targets(project_root: Path, proposal: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for target in proposal.get("targets", []):
+        if not isinstance(target, dict):
+            continue
+        rel_path = str(target.get("target_path") or "")
+        path = project_root / rel_path
+        rows.append(
+            {
+                "target_path": rel_path,
+                "exists": path.exists(),
+                "digest": digest_file(path) if path.exists() and path.is_file() else "absent",
+            }
+        )
+    return rows
+
+
+def local_runner_id(project_root: Path) -> str:
+    from acc.runner import LocalRunnerService
+
+    return str(LocalRunnerService(project_root).ensure_runner_record()["runner_id"])
+
+
+def workspace_binding_fingerprint(project_root: Path) -> str:
+    path = project_root / ".acc" / "runner" / "workspaces.json"
+    if not path.exists():
+        return digest_payload({"workspaces": "absent"})
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return digest_payload({"workspaces": "invalid"})
+    aliases = []
+    for item in payload.get("aliases", []) if isinstance(payload, dict) else []:
+        if not isinstance(item, dict):
+            continue
+        aliases.append(
+            {
+                "alias": item.get("alias"),
+                "allowed": item.get("allowed"),
+                "local_path_digest": _digest_text(str(item.get("local_path") or "")),
+            }
+        )
+    return digest_payload({"aliases": sorted(aliases, key=lambda row: str(row.get("alias")))})
+
+
+def digest_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return "sha256:" + digest.hexdigest()
+
+
 def validate_proposal_id(value: str) -> str:
     if not value or not GRAPHOPS_SAFE_ID_RE.fullmatch(value):
         raise AccError("GraphOps proposal_id must match ^[A-Za-z0-9_.-]+$")
     return value
 
 
-def _unexpected_keys(scope: str, payload: dict[str, Any], allowed: set[str]) -> list[dict[str, str]]:
+def _unexpected_keys(
+    scope: str,
+    payload: dict[str, Any],
+    allowed: set[str],
+) -> list[dict[str, str]]:
     return [
         {
             "code": "unexpected_field",

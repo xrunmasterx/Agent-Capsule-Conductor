@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-import shutil
 from pathlib import Path
 from typing import Any
 
 from acc.models import AccError, EnvironmentBinding, SessionInstance
 from acc.session import utc_now_iso
+from acc.storage import append_jsonl_locked, prepare_runtime_run_dir, write_json_atomic
 
 
 def is_clean_workflow_path(path: Path) -> bool:
@@ -25,11 +25,7 @@ def load_json(path: Path) -> Any:
 
 
 def write_json(path: Path, payload: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True),
-        encoding="utf-8",
-    )
+    write_json_atomic(path, payload)
 
 
 def load_clean_environment_binding(path: Path) -> EnvironmentBinding:
@@ -54,9 +50,7 @@ def load_clean_environment_binding(path: Path) -> EnvironmentBinding:
 
 
 def prepare_run_dir(run_dir: Path) -> None:
-    if run_dir.exists():
-        shutil.rmtree(run_dir)
-    run_dir.mkdir(parents=True, exist_ok=True)
+    prepare_runtime_run_dir(run_dir)
 
 
 def safe_child_path(path: Path, root: Path) -> None:
@@ -101,10 +95,7 @@ def emit_event(
         "level": level,
         "payload": payload or {},
     }
-    event_log.parent.mkdir(parents=True, exist_ok=True)
-    with event_log.open("a", encoding="utf-8") as file:
-        file.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
-    return event
+    return append_jsonl_locked(event_log, event)
 
 
 def emit_node_event(

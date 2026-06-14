@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from acc.run_index import NodeRunSummary, RunIndex, RunSummary
 from acc.server.app import create_app
+from acc.storage import RunHandle, write_run_marker
 
 
 @pytest.fixture()
@@ -47,6 +48,14 @@ def create_run(root: Path) -> None:
     run_dir = root / "runs" / "server_run"
     artifact_dir = run_dir / "artifacts"
     artifact_dir.mkdir(parents=True)
+    write_run_marker(
+        RunHandle(
+            run_id="server_run",
+            run_dir=run_dir,
+            marker_path=run_dir / ".acc-run-marker.json",
+        ),
+        root,
+    )
     (artifact_dir / "report.md").write_text("# Report\n\nhello\n", encoding="utf-8")
     (artifact_dir / "secret-token.txt").write_text("hidden\n", encoding="utf-8")
     (run_dir / "output.json").write_text(

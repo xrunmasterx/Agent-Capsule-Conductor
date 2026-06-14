@@ -244,6 +244,75 @@ export type WorkflowRunSubmitResult = {
   run_dir: string;
 };
 
+export type RunnerCapabilities = {
+  schema_version: string;
+  runner_id: string;
+  os: string;
+  acc_version: string;
+  available_runtimes: string[];
+  provider_status: Record<string, string>;
+  max_active_runs: number;
+  max_queued_runs?: number;
+  supports_graphops_apply: boolean;
+  supports_artifact_preview: boolean;
+  permission_policy: Record<string, string>;
+  workspace_aliases: string[];
+};
+
+export type RunnerWorkspaceAlias = {
+  alias: string;
+  display_name: string;
+  allowed: boolean;
+  created_at?: string | null;
+  debug_path?: string;
+};
+
+export type RunnerWorkspaces = {
+  schema_version: string;
+  runner_id: string;
+  aliases: RunnerWorkspaceAlias[];
+};
+
+export type RunnerJob = {
+  schema_version: string;
+  runner_id: string;
+  workspace_alias: string;
+  job_id: string;
+  run_id?: string | null;
+  task_id?: string | null;
+  workflow_id?: string | null;
+  status: string;
+  rejection?: Record<string, unknown> | null;
+  stream_url?: string | null;
+};
+
+export type RunnerRunProjection = {
+  schema_version: string;
+  runner_id: string;
+  workspace_alias: string;
+  run_id: string;
+  workflow_id?: string | null;
+  status: string;
+  started_at?: string | null;
+  ended_at?: string | null;
+  stream_url: string;
+  artifact_ref?: string | null;
+  nodes: Array<{
+    node_id: string;
+    callable_id: string;
+    session_id?: string | null;
+    status: string;
+    summary?: string | null;
+    artifact_ref?: string | null;
+    event_ref?: string | null;
+    stdout_ref?: string | null;
+    stderr_ref?: string | null;
+    debug_path?: string;
+    debug_artifact_path?: string | null;
+  }>;
+  debug_path?: string;
+};
+
 export type RunIndex = {
   version: string;
   runs: RunSummary[];

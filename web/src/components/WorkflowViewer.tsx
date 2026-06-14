@@ -59,7 +59,7 @@ import {
   type TouchEvent as ReactTouchEvent,
 } from 'react';
 
-import { api } from '../api';
+import { api, runnerApi } from '../api';
 import { shortPath, statusTone } from '../format';
 import type {
   AgentClassDraft,
@@ -2300,6 +2300,7 @@ export function WorkflowViewer({
   );
   const [tasks, setTasks] = useState<WorkbenchTask[]>(() => initialTaskStore.tasks);
   const [activeTaskId, setActiveTaskId] = useState(initialTaskStore.activeTaskId);
+  const durableTaskBootstrapStartedRef = useRef(false);
   const currentTask = useMemo(
     () => tasks.find((task) => task.taskId === activeTaskId) || tasks[0],
     [activeTaskId, tasks],
@@ -2315,6 +2316,7 @@ export function WorkflowViewer({
   });
   const [connectionMode, setConnectionMode] = useState<ConnectionMode>('control');
   const [message, setMessage] = useState('已加载工作台');
+  const [durableTasksReady, setDurableTasksReady] = useState(false);
   const [runsById, setRunsById] = useState<Record<string, RunProjection>>({});
   const [runLogsById, setRunLogsById] = useState<Record<string, Record<string, NodeLiveLogs>>>({});
   const [runLiveEventsById, setRunLiveEventsById] = useState<Record<string, WorkbenchLiveEvent[]>>({});
@@ -2560,6 +2562,65 @@ export function WorkflowViewer({
   }, []);
 
   useEffect(() => {
+    if (durableTaskBootstrapStartedRef.current) {
+      return undefined;
+    }
+    durableTaskBootstrapStartedRef.current = true;
+    let cancelled = false;
+
+    async function bootstrapDurableTasks() {
+      try {
+        const response = await api.workbenchTasks();
+        if (cancelled) {
+          return;
+        }
+        if (response.tasks.length > 0) {
+          const loadedTasks = (
+            await Promise.all(response.tasks.map((task) => loadWorkbenchTaskFromBackend(task)))
+          ).filter((task): task is WorkbenchTask => Boolean(task));
+          if (cancelled || loadedTasks.length === 0) {
+            return;
+          }
+          const nextActiveTask =
+            loadedTasks.find((task) => task.taskId === initialTaskStore.activeTaskId) ||
+            loadedTasks[0];
+          const nextCanvas = normalizeCanvasEdges(nextActiveTask.canvas);
+          setTasks(loadedTasks);
+          setActiveTaskId(nextActiveTask.taskId);
+          setCanvas(nextCanvas);
+          const nextGraph = canvasToWorkflowGraph(nextCanvas);
+          graphRef.current = nextGraph;
+          setSourceGraph(nextGraph);
+          setSelection({ type: 'task_canvas', taskId: nextCanvas.id });
+          setMessage('已从本地 runner 加载持久化任务');
+          return;
+        }
+        await Promise.all(
+          initialTaskStore.tasks.map((task) =>
+            persistWorkbenchTaskToBackend(task, callables, workflows),
+          ),
+        );
+        if (!cancelled) {
+          setMessage('已迁移浏览器任务缓存到本地 runner');
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setMessage(error instanceof Error ? error.message : String(error));
+        }
+      } finally {
+        if (!cancelled) {
+          setDurableTasksReady(true);
+        }
+      }
+    }
+
+    void bootstrapDurableTasks();
+    return () => {
+      cancelled = true;
+    };
+  }, [callables, initialTaskStore, workflows]);
+
+  useEffect(() => {
     if (!assistantOpen || assistantSessionId || assistantBusy) {
       return;
     }
@@ -2684,11 +2745,13 @@ export function WorkflowViewer({
   }, [assistantPendingTurn, assistantSessionId]);
 
   useEffect(() => {
+    if (!durableTasksReady) {
+      return undefined;
+    }
     const snapshot = currentAuthoringSnapshot();
     const timeout = window.setTimeout(() => {
       void api
-        .publishWorkbenchCanvasSnapshot({
-          task_id: snapshot.task_id,
+        .putWorkbenchTaskCanvas(snapshot.task_id, {
           canvas_hash: snapshot.snapshot_id,
           canvas_snapshot: authoringBackendCanvasSnapshot(snapshot),
           selection: authoringSelectionPayload(snapshot.selection),
@@ -2708,6 +2771,7 @@ export function WorkflowViewer({
     callables,
     workflows,
     currentAuthoringState.temporaryResources,
+    durableTasksReady,
   ]);
 
   useEffect(() => {
@@ -2768,8 +2832,11 @@ export function WorkflowViewer({
   }, [appendNodeLogDelta, appendRunAgentEvent, appendRunLiveEvent, selectedRunId, updateRunProjection]);
 
   useEffect(() => {
+    if (!durableTasksReady) {
+      return;
+    }
     saveTaskStore({ version: 1, activeTaskId, tasks });
-  }, [activeTaskId, tasks]);
+  }, [activeTaskId, durableTasksReady, tasks]);
 
   const updateCanvas = useCallback((next: SetStateAction<WorkspaceCanvasModel>) => {
     setCanvas((current) => {
@@ -3381,6 +3448,11 @@ export function WorkflowViewer({
     setFocusedWorkflowId(null);
     resetAssistantConversationState();
     closeEvidenceDock();
+    if (durableTasksReady) {
+      void api.createWorkbenchTask({ task_id: task.taskId, title: task.title }).catch(() => {
+        // The debounced canvas save can recreate the durable task if this request races.
+      });
+    }
   }
 
   function deleteTask(taskId: string) {
@@ -3405,6 +3477,11 @@ export function WorkflowViewer({
     setSelection({ type: 'task_canvas', taskId: nextCanvas.id });
     resetAssistantConversationState();
     setMessage(`已删除任务 ${taskId}`);
+    if (durableTasksReady) {
+      void api.deleteWorkbenchTask(taskId).catch((error) => {
+        setMessage(error instanceof Error ? error.message : String(error));
+      });
+    }
   }
 
   function autoLayout() {
@@ -3748,11 +3825,11 @@ export function WorkflowViewer({
         content: null,
         owner: { kind: 'run', taskId, runId, createdAt: new Date().toISOString() },
       }));
-      const submitted = await api.submitGraphRun(
-        runnableGraph,
-        runDir,
-        { taskId, ...(bindingPath ? { bindingPath } : {}) },
-      );
+      const submitted = await runnerApi.submitJob(runnableGraph, {
+        runId,
+        taskId,
+        ...(bindingPath ? { bindingRef: bindingRefOfPath(bindingPath) } : {}),
+      });
       setTasks((current) =>
         current.map((task) =>
           task.taskId === taskId
@@ -14820,6 +14897,97 @@ function nextTaskTitle(tasks: WorkbenchTask[]): string {
   return title;
 }
 
+async function loadWorkbenchTaskFromBackend(taskRecord: Record<string, unknown>): Promise<WorkbenchTask | null> {
+  const taskId = typeof taskRecord.task_id === 'string' ? taskRecord.task_id : '';
+  if (!taskId) {
+    return null;
+  }
+  let canvasRecord: Record<string, unknown> | null = null;
+  try {
+    canvasRecord = await api.getWorkbenchTaskCanvas(taskId);
+  } catch {
+    canvasRecord = null;
+  }
+  const canvas = canvasFromBackendSnapshot(taskId, taskRecord, canvasRecord);
+  if (!canvas) {
+    return null;
+  }
+  return {
+    taskId,
+    title: typeof taskRecord.title === 'string' ? taskRecord.title : canvas.name,
+    canvas,
+    authoring: normalizeWorkbenchAuthoringState({
+      temporaryResources:
+        canvasRecord && isRecord(canvasRecord.temporary_resources)
+          ? canvasRecord.temporary_resources
+          : {},
+    }),
+    savedWorkflowRef:
+      typeof taskRecord.saved_workflow_ref === 'string' ? taskRecord.saved_workflow_ref : undefined,
+    activeRunId: typeof taskRecord.active_run_id === 'string' ? taskRecord.active_run_id : undefined,
+    latestRunId: typeof taskRecord.latest_run_id === 'string' ? taskRecord.latest_run_id : undefined,
+    status: 'not_run',
+  };
+}
+
+function canvasFromBackendSnapshot(
+  taskId: string,
+  taskRecord: Record<string, unknown>,
+  canvasRecord: Record<string, unknown> | null,
+): WorkspaceCanvasModel | null {
+  const snapshot = canvasRecord?.canvas_snapshot;
+  if (!isRecord(snapshot)) {
+    return emptyWorkspaceCanvas(
+      taskId,
+      typeof taskRecord.title === 'string' ? taskRecord.title : 'Untitled task',
+    );
+  }
+  const id = typeof snapshot.id === 'string' ? snapshot.id : taskId;
+  const name =
+    typeof snapshot.name === 'string'
+      ? snapshot.name
+      : typeof taskRecord.title === 'string'
+        ? taskRecord.title
+        : 'Untitled task';
+  if (!Array.isArray(snapshot.workflows) || !Array.isArray(snapshot.edges)) {
+    return null;
+  }
+  return normalizeCanvasEdges({
+    id,
+    name,
+    layout: 'workspace-canvas',
+    rootWorkflowId: typeof snapshot.rootWorkflowId === 'string' ? snapshot.rootWorkflowId : id,
+    workflows: snapshot.workflows as WorkflowContainerModel[],
+    edges: snapshot.edges as WorkflowCanvasEdge[],
+  });
+}
+
+async function persistWorkbenchTaskToBackend(
+  task: WorkbenchTask,
+  callables: CallableSummary[],
+  workflows: WorkflowSummary[],
+): Promise<void> {
+  try {
+    await api.createWorkbenchTask({ task_id: task.taskId, title: task.title });
+  } catch {
+    await api.updateWorkbenchTask(task.taskId, { title: task.title });
+  }
+  const canvas = stripRuntimeStateFromCanvas(task.canvas);
+  const snapshot = captureAuthoringSnapshot({
+    taskId: task.taskId,
+    canvas,
+    selection: { type: 'task_canvas', taskId: task.taskId },
+    callables,
+    workflows,
+  });
+  await api.putWorkbenchTaskCanvas(task.taskId, {
+    canvas_hash: snapshot.snapshot_id,
+    canvas_snapshot: authoringBackendCanvasSnapshot(snapshot),
+    selection: authoringSelectionPayload(snapshot.selection),
+    temporary_resources: task.authoring?.temporaryResources || {},
+  });
+}
+
 function loadTaskStore(): WorkbenchTaskStorePayload {
   const fallbackTask = createEmptyTask(DEFAULT_TASK_ID, '任务 1');
   if (typeof window === 'undefined') {
@@ -16895,6 +17063,17 @@ function workspaceRootOf(binding: WorkflowBindingView | null | undefined): strin
 
 function bindingPathOf(binding: WorkflowBindingView | null | undefined): string {
   return binding?.bindingPath || binding?.binding_path || '';
+}
+
+function bindingRefOfPath(bindingPath: string): string {
+  const normalized = bindingPath.replace(/\\/g, '/');
+  if (normalized.startsWith('binding:')) {
+    return normalized;
+  }
+  if (normalized.startsWith('bindings/')) {
+    return `binding:${normalized.slice('bindings/'.length)}`;
+  }
+  return `binding:${normalized}`;
 }
 
 function bindingDirectory(

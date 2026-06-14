@@ -9,6 +9,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
 
 from acc.app.agent_sessions import AgentTurnService, AgentTurnTaskManager
+from acc.runner import LocalRunnerService, RunnerCapabilityError
 from acc.server.context import get_project_root
 from acc.server.live_events import (
     WorkbenchLiveBus,
@@ -32,6 +33,7 @@ class AgentSessionCreateRequest(BaseModel):
     callable_ref: dict[str, Any] | None = None
     runtime: str = "codex_app_server"
     workspace_ref: str = ""
+    workspace_alias: str | None = None
     output_schema: dict[str, Any] | None = None
 
 
@@ -78,7 +80,7 @@ def create_agent_session(payload: AgentSessionCreateRequest, request: Request) -
                     else None,
                     workspace_ref=payload.source.get("workspace_ref")
                     if isinstance(payload.source.get("workspace_ref"), str)
-                    else None,
+                    else workspace_ref_for_alias(request, payload.source.get("workspace_alias")),
                 )
             if source_type != "run_node":
                 raise AccError("Agent session source.type must be run_node or workbench_assistant")
@@ -96,9 +98,11 @@ def create_agent_session(payload: AgentSessionCreateRequest, request: Request) -
             node_id=payload.node_id,
             callable_ref=payload.callable_ref,
             runtime=payload.runtime,
-            workspace_ref=payload.workspace_ref,
+            workspace_ref=payload.workspace_ref or workspace_ref_for_alias(request, payload.workspace_alias),
             output_schema=payload.output_schema,
         )
+    except RunnerCapabilityError as exc:
+        raise HTTPException(status_code=400, detail=exc.to_payload()) from exc
     except AccError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -275,6 +279,12 @@ def publish_agent_output(
 
 def service_for(request: Request) -> AgentTurnService:
     return AgentTurnService(project_root=get_project_root(request))
+
+
+def workspace_ref_for_alias(request: Request, alias: object) -> str:
+    if not isinstance(alias, str) or not alias:
+        return ""
+    return str(LocalRunnerService(get_project_root(request)).resolve_workspace_alias(alias))
 
 
 def task_manager_for(request: Request) -> AgentTurnTaskManager:

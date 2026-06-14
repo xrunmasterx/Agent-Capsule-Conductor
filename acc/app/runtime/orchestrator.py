@@ -5,7 +5,6 @@ Extracted from core_v2_runtime.py to complete the God Module split.
 
 from __future__ import annotations
 
-import shutil
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -33,6 +32,7 @@ from acc.runtime.io import (
 )
 from acc.serialization import workflow_function_template_to_dict
 from acc.session import utc_now_iso
+from acc.storage import prepare_runtime_run_dir, write_text_atomic
 from acc.store import write_json
 
 from acc.app.runtime.scheduler import run_ready_queue_execution
@@ -107,8 +107,8 @@ async def run_workflow_function_invocation(
 ) -> RunRecord:
     """Set up run directory, execute the DAG scheduler, and finalize the run."""
     run_dir = scope.environment_root
-    if run_dir.exists():
-        shutil.rmtree(run_dir)
+    project_root = _project_root_for_canonical_run_dir(run_dir)
+    prepare_runtime_run_dir(run_dir, project_root=project_root)
     for path in (
         run_dir,
         scope.inbox_root,
@@ -120,7 +120,7 @@ async def run_workflow_function_invocation(
         path.mkdir(parents=True, exist_ok=True)
 
     event_log_path = run_dir / "events.jsonl"
-    event_log_path.write_text("", encoding="utf-8")
+    write_text_atomic(event_log_path, "")
     result_store = FilesystemResultStore(run_dir.parent)
     invocation_path = run_dir / "function_invocation.json"
     scope_path = run_dir / "scope_frame.json"
@@ -245,3 +245,10 @@ async def run_workflow_function_invocation(
         ended_at=ended_at,
     )
     return final_record
+
+
+def _project_root_for_canonical_run_dir(run_dir: Path) -> Path | None:
+    resolved = run_dir.resolve()
+    if resolved.parent.name != "runs":
+        return None
+    return resolved.parent.parent

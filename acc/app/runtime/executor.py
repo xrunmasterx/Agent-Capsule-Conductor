@@ -52,6 +52,7 @@ from acc.runtime.io import (
 )
 from acc.runtime.policy import acc_run_mode
 from acc.session import utc_now_iso
+from acc.storage import write_text_atomic
 from acc.store import load_clean_environment_binding, load_json, write_json
 
 
@@ -68,9 +69,9 @@ async def execute_core_v2_node(
     node_dir = scope.environment_root / "nodes" / node.id
     for path in (node_dir, node_dir / "artifacts"):
         path.mkdir(parents=True, exist_ok=True)
-    (node_dir / "events.jsonl").write_text("", encoding="utf-8")
+    write_text_atomic(node_dir / "events.jsonl", "")
     for log_name in ("stdout.log", "stderr.log", "stdout.txt", "stderr.txt"):
-        (node_dir / log_name).write_text("", encoding="utf-8")
+        write_text_atomic(node_dir / log_name, "")
     append_event(event_log_path, invocation.run_id, "node_started", node_id=node.id)
 
     started_at = utc_now_iso()
@@ -225,7 +226,7 @@ async def execute_core_v2_node(
             scope.environment_root / "failures" / f"{failure.failure_id}.json",
             failure_record_payload(failure),
         )
-        (node_dir / "stderr.txt").write_text(str(exc), encoding="utf-8")
+        write_text_atomic(node_dir / "stderr.txt", str(exc))
         append_runtime_error_to_stderr_log(node_dir / "stderr.log", str(exc))
         append_event(
             event_log_path,

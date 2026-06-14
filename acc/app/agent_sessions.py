@@ -60,11 +60,14 @@ from acc.runtime.policy import (
     production_codex_timeout_seconds,
 )
 from acc.session import utc_now_iso
+from acc.storage import append_jsonl_locked, write_text_atomic
 from acc.store import load_json, write_json
 from acc.store.control_ledger import append_control_event, append_decision_record
 
 AGENT_SESSION_SCHEMA_VERSION = "acc.agent_session.v1"
 AGENT_TURN_SCHEMA_VERSION = "acc.agent_turn.v1"
+ACC_SESSIONS_ROOT = Path(".acc") / "sessions"
+ACC_SESSION_INDEX = Path(".acc") / "session_index.json"
 AGENT_SESSIONS_ROOT = Path("runs") / "_agent_sessions"
 SUPPORTED_STREAMING_RUNTIMES = frozenset({"codex_app_server", "codex_cli"})
 WORKBENCH_ASSISTANT_NODE_ID = "workbench_assistant"
@@ -281,6 +284,33 @@ def write_jsonl(path: Path, events: list[dict[str, Any]]) -> None:
             handle.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
 
 
+def session_owner_ref(
+    *,
+    task_id: str,
+    node_id: str,
+    bound_run_id: str | None,
+    bound_node_id: str | None,
+    session_kind: str | None,
+) -> str:
+    if bound_run_id and bound_node_id:
+        return f"run_node:{safe_segment(bound_run_id)}/{safe_segment(bound_node_id)}"
+    if session_kind == "workbench_assistant" or node_id == WORKBENCH_ASSISTANT_NODE_ID:
+        return f"task:{safe_segment(task_id)}"
+    return f"task:{safe_segment(task_id)}/node:{safe_segment(node_id)}"
+
+
+def owner_key(owner_ref: str, node_id: str) -> str:
+    return f"{owner_ref}|{safe_segment(node_id)}"
+
+
+def retention_payload(value: Any) -> dict[str, Any]:
+    payload = value if isinstance(value, dict) else {}
+    return {
+        "pinned": bool(payload.get("pinned", False)),
+        "retention_class": str(payload.get("retention_class") or "normal"),
+    }
+
+
 class AgentTurnService:
     def __init__(
         self,
@@ -331,6 +361,7 @@ class AgentTurnService:
             bound_run_id=scope.environment_root.name,
             bound_node_id=node.id,
             bound_node_output_ref=str((node_dir / "output.json").resolve()),
+            bound_node_dir=node_dir,
             permissions_effective=permission_payload(permissions),
         )
         turn_id = f"turn_{uuid4().hex[:12]}"
@@ -490,6 +521,7 @@ class AgentTurnService:
             bound_run_id=None,
             bound_node_id=None,
             bound_node_output_ref=None,
+            bound_node_dir=None,
             permissions_effective=None,
         )
         return {**payload, "session_dir": str(session_dir.resolve())}
@@ -535,6 +567,7 @@ class AgentTurnService:
             bound_run_id=run_id,
             bound_node_id=node_id,
             bound_node_output_ref=str((node_dir / "output.json").resolve()),
+            bound_node_dir=node_dir,
             permissions_effective=runtime_payload.get("permissions_effective")
             if isinstance(runtime_payload.get("permissions_effective"), dict)
             else None,
@@ -601,6 +634,7 @@ class AgentTurnService:
             bound_run_id=None,
             bound_node_id=None,
             bound_node_output_ref=None,
+            bound_node_dir=None,
             permissions_effective=permission_payload(
                 PermissionProfile(workspace_access="read_only", network=False, shell=False)
             ),
@@ -1288,14 +1322,21 @@ class AgentTurnService:
         bound_run_id: str | None,
         bound_node_id: str | None,
         bound_node_output_ref: str | None,
+        bound_node_dir: Path | None,
         permissions_effective: dict[str, Any] | None,
         extra_payload: dict[str, Any] | None = None,
     ) -> tuple[Path, dict[str, Any]]:
         extra_payload = extra_payload or {}
-        session_dir = self._session_dir(task_id, node_id)
-        session_dir.mkdir(parents=True, exist_ok=True)
-        session_path = session_dir / "session.json"
-        if session_path.exists():
+        owner_ref = session_owner_ref(
+            task_id=task_id,
+            node_id=node_id,
+            bound_run_id=bound_run_id,
+            bound_node_id=bound_node_id,
+            session_kind=optional_string(extra_payload, "session_kind"),
+        )
+        session_dir = self._find_session_dir_by_owner(owner_ref, node_id)
+        session_path = session_dir / "session.json" if session_dir is not None else None
+        if session_path is not None and session_path.exists():
             payload = require_object(load_json(session_path), "session.json")
             next_callable_ref = asdict(callable_ref)
             if (
@@ -1315,19 +1356,35 @@ class AgentTurnService:
                 "bound_node_id": bound_node_id,
                 "bound_node_output_ref": bound_node_output_ref,
                 "permissions_effective": permissions_effective,
+                "owner_ref": owner_ref,
+                "retention": retention_payload(payload.get("retention")),
+                "sensitive_fields": ["provider_session_id"],
                 **extra_payload,
             }
             write_json(session_path, payload)
             self._session_index[str(payload["session_id"])] = session_dir
+            self._write_session_sidecars(session_dir, payload)
+            self._index_session(session_dir, payload)
             return session_dir, payload
+        session_id = f"agent_session_{uuid4().hex[:12]}"
+        session_dir = self._new_session_dir(
+            session_id,
+            bound_run_id=bound_run_id,
+            bound_node_id=bound_node_id,
+            bound_node_dir=bound_node_dir,
+        )
+        session_dir.mkdir(parents=True, exist_ok=False)
+        session_path = session_dir / "session.json"
         payload = {
             "schema_version": AGENT_SESSION_SCHEMA_VERSION,
-            "session_id": f"agent_session_{uuid4().hex[:12]}",
+            "session_id": session_id,
             "task_id": task_id,
             "node_id": node_id,
+            "owner_ref": owner_ref,
             "callable_ref": asdict(callable_ref),
             "runtime": runtime,
             "provider_session_id": None,
+            "sensitive_fields": ["provider_session_id"],
             "workspace_ref": workspace_ref,
             "status": "ready",
             "current_output_ref": None,
@@ -1343,20 +1400,37 @@ class AgentTurnService:
             "created_at": utc_now_iso(),
             "updated_at": utc_now_iso(),
             "last_turn_id": None,
+            "retention": retention_payload(None),
             **extra_payload,
         }
         write_json(session_path, payload)
-        (session_dir / "messages.jsonl").touch()
+        write_text_atomic(session_dir / "messages.jsonl", "")
         self._session_index[str(payload["session_id"])] = session_dir
+        self._write_session_sidecars(session_dir, payload)
+        self._index_session(session_dir, payload)
         return session_dir, payload
 
-    def _session_dir(self, task_id: str, node_id: str) -> Path:
-        return (
-            self.project_root
-            / AGENT_SESSIONS_ROOT
-            / safe_segment(task_id)
-            / safe_segment(node_id)
-        )
+    def _new_session_dir(
+        self,
+        session_id: str,
+        *,
+        bound_run_id: str | None,
+        bound_node_id: str | None,
+        bound_node_dir: Path | None,
+    ) -> Path:
+        if bound_run_id and bound_node_id:
+            if bound_node_dir is not None:
+                return bound_node_dir.resolve() / "sessions" / safe_segment(session_id)
+            return (
+                self.project_root
+                / "runs"
+                / safe_segment(bound_run_id)
+                / "nodes"
+                / safe_segment(bound_node_id)
+                / "sessions"
+                / safe_segment(session_id)
+            )
+        return self.project_root / ACC_SESSIONS_ROOT / safe_segment(session_id)
 
     def _find_session_dir(self, session_id: str) -> Path:
         validate_agent_session_id(session_id)
@@ -1365,9 +1439,71 @@ class AgentTurnService:
             if (cached / "session.json").exists():
                 return cached
             del self._session_index[session_id]
+        direct = self.project_root / ACC_SESSIONS_ROOT / safe_segment(session_id) / "session.json"
+        if direct.exists():
+            payload = require_object(load_json(direct), "session.json")
+            if payload.get("session_id") == session_id:
+                self._session_index[session_id] = direct.parent
+                self._index_session(direct.parent, payload)
+                return direct.parent
+        indexed = self._session_dir_from_index(session_id)
+        if indexed is not None:
+            return indexed
+        self._rebuild_session_index()
+        indexed = self._session_dir_from_index(session_id)
+        if indexed is not None:
+            return indexed
+        legacy = self._legacy_find_session_dir(session_id)
+        if legacy is not None:
+            return legacy
+        raise AccError(f"Agent session not found: {session_id}")
+
+    def _find_session_dir_by_owner(self, owner_ref: str, node_id: str) -> Path | None:
+        index = self._load_session_index()
+        session_id = index.get("owner_sessions", {}).get(owner_key(owner_ref, node_id))
+        if isinstance(session_id, str):
+            session_dir = self._session_dir_from_index(session_id)
+            if session_dir is not None:
+                return session_dir
+        root = self.project_root / ACC_SESSIONS_ROOT
+        if root.exists():
+            for session_path in root.glob("*/session.json"):
+                try:
+                    payload = require_object(load_json(session_path), "session.json")
+                except AccError:
+                    continue
+                if payload.get("owner_ref") == owner_ref and payload.get("node_id") == node_id:
+                    self._index_session(session_path.parent, payload)
+                    return session_path.parent
+        return None
+
+    def _session_dir_from_index(self, session_id: str) -> Path | None:
+        index = self._load_session_index()
+        entry = index.get("sessions", {}).get(session_id)
+        if not isinstance(entry, dict):
+            return None
+        raw_path = entry.get("path")
+        if not isinstance(raw_path, str) or not raw_path:
+            return None
+        session_dir = (self.project_root / raw_path).resolve()
+        if not session_dir.is_relative_to(self.project_root):
+            return None
+        session_path = session_dir / "session.json"
+        if not session_path.exists():
+            return None
+        try:
+            payload = require_object(load_json(session_path), "session.json")
+        except AccError:
+            return None
+        if payload.get("session_id") != session_id:
+            return None
+        self._session_index[session_id] = session_dir
+        return session_dir
+
+    def _legacy_find_session_dir(self, session_id: str) -> Path | None:
         root = self.project_root / AGENT_SESSIONS_ROOT
         if not root.exists():
-            raise AccError(f"Agent session not found: {session_id}")
+            return None
         for session_path in root.glob("*/*/session.json"):
             try:
                 payload = require_object(load_json(session_path), "session.json")
@@ -1378,7 +1514,94 @@ class AgentTurnService:
                 self._session_index[found_id] = session_path.parent
             if found_id == session_id:
                 return session_path.parent
-        raise AccError(f"Agent session not found: {session_id}")
+        return None
+
+    def _write_session_sidecars(self, session_dir: Path, payload: dict[str, Any]) -> None:
+        write_json(session_dir / "retention.json", retention_payload(payload.get("retention")))
+        write_json(
+            session_dir / "refs.json",
+            {
+                "schema_version": "acc.agent_session.refs.v1",
+                "session_id": payload.get("session_id"),
+                "owner_ref": payload.get("owner_ref"),
+                "task_id": payload.get("task_id"),
+                "node_id": payload.get("node_id"),
+                "bound_run_id": payload.get("bound_run_id"),
+                "bound_node_id": payload.get("bound_node_id"),
+                "current_output_ref": payload.get("current_output_ref"),
+                "published_output_ref": payload.get("published_output_ref"),
+                "updated_at": payload.get("updated_at"),
+            },
+        )
+
+    def _index_session(self, session_dir: Path, payload: dict[str, Any]) -> None:
+        session_id = payload.get("session_id")
+        owner_ref = payload.get("owner_ref")
+        node_id = payload.get("node_id")
+        if not isinstance(session_id, str):
+            return
+        index = self._load_session_index()
+        try:
+            relative_path = str(session_dir.resolve().relative_to(self.project_root))
+        except ValueError:
+            return
+        sessions = index.setdefault("sessions", {})
+        if isinstance(sessions, dict):
+            sessions[session_id] = {
+                "path": relative_path,
+                "owner_ref": owner_ref,
+                "session_kind": payload.get("session_kind"),
+                "updated_at": payload.get("updated_at"),
+            }
+        owner_sessions = index.setdefault("owner_sessions", {})
+        if isinstance(owner_ref, str) and isinstance(node_id, str) and isinstance(owner_sessions, dict):
+            owner_sessions[owner_key(owner_ref, node_id)] = session_id
+        index["updated_at"] = utc_now_iso()
+        write_json(self.project_root / ACC_SESSION_INDEX, index)
+
+    def _load_session_index(self) -> dict[str, Any]:
+        path = self.project_root / ACC_SESSION_INDEX
+        if not path.exists():
+            return {
+                "schema_version": "acc.session_index.v1",
+                "sessions": {},
+                "owner_sessions": {},
+                "updated_at": None,
+            }
+        try:
+            payload = load_json(path)
+        except AccError:
+            return {
+                "schema_version": "acc.session_index.v1",
+                "sessions": {},
+                "owner_sessions": {},
+                "updated_at": None,
+            }
+        if not isinstance(payload, dict):
+            return {
+                "schema_version": "acc.session_index.v1",
+                "sessions": {},
+                "owner_sessions": {},
+                "updated_at": None,
+            }
+        payload.setdefault("sessions", {})
+        payload.setdefault("owner_sessions", {})
+        return payload
+
+    def _rebuild_session_index(self) -> None:
+        paths = []
+        root = self.project_root / ACC_SESSIONS_ROOT
+        if root.exists():
+            paths.extend(root.glob("*/session.json"))
+        runs_root = self.project_root / "runs"
+        if runs_root.exists():
+            paths.extend(runs_root.glob("*/nodes/*/sessions/*/session.json"))
+        for session_path in paths:
+            try:
+                payload = require_object(load_json(session_path), "session.json")
+            except AccError:
+                continue
+            self._index_session(session_path.parent, payload)
 
     def _write_turn(
         self,
@@ -1694,11 +1917,11 @@ def copy_turn_inputs(
 ) -> None:
     write_json(turn_dir / "input.json", input_payload)
     write_json(turn_dir / "output_schema.json", output_schema)
-    (turn_dir / "resolved_prompt.md").write_text(prompt, encoding="utf-8")
-    (turn_dir / "events.jsonl").write_text("", encoding="utf-8")
-    (turn_dir / "provider_events.jsonl").write_text("", encoding="utf-8")
-    (turn_dir / "stdout.log").write_text("", encoding="utf-8")
-    (turn_dir / "stderr.log").write_text("", encoding="utf-8")
+    write_text_atomic(turn_dir / "resolved_prompt.md", prompt)
+    write_text_atomic(turn_dir / "events.jsonl", "")
+    write_text_atomic(turn_dir / "provider_events.jsonl", "")
+    write_text_atomic(turn_dir / "stdout.log", "")
+    write_text_atomic(turn_dir / "stderr.log", "")
 
 
 def render_workbench_assistant_prompt(
@@ -1824,8 +2047,7 @@ def normalize_workbench_authoring_output(payload: dict[str, Any]) -> dict[str, A
 
 
 def append_message(session_dir: Path, payload: dict[str, Any]) -> None:
-    with (session_dir / "messages.jsonl").open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
+    append_jsonl_locked(session_dir / "messages.jsonl", payload)
 
 
 

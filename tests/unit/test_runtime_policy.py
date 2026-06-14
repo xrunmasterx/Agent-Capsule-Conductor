@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from acc.models import AccError
+from acc.models import AccError, PermissionProfile
+from acc.runtime import validate_permission_profile, validate_workspace_access
 from acc.runtime.policy import (
     DEFAULT_PRODUCTION_CODEX_APP_SERVER_TIMEOUT_SECONDS,
     DEFAULT_PRODUCTION_CODEX_TIMEOUT_SECONDS,
@@ -65,6 +66,20 @@ def test_runtime_feature_flags_default_to_disabled(monkeypatch: pytest.MonkeyPat
     assert external_agent_execution_enabled() is False
     assert use_submit_validate() is False
     assert use_supervisor() is False
+
+
+def test_writes_run_only_permission_profile_is_supported_without_workspace_lock() -> None:
+    profile = PermissionProfile(workspace_access="writes_run_only")
+
+    validate_permission_profile(profile)
+    validate_workspace_access(profile, has_workspace_lock=False)
+
+
+def test_writes_workspace_still_requires_workspace_lock() -> None:
+    profile = PermissionProfile(workspace_access="writes_workspace")
+
+    with pytest.raises(AccError, match="writes_workspace requires workspace write lock"):
+        validate_workspace_access(profile, has_workspace_lock=False)
 
 
 def test_external_agent_execution_defaults_to_enabled_in_production(
