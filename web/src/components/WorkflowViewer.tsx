@@ -173,6 +173,14 @@ import {
   workbenchViewProjection,
 } from '../workbench/model/workbenchViewProjection';
 import {
+  inspectorDrawerTitle,
+  isJsdomRuntime,
+  isNodeDetailModel,
+  selectionKey,
+  textArtifact,
+  truncateLargeLog,
+} from '../workbench/model/workflowViewerShell';
+import {
   agentEventsLiveText,
   failedAgentEventsText,
   mergeAgentEvents,
@@ -3002,113 +3010,4 @@ export function WorkflowViewer({
       ) : null}
     </WorkbenchShell>
   );
-}
-
-function evidenceIdentityLabel(
-  owner: EvidenceDockState['owner'],
-  currentTaskId?: string,
-  selectedRunId?: string | null,
-): string {
-  const parts: string[] = [];
-  const taskId = owner?.taskId || currentTaskId;
-  const runId = owner?.runId || selectedRunId || undefined;
-  if (taskId) {
-    parts.push(`task_id: ${taskId}`);
-  }
-  if (runId) {
-    parts.push(`run_id: ${runId}`);
-  }
-  if (owner?.nodeId) {
-    parts.push(`node_id: ${owner.nodeId}`);
-  }
-  return parts.join(' / ');
-}
-
-
-
-function parentPath(path: string | null | undefined): string {
-  if (!path) {
-    return '';
-  }
-  const normalized = path.replaceAll('\\', '/');
-  const index = normalized.lastIndexOf('/');
-  return index > 0 ? normalized.slice(0, index) : '';
-}
-
-
-function limitText(value: string, maxLength: number): string {
-  return value.length > maxLength ? `${value.slice(0, maxLength)}...` : value;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function isNodeDetailModel(model: SelectedEntityDetailsModel): boolean {
-  return model.kind === 'node' || model.kind === 'internal-node' || model.kind === 'workflow';
-}
-
-function selectionKey(selection: CanvasSelection): string {
-  if (selection.type === 'task_canvas') {
-    return `task:${selection.taskId}`;
-  }
-  if (selection.type === 'workflow') {
-    return `${selection.type}:${selection.id}`;
-  }
-  if (selection.type === 'edge') {
-    return `edge:${selection.scopeWorkflowId || 'root'}:${selection.id}`;
-  }
-  if (selection.type === 'port') {
-    return `port:${selection.workflowId}:${selection.direction}:${selection.portId}`;
-  }
-  return `internal:${selection.workflowId}:${selection.nodeId}`;
-}
-
-function isJsdomRuntime(): boolean {
-  return (
-    typeof window !== 'undefined' &&
-    window.navigator?.userAgent?.toLowerCase().includes('jsdom')
-  );
-}
-
-
-
-
-function inspectorDrawerTitle(selection: CanvasSelection): string {
-  if (selection.type === 'port') {
-    return '端口设置';
-  }
-  if (selection.type === 'edge') {
-    return '连接设置';
-  }
-  if (selection.type === 'workflow' || selection.type === 'internal') {
-    return '节点设置';
-  }
-  return '任务设置';
-}
-
-function textArtifact(name: string, content: string, type: ArtifactContent['type']): ArtifactContent {
-  return { name, path: name, content, type, size_bytes: content.length };
-}
-
-function artifactNameFromPath(path: string): string {
-  return path.split(/[\\/]/u).filter(Boolean).pop() || path;
-}
-
-function truncateLargeLog(content: ArtifactContent): ArtifactContent {
-  if (content.type !== 'log') {
-    return content;
-  }
-  const lines = content.content.split(/\r?\n/u);
-  if (lines.length <= MAX_LOG_PREVIEW_LINES) {
-    return content;
-  }
-  return {
-    ...content,
-    content: [
-      `日志较大，仅显示最后 ${MAX_LOG_PREVIEW_LINES} 行。`,
-      '',
-      ...lines.slice(-MAX_LOG_PREVIEW_LINES),
-    ].join('\n'),
-  };
 }

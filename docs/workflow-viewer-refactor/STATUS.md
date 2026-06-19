@@ -821,6 +821,9 @@ Status: in progress
 - Moved node-run detail cache keying and merge helpers into `web/src/workbench/model/workflowRuntimeProjection.ts`.
 - Deleted unused local canvas/edge helper leftovers from `WorkflowViewer.tsx`: `uniqueEdgeId`, `addEdgeWithControlDependency`, `internalEdgeEndpointToFlowId`, `edgeConnectsRemainingNodes`, `workflowSummaryForRef`, and `isChildWorkflowSummary`.
 - `web/src/components/WorkflowViewer.tsx` is now 113,108 bytes / 3,114 lines after moving run-detail merge helpers and deleting dead edge helpers.
+- Added `web/src/workbench/model/workflowViewerShell.ts` for remaining shell-only pure helpers: selection keys, drawer titles, node-detail model checks, JSDOM detection, text artifact construction, artifact name parsing, and log truncation.
+- Deleted dead local `evidenceIdentityLabel` and `parentPath` helpers from `WorkflowViewer.tsx`.
+- `web/src/components/WorkflowViewer.tsx` is now 110,294 bytes / 3,013 lines after moving shell helper functions.
 
 ### Added/Updated Tests
 
@@ -852,6 +855,7 @@ Status: in progress
 - Added `web/src/workbench/model/agentEventText.test.ts` for structured assistant message summaries, session-message projection, agent event de-duplication/sorting, live event text, filter labels, and transcript labels.
 - Added `web/src/components/inspector/EventTimeline.test.tsx` for empty timeline rendering and reverse chronological event display.
 - Extended `web/src/workbench/model/workflowRuntimeProjection.test.ts` with node-run detail cache key and merge coverage.
+- Added `web/src/workbench/model/workflowViewerShell.test.ts` for selection keys, drawer titles, node detail detection, text artifact projection, artifact path names, and large-log truncation.
 - Existing `web/src/App.test.tsx` and `web/src/components/WorkflowViewer.drag.test.tsx` now validate against the real owner imports instead of `WorkflowViewer.tsx` compatibility exports.
 
 ### Validation So Far
@@ -922,6 +926,10 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npm run test -- --run src/workbench/model/workflowRuntimeProjection.test.ts src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 3 files, 188 tests passed. |
 | `npm run test -- --run` | Passed | 91 files, 513 tests passed. |
 | `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
+| `npx tsc --noEmit` | Passed | Shell helper extraction compiles. |
+| `npm run test -- --run src/workbench/model/workflowViewerShell.test.ts src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 3 files, 187 tests passed. |
+| `npm run test -- --run` | Passed | 92 files, 517 tests passed. |
+| `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
 
 ### Static Gates So Far
 
@@ -962,3 +970,5 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `WorkflowViewer.tsx` no longer defines `EventTimeline`.
 - `WorkflowViewer.tsx` no longer defines node-run detail merge/cache helpers.
 - `WorkflowViewer.tsx` no longer defines unused canvas/edge helper leftovers: `uniqueEdgeId`, `addEdgeWithControlDependency`, `internalEdgeEndpointToFlowId`, `edgeConnectsRemainingNodes`, `workflowSummaryForRef`, or `isChildWorkflowSummary`.
+- `WorkflowViewer.tsx` no longer defines shell helper functions such as `selectionKey`, `isJsdomRuntime`, `inspectorDrawerTitle`, `textArtifact`, or `truncateLargeLog`.
+- `WorkflowViewer.tsx` no longer ends with local helper definitions; the file now ends at the `WorkflowViewer` component close.
