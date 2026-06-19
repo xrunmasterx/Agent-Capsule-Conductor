@@ -5,269 +5,64 @@ import {
   useMemo,
   useRef,
   useState,
-  type CSSProperties,
-  type DragEvent,
-  type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
 
-import { api } from '../api';
 import type {
   AuthoringRequiredAction,
   CallableSummary,
-  GraphOpsDryRunPayload,
-  InteractionRequest,
-  NodeRunSummary,
   RunEvent,
-  BoundaryTransferPreview,
-  WorkflowDataEdge,
   WorkflowGraph,
-  WorkflowGraphEdge,
   WorkflowSummary,
 } from '../types';
 import {
-  AGENT_CONTROL_HANDLE_FALLBACK_TOP,
-  AGENT_CONTROL_HANDLE_TOP,
-  AGENT_DATA_PORT_GAP,
-  DEFAULT_WORKFLOW_MAX_CONCURRENCY,
-  INSPECTOR_DEFAULT_WIDTH,
-  INTERNAL_AGENT_TOOL_NODE_SIZE,
-  TEMPORARY_CALLABLE_ID_PREFIX,
-  WORKFLOW_INNER_HANDLE_X,
-  agentDataPortTop,
-} from '../workbench/constants';
-import {
-  emptyInputPolicyFromMetadata,
   emptyWorkbenchAuthoringState,
   isActiveTaskStatus,
 } from '../workbench/model/taskModel';
 import {
-  isTemporaryCallableId,
-} from '../workbench/model/graphOpsProposal';
-import {
   authoringBackendCanvasSnapshot,
-  authoringOperationSummary,
   authoringSelectionPayload,
-  authoringTargetFromSelection,
-  authoringValidationFromBackend,
   canvasAuthoringHash,
   mergeAuthoringValidation,
 } from '../workbench/model/authoringProposal';
 import {
-  buildDeterministicCanvasAuthoringProposal,
   validateCanvasAuthoringProposal,
 } from './authoring/authoringRuntime';
 import {
-  addCallableNodeFromPalette,
-  addInternalNodeFromPalette,
-  addWorkflowFromPalette,
-  nextPaletteSelection,
-  paletteItemBaseId,
-  uniqueId,
-} from '../workbench/model/paletteCanvasOps';
-import {
-  connectionCandidatesFromPendingEndpoint,
-  connectionFromPendingEndpoint,
-  controlSlotLimitIssue,
-  controlSourceTokenId,
-  controlTargetTokenId,
-  dataConnectEdges,
-  dataConnectNodes,
-  describeEndpoint,
-  edgeDiagnosticsForCanvasEdge,
-  edgeDiagnosticsForWorkflowEdge,
   findDataConnectNode,
-  isWorkflowBoundaryEdge,
-  isWorkflowInputBoundaryControlBinding,
-  isWorkflowOutputBoundaryControlBinding,
-  portTokenId,
-  resolveScopedConnection,
-  reverseConnection,
-  tryCommitResolvedConnection,
-  uniqueCanvasEdges,
-  workflowInputInnerSourceTokenId,
-  workflowInputOuterTargetTokenId,
-  workflowIdForBoundaryMainBinding,
-  workflowOutputInnerTargetTokenId,
-  workflowOutputOuterSourceTokenId,
-  wouldCreateControlCycle,
-  type ConnectionResolution,
-  type DataConnectNodeOption,
-  type EdgeDiagnostic,
-  type EndpointSide,
-  type PendingCanvasConnection,
 } from '../workbench/model/canvasEdgeOps';
 import {
-  expandWorkflowToFitChildren,
-  expandWorkflowToFitChildrenCenterLocked,
-  layoutCanvasForSelection,
-  layoutWorkflowInternalNodes,
-  nextRootPalettePosition,
-} from '../workbench/model/canvasLayout';
-import {
-  edgeTouchesNode,
-  findCanvasEdgeByAddress,
-  isActiveCanvasObjectStatus,
   isExecutableNodeWorkflow,
-  normalizeSelectionIntent,
   normalizeWorkbenchSelection,
-  selectionEdgeAddress,
-  selectionMatchesEdge,
-  shouldDisconnectEdgeOnClick,
-  type SelectionIntent,
-  workflowInvocationLabel,
 } from '../workbench/model/selectionModel';
 import {
   workbenchViewProjection,
 } from '../workbench/model/workbenchViewProjection';
 import { selectionKey, truncateLargeLog } from '../workbench/model/workflowViewerShell';
-import { failedAgentEventsText } from '../workbench/model/agentEventText';
-import {
-  bindingDirectory,
-  boundaryInputMainConflictMessage,
-  boundaryMainBindingLabel,
-  controlEdgeMainTransferMode,
-  effectiveNodeRunDir,
-  nodeLiveLogsFor,
-  nodeRunForInternalNode,
-  nodeRunForWorkflow,
-  selectedNodeRunForSelection,
-  sameRunDir,
-  selectedEntityDetailsModel,
-  selectedNodeSettingsModel,
-  statusLabel,
-  workflowMainInputBindingState,
-  type NodeRunLookupContext,
-} from '../workbench/model/selectedNodeModel';
 import type {
-  BoundaryTransfer,
-  BoundaryTransferMapping,
-  BottomDockMode,
-  CanvasAuthoringOperation,
   CanvasAuthoringProposal,
-  CodexExecutionMode,
-  ConnectionMode,
   DataConnectionDraft,
-  EdgeViewMode,
-  EmptyInputPolicy,
-  InternalNodeView,
-  PortDirection,
-  SelectedEntityDetailsModel,
-  TaskWorkspaceView,
-  TemporaryResourceDraft,
-  TemporaryResourceDraftStatus,
-  WorkbenchChromeState,
   WorkbenchTask,
-  WorkflowCanvasEdge,
-  WorkflowContainerModel,
-  WorkflowMainInputBindingState,
-  WorkflowPortView,
 } from '../types/workbench';
-import {
-  boundaryTransferFromGraphEdge,
-  boundaryTransferPreviewHasErrors,
-  boundaryTransferToGraphMetadata,
-  unavailableBoundaryTransferPreview,
-} from './canvas/boundaryTransfer';
 import {
   buildAccTranscript,
 } from '../lib/runTranscript';
 import {
-  filterLiveEvents,
-  liveEventFromAgentRunEvent,
-  liveStateForNodeRun,
   useWorkbenchLiveStream,
   type WorkbenchLiveStreamScope,
-  type WorkbenchLiveStreamState,
 } from '../hooks/useWorkbenchLiveStream';
 import {
-  useBoundaryTransferPreview,
   useBoundaryTransferValidation,
 } from '../hooks/useBoundaryTransferPreview';
 import {
-  outputSchemaFromArtifactContract,
-  paletteItemFromCallable,
-  parsePaletteItem,
-  workflowPortsFromPortContracts,
-  type PaletteItem,
-} from './workflow-viewer/palette';
-import {
-  effectiveOutputPortsForNode,
-  isSchemaDerivedOutputPort,
-  outputPortTooltip,
-  outputPortsFromSchema,
-} from '../workbench/model/schemaPorts';
-import {
   canvasToWorkflowGraph,
-  edgeCanonicalPreview,
-  internalNodeInputPorts,
-  internalNodeInvocationPreview,
-  internalNodeOutputPorts,
-  isInlineWorkflowContainer,
-  port,
-  workflowInvocationPreview,
-  workflowOutputPorts,
-  workflowOutputPortsReadonly,
 } from '../workbench/model/workflowGraphProjection';
-import {
-  mergeNodeRunDetail,
-  mergeWorkflowRunNodeDetails,
-  nodeRunDetailCacheKey,
-} from '../workbench/model/workflowRuntimeProjection';
-import {
-  type EdgeAddress,
-} from './workflow-viewer/workflowConnectionState';
-import {
-  canvasEdgeToFlowEdge,
-  dragCommitKey,
-  edgeAddressFromFlowEdge,
-  flowNodeIdentityKey,
-  flowNodeLayoutKey,
-  reconcileFlowNodes,
-  toFlowEdges,
-  toFlowNodes,
-  type DataDropTargetPreview,
-} from './canvas/flowProjection';
-import {
-  flowEndpointForCanvas,
-  isWorkflowBoundaryId,
-  parseInternalFlowNodeId,
-  workflowBoundaryKind,
-  workflowIdFromBoundaryId,
-  type FlowEndpoint,
-} from '../workbench/model/workflowNodeModel';
-import {
-  AgentToolNode,
-  FlowNodeLayoutContext,
-  WorkflowContainer,
-  nodeTypes,
-  type AgentToolFlowNode,
-  type CanvasFlowNode,
-  type WorkflowFlowNode,
-} from './canvas/NodeRenderer';
-import {
-  closestConnectionHandle,
-  connectionHandleElementForEndpoint,
-  connectionHandleSelector,
-  connectionModeForHandleElement,
-  connectionSideFromHandleElement,
-  domConnectionEndpointAtPoint,
-  domConnectionEndpointFromElement,
-  domFlowNodeIdAtPoint,
-  isConnectionHandleForMode,
-  queueControlHandleConnectionStart,
-  recordConnectionTrace,
-  rectCenter,
-  type DomConnectionEndpoint,
-} from './canvas/connectionDom';
 import {
   applyRunOverlayToCanvas,
   stripRuntimeStateFromCanvas,
   workflowRunFailureText,
 } from './workflow-viewer/runState';
 
-import { LiveOutputViewer } from './execution/RunOverlay';
 import type { ResourceTemplate } from './inspector/ResourceInspector';
-import { evidenceContentForCurrentSelection } from './inspector/SelectionDetailsDock';
 import {
   TopBar as TopBarComponent,
   WorkbenchShell,
@@ -276,10 +71,7 @@ import {
 import { useAssistantTurnStream } from '../hooks/useAssistantStream';
 import { useArtifactContentCache } from '../hooks/useArtifactContentCache';
 import { useRunStream } from '../hooks/useRunStream';
-import { useSelectedAgentSession, type AgentSessionUiState } from '../hooks/useSelectedAgentSession';
 import { useOpenedWorkflowCanvas } from '../hooks/useOpenedWorkflowCanvas';
-import { useNodeRunDetails } from '../hooks/useNodeRunDetails';
-import { useCallableDetail, type CallableDetailLoadState } from '../hooks/useCallableDetail';
 import { useGraphOpsPersistence } from '../hooks/useGraphOpsPersistence';
 import { useRunnerSubmit } from '../hooks/useRunnerSubmit';
 import { useSelectedAgentActions } from '../hooks/useSelectedAgentActions';
@@ -293,13 +85,6 @@ import {
   saveTaskStore,
   useTaskPersistence,
 } from '../hooks/useTaskPersistence';
-import {
-  assistantDisplayStatus,
-  buildAssistantTranscriptItems,
-  graphOpsStringList,
-  type AssistantDisplayStatus,
-  type AssistantTranscriptItem,
-} from './assistant/assistantTranscript';
 import { useWorkbenchTaskDurability } from '../hooks/useWorkbenchTaskDurability';
 import {
   useWorkbenchTaskCanvasPersistence,
@@ -335,6 +120,7 @@ import { WorkflowViewerDock } from './workflow-viewer/WorkflowViewerDock';
 import { WorkflowViewerMainStage } from './workflow-viewer/WorkflowViewerMainStage';
 import { WorkflowViewerNodeDetailOverlay } from './workflow-viewer/WorkflowViewerNodeDetailOverlay';
 import { WorkflowViewerRightPanel } from './workflow-viewer/WorkflowViewerRightPanel';
+import { useWorkflowViewerSelectionState } from './workflow-viewer/useWorkflowViewerSelectionState';
 
 type Props = {
   workflows: WorkflowSummary[];
@@ -668,144 +454,42 @@ export function WorkflowViewer({
   });
 
   const displayCanvas = useMemo(() => applyRunOverlayToCanvas(canvas, runOverlay), [canvas, runOverlay]);
-  const selectedWorkflow =
-    selection.type === 'workflow'
-      ? displayCanvas.workflows.find((workflow) => workflow.id === selection.id)
-      : selection.type === 'port' || selection.type === 'internal'
-        ? displayCanvas.workflows.find((workflow) => workflow.id === selection.workflowId)
-        : undefined;
-  const selectedEdgeAddress = selectionEdgeAddress(displayCanvas, selection);
-  const selectedEdge = findCanvasEdgeByAddress(displayCanvas, selectedEdgeAddress);
-  const selectedPort =
-    selection.type === 'port'
-      ? selectedWorkflow?.[selection.direction === 'input' ? 'inputPorts' : 'outputPorts'].find(
-          (port) => port.id === selection.portId,
-        )
-      : undefined;
-  const selectedInternalNode =
-    selection.type === 'internal'
-      ? selectedWorkflow?.internalNodes.find((node) => node.id === selection.nodeId)
-      : undefined;
   const selectedLiveLogs = selectedRunId ? runLogsById[selectedRunId] || {} : {};
   const selectedRunLiveEvents = selectedRunId ? runLiveEventsById[selectedRunId] || [] : [];
-  const selectedNodeRunLookup = useMemo<NodeRunLookupContext>(
-    () => ({
-      scope: selectedRunProjection?.scope,
-      targetId: selectedRunProjection?.targetId,
-      parentWorkflowId:
-        typeof selectedRunProjection?.graph.metadata?.parent_workflow_id === 'string'
-          ? selectedRunProjection.graph.metadata.parent_workflow_id
-          : undefined,
-    }),
-    [
-      selectedRunProjection?.graph.metadata,
-      selectedRunProjection?.scope,
-      selectedRunProjection?.targetId,
-    ],
-  );
-  const rawSelectedNodeRun = useMemo(
-    () => selectedNodeRunForSelection(workflowRun, selection, selectedWorkflow, selectedInternalNode, selectedNodeRunLookup),
-    [selection, selectedInternalNode, selectedNodeRunLookup, selectedWorkflow, workflowRun],
-  );
-  const rawSelectedNodeRunDetailKey =
-    selectedRunId && rawSelectedNodeRun ? nodeRunDetailCacheKey(selectedRunId, rawSelectedNodeRun) : '';
-  const { nodeRunDetailsByKey } = useNodeRunDetails({
-    runId: selectedRunId,
-    nodeRun: rawSelectedNodeRun,
-    detailKey: rawSelectedNodeRunDetailKey,
-    mergeDetail: mergeNodeRunDetail,
-  });
-
-  const enrichedWorkflowRun = useMemo(
-    () => mergeWorkflowRunNodeDetails(workflowRun, selectedRunId, nodeRunDetailsByKey),
-    [nodeRunDetailsByKey, selectedRunId, workflowRun],
-  );
-  const selectedNodeSettings = useMemo(
-    () =>
-      selectedNodeSettingsModel({
-        canvas: displayCanvas,
-        selection,
-        selectedWorkflow,
-        selectedInternalNode,
-        workflowRun: enrichedWorkflowRun,
-        liveLogs: selectedLiveLogs,
-        nodeRunLookup: selectedNodeRunLookup,
-      }),
-    [
-      selection,
-      selectedWorkflow,
-      selectedInternalNode,
-      enrichedWorkflowRun,
-      selectedLiveLogs,
-      selectedNodeRunLookup,
-      displayCanvas,
-    ],
-  );
-  const selectedCallableLookupId =
-    selectedNodeSettings?.temporaryResourceId || isTemporaryCallableId(selectedNodeSettings?.callableId)
-    ? ''
-    : selectedNodeSettings?.callableId || '';
-  const selectedCallableDetailState = useCallableDetail(selectedCallableLookupId);
-  const selectedDetailsModel = useMemo(
-    () =>
-      selectedEntityDetailsModel({
-        canvas: displayCanvas,
-        selection,
-        selectedWorkflow,
-        selectedPort,
-        selectedEdge,
-        selectedInternalNode,
-        selectedNodeSettings,
-        workflowRun: enrichedWorkflowRun,
-        workflowEvents,
-        liveLogs: selectedLiveLogs,
-        runtimeConfig,
-        binding: selectedWorkflow ? workflowBindings[selectedWorkflow.id] : undefined,
-        currentTask,
-      }),
-    [
-      currentTask,
-      displayCanvas,
-      runtimeConfig,
-      selectedEdge,
-      selectedInternalNode,
-      selectedLiveLogs,
-      selectedNodeSettings,
-      selectedPort,
-      selectedWorkflow,
-      selection,
-      workflowBindings,
-      workflowEvents,
-      enrichedWorkflowRun,
-    ],
-  );
-  const selectedAgentNodeRun =
-    selectedNodeSettings && selectedNodeSettings.kind !== 'Tool' ? selectedNodeSettings.run : undefined;
-  const selectedAgentSessionContext = useMemo(
-    () =>
-      selectedRunId && selectedAgentNodeRun
-        ? {
-            runId: selectedRunId,
-            nodeId: selectedAgentNodeRun.node_id,
-            uiNodeId: selectedAgentNodeRun.ui_node_id || '',
-            parentNodeId: selectedAgentNodeRun.parent_node_id || '',
-            nodeRunDir: effectiveNodeRunDir(selectedAgentNodeRun) || '',
-          }
-        : null,
-    [selectedAgentNodeRun, selectedRunId],
-  );
   const {
-    state: agentSessionState,
-    refresh: refreshAgentSession,
-    setPendingTurn: setAgentSessionPendingTurn,
-    appendEvent: appendSelectedAgentSessionEvent,
-  } = useSelectedAgentSession(selectedAgentSessionContext);
+    selectedWorkflow,
+    selectedPort,
+    selectedEdge,
+    selectedInternalNode,
+    enrichedWorkflowRun,
+    selectedCallableDetailState,
+    selectedAgentSessionContext,
+    agentSessionState,
+    refreshAgentSession,
+    setAgentSessionPendingTurn,
+    appendRunAgentEventToSession,
+    selectedAgentLiveState,
+    selectedAgentTurnLiveState,
+    selectedDetailsModelWithAgentEvents,
+  } = useWorkflowViewerSelectionState({
+    displayCanvas,
+    selection,
+    selectedRunId,
+    selectedRunProjection,
+    workflowRun,
+    workflowEvents,
+    selectedLiveLogs,
+    selectedRunLiveEvents,
+    runtimeConfig,
+    workflowBindings,
+    currentTask,
+  });
   const appendRunAgentEvent = useCallback(
     (runId: string, event: RunEvent) => {
       appendRunAgentEventToProjection(runId, event);
-      appendSelectedAgentSessionEvent(runId, event);
+      appendRunAgentEventToSession(runId, event);
     },
-    [appendRunAgentEventToProjection, appendSelectedAgentSessionEvent],
+    [appendRunAgentEventToProjection, appendRunAgentEventToSession],
   );
 
   useRunStream(selectedRunId, {
@@ -814,23 +498,6 @@ export function WorkflowViewer({
     appendRunLiveEvent,
     updateRunProjection,
   });
-  const selectedAgentLiveState = useMemo(
-    () => liveStateForNodeRun(selectedRunLiveEvents, selectedAgentNodeRun),
-    [selectedAgentNodeRun, selectedRunLiveEvents],
-  );
-  const selectedAgentTurnLiveScope = useMemo<WorkbenchLiveStreamScope | null>(
-    () =>
-      agentSessionState.session && agentSessionState.pendingTurn
-        ? {
-            kind: 'turn',
-            sessionId: agentSessionState.session.session_id,
-            turnId: agentSessionState.pendingTurn.turn_id,
-            source: 'agent_turn',
-          }
-        : null,
-    [agentSessionState.pendingTurn, agentSessionState.session],
-  );
-  const selectedAgentTurnLiveState = useWorkbenchLiveStream(selectedAgentTurnLiveScope);
   const assistantLiveScope = useMemo<WorkbenchLiveStreamScope | null>(
     () =>
       assistantSessionId && assistantPendingTurn
@@ -844,17 +511,6 @@ export function WorkflowViewer({
     [assistantPendingTurn, assistantSessionId],
   );
   const assistantLiveState = useWorkbenchLiveStream(assistantLiveScope);
-  const selectedAgentEvents =
-    selectedAgentSessionContext && (agentSessionState.status === 'ready' || agentSessionState.status === 'loading')
-      ? agentSessionState.events
-      : selectedDetailsModel.events;
-  const selectedDetailsModelWithAgentEvents = useMemo(
-    () =>
-      selectedDetailsModel.nodeRun
-        ? { ...selectedDetailsModel, events: selectedAgentEvents }
-        : selectedDetailsModel,
-    [selectedAgentEvents, selectedDetailsModel],
-  );
 
   const {
     submitSelectedAgentTurn,
