@@ -703,10 +703,15 @@ Status: in progress
 - Rewired `WorkflowViewer.tsx` to consume store-owned task list, active task, canvas, selection, focused workflow id, connection mode, edge view mode, task workspace view, chrome, bottom dock mode, and node-detail open state.
 - Kept `sourceGraph` as a local derived projection and kept run/assistant/API/EventSource state out of the store.
 - Reset store UI scalars on each `WorkflowViewer` mount before hydrating persisted tasks, preserving per-instance behavior that local React state previously provided and preventing test/runtime cross-instance leakage.
+- Upgraded `web/src/stores/runStore.ts` into a run/task partitioned owner for run projections, task run indexes, active run ids, node logs, live events, runtime config, and workflow bindings.
+- Upgraded `web/src/stores/assistantStore.ts` into a per-task assistant owner with session/proposal/review/undo state and stale turn-completion guards.
+- Kept both stores pure: no API calls, no EventSource, no ReactFlow, and no `WorkflowViewer` dependency.
 
 ### Added Tests
 
 - Extended `web/src/stores/workbenchStore.types.test.ts` with task hydration, task-isolated canvas revision updates, per-task selection/focus isolation, active-task fallback on delete, and static boundary checks.
+- Added `web/src/stores/runStore.test.ts` for task/run isolation, same-node log isolation, unknown-run event/log ignore behavior, removal cleanup, and static dependency boundaries.
+- Added `web/src/stores/assistantStore.test.ts` for per-task proposal isolation, per-task reset, stale turn completion rejection, matching turn completion, and static dependency boundaries.
 
 ### Validation So Far
 
@@ -720,8 +725,9 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npm run test -- --run src/App.test.tsx` | Passed | 1 file, 82 tests passed after WorkflowViewer consumed store-owned state. |
 | `npm run test -- --run` | Passed | 65 files, 431 tests passed. |
 | `npm run build` | Passed | Same expected Vite chunk-size warning remains. |
+| `npm run test -- --run src/stores/runStore.test.ts src/stores/assistantStore.test.ts src/stores/workbenchStore.types.test.ts` | Passed | 3 files, 16 tests passed for store ownership contracts. |
 
 ### Remaining PLAN_08 Work
 
-- Partition run and assistant owner state by task where needed, without moving API/EventSource effects into stores.
+- Rewire `WorkflowViewer.tsx` run/assistant local state to dispatch through `runStore` and `assistantStore` selectors/actions, without moving API/EventSource effects into stores.
 - Continue reducing `WorkflowViewer.tsx` shell glue now that task/canvas owner state has moved to the store.

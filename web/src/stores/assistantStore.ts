@@ -1,14 +1,16 @@
 /**
  * Zustand store for AI assistant / authoring session state.
  *
- * Covers: assistant chat messages, proposal, session identity, streaming
- * status, GraphOps review, required-actions queue, and undo tokens.
+ * Assistant state is partitioned by taskId. Async hooks must dispatch with the
+ * task/session/turn identifiers they observed, and stale completions are
+ * ignored here instead of overwriting the active task.
  */
 
 import { create } from 'zustand';
 import type {
   AgentSessionRecord,
   AgentTurnRecord,
+  AuthoringAgentSummary,
   AuthoringRequiredAction,
   RunEvent,
 } from '../types';
@@ -30,108 +32,171 @@ export type {
   CanvasAuthoringValidationResult,
 };
 
-export interface AssistantStoreState {
-  // --- chat ---
+export interface AssistantTaskState {
   assistantInput: string;
   assistantMessages: AssistantChatMessage[];
-
-  // --- proposal ---
   assistantProposal: CanvasAuthoringProposal | null;
-
-  // --- session identity ---
   assistantSessionId: string | null;
   assistantAgentSession: AgentSessionRecord | null;
   assistantPendingTurn: AgentTurnRecord | null;
   assistantEvents: RunEvent[];
   assistantTurnReason: AssistantTurnReason;
   assistantSessionStatus: string;
-
-  // --- validation / review ---
   assistantBackendValidation: CanvasAuthoringValidationResult | null;
   assistantRequiredActions: AuthoringRequiredAction[];
   assistantGraphOpsReview: AssistantGraphOpsReview | null;
-
-  // --- busy / undo ---
   assistantBusy: boolean;
   assistantApplyUndo: AssistantApplyUndoToken | null;
-
-  // --- authoring agents ---
-  authoringAgents: unknown[];
   selectedAuthoringAgentId: string;
-
-  // --- actions ---
-  setAssistantInput: (input: string) => void;
-  addAssistantMessage: (message: AssistantChatMessage) => void;
-  setAssistantMessages: (messages: AssistantChatMessage[]) => void;
-  setAssistantProposal: (proposal: CanvasAuthoringProposal | null) => void;
-  setAssistantSessionId: (id: string | null) => void;
-  setAssistantAgentSession: (session: AgentSessionRecord | null) => void;
-  setAssistantPendingTurn: (turn: AgentTurnRecord | null) => void;
-  setAssistantEvents: (events: RunEvent[]) => void;
-  setAssistantTurnReason: (reason: AssistantTurnReason) => void;
-  setAssistantSessionStatus: (status: string) => void;
-  setAssistantBackendValidation: (validation: CanvasAuthoringValidationResult | null) => void;
-  setAssistantRequiredActions: (actions: AuthoringRequiredAction[]) => void;
-  setAssistantGraphOpsReview: (review: AssistantGraphOpsReview | null) => void;
-  setAssistantBusy: (busy: boolean) => void;
-  setAssistantApplyUndo: (token: AssistantApplyUndoToken | null) => void;
-  setAuthoringAgents: (agents: unknown[]) => void;
-  setSelectedAuthoringAgentId: (id: string) => void;
-  resetAssistantSession: () => void;
 }
 
-export const useAssistantStore = create<AssistantStoreState>((set) => ({
-  assistantInput: '',
-  assistantMessages: [],
-  assistantProposal: null,
-  assistantSessionId: null,
-  assistantAgentSession: null,
-  assistantPendingTurn: null,
-  assistantEvents: [],
-  assistantTurnReason: 'workbench_chat',
-  assistantSessionStatus: 'disconnected',
-  assistantBackendValidation: null,
-  assistantRequiredActions: [],
-  assistantGraphOpsReview: null,
-  assistantBusy: false,
-  assistantApplyUndo: null,
+export interface AssistantTurnCompletionPayload {
+  taskId: string;
+  sessionId: string | null;
+  turnId: string | null;
+  messages?: AssistantChatMessage[];
+  proposal?: CanvasAuthoringProposal | null;
+  backendValidation?: CanvasAuthoringValidationResult | null;
+  requiredActions?: AuthoringRequiredAction[];
+  events?: RunEvent[];
+  status?: string;
+}
+
+export interface AssistantStoreState {
+  assistantByTaskId: Record<string, AssistantTaskState>;
+  authoringAgents: AuthoringAgentSummary[];
+
+  ensureAssistantTask: (taskId: string) => void;
+  resetAssistantTask: (taskId: string) => void;
+  setAssistantInput: (taskId: string, input: string) => void;
+  addAssistantMessage: (taskId: string, message: AssistantChatMessage) => void;
+  setAssistantMessages: (taskId: string, messages: AssistantChatMessage[]) => void;
+  setAssistantProposal: (taskId: string, proposal: CanvasAuthoringProposal | null) => void;
+  setAssistantSessionId: (taskId: string, id: string | null) => void;
+  setAssistantAgentSession: (taskId: string, session: AgentSessionRecord | null) => void;
+  setAssistantPendingTurn: (taskId: string, turn: AgentTurnRecord | null) => void;
+  setAssistantEvents: (taskId: string, events: RunEvent[]) => void;
+  setAssistantTurnReason: (taskId: string, reason: AssistantTurnReason) => void;
+  setAssistantSessionStatus: (taskId: string, status: string) => void;
+  setAssistantBackendValidation: (taskId: string, validation: CanvasAuthoringValidationResult | null) => void;
+  setAssistantRequiredActions: (taskId: string, actions: AuthoringRequiredAction[]) => void;
+  setAssistantGraphOpsReview: (taskId: string, review: AssistantGraphOpsReview | null) => void;
+  setAssistantBusy: (taskId: string, busy: boolean) => void;
+  setAssistantApplyUndo: (taskId: string, token: AssistantApplyUndoToken | null) => void;
+  setSelectedAuthoringAgentId: (taskId: string, id: string) => void;
+  setAuthoringAgents: (agents: AuthoringAgentSummary[]) => void;
+  applyTurnCompletion: (payload: AssistantTurnCompletionPayload) => boolean;
+}
+
+export function emptyAssistantTaskState(): AssistantTaskState {
+  return {
+    assistantInput: '',
+    assistantMessages: [],
+    assistantProposal: null,
+    assistantSessionId: null,
+    assistantAgentSession: null,
+    assistantPendingTurn: null,
+    assistantEvents: [],
+    assistantTurnReason: 'workbench_chat',
+    assistantSessionStatus: 'disconnected',
+    assistantBackendValidation: null,
+    assistantRequiredActions: [],
+    assistantGraphOpsReview: null,
+    assistantBusy: false,
+    assistantApplyUndo: null,
+    selectedAuthoringAgentId: '',
+  };
+}
+
+function taskState(state: AssistantStoreState, taskId: string): AssistantTaskState {
+  return state.assistantByTaskId[taskId] || emptyAssistantTaskState();
+}
+
+function patchAssistantTask(
+  state: AssistantStoreState,
+  taskId: string,
+  patch: Partial<AssistantTaskState>,
+): Pick<AssistantStoreState, 'assistantByTaskId'> {
+  return {
+    assistantByTaskId: {
+      ...state.assistantByTaskId,
+      [taskId]: { ...taskState(state, taskId), ...patch },
+    },
+  };
+}
+
+export const useAssistantStore = create<AssistantStoreState>((set, get) => ({
+  assistantByTaskId: {},
   authoringAgents: [],
-  selectedAuthoringAgentId: '',
 
-  // --- actions ---
-  setAssistantInput: (input) => set({ assistantInput: input }),
-  addAssistantMessage: (message) =>
-    set((state) => ({ assistantMessages: [...state.assistantMessages, message] })),
-  setAssistantMessages: (messages) => set({ assistantMessages: messages }),
-  setAssistantProposal: (proposal) => set({ assistantProposal: proposal }),
-  setAssistantSessionId: (id) => set({ assistantSessionId: id }),
-  setAssistantAgentSession: (session) => set({ assistantAgentSession: session }),
-  setAssistantPendingTurn: (turn) => set({ assistantPendingTurn: turn }),
-  setAssistantEvents: (events) => set({ assistantEvents: events }),
-  setAssistantTurnReason: (reason) => set({ assistantTurnReason: reason }),
-  setAssistantSessionStatus: (status) => set({ assistantSessionStatus: status }),
-  setAssistantBackendValidation: (validation) =>
-    set({ assistantBackendValidation: validation }),
-  setAssistantRequiredActions: (actions) => set({ assistantRequiredActions: actions }),
-  setAssistantGraphOpsReview: (review) => set({ assistantGraphOpsReview: review }),
-  setAssistantBusy: (busy) => set({ assistantBusy: busy }),
-  setAssistantApplyUndo: (token) => set({ assistantApplyUndo: token }),
-  setAuthoringAgents: (agents) => set({ authoringAgents: agents }),
-  setSelectedAuthoringAgentId: (id) => set({ selectedAuthoringAgentId: id }),
-
-  resetAssistantSession: () =>
-    set({
-      assistantMessages: [],
-      assistantProposal: null,
-      assistantSessionId: null,
-      assistantAgentSession: null,
-      assistantPendingTurn: null,
-      assistantEvents: [],
-      assistantSessionStatus: 'disconnected',
-      assistantBackendValidation: null,
-      assistantRequiredActions: [],
-      assistantGraphOpsReview: null,
-      assistantBusy: false,
-      assistantApplyUndo: null,
+  ensureAssistantTask: (taskId) => set((state) => patchAssistantTask(state, taskId, {})),
+  resetAssistantTask: (taskId) =>
+    set((state) => ({
+      assistantByTaskId: { ...state.assistantByTaskId, [taskId]: emptyAssistantTaskState() },
+    })),
+  setAssistantInput: (taskId, input) => set((state) => patchAssistantTask(state, taskId, { assistantInput: input })),
+  addAssistantMessage: (taskId, message) =>
+    set((state) => {
+      const current = taskState(state, taskId);
+      return patchAssistantTask(state, taskId, {
+        assistantMessages: [...current.assistantMessages, message],
+      });
     }),
+  setAssistantMessages: (taskId, messages) =>
+    set((state) => patchAssistantTask(state, taskId, { assistantMessages: messages })),
+  setAssistantProposal: (taskId, proposal) =>
+    set((state) => patchAssistantTask(state, taskId, { assistantProposal: proposal })),
+  setAssistantSessionId: (taskId, id) =>
+    set((state) => patchAssistantTask(state, taskId, { assistantSessionId: id })),
+  setAssistantAgentSession: (taskId, session) =>
+    set((state) => patchAssistantTask(state, taskId, { assistantAgentSession: session })),
+  setAssistantPendingTurn: (taskId, turn) =>
+    set((state) => patchAssistantTask(state, taskId, { assistantPendingTurn: turn })),
+  setAssistantEvents: (taskId, events) =>
+    set((state) => patchAssistantTask(state, taskId, { assistantEvents: events })),
+  setAssistantTurnReason: (taskId, reason) =>
+    set((state) => patchAssistantTask(state, taskId, { assistantTurnReason: reason })),
+  setAssistantSessionStatus: (taskId, status) =>
+    set((state) => patchAssistantTask(state, taskId, { assistantSessionStatus: status })),
+  setAssistantBackendValidation: (taskId, validation) =>
+    set((state) => patchAssistantTask(state, taskId, { assistantBackendValidation: validation })),
+  setAssistantRequiredActions: (taskId, actions) =>
+    set((state) => patchAssistantTask(state, taskId, { assistantRequiredActions: actions })),
+  setAssistantGraphOpsReview: (taskId, review) =>
+    set((state) => patchAssistantTask(state, taskId, { assistantGraphOpsReview: review })),
+  setAssistantBusy: (taskId, busy) => set((state) => patchAssistantTask(state, taskId, { assistantBusy: busy })),
+  setAssistantApplyUndo: (taskId, token) =>
+    set((state) => patchAssistantTask(state, taskId, { assistantApplyUndo: token })),
+  setSelectedAuthoringAgentId: (taskId, id) =>
+    set((state) => patchAssistantTask(state, taskId, { selectedAuthoringAgentId: id })),
+  setAuthoringAgents: (agents) => set({ authoringAgents: agents }),
+
+  applyTurnCompletion: (payload) => {
+    const current = taskState(get(), payload.taskId);
+    const pendingTurn = current.assistantPendingTurn;
+    if (
+      (payload.sessionId && current.assistantSessionId && payload.sessionId !== current.assistantSessionId) ||
+      (payload.turnId && pendingTurn?.turn_id && payload.turnId !== pendingTurn.turn_id)
+    ) {
+      return false;
+    }
+    set((state) =>
+      patchAssistantTask(state, payload.taskId, {
+        ...(payload.messages ? { assistantMessages: payload.messages } : {}),
+        ...(payload.proposal !== undefined ? { assistantProposal: payload.proposal } : {}),
+        ...(payload.backendValidation !== undefined
+          ? { assistantBackendValidation: payload.backendValidation }
+          : {}),
+        ...(payload.requiredActions ? { assistantRequiredActions: payload.requiredActions } : {}),
+        ...(payload.events ? { assistantEvents: payload.events } : {}),
+        ...(payload.status ? { assistantSessionStatus: payload.status } : {}),
+        assistantBusy: false,
+      }),
+    );
+    return true;
+  },
 }));
+
+export function selectAssistantForTask(state: AssistantStoreState, taskId: string): AssistantTaskState {
+  return taskState(state, taskId);
+}
