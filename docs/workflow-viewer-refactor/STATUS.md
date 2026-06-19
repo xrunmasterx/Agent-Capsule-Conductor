@@ -443,12 +443,15 @@ Status: in progress
 - Upgraded extracted `LiveOutputViewer` to match the current inline implementation: ACC transcript projection, `输出/日志/stdout/stderr/错误/raw` filters, pinned-scroll behavior, and the jump-to-latest action.
 - Switched the `WorkflowViewer.tsx` node-detail live output path to the extracted `LiveOutputViewer`.
 - Removed the local `WorkflowViewer.tsx` `LiveOutputViewer` function declaration while preserving the exported `filterLiveEvents(...)` helper used by existing tests.
-- `web/src/components/WorkflowViewer.tsx` is now 550,667 bytes / 15,558 lines after the latest slice.
+- Switched node-detail overlay chrome to extracted `NodeDetailOverlay`, keeping the three detail panes local until PLAN_05.
+- Removed the local `WorkflowViewer.tsx` `NodeDetailOverlay` function declaration.
+- `web/src/components/WorkflowViewer.tsx` is now 548,052 bytes / 15,484 lines after the latest slice.
 
 ### Added Tests
 
 - `web/src/components/execution/ExecutionDock.test.tsx`
 - `web/src/components/execution/RunOverlay.test.tsx`
+- `web/src/components/inspector/NodeDetailOverlay.test.tsx`
 - `web/src/components/workbench/WorkbenchShell.test.tsx`
 - `web/src/components/workbench/TopBar.test.tsx`
 
@@ -468,11 +471,16 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npx tsc --noEmit` | Passed | Extracted live output viewer wiring compiles. |
 | `npm run test -- --run` | Passed | 46 files, 358 tests passed. |
 | `npm run build` | Passed | Same expected chunk-size warning remains. |
+| `npm run test -- --run src/components/inspector/NodeDetailOverlay.test.tsx src/App.test.tsx src/components/WorkflowViewer.drag.test.tsx` | Passed | 3 files, 184 tests passed. |
+| `npx tsc --noEmit` | Passed | Extracted node-detail overlay wiring compiles. |
+| `npm run test -- --run` | Passed | 47 files, 359 tests passed. |
+| `npm run build` | Passed | Same expected chunk-size warning remains. |
 
 ### Static Gates So Far
 
 - `WorkflowViewer.tsx` no longer defines the low-risk workbench/execution local display functions listed above.
 - The main render path uses the extracted workbench/execution components for the top-level shell, task overview, save dialog, and run controls.
 - `WorkflowViewer.tsx` no longer defines the local `LiveOutputViewer`; node-detail live output uses `components/execution/RunOverlay.tsx`.
+- `WorkflowViewer.tsx` no longer defines the local `NodeDetailOverlay`; node-detail chrome uses `components/inspector/NodeDetailOverlay.tsx`.
 - `WorkflowViewer.tsx` still contains `Extracted` migration aliases for assistant, live output, node detail, and selection-details components; those remain for later PLAN_04 slices.
-- `NodeDetailOverlay` and `SelectionDetailsDock` are not yet switched to extracted modules in the main render path.
+- `SelectionDetailsDock` is not yet switched to extracted modules in the main render path.

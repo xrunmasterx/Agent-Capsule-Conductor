@@ -4242,64 +4242,78 @@ export function WorkflowViewer({
           </div>
         ) : null}
         {blueprintViewActive && nodeDetailOpen && isNodeDetailModel(selectedDetailsModelWithAgentEvents) ? (
-          <NodeDetailOverlay
+          <NodeDetailOverlayExtracted
             model={selectedDetailsModelWithAgentEvents}
-            callableState={selectedCallableDetailState}
-            runtimeConfig={runtimeConfig}
-            agentSessionState={agentSessionState}
-            agentLiveState={
-              selectedAgentTurnLiveState.events.length ? selectedAgentTurnLiveState : selectedAgentLiveState
-            }
-            artifactCacheByPath={artifactCacheByPath}
-            onEnsureArtifactContent={ensureArtifactContent}
-            onReadEvidence={readEvidence}
-            onRefreshAgentSession={refreshAgentSession}
-            onPublishAgentOutput={publishSelectedAgentOutput}
-            onAnswerAgentInteraction={answerSelectedAgentInteraction}
             onClose={() => setNodeDetailOpen(false)}
-            onUpdateInput={(nextInput) => {
-              if (selection.type === 'workflow' && selectedWorkflow && isExecutableNodeWorkflow(selectedWorkflow)) {
-                updateWorkflowInvocationInput(selectedWorkflow.id, nextInput);
+          >
+            <SelectionInputPane
+              model={selectedDetailsModelWithAgentEvents}
+              artifactCacheByPath={artifactCacheByPath}
+              onEnsureArtifactContent={ensureArtifactContent}
+            />
+            <SelectionPropertiesPane
+              model={selectedDetailsModelWithAgentEvents}
+              callableState={selectedCallableDetailState}
+              runtimeConfig={runtimeConfig}
+              agentSessionState={agentSessionState}
+              agentLiveState={
+                selectedAgentTurnLiveState.events.length ? selectedAgentTurnLiveState : selectedAgentLiveState
               }
-              if (selection.type === 'internal' && selectedWorkflow && selectedInternalNode) {
-                updateInternalInvocationInput(selectedWorkflow.id, selectedInternalNode.id, nextInput);
+              onReadEvidence={readEvidence}
+              onRefreshAgentSession={refreshAgentSession}
+              onPublishAgentOutput={publishSelectedAgentOutput}
+              onAnswerAgentInteraction={answerSelectedAgentInteraction}
+              onUpdateInput={(nextInput) => {
+                if (selection.type === 'workflow' && selectedWorkflow && isExecutableNodeWorkflow(selectedWorkflow)) {
+                  updateWorkflowInvocationInput(selectedWorkflow.id, nextInput);
+                }
+                if (selection.type === 'internal' && selectedWorkflow && selectedInternalNode) {
+                  updateInternalInvocationInput(selectedWorkflow.id, selectedInternalNode.id, nextInput);
+                }
+              }}
+              onUpdateLabel={(label) => {
+                if (selection.type === 'workflow' && selectedWorkflow && isExecutableNodeWorkflow(selectedWorkflow)) {
+                  updateWorkflowInvocationLabel(selectedWorkflow.id, label);
+                }
+                if (selection.type === 'internal' && selectedWorkflow && selectedInternalNode) {
+                  updateInternalInvocationLabel(selectedWorkflow.id, selectedInternalNode.id, label);
+                }
+              }}
+              onUpdateForwardMainOutput={(value) => {
+                if (selection.type === 'workflow' && selectedWorkflow && isExecutableNodeWorkflow(selectedWorkflow)) {
+                  updateWorkflowForwardMainOutput(selectedWorkflow.id, value);
+                }
+                if (selection.type === 'internal' && selectedWorkflow && selectedInternalNode) {
+                  updateInternalForwardMainOutput(selectedWorkflow.id, selectedInternalNode.id, value);
+                }
+              }}
+              onUpdateEmptyInputPolicy={(value) => {
+                if (selection.type === 'workflow' && selectedWorkflow && isExecutableNodeWorkflow(selectedWorkflow)) {
+                  updateWorkflowEmptyInputPolicy(selectedWorkflow.id, value);
+                }
+                if (selection.type === 'internal' && selectedWorkflow && selectedInternalNode) {
+                  updateInternalEmptyInputPolicy(selectedWorkflow.id, selectedInternalNode.id, value);
+                }
+              }}
+              onUpdateCodexExecutionMode={(value) => {
+                if (selection.type === 'workflow' && selectedWorkflow && isExecutableNodeWorkflow(selectedWorkflow)) {
+                  updateWorkflowCodexExecutionMode(selectedWorkflow.id, value);
+                }
+                if (selection.type === 'internal' && selectedWorkflow && selectedInternalNode) {
+                  updateInternalCodexExecutionMode(selectedWorkflow.id, selectedInternalNode.id, value);
+                }
+              }}
+              onOpenCallableResource={openCallableResourceFromNode}
+            />
+            <SelectionOutputPane
+              model={selectedDetailsModelWithAgentEvents}
+              liveState={
+                selectedAgentTurnLiveState.events.length ? selectedAgentTurnLiveState : selectedAgentLiveState
               }
-            }}
-            onUpdateLabel={(label) => {
-              if (selection.type === 'workflow' && selectedWorkflow && isExecutableNodeWorkflow(selectedWorkflow)) {
-                updateWorkflowInvocationLabel(selectedWorkflow.id, label);
-              }
-              if (selection.type === 'internal' && selectedWorkflow && selectedInternalNode) {
-                updateInternalInvocationLabel(selectedWorkflow.id, selectedInternalNode.id, label);
-              }
-            }}
-            onUpdateForwardMainOutput={(value) => {
-              if (selection.type === 'workflow' && selectedWorkflow && isExecutableNodeWorkflow(selectedWorkflow)) {
-                updateWorkflowForwardMainOutput(selectedWorkflow.id, value);
-              }
-              if (selection.type === 'internal' && selectedWorkflow && selectedInternalNode) {
-                updateInternalForwardMainOutput(selectedWorkflow.id, selectedInternalNode.id, value);
-              }
-            }}
-            onUpdateEmptyInputPolicy={(value) => {
-              if (selection.type === 'workflow' && selectedWorkflow && isExecutableNodeWorkflow(selectedWorkflow)) {
-                updateWorkflowEmptyInputPolicy(selectedWorkflow.id, value);
-              }
-              if (selection.type === 'internal' && selectedWorkflow && selectedInternalNode) {
-                updateInternalEmptyInputPolicy(selectedWorkflow.id, selectedInternalNode.id, value);
-              }
-            }}
-            onUpdateCodexExecutionMode={(value) => {
-              if (selection.type === 'workflow' && selectedWorkflow && isExecutableNodeWorkflow(selectedWorkflow)) {
-                updateWorkflowCodexExecutionMode(selectedWorkflow.id, value);
-              }
-              if (selection.type === 'internal' && selectedWorkflow && selectedInternalNode) {
-                updateInternalCodexExecutionMode(selectedWorkflow.id, selectedInternalNode.id, value);
-              }
-            }}
-            onOpenCallableResource={openCallableResourceFromNode}
-          />
-        ) : null}
+              artifactCacheByPath={artifactCacheByPath}
+              onEnsureArtifactContent={ensureArtifactContent}
+            />
+          </NodeDetailOverlayExtracted>        ) : null}
       </div>
       {bindingEditorWorkflowId ? (
         <WorkflowBindingDialog
@@ -8567,94 +8581,6 @@ function AgentNodeSettings({
   );
 }
 
-function NodeDetailOverlay({
-  model,
-  callableState,
-  runtimeConfig,
-  agentSessionState,
-  agentLiveState,
-  artifactCacheByPath,
-  onEnsureArtifactContent,
-  onClose,
-  onReadEvidence,
-  onRefreshAgentSession,
-  onPublishAgentOutput,
-  onAnswerAgentInteraction,
-  onUpdateInput,
-  onUpdateLabel,
-  onUpdateForwardMainOutput,
-  onUpdateEmptyInputPolicy,
-  onUpdateCodexExecutionMode,
-  onOpenCallableResource,
-}: {
-  model: SelectedEntityDetailsModel;
-  callableState: CallableDetailLoadState;
-  runtimeConfig: RuntimeConfig | null;
-  agentSessionState: AgentSessionUiState;
-  agentLiveState: WorkbenchLiveStreamState;
-  artifactCacheByPath: Record<string, ArtifactContent>;
-  onEnsureArtifactContent: (path: string | null | undefined) => Promise<void>;
-  onClose: () => void;
-  onReadEvidence: (path: string | null | undefined, title?: string) => void;
-  onRefreshAgentSession: () => Promise<void>;
-  onPublishAgentOutput: (expectedTurnId: string) => Promise<void>;
-  onAnswerAgentInteraction: (interactionId: string, answer: Record<string, unknown>) => Promise<void>;
-  onUpdateInput: (input: Record<string, unknown>) => void;
-  onUpdateLabel: (label: string) => void;
-  onUpdateForwardMainOutput: (value: boolean) => void;
-  onUpdateEmptyInputPolicy: (value: EmptyInputPolicy) => void;
-  onUpdateCodexExecutionMode: (value: CodexExecutionMode) => void;
-  onOpenCallableResource: (callableId: string, name: string, kind: 'agent_class' | 'tool_class') => void;
-}) {
-  return (
-    <section className="node-detail-overlay" aria-label="节点详情浮层">
-      <header className="node-detail-overlay-header">
-        <div>
-          <span className={`evidence-dock-status status-${model.status || 'not_run'}`}>
-            {statusLabel(model.status || 'not_run')}
-          </span>
-          <div>
-            <strong>{model.title}</strong>
-            {model.subtitle ? <small>{model.subtitle}</small> : null}
-          </div>
-        </div>
-        <button type="button" className="node-detail-close" aria-label="关闭节点详情" onClick={onClose}>
-          ×
-        </button>
-      </header>
-      <div className="node-detail-overlay-body">
-        <SelectionInputPane
-          model={model}
-          artifactCacheByPath={artifactCacheByPath}
-          onEnsureArtifactContent={onEnsureArtifactContent}
-        />
-        <SelectionPropertiesPane
-          model={model}
-          callableState={callableState}
-          runtimeConfig={runtimeConfig}
-          agentSessionState={agentSessionState}
-          agentLiveState={agentLiveState}
-          onReadEvidence={onReadEvidence}
-          onRefreshAgentSession={onRefreshAgentSession}
-          onPublishAgentOutput={onPublishAgentOutput}
-          onAnswerAgentInteraction={onAnswerAgentInteraction}
-          onUpdateInput={onUpdateInput}
-          onUpdateLabel={onUpdateLabel}
-          onUpdateForwardMainOutput={onUpdateForwardMainOutput}
-          onUpdateEmptyInputPolicy={onUpdateEmptyInputPolicy}
-          onUpdateCodexExecutionMode={onUpdateCodexExecutionMode}
-          onOpenCallableResource={onOpenCallableResource}
-        />
-        <SelectionOutputPane
-          model={model}
-          liveState={agentLiveState}
-          artifactCacheByPath={artifactCacheByPath}
-          onEnsureArtifactContent={onEnsureArtifactContent}
-        />
-      </div>
-    </section>
-  );
-}
 
 function SelectionInputPane({
   model,

@@ -1,19 +1,11 @@
 /**
- * NodeDetailOverlay - floating panel for detailed node inspection.
+ * NodeDetailOverlay - floating chrome for detailed node inspection.
  *
- * Extracted from WorkflowViewer.tsx lines 8175-8262.
- * Renders three panes: input, properties, and output.
- *
- * NOTE: SelectionInputPane / SelectionPropertiesPane / SelectionOutputPane
- * remain inside WorkflowViewer.tsx and are passed as render props via the
- * `children` slot.  This file owns only the overlay chrome (header + close).
+ * SelectionInputPane / SelectionPropertiesPane / SelectionOutputPane remain
+ * owned by WorkflowViewer until their data dependencies are split in PLAN_05.
  */
 
 import type { ReactNode } from 'react';
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 function statusLabel(status: string) {
   const labels: Record<string, string> = {
@@ -29,10 +21,6 @@ function statusLabel(status: string) {
   };
   return labels[status] || status;
 }
-
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
 
 export type NodeDetailOverlayModel = {
   title: string;
@@ -62,7 +50,7 @@ export function NodeDetailOverlay({
           </div>
         </div>
         <button type="button" className="node-detail-close" aria-label="关闭节点详情" onClick={onClose}>
-          ×
+          x
         </button>
       </header>
       <div className="node-detail-overlay-body">{children}</div>
