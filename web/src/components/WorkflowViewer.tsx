@@ -63,9 +63,7 @@ import {
   taskStatusFromRunStatus,
 } from '../workbench/model/taskModel';
 import {
-  graphOpsTransactionForTemporaryAgent,
   isTemporaryCallableId,
-  persistentCallableIdForDraft,
 } from '../workbench/model/graphOpsProposal';
 import {
   authoringBackendCanvasSnapshot,
@@ -76,7 +74,6 @@ import {
   canvasAuthoringHash,
   isInspectableNodeSelection,
   mergeAuthoringValidation,
-  replaceTemporaryResourceWithCallable,
 } from '../workbench/model/authoringProposal';
 import {
   authoringId,
@@ -424,6 +421,7 @@ import {
   boundaryTransferPreviewSnapshotForCanvas,
   useWorkflowSaveValidationActions,
 } from '../hooks/useWorkflowSaveValidationActions';
+import { useAssistantGraphOpsPersistenceActions } from '../hooks/useAssistantGraphOpsPersistenceActions';
 
 type Props = {
   workflows: WorkflowSummary[];
@@ -879,13 +877,7 @@ export function WorkflowViewer({
   const { validateBoundaryTransfers } = useBoundaryTransferValidation();
   const { pollSubmittedRunUntilTerminal } = useSubmittedRunPolling();
   const { submitRunnerJob } = useRunnerSubmit();
-  const {
-    createGraphOpsProposalRequest,
-    validateGraphOpsProposalRequest,
-    dryRunGraphOpsProposalRequest,
-    approveGraphOpsProposalRequest,
-    applyGraphOpsProposalRequest,
-  } = useGraphOpsPersistence();
+  const graphOpsPersistence = useGraphOpsPersistence();
   const {
     submitSelectedAgentTurnRequest,
     publishSelectedAgentOutputRequest,
@@ -1518,6 +1510,25 @@ export function WorkflowViewer({
     setAssistantMessages,
     setMessage,
   });
+  const {
+    persistTemporaryResourceDraft,
+    applyGraphOpsPersistenceReview,
+  } = useAssistantGraphOpsPersistenceActions({
+    activeTaskId,
+    canvas,
+    temporaryResources: currentAuthoringState.temporaryResources,
+    graphRef,
+    graphOps: graphOpsPersistence,
+    setSourceGraph,
+    setCanvas,
+    setTasks,
+    setAssistantRequiredActions,
+    setAssistantGraphOpsReview,
+    setAssistantMessages,
+    setAssistantBusy,
+    setMessage,
+    onChanged,
+  });
 
   useTaskPersistence({
     durableTasksReady,
@@ -1752,131 +1763,6 @@ export function WorkflowViewer({
       return;
     }
     await runWorkflowGraph(singleNodeWorkflowGraph(node, selectedWorkflow?.id || canvas.id), 'node', node.id);
-  }
-
-  async function persistTemporaryResourceDraft(resourceDraftId: string) {
-    const draft = currentAuthoringState.temporaryResources[resourceDraftId];
-    if (!draft || draft.status === 'discarded') {
-      const text = `临时资源不存在或已丢弃: ${resourceDraftId}`;
-      setMessage(text);
-      setAssistantMessages((current) => [
-        ...current,
-        { id: authoringId('assistant_msg'), role: 'system', content: text },
-      ]);
-      return;
-    }
-    const transaction = graphOpsTransactionForTemporaryAgent(draft);
-    const callableId = persistentCallableIdForDraft(draft);
-    setAssistantBusy(true);
-    try {
-      await createGraphOpsProposalRequest(transaction);
-      const validation = await validateGraphOpsProposalRequest(transaction.proposal_id);
-      if (validation.status !== 'valid') {
-        throw new Error(`GraphOps validate failed: ${JSON.stringify(validation)}`);
-      }
-      const dryRun = await dryRunGraphOpsProposalRequest(transaction.proposal_id);
-      setAssistantGraphOpsReview({
-        resourceDraftId,
-        callableId,
-        proposal: transaction,
-        validation,
-        dryRun,
-      });
-      const text = [
-        `GraphOps dry-run 已准备: ${transaction.proposal_id}`,
-        `Files: ${dryRun.target_paths.join(', ')}`,
-        '请检查预览后再批准写入。',
-      ].join('\n');
-      setAssistantMessages((current) => [
-        ...current,
-        { id: authoringId('assistant_msg'), role: 'system', content: text },
-      ]);
-      setMessage(`GraphOps proposal 已预览: ${transaction.proposal_id}`);
-    } catch (error) {
-      const text = error instanceof Error ? error.message : String(error);
-      setAssistantMessages((current) => [
-        ...current,
-        { id: authoringId('assistant_msg'), role: 'system', content: text },
-      ]);
-      setMessage(text);
-    } finally {
-      setAssistantBusy(false);
-    }
-  }
-
-  async function applyGraphOpsPersistenceReview(review: AssistantGraphOpsReview) {
-    const draft = currentAuthoringState.temporaryResources[review.resourceDraftId];
-    if (!draft || draft.status === 'discarded') {
-      const text = `临时资源不存在或已丢弃: ${review.resourceDraftId}`;
-      setAssistantMessages((current) => [
-        ...current,
-        { id: authoringId('assistant_msg'), role: 'system', content: text },
-      ]);
-      setMessage(text);
-      return;
-    }
-    setAssistantBusy(true);
-    try {
-      await approveGraphOpsProposalRequest(review.proposal.proposal_id, {
-        target_paths: review.dryRun.target_paths,
-        base_hashes: review.proposal.base.content_hashes,
-        dry_run_digest: review.dryRun.dry_run_digest,
-      });
-      const manifest = await applyGraphOpsProposalRequest(review.proposal.proposal_id);
-      const nextCanvas = normalizeCanvasEdges(
-        replaceTemporaryResourceWithCallable(
-          stripRuntimeStateFromCanvas(canvas),
-          review.resourceDraftId,
-          review.callableId,
-        ),
-      );
-      graphRef.current = canvasToWorkflowGraph(nextCanvas);
-      setSourceGraph(graphRef.current);
-      setCanvas(nextCanvas);
-      setTasks((currentTasks) =>
-        currentTasks.map((task) =>
-          task.taskId === activeTaskId
-            ? {
-                ...task,
-                canvas: stripRuntimeStateFromCanvas(nextCanvas),
-                authoring: {
-                  temporaryResources: {
-                    ...(task.authoring || emptyWorkbenchAuthoringState()).temporaryResources,
-                    [review.resourceDraftId]: {
-                      ...draft,
-                      status: 'discarded',
-                    },
-                  },
-                },
-              }
-            : task,
-        ),
-      );
-      setAssistantRequiredActions((current) =>
-        current.filter((action) => action.resource_draft_id !== review.resourceDraftId),
-      );
-      setAssistantGraphOpsReview(null);
-      const text = [
-        `GraphOps 已持久化 ${review.callableId}`,
-        `Proposal: ${review.proposal.proposal_id}`,
-        `Files: ${manifest.created_files.join(', ')}`,
-      ].join('\n');
-      setAssistantMessages((current) => [
-        ...current,
-        { id: authoringId('assistant_msg'), role: 'system', content: text },
-      ]);
-      setMessage(`已保存临时资源为 ${review.callableId}`);
-      onChanged?.();
-    } catch (error) {
-      const text = error instanceof Error ? error.message : String(error);
-      setAssistantMessages((current) => [
-        ...current,
-        { id: authoringId('assistant_msg'), role: 'system', content: text },
-      ]);
-      setMessage(text);
-    } finally {
-      setAssistantBusy(false);
-    }
   }
 
   function openCallableResourceFromNode(callableId: string, name: string, kind: 'agent_class' | 'tool_class') {
