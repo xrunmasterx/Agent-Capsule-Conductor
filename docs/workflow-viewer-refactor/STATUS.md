@@ -496,3 +496,44 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 ## Next Plan
 
 PLAN_05 may start. It should keep the presentational component ownership from PLAN_04 intact while moving inspector-specific business panes and models out of `WorkflowViewer.tsx`.
+
+## PLAN_05 Inspector
+
+Status: in progress
+
+### Scope Completed So Far
+
+- Added `web/src/workbench/model/inspectorActions.ts` as the pure view-model owner for data-connection panel projections.
+- Added `web/src/components/inspector/DataConnectionsPanel.tsx` and switched all `WorkflowViewer.tsx` call sites to the extracted component.
+- Removed the local `DataConnectionsPanel` function from `WorkflowViewer.tsx`.
+- Replaced the old prompt-based port rename interaction with an inline rename form, making the behavior testable and avoiding `window.prompt` in inspector code.
+- Moved `DataConnectionDraft` into `web/src/types/workbench.ts` so inspector components no longer depend on a main-file-local type.
+- Added `web/src/hooks/useCallableDetail.ts` and removed the local `useCallableDetail(...)` implementation from `WorkflowViewer.tsx`, keeping callable API access in the hook layer instead of the inspector component layer.
+- `web/src/components/WorkflowViewer.tsx` is now 529,300 bytes / 14,964 lines after this PLAN_05 checkpoint.
+
+### Added Tests
+
+- `web/src/workbench/model/inspectorActions.test.ts`
+- `web/src/components/inspector/DataConnectionsPanel.test.tsx`
+
+### Validation So Far
+
+Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `npx tsc --noEmit` | Passed | Data connection model/component extraction compiles. |
+| `npm run test -- --run src/workbench/model/inspectorActions.test.ts src/components/inspector/DataConnectionsPanel.test.tsx` | Passed | 2 files, 6 tests passed. |
+| `npm run test -- --run` | Passed | 49 files, 367 tests passed. |
+| `npm run build` | Passed | Same expected chunk-size warning remains. |
+
+### Static Gates So Far
+
+- `WorkflowViewer.tsx` no longer defines local `DataConnectionsPanel`.
+- `web/src/components/inspector` has no direct `api.*` usage.
+- `web/src/components/WorkflowViewer.tsx`, `web/src/components/inspector`, and `web/src/workbench/model` have no `window.prompt` usage.
+- `web/src/workbench/model/inspectorActions.ts` imports no React, API modules, stores, or `WorkflowViewer`.
+
+### Next PLAN_05 Slice
+
+Continue by extracting `RightInspector`, `WorkflowInspector`, `PortInspector`, `EdgeInspector`, `InternalNodeInspector`, and the reusable inspector primitives they need. Keep callable loading in `useCallableDetail` or another hook, not in `components/inspector`.

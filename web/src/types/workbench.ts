@@ -152,6 +152,14 @@ export type CanvasSelection =
   | { type: 'edge'; id: string; scopeWorkflowId?: string | null }
   | { type: 'internal'; workflowId: string; nodeId: string };
 
+export type DataConnectionDraft = {
+  scopeWorkflowId: string | null;
+  sourceNodeId: string;
+  sourceNodeLabel: string;
+  sourcePortId: string;
+  materialization: 'copy' | 'reference';
+} | null;
+
 export type SelectedDetailsKind =
   | 'canvas'
   | 'node'

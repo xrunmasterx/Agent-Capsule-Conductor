@@ -246,6 +246,7 @@ import type {
   CanvasSelection,
   CodexExecutionMode,
   ConnectionMode,
+  DataConnectionDraft,
   EdgeViewMode,
   EmptyInputPolicy,
   InternalNodeView,
@@ -356,6 +357,7 @@ import {
 
 import { ExecutionDock as ExecutionDockComponent } from './execution';
 import { LiveOutputViewer } from './execution/RunOverlay';
+import { DataConnectionsPanel } from './inspector/DataConnectionsPanel';
 import { NodeDetailOverlay } from './inspector/NodeDetailOverlay';
 import {
   SelectionDetailsDock,
@@ -376,6 +378,7 @@ import { useRunStream } from '../hooks/useRunStream';
 import { useSelectedAgentSession, type AgentSessionUiState } from '../hooks/useSelectedAgentSession';
 import { useOpenedWorkflowLoader } from '../hooks/useOpenedWorkflowLoader';
 import { useNodeRunDetails } from '../hooks/useNodeRunDetails';
+import { useCallableDetail, type CallableDetailLoadState } from '../hooks/useCallableDetail';
 import { useGraphOpsPersistence } from '../hooks/useGraphOpsPersistence';
 import { useRunRestorationLoader } from '../hooks/useRunRestorationLoader';
 import { useRunRefreshLoader } from '../hooks/useRunRefreshLoader';
@@ -447,14 +450,6 @@ type CanvasInteractionCommand =
   | { type: 'port-click'; workflowId: string; portId: string; direction: PortDirection }
   | { type: 'edge-click'; address: EdgeAddress; altKey: boolean }
   | { type: 'blank-pane-click' };
-
-type DataConnectionDraft = {
-  scopeWorkflowId: string | null;
-  sourceNodeId: string;
-  sourceNodeLabel: string;
-  sourcePortId: string;
-  materialization: 'copy' | 'reference';
-} | null;
 
 type BodyDropDataEdgePlan = {
   canvasWithTargetPort: WorkspaceCanvasModel;
@@ -8247,12 +8242,6 @@ function ResourceInspector({ resource }: { resource: ResourceTemplate }) {
   );
 }
 
-type CallableDetailLoadState = {
-  status: 'idle' | 'loading' | 'loaded' | 'error';
-  detail: CallableDetail | null;
-  error: string;
-};
-
 type AgentNodeConnectionEditor = {
   canvas: WorkspaceCanvasModel;
   canvasNodeKind: 'workflow' | 'internal';
@@ -8301,56 +8290,6 @@ type SchemaFieldCard = {
   description: string;
   example?: string;
 };
-
-function useCallableDetail(callableId: string): CallableDetailLoadState {
-  const cacheRef = useRef<Record<string, CallableDetail>>({});
-  const [state, setState] = useState<CallableDetailLoadState>({
-    status: callableId ? 'loading' : 'idle',
-    detail: null,
-    error: '',
-  });
-
-  useEffect(() => {
-    let ignore = false;
-    if (!callableId) {
-      setState({ status: 'idle', detail: null, error: '' });
-      return () => {
-        ignore = true;
-      };
-    }
-    const cached = cacheRef.current[callableId];
-    if (cached) {
-      setState({ status: 'loaded', detail: cached, error: '' });
-      return () => {
-        ignore = true;
-      };
-    }
-    setState({ status: 'loading', detail: null, error: '' });
-    api
-      .callable(callableId)
-      .then((payload) => {
-        if (ignore) {
-          return;
-        }
-        cacheRef.current[callableId] = payload.callable;
-        setState({ status: 'loaded', detail: payload.callable, error: '' });
-      })
-      .catch((error) => {
-        if (!ignore) {
-          setState({
-            status: 'error',
-            detail: null,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
-      });
-    return () => {
-      ignore = true;
-    };
-  }, [callableId]);
-
-  return state;
-}
 
 function AgentNodeSettings({
   node,
@@ -10715,310 +10654,6 @@ function WorkflowInspector({
       <dt>内部节点</dt>
       <dd>{savedWorkflow ? `${savedWorkflow.task_count} saved` : workflow.internalNodes.length}</dd>
     </dl>
-  );
-}
-
-function DataConnectionsPanel({
-  canvas,
-  scopeWorkflowId,
-  nodeId,
-  nodeLabel,
-  callableId,
-  inputPorts,
-  outputPorts,
-  outputPortsReadonly = false,
-  dataConnectionDraft,
-  onBeginDataConnection,
-  onCancelDataConnection,
-  onUpdateDataConnectionMaterialization,
-  onCompleteDataConnection,
-  onCompleteDataConnectionWithNewInputPort,
-  onAddPort,
-  onRenamePort,
-  onDeletePort,
-}: {
-  canvasNodeKind: 'workflow' | 'internal';
-  canvas: WorkspaceCanvasModel;
-  scopeWorkflowId: string | null;
-  nodeId: string;
-  nodeLabel: string;
-  callableId?: string;
-  inputPorts: WorkflowPortView[];
-  outputPorts: WorkflowPortView[];
-  outputPortsReadonly?: boolean;
-  dataConnectionDraft: DataConnectionDraft;
-  onBeginDataConnection: (draft: Exclude<DataConnectionDraft, null>) => void;
-  onCancelDataConnection: () => void;
-  onUpdateDataConnectionMaterialization: (materialization: 'copy' | 'reference') => void;
-  onCompleteDataConnection: (
-    targetNodeId: string,
-    targetPortId: string,
-    options?: { replaceExisting?: boolean },
-  ) => void;
-  onCompleteDataConnectionWithNewInputPort: (targetNodeId: string, requestedPortId: string) => void;
-  onAddPort: (
-    scopeWorkflowId: string | null,
-    nodeId: string,
-    direction: PortDirection,
-    requestedPortId: string,
-  ) => void;
-  onRenamePort: (
-    scopeWorkflowId: string | null,
-    nodeId: string,
-    direction: PortDirection,
-    portId: string,
-    requestedPortId: string,
-  ) => void;
-  onDeletePort: (
-    scopeWorkflowId: string | null,
-    nodeId: string,
-    direction: PortDirection,
-    portId: string,
-  ) => void;
-}) {
-  const [newInputPortId, setNewInputPortId] = useState('');
-  const [newOutputPortId, setNewOutputPortId] = useState('');
-  const sourceScopeMatches = dataConnectionDraft?.scopeWorkflowId === scopeWorkflowId;
-  const targets = dataConnectNodes(canvas, scopeWorkflowId).filter(
-    (candidate) => candidate.nodeId !== dataConnectionDraft?.sourceNodeId,
-  );
-  const incoming = dataEdgesForNode(canvas, scopeWorkflowId, nodeId, 'input');
-  const outgoing = dataEdgesForNode(canvas, scopeWorkflowId, nodeId, 'output');
-
-  function addPort(direction: PortDirection) {
-    const requestedPortId = direction === 'input' ? newInputPortId : newOutputPortId;
-    onAddPort(scopeWorkflowId, nodeId, direction, requestedPortId);
-    if (direction === 'input') {
-      setNewInputPortId('');
-    } else {
-      setNewOutputPortId('');
-    }
-  }
-
-  function renamePort(direction: PortDirection, currentPortId: string) {
-    const requestedPortId = window.prompt('新的 port id', currentPortId);
-    if (requestedPortId === null) {
-      return;
-    }
-    onRenamePort(scopeWorkflowId, nodeId, direction, currentPortId, requestedPortId);
-  }
-
-  function deletePort(direction: PortDirection, portId: string) {
-    onDeletePort(scopeWorkflowId, nodeId, direction, portId);
-  }
-
-  return (
-    <section className="inspector-stack data-connections-panel">
-      <div className="connection-identity-card">
-        <strong>{nodeLabel}</strong>
-        <small>{nodeId}</small>
-        {callableId ? <small>{callableId}</small> : null}
-      </div>
-
-      {dataConnectionDraft ? (
-        <div className="data-connect-draft">
-          <strong>
-            正在连接: {dataConnectionDraft.sourceNodeLabel}.{dataConnectionDraft.sourcePortId}
-          </strong>
-          <label>
-            materialization
-            <select
-              value={dataConnectionDraft.materialization}
-              onChange={(event) =>
-                onUpdateDataConnectionMaterialization(
-                  event.target.value === 'reference' ? 'reference' : 'copy',
-                )
-              }
-            >
-              <option value="copy">copy</option>
-              <option value="reference">reference</option>
-            </select>
-          </label>
-          <button type="button" onClick={onCancelDataConnection}>
-            取消连接
-          </button>
-        </div>
-      ) : (
-        <p className="muted">先从某个 output port 发起连接，再选择目标 input port。</p>
-      )}
-
-      <section className="inspector-stack">
-        <h4>输出端口</h4>
-        {outputPortsReadonly ? (
-          <p className="muted">
-            输出端口来自 output_schema.properties.outputs.properties，只读展示；需要修改命名输出时请编辑 output schema。
-          </p>
-        ) : null}
-        {outputPorts.map((portValue) => {
-          const related = outgoing.filter((edge) => edge.source.portId === portValue.id);
-          const readonlyPort = outputPortsReadonly || isSchemaDerivedOutputPort(portValue);
-          return (
-            <article key={portValue.id} className="port-contract-row">
-              <strong>{portValue.id}</strong>
-              <span>{portValue.label}</span>
-              {portValue.jsonPath ? <small>{portValue.jsonPath}</small> : null}
-              {portValue.diagnostic ? <small>{portValue.diagnostic}</small> : null}
-              {related.length > 0 ? (
-                <small>
-                  输出到 {related.map((edge) => `${edge.target.workflowId}.${edge.target.portId}`).join(', ')}
-                </small>
-              ) : (
-                <small>暂无下游 data edge</small>
-              )}
-              <button
-                type="button"
-                className="secondary-action-button"
-                onClick={() =>
-                  onBeginDataConnection({
-                    scopeWorkflowId,
-                    sourceNodeId: nodeId,
-                    sourceNodeLabel: nodeLabel,
-                    sourcePortId: portValue.id,
-                    materialization: 'copy',
-                  })
-                }
-              >
-                从此输出连接...
-              </button>
-              <button
-                type="button"
-                className="secondary-action-button"
-                disabled={readonlyPort}
-                title={readonlyPort ? 'schema-derived output port 只读，请修改 output schema' : undefined}
-                onClick={() => renamePort('output', portValue.id)}
-              >
-                重命名
-              </button>
-              <button
-                type="button"
-                className="secondary-action-button"
-                disabled={readonlyPort}
-                title={readonlyPort ? 'schema-derived output port 只读，请修改 output schema' : undefined}
-                onClick={() => deletePort('output', portValue.id)}
-              >
-                删除
-              </button>
-            </article>
-          );
-        })}
-        {!outputPortsReadonly ? (
-          <div className="inline-port-form">
-            <input
-              value={newOutputPortId}
-              onChange={(event) => setNewOutputPortId(event.target.value)}
-              placeholder="new_output_port"
-              aria-label="new output port id"
-            />
-            <button type="button" onClick={() => addPort('output')}>
-              添加输出端口
-            </button>
-          </div>
-        ) : null}
-      </section>
-
-      <section className="inspector-stack">
-        <h4>输入端口</h4>
-        {inputPorts.map((portValue) => {
-          const related = incoming.filter((edge) => edge.target.portId === portValue.id);
-          return (
-            <article key={portValue.id} className="port-contract-row">
-              <strong>{portValue.id}</strong>
-              <span>{portValue.label}</span>
-              {related.length > 0 ? (
-                <small>
-                  来自 {related.map((edge) => `${edge.source.workflowId}.${edge.source.portId}`).join(', ')}
-                </small>
-              ) : (
-                <small>暂无上游 data edge</small>
-              )}
-              <button
-                type="button"
-                className="secondary-action-button"
-                onClick={() => renamePort('input', portValue.id)}
-              >
-                重命名
-              </button>
-              <button
-                type="button"
-                className="secondary-action-button"
-                onClick={() => deletePort('input', portValue.id)}
-              >
-                删除
-              </button>
-            </article>
-          );
-        })}
-        <div className="inline-port-form">
-          <input
-            value={newInputPortId}
-            onChange={(event) => setNewInputPortId(event.target.value)}
-            placeholder="new_input_port"
-            aria-label="new input port id"
-          />
-          <button type="button" onClick={() => addPort('input')}>
-            添加输入端口
-          </button>
-        </div>
-      </section>
-
-      {dataConnectionDraft && sourceScopeMatches ? (
-        <section className="inspector-stack">
-          <h4>可连接目标</h4>
-          {targets.map((target) => (
-            <article key={target.nodeId} className="connection-target-card">
-              <strong>{target.label}</strong>
-              <small>{target.nodeId}</small>
-              {target.inputPorts.map((targetPort) => {
-                const conflicts = dataEdgesForNode(
-                  canvas,
-                  scopeWorkflowId,
-                  target.nodeId,
-                  'input',
-                ).filter((edge) => edge.target.portId === targetPort.id);
-                const hasOneCardinalityConflict =
-                  conflicts.length > 0 && (targetPort.cardinality || 'one') !== 'many';
-                const requestedPortId = `${dataConnectionDraft.sourceNodeId}_input`;
-                return (
-                  <div key={targetPort.id} className="connection-target-port">
-                    <span>
-                      {targetPort.id}
-                      {hasOneCardinalityConflict ? '（已有输入）' : ''}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        onCompleteDataConnection(target.nodeId, targetPort.id, {
-                          replaceExisting: hasOneCardinalityConflict,
-                        })
-                      }
-                    >
-                      {hasOneCardinalityConflict ? '替换连接' : '连接到此输入'}
-                    </button>
-                    {hasOneCardinalityConflict ? (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          onCompleteDataConnectionWithNewInputPort(
-                            target.nodeId,
-                            requestedPortId,
-                          )
-                        }
-                      >
-                        创建新输入端口并连接
-                      </button>
-                    ) : null}
-                  </div>
-                );
-              })}
-            </article>
-          ))}
-          {targets.length === 0 ? <p className="muted">当前 scope 没有可连接目标。</p> : null}
-        </section>
-      ) : null}
-      {dataConnectionDraft && !sourceScopeMatches ? (
-        <p className="muted">当前连接来源不在这个 scope 内，请回到来源所在的画布层级。</p>
-      ) : null}
-    </section>
   );
 }
 

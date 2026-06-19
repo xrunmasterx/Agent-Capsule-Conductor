@@ -13,3 +13,4 @@
 
 export { NodeDetailOverlay } from './NodeDetailOverlay';
 export { SelectionDetailsDock } from './SelectionDetailsDock';
+export { DataConnectionsPanel } from './DataConnectionsPanel';
