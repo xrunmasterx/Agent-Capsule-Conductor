@@ -792,6 +792,8 @@ Status: in progress
 - Moved assistant selected-node runtime output tabs, live output view, output schema view, and error view into `web/src/components/inspector/SelectedNodeRuntimePane.tsx`.
 - `WorkflowViewer.tsx` now only formats agent event text for that runtime pane instead of owning the pane UI.
 - `web/src/components/WorkflowViewer.tsx` is now 178,229 bytes / 4,772 lines after moving `SelectedNodeRuntimePane`.
+- Moved the Codex execution mode selector into `web/src/components/inspector/CodexExecutionModeSelector.tsx`, restoring readable UTF-8 Chinese labels and risk notices.
+- `web/src/components/WorkflowViewer.tsx` is now 177,128 bytes / 4,743 lines after moving `CodexExecutionModeSelector`.
 
 ### Added/Updated Tests
 
@@ -809,6 +811,7 @@ Status: in progress
 - Added `web/src/components/inspector/SelectionOutputPane.test.tsx` for live log streams, final JSON output rendering, text fallback, final-output loading, and no-output disabled state.
 - Added `web/src/components/inspector/SchemaFieldCards.test.tsx` for card rendering, empty state, JSON schema projection, artifact contract projection, fallback port projection, and schema-field de-duplication.
 - Added `web/src/components/inspector/SelectedNodeRuntimePane.test.tsx` for non-node empty state, live output, schema tab, error tab, and tab reset on selected node changes.
+- Added `web/src/components/inspector/CodexExecutionModeSelector.test.tsx` for option rendering, normalized mode changes, and high-risk mode notices.
 - Existing `web/src/App.test.tsx` and `web/src/components/WorkflowViewer.drag.test.tsx` now validate against the real owner imports instead of `WorkflowViewer.tsx` compatibility exports.
 
 ### Validation So Far
@@ -838,7 +841,9 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npm run test -- --run src/components/inspector/SchemaFieldCards.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 3 files, 186 tests passed. |
 | `npx tsc --noEmit` | Passed | Selected node runtime pane extraction compiles. |
 | `npm run test -- --run src/components/inspector/SelectedNodeRuntimePane.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 3 files, 187 tests passed. |
-| `npm run test -- --run` | Passed | 79 files, 479 tests passed. |
+| `npx tsc --noEmit` | Passed | Codex execution mode selector extraction compiles. |
+| `npm run test -- --run src/components/inspector/CodexExecutionModeSelector.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 3 files, 185 tests passed. |
+| `npm run test -- --run` | Passed | 80 files, 481 tests passed. |
 | `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
 
 ### Static Gates So Far
@@ -862,3 +867,4 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `WorkflowViewer.tsx` no longer defines `SelectionOutputPane`, output artifact parser helpers, or `evidenceActionByLabel`.
 - `WorkflowViewer.tsx` no longer defines `SchemaFieldCards`, `schemaFieldsFromPorts`, `schemaFieldsFromArtifactContract`, `schemaFieldsFromJsonSchema`, or `dedupeSchemaFields`.
 - `WorkflowViewer.tsx` no longer defines `SelectedNodeRuntimePane`, `SelectionLiveOutput`, `NodeOutputSchemaPane`, or `NodeErrorPane`.
+- `WorkflowViewer.tsx` no longer defines `CodexExecutionModeSelector`.
