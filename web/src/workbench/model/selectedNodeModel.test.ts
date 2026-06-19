@@ -1,11 +1,16 @@
 import { describe, expect, test } from 'vitest';
 
 import {
+  combinedLogText,
+  controlEdgeMainTransferMode,
   effectiveNodeRunDir,
   nodeLiveLogsFor,
   nodeRunForInternalNode,
   nodeRunForWorkflow,
+  sameRunDir,
+  selectedEntityDetailsModel,
   selectedNodeSettingsModel,
+  statusLabel,
   workflowMainInputBindingState,
 } from './selectedNodeModel';
 import { port } from './workflowGraphProjection';
@@ -140,6 +145,7 @@ describe('selectedNodeModel', () => {
         run,
       )?.stdout,
     ).toBe('ok');
+    expect(sameRunDir('C:\\Runs\\ACC\\Codex\\', 'c:/runs/acc/codex')).toBe(true);
   });
 
   test('reports workflow main input binding state for boundary control and data edges', () => {
@@ -235,5 +241,165 @@ describe('selectedNodeModel', () => {
       }),
     );
     expect(model?.preview).toEqual(expect.objectContaining({ input_bindings: {} }));
+  });
+
+  test('builds selected node detail model with live log excerpt and evidence actions', () => {
+    const workflowId = 'flow';
+    const workflow = inlineWorkflow(workflowId, [
+      {
+        id: 'control_inputs_codex',
+        kind: 'control',
+        source: { workflowId: workflowInputBoundaryId(workflowId) },
+        target: { workflowId: 'codex' },
+      },
+    ]);
+    const canvas: WorkspaceCanvasModel = {
+      id: 'canvas',
+      name: 'Canvas',
+      rootWorkflowId: workflowId,
+      workflows: [workflow],
+      edges: [],
+    };
+    const run = workflowRun([
+      nodeRun({
+        node_id: 'codex',
+        ui_node_id: 'flow__internal__codex',
+        parent_node_id: workflowId,
+        run_dir: 'runs/flow/codex',
+        output_path: 'runs/flow/codex/output.json',
+      }),
+    ]);
+    const settings = selectedNodeSettingsModel({
+      canvas,
+      selection: { type: 'internal', workflowId, nodeId: 'codex' },
+      selectedWorkflow: workflow,
+      selectedInternalNode: workflow.internalNodes[0],
+      workflowRun: run,
+      liveLogs: {
+        'flow__internal__codex': {
+          stdout: Array.from({ length: 10 }, (_, index) => `line ${index}`).join('\n'),
+          stderr: '',
+          stdoutOffset: 70,
+          stderrOffset: 0,
+        },
+      },
+    });
+
+    const model = selectedEntityDetailsModel({
+      canvas,
+      selection: { type: 'internal', workflowId, nodeId: 'codex' },
+      selectedWorkflow: workflow,
+      selectedInternalNode: workflow.internalNodes[0],
+      selectedNodeSettings: settings,
+      workflowRun: run,
+      workflowEvents: [
+        { type: 'node_started', node_id: 'codex', node_run_dir: 'runs/flow/codex' },
+      ],
+      liveLogs: {},
+      runtimeConfig: null,
+    });
+
+    expect(model.kind).toBe('internal-node');
+    expect(model.status).toBe('success');
+    expect(model.log.excerpt).toContain('line 9');
+    expect(model.log.excerpt).not.toContain('line 0');
+    expect(model.events).toHaveLength(1);
+    expect(model.evidenceActions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: 'output.json', path: 'runs/flow/codex/output.json' }),
+      ]),
+    );
+    expect(combinedLogText(model.log)).toContain('[stdout]');
+  });
+
+  test('builds selected edge detail model without losing explicit data edge priority', () => {
+    const controlEdge: WorkflowCanvasEdge = {
+      id: 'control_source_target',
+      kind: 'control',
+      source: { workflowId: 'source_agent' },
+      target: { workflowId: 'target_agent' },
+    };
+    const canvas: WorkspaceCanvasModel = {
+      id: 'canvas',
+      name: 'Canvas',
+      rootWorkflowId: 'source_agent',
+      workflows: [rootAgent('source_agent'), rootAgent('target_agent')],
+      edges: [
+        controlEdge,
+        {
+          id: 'data_source_target',
+          kind: 'data',
+          source: { workflowId: 'source_agent', portId: 'main' },
+          target: { workflowId: 'target_agent', portId: 'main' },
+          materialization: 'copy',
+        },
+      ],
+    };
+
+    expect(controlEdgeMainTransferMode(canvas, null, controlEdge).reason).toContain('Data Edge');
+
+    const model = selectedEntityDetailsModel({
+      canvas,
+      selection: { type: 'edge', id: controlEdge.id, scopeWorkflowId: null },
+      selectedEdge: controlEdge,
+      workflowRun: workflowRun([]),
+      workflowEvents: [],
+      liveLogs: {},
+      runtimeConfig: null,
+    });
+    const rows = model.properties[0].rows;
+
+    expect(model.kind).toBe('edge');
+    expect(rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: 'source', value: 'source_agent' }),
+        expect.objectContaining({ label: 'target', value: 'target_agent' }),
+        expect.objectContaining({ label: 'kind', value: 'control' }),
+      ]),
+    );
+  });
+
+  test('builds canvas and workflow detail models from pure run state', () => {
+    const workflow = inlineWorkflow('flow');
+    const canvas: WorkspaceCanvasModel = {
+      id: 'canvas',
+      name: 'Canvas',
+      rootWorkflowId: 'flow',
+      workflows: [workflow],
+      edges: [],
+    };
+    const run = workflowRun([
+      nodeRun({ node_id: 'flow', ui_node_id: 'flow', run_dir: 'runs/root/flow' }),
+    ]);
+
+    const canvasModel = selectedEntityDetailsModel({
+      canvas,
+      selection: { type: 'task_canvas', taskId: 'canvas' },
+      workflowRun: run,
+      workflowEvents: [],
+      liveLogs: {},
+      runtimeConfig: { real_external_agents_enabled: false } as never,
+      currentTask: { taskId: 'canvas', title: 'Task Canvas', status: 'running' } as never,
+    });
+    const workflowModel = selectedEntityDetailsModel({
+      canvas,
+      selection: { type: 'workflow', id: 'flow' },
+      selectedWorkflow: workflow,
+      workflowRun: run,
+      workflowEvents: [],
+      liveLogs: {},
+      runtimeConfig: null,
+      binding: { workspace_root: 'F:/workspace' } as never,
+    });
+
+    expect(statusLabel('running')).toBe('运行中');
+    expect(canvasModel.kind).toBe('canvas');
+    expect(canvasModel.title).toBe('Task Canvas');
+    expect(workflowModel.kind).toBe('workflow');
+    expect(workflowModel.properties[0].rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: '目录', value: 'F:/workspace' }),
+      ]),
+    );
   });
 });

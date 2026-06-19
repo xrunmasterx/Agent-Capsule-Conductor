@@ -111,8 +111,9 @@ Status: in progress
 - Extended `web/src/workbench/model/canvasEdgeOps.ts` to export workflow-boundary edge detection shared by graph projection and canvas edge normalization.
 - Added `web/src/workbench/model/selectedNodeModel.ts` as the pure owner for node-run lookup, live-log lookup, workflow main input binding state, and selected node settings projection.
 - Added `web/src/workbench/model/canvasProjection.ts` as the pure owner for Core graph-to-canvas projection, focused workflow boundary node projection, graph edge metadata decoding, workflow port decoding, and executable-node schema-derived output-port projection.
+- Extended `web/src/workbench/model/selectedNodeModel.ts` to own selected entity detail projection, log excerpt projection, evidence action projection, node event filtering, status labeling, binding directory projection, and edge transfer explanation helpers.
 - Removed the corresponding local function definitions from `web/src/components/WorkflowViewer.tsx`; existing exports remain as migration compatibility for older tests and callers.
-- `web/src/components/WorkflowViewer.tsx` is now 604,130 bytes / 16,523 lines after the latest slice.
+- `web/src/components/WorkflowViewer.tsx` is now 587,370 bytes / 16,104 lines after the latest slice.
 
 ### Added Tests
 
@@ -127,6 +128,7 @@ Status: in progress
 - `web/src/workbench/model/workflowGraphProjection.test.ts`
 - `web/src/workbench/model/selectedNodeModel.test.ts`
 - `web/src/workbench/model/canvasProjection.test.ts`
+- Extended `web/src/workbench/model/selectedNodeModel.test.ts` with selected detail model, live-log excerpt, evidence action, edge transfer priority, canvas detail, and workflow binding-directory coverage.
 
 ### Validation So Far
 
@@ -160,6 +162,10 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npx tsc --noEmit` | Passed | Canvas graph decode extraction compiles. |
 | `npm run test -- --run` | Passed | 20 files, 262 tests passed. |
 | `npm run build` | Passed | Same expected chunk-size warning remains. |
+| `npm run test -- --run src/workbench/model/selectedNodeModel.test.ts src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 3 files, 191 tests passed. |
+| `npx tsc --noEmit` | Passed | Selected detail projection extraction compiles. |
+| `npm run test -- --run` | Passed | 20 files, 265 tests passed. |
+| `npm run build` | Passed | Same expected chunk-size warning remains. |
 
 ### Static Gates So Far
 
@@ -175,10 +181,10 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `WorkflowViewer.tsx` no longer owns canvas-to-Core graph projection, internal workflow graph projection, invocation preview projection, workflow boundary binding projection, graph edge canonical preview, or reusable port projection helpers.
 - `WorkflowViewer.tsx` no longer owns node-run lookup, live-log lookup, workflow main input binding state, or selected node settings projection.
 - `WorkflowViewer.tsx` no longer owns Core graph-to-canvas projection, focused workflow boundary node projection, graph edge metadata decoding, workflow port decoding, executable-node schema output projection, or graph node directory fallback projection.
+- `WorkflowViewer.tsx` no longer owns selected entity detail projection, selected detail property groups, log excerpt projection, evidence action projection, status labels, binding directory projection, or control-edge transfer explanation helpers.
 - `web/src/workbench/model` has no direct `ReactFlow`, `Handle`, `NodeResizer`, React hook, `localStorage`, API, store, or `WorkflowViewer` dependency.
 
 ### Remaining PLAN_02 Work
 
 - Extract remaining pure authoring snapshot/proposal helpers once their temporary-resource dependencies are isolated.
-- Move additional pure selected-detail helpers once their dependency graph is isolated.
 - Keep React components, hooks, API calls, EventSource, localStorage IO, and ReactFlow rendering in later plans.
