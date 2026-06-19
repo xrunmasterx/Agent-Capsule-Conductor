@@ -37,7 +37,6 @@ import type {
   BoundaryTransferPreview,
   WorkflowDataEdge,
   WorkflowBindingView,
-  WorkflowDetail,
   WorkflowGraph,
   WorkflowGraphEdge,
   WorkflowRunResult,
@@ -192,9 +191,6 @@ import {
   workspaceRootOf,
   type NodeRunLookupContext,
 } from '../workbench/model/selectedNodeModel';
-import {
-  graphToWorkspaceCanvas,
-} from '../workbench/model/canvasProjection';
 import type {
   AssistantApplyUndoToken,
   AssistantChatMessage,
@@ -281,11 +277,9 @@ import {
   workflowOutputPortsReadonly,
 } from '../workbench/model/workflowGraphProjection';
 import {
-  graphFromLegacyWorkflow,
   mergeNodeRunDetail,
   mergeWorkflowRunNodeDetails,
   nodeRunDetailCacheKey,
-  normalizeWorkflowGraph,
   reusableWorkflowClassGraph,
   singleNodeWorkflowGraph,
   workflowRunFromRunStateSnapshot,
@@ -389,7 +383,7 @@ import { useArtifactContentCache } from '../hooks/useArtifactContentCache';
 import { useAssistantSession } from '../hooks/useAssistantSession';
 import { useRunStream } from '../hooks/useRunStream';
 import { useSelectedAgentSession, type AgentSessionUiState } from '../hooks/useSelectedAgentSession';
-import { useOpenedWorkflowLoader } from '../hooks/useOpenedWorkflowLoader';
+import { useOpenedWorkflowCanvas } from '../hooks/useOpenedWorkflowCanvas';
 import { useNodeRunDetails } from '../hooks/useNodeRunDetails';
 import { useCallableDetail, type CallableDetailLoadState } from '../hooks/useCallableDetail';
 import { useGraphOpsPersistence } from '../hooks/useGraphOpsPersistence';
@@ -1129,25 +1123,16 @@ export function WorkflowViewer({
     onLoadFailed: handleRunRestorationFailed,
   });
 
-  const handleOpenedExternalWorkflow = useCallback((workflow: WorkflowDetail) => {
-    const nextGraph = normalizeWorkflowGraph(workflow.graph || graphFromLegacyWorkflow(workflow));
-    const nextCanvas = normalizeCanvasEdges(graphToWorkspaceCanvas(nextGraph, workflowRun));
-    const nextNormalizedGraph = canvasToWorkflowGraph(nextCanvas);
-    graphRef.current = nextNormalizedGraph;
-    setSourceGraph(nextNormalizedGraph);
-    setCanvas(nextCanvas);
-    setSelection(
-      nextCanvas.workflows[0]
-        ? { type: 'workflow', id: nextCanvas.workflows[0].id }
-        : { type: 'workflow', id: nextCanvas.rootWorkflowId },
-    );
-    setMessage(`\u5df2\u6253\u5f00 ${workflow.workflow_id}`);
-    setEvidenceDock({ open: false, title: '\u8fd0\u884c\u8bc1\u636e', content: null });
-  }, [workflowRun]);
-  useOpenedWorkflowLoader({
+  useOpenedWorkflowCanvas({
     enabled: openedExternalWorkflow,
     workflowId: selectedWorkflowId,
-    onWorkflowLoaded: handleOpenedExternalWorkflow,
+    workflowRun,
+    graphRef,
+    setSourceGraph,
+    setCanvas,
+    setSelection,
+    setMessage,
+    closeEvidenceDock,
   });
 
   const displayCanvas = useMemo(() => applyRunOverlayToCanvas(canvas, runOverlay), [canvas, runOverlay]);
