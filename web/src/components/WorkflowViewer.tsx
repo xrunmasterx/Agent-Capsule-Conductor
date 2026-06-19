@@ -18,13 +18,6 @@ import {
   isActiveTaskStatus,
 } from '../workbench/model/taskModel';
 import {
-  canvasAuthoringHash,
-  mergeAuthoringValidation,
-} from '../workbench/model/authoringProposal';
-import {
-  validateCanvasAuthoringProposal,
-} from './authoring/authoringRuntime';
-import {
   isExecutableNodeWorkflow,
 } from '../workbench/model/selectionModel';
 import { truncateLargeLog } from '../workbench/model/workflowViewerShell';
@@ -44,7 +37,6 @@ import {
 } from '../hooks/useBoundaryTransferPreview';
 import {
   applyRunOverlayToCanvas,
-  stripRuntimeStateFromCanvas,
   workflowRunFailureText,
 } from './workflow-viewer/runState';
 
@@ -104,6 +96,7 @@ import { WorkflowViewerDock } from './workflow-viewer/WorkflowViewerDock';
 import { WorkflowViewerMainStage } from './workflow-viewer/WorkflowViewerMainStage';
 import { WorkflowViewerNodeDetailOverlay } from './workflow-viewer/WorkflowViewerNodeDetailOverlay';
 import { WorkflowViewerRightPanel } from './workflow-viewer/WorkflowViewerRightPanel';
+import { useWorkflowViewerAssistantDerivedState } from './workflow-viewer/useWorkflowViewerAssistantDerivedState';
 import { useWorkflowViewerCanvasGuards } from './workflow-viewer/useWorkflowViewerCanvasGuards';
 import { useWorkflowViewerChromeState } from './workflow-viewer/useWorkflowViewerChromeState';
 import { useWorkflowViewerGraphState } from './workflow-viewer/useWorkflowViewerGraphState';
@@ -534,27 +527,24 @@ export function WorkflowViewer({
           !isExecutableNodeWorkflow(selectedWorkflow)
         ? selectedWorkflow
         : null;
-  const assistantLocalValidation = useMemo(
-    () =>
-      assistantProposal
-        ? validateCanvasAuthoringProposal(assistantProposal, {
-            canvas,
-            taskId: activeTaskId,
-            temporaryResources: currentAuthoringState.temporaryResources,
-            callables,
-            workflows,
-          })
-        : null,
-    [activeTaskId, assistantProposal, callables, canvas, currentAuthoringState.temporaryResources, workflows],
-  );
-  const assistantValidation = useMemo(
-    () => mergeAuthoringValidation(assistantLocalValidation, assistantBackendValidation),
-    [assistantBackendValidation, assistantLocalValidation],
-  );
-  const currentAuthoringCanvasHash = useMemo(
-    () => canvasAuthoringHash(activeTaskId, stripRuntimeStateFromCanvas(canvas)),
-    [activeTaskId, canvas],
-  );
+  const {
+    assistantValidation,
+    currentAuthoringCanvasHash,
+    canUndoAssistantApply,
+    clearAssistantProposal,
+  } = useWorkflowViewerAssistantDerivedState({
+    activeTaskId,
+    canvas,
+    temporaryResources: currentAuthoringState.temporaryResources,
+    callables,
+    workflows,
+    assistantProposal,
+    assistantBackendValidation,
+    assistantApplyUndo,
+    isRunning,
+    hasAssistantPendingTurn: Boolean(assistantPendingTurn),
+    setAssistantProposal,
+  });
   const handleBackendAutosaveError = useCallback((error: unknown) => {
     console.warn('Workbench task autosave failed', error);
   }, []);
@@ -565,9 +555,6 @@ export function WorkflowViewer({
     durableTasksReady,
     onDeleteError: handleDurableTaskDeleteError,
   });
-  const clearAssistantProposal = useCallback(() => {
-    setAssistantProposal(null);
-  }, [setAssistantProposal]);
   const {
     createDemo,
     openWorkflow,
@@ -595,12 +582,6 @@ export function WorkflowViewer({
     deleteDurableTask,
     onSelect,
   });
-  const canUndoAssistantApply =
-    Boolean(assistantApplyUndo) &&
-    assistantApplyUndo?.taskId === activeTaskId &&
-    assistantApplyUndo.afterCanvasHash === currentAuthoringCanvasHash &&
-    !isRunning &&
-    !assistantPendingTurn;
   const {
     applyAssistantProposal,
     undoLastAssistantApply,

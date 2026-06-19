@@ -1095,6 +1095,10 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npm run test -- --run src/components/workflow-viewer/useWorkflowViewerCanvasGuards.test.tsx src/workbench/model/selectionModel.test.ts src/hooks/useDataConnectionActions.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 5 files, 201 tests passed. |
 | `npm run test -- --run` | Passed | 123 files, 636 tests passed. |
 | `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
+| `npx tsc --noEmit` | Passed | WorkflowViewer assistant-derived-state hook extraction compiles. |
+| `npm run test -- --run src/components/workflow-viewer/useWorkflowViewerAssistantDerivedState.test.tsx src/hooks/useAssistantProposalApplyActions.test.tsx src/hooks/useAssistantProposalGenerateActions.test.tsx src/components/workflow-viewer/useWorkflowViewerTaskPersistence.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 6 files, 196 tests passed. |
+| `npm run test -- --run` | Passed | 124 files, 639 tests passed. |
+| `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
 
 ### Static Gates So Far
 
@@ -1170,5 +1174,6 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `WorkflowViewer.tsx` no longer directly imports `canvasToWorkflowGraph`; source graph initialization and layout sync state ownership moved to `useWorkflowViewerGraphState`.
 - `WorkflowViewer.tsx` no longer directly imports `workbenchViewProjection` or owns TopBar assistant/details dock toggle branching; ownership moved to `useWorkflowViewerChromeState`.
 - `WorkflowViewer.tsx` no longer directly imports `findDataConnectNode`, `normalizeWorkbenchSelection`, or `selectionKey`; selection normalization and data-connection draft guard ownership moved to `useWorkflowViewerCanvasGuards`.
-- `WorkflowViewer.tsx` is now 34,119 bytes / 972 lines after canvas guard hook extraction.
+- `WorkflowViewer.tsx` no longer directly imports `validateCanvasAuthoringProposal`, `mergeAuthoringValidation`, `canvasAuthoringHash`, or `stripRuntimeStateFromCanvas`; assistant validation/hash/undo derived-state ownership moved to `useWorkflowViewerAssistantDerivedState`.
+- `WorkflowViewer.tsx` is now 33,295 bytes / 953 lines after assistant-derived-state hook extraction.
 - `WorkflowViewer.tsx` no longer ends with local helper definitions; the file now ends at the `WorkflowViewer` component close.
