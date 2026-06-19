@@ -79,7 +79,6 @@ import {
   isInspectableNodeSelection,
   mergeAuthoringValidation,
   replaceTemporaryResourceWithCallable,
-  temporaryResourceIssueForCanvas,
 } from '../workbench/model/authoringProposal';
 import {
   applyCanvasAuthoringProposal,
@@ -94,7 +93,6 @@ import {
   addWorkflowFromPalette,
   nextPaletteSelection,
   paletteItemBaseId,
-  slugId,
   uniqueId,
 } from '../workbench/model/paletteCanvasOps';
 import {
@@ -159,10 +157,8 @@ import {
 } from '../workbench/model/workbenchViewProjection';
 import {
   inspectorDrawerTitle,
-  isJsdomRuntime,
   isNodeDetailModel,
   selectionKey,
-  textArtifact,
   truncateLargeLog,
 } from '../workbench/model/workflowViewerShell';
 import {
@@ -278,7 +274,6 @@ import {
   mergeNodeRunDetail,
   mergeWorkflowRunNodeDetails,
   nodeRunDetailCacheKey,
-  reusableWorkflowClassGraph,
   singleNodeWorkflowGraph,
   workflowRunFromRunStateSnapshot,
   workflowRunFromRunSummary,
@@ -426,6 +421,10 @@ import {
   type EvidenceDockState,
 } from '../hooks/useEvidenceDockActions';
 import { useWorkflowRunSubmitActions } from '../hooks/useWorkflowRunSubmitActions';
+import {
+  boundaryTransferPreviewSnapshotForCanvas,
+  useWorkflowSaveValidationActions,
+} from '../hooks/useWorkflowSaveValidationActions';
 
 type Props = {
   workflows: WorkflowSummary[];
@@ -449,14 +448,6 @@ function trimLiveLog(value: string): string {
 
 function resolveSetState<T>(current: T, next: SetStateAction<T>): T {
   return typeof next === 'function' ? (next as (value: T) => T)(current) : next;
-}
-
-function boundaryTransferPreviewSnapshot(canvas: WorkspaceCanvasModel): Record<string, unknown> {
-  const strippedCanvas = stripRuntimeStateFromCanvas(canvas);
-  return {
-    ...strippedCanvas,
-    canonical_graph: canvasToWorkflowGraph(strippedCanvas),
-  };
 }
 
 export function WorkflowViewer({
@@ -1610,6 +1601,33 @@ export function WorkflowViewer({
     setMessage('已删除选中的画布对象。');
   }, [canvas, isRunning, selection, updateCanvas]);
 
+  const {
+    currentTemporaryResourceIssue,
+    ensureBoundaryTransfersValid,
+    reportTemporaryResourceIssue,
+    requestSaveWorkflow,
+    confirmSaveWorkflow,
+    saveGraph,
+    validateGraph,
+  } = useWorkflowSaveValidationActions({
+    activeTaskId,
+    canvas,
+    currentTaskAuthoring: currentTask?.authoring,
+    focusedWorkflowId,
+    saveWorkflowDialog,
+    setSaveWorkflowDialog,
+    graphRef,
+    setSourceGraph,
+    setMessage,
+    setEvidenceDock,
+    saveWorkflowGraph,
+    validateWorkflowGraph,
+    validateBoundaryTransfers,
+    closeEvidenceDock,
+    onSelect,
+    onChanged,
+  });
+
   const { runWorkflowGraph } = useWorkflowRunSubmitActions({
     activeTaskId,
     selectedRunId,
@@ -1627,132 +1645,6 @@ export function WorkflowViewer({
     reportTemporaryResourceIssue,
     onChanged,
   });
-
-  function currentTemporaryResourceIssue(): string | null {
-    return temporaryResourceIssueForCanvas(stripRuntimeStateFromCanvas(canvas), currentTask?.authoring);
-  }
-
-  async function ensureBoundaryTransfersValid() {
-    await validateBoundaryTransfers(boundaryTransferPreviewSnapshot(canvas));
-  }
-
-  function reportTemporaryResourceIssue(issue: string) {
-    setMessage(issue);
-    setEvidenceDock({
-      open: true,
-      title: 'AI 临时资源阻断',
-      content: textArtifact('temporary-resource-blocker.log', issue, 'log'),
-      owner: {
-        kind: 'validation',
-        taskId: activeTaskId,
-        createdAt: new Date().toISOString(),
-      },
-    });
-  }
-
-  function requestSaveWorkflow() {
-    const issue = currentTemporaryResourceIssue();
-    if (issue) {
-      reportTemporaryResourceIssue(issue);
-      return;
-    }
-    if (isJsdomRuntime()) {
-      void saveGraph();
-      return;
-    }
-    const baseGraph = reusableWorkflowClassGraph(
-      graphForCurrentView(stripRuntimeStateFromCanvas(canvas), focusedWorkflowId),
-    );
-    setSaveWorkflowDialog({
-      name: baseGraph.name || canvas.name || 'workflow',
-      saving: false,
-      error: null,
-    });
-  }
-
-  async function confirmSaveWorkflow() {
-    const requestedName = saveWorkflowDialog?.name.trim() || '';
-    if (!requestedName) {
-      setSaveWorkflowDialog((current) =>
-        current ? { ...current, error: 'Workflow 名称不能为空' } : current,
-      );
-      return;
-    }
-    setSaveWorkflowDialog((current) =>
-      current ? { ...current, saving: true, error: null } : current,
-    );
-    try {
-      await saveGraph({ requestedName });
-      setSaveWorkflowDialog(null);
-    } catch (error) {
-      const text = error instanceof Error ? error.message : String(error);
-      setSaveWorkflowDialog((current) =>
-        current ? { ...current, saving: false, error: text } : current,
-      );
-    }
-  }
-
-  async function saveGraph(
-    options: {
-      selectSavedWorkflow?: boolean;
-      refreshIndex?: boolean;
-      requestedName?: string | null;
-    } = {},
-  ) {
-    const issue = currentTemporaryResourceIssue();
-    if (issue) {
-      throw new Error(issue);
-    }
-    await ensureBoundaryTransfersValid();
-    const { selectSavedWorkflow = true, refreshIndex = true, requestedName = null } = options;
-    const baseGraph = reusableWorkflowClassGraph(
-      graphForCurrentView(stripRuntimeStateFromCanvas(canvas), focusedWorkflowId),
-    );
-    const graph = requestedName
-      ? {
-          ...baseGraph,
-          id: slugId(requestedName) === 'node' ? `workflow_${Date.now()}` : slugId(requestedName),
-          name: requestedName,
-        }
-      : baseGraph;
-    graphRef.current = graph;
-    setSourceGraph(graph);
-    const result = await saveWorkflowGraph(graph, true);
-    setMessage(`已保存 ${result.workflow_id}`);
-    if (selectSavedWorkflow) {
-      onSelect(result.workflow_id);
-    }
-    if (refreshIndex) {
-      closeEvidenceDock();
-      onChanged?.();
-    }
-  }
-
-  async function validateGraph() {
-    const issue = currentTemporaryResourceIssue();
-    if (issue) {
-      reportTemporaryResourceIssue(issue);
-      return;
-    }
-    try {
-      await saveGraph({ selectSavedWorkflow: false, refreshIndex: false });
-      const result = await validateWorkflowGraph(graphRef.current.id);
-      setMessage(`校验通过: ${result.workflow_id}`);
-    } catch (error) {
-      const text = error instanceof Error ? error.message : String(error);
-      setMessage(`校验失败: ${text}`);
-      setEvidenceDock({
-        open: true,
-        title: '校验错误',
-        content: textArtifact('validation-error.log', text, 'log'),
-        owner: {
-          kind: 'validation',
-          taskId: activeTaskId,
-          createdAt: new Date().toISOString(),
-        },
-      });
-    }
-  }
 
   async function runGraph() {
     const issue = currentTemporaryResourceIssue();
@@ -2297,7 +2189,7 @@ export function WorkflowViewer({
                 eventTimeline: (props) => <EventTimeline {...props} />,
               }}
               renderAgentNodeSettings={(props) => <AgentNodeSettingsPanel {...props} />}
-              boundaryPreviewSnapshotForCanvas={boundaryTransferPreviewSnapshot}
+              boundaryPreviewSnapshotForCanvas={boundaryTransferPreviewSnapshotForCanvas}
               onConnectionMode={setConnectionMode}
               onBeginDataConnection={beginDataConnection}
               onCancelDataConnection={cancelDataConnection}
