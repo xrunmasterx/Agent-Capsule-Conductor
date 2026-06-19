@@ -383,6 +383,7 @@ import { useSelectedAgentSession, type AgentSessionUiState } from '../hooks/useS
 import { useOpenedWorkflowLoader } from '../hooks/useOpenedWorkflowLoader';
 import { useNodeRunDetails } from '../hooks/useNodeRunDetails';
 import { useTaskPersistence } from '../hooks/useTaskPersistence';
+import { useWorkbenchTaskDurability } from '../hooks/useWorkbenchTaskDurability';
 import { useWorkbenchBootstrap } from '../hooks/useWorkbenchBootstrap';
 import {
   bindingPathOf,
@@ -2849,6 +2850,13 @@ export function WorkflowViewer({
   const handleBackendAutosaveError = useCallback((error: unknown) => {
     console.warn('Workbench task autosave failed', error);
   }, []);
+  const handleDurableTaskDeleteError = useCallback((error: unknown) => {
+    setMessage(error instanceof Error ? error.message : String(error));
+  }, []);
+  const { createDurableTask, deleteDurableTask } = useWorkbenchTaskDurability({
+    durableTasksReady,
+    onDeleteError: handleDurableTaskDeleteError,
+  });
   const canUndoAssistantApply =
     Boolean(assistantApplyUndo) &&
     assistantApplyUndo?.taskId === activeTaskId &&
@@ -2946,11 +2954,7 @@ export function WorkflowViewer({
     setFocusedWorkflowId(null);
     resetAssistantConversationState();
     closeEvidenceDock();
-    if (durableTasksReady) {
-      void api.createWorkbenchTask({ task_id: task.taskId, title: task.title }).catch(() => {
-        // The debounced canvas save can recreate the durable task if this request races.
-      });
-    }
+    createDurableTask(task.taskId, task.title);
   }
 
   function deleteTask(taskId: string) {
@@ -2975,11 +2979,7 @@ export function WorkflowViewer({
     setSelection({ type: 'task_canvas', taskId: nextCanvas.id });
     resetAssistantConversationState();
     setMessage(`已删除任务 ${taskId}`);
-    if (durableTasksReady) {
-      void api.deleteWorkbenchTask(taskId).catch((error) => {
-        setMessage(error instanceof Error ? error.message : String(error));
-      });
-    }
+    deleteDurableTask(taskId);
   }
 
   function autoLayout() {
