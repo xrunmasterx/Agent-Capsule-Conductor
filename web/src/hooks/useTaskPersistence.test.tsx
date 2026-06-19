@@ -2,7 +2,14 @@ import { act, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import type { WorkbenchTask } from '../types/workbench';
-import { useTaskPersistence, type UseTaskPersistenceOptions } from './useTaskPersistence';
+import {
+  canvasFromBackendSnapshot,
+  loadTaskStore,
+  loadWorkbenchTaskFromBackend,
+  saveTaskStore,
+  useTaskPersistence,
+  type UseTaskPersistenceOptions,
+} from './useTaskPersistence';
 
 function task(taskId = 'task_1'): WorkbenchTask {
   return {
@@ -47,6 +54,7 @@ function baseOptions(overrides: Partial<UseTaskPersistenceOptions> = {}): UseTas
 describe('useTaskPersistence', () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    window.localStorage.clear();
   });
 
   afterEach(() => {
@@ -168,5 +176,83 @@ describe('useTaskPersistence', () => {
 
     expect(publishCurrentSnapshot).not.toHaveBeenCalled();
     expect(persistTaskToBackend).not.toHaveBeenCalled();
+  });
+
+  test('loads and saves task store payloads from localStorage', () => {
+    const currentTask = task('stored_task');
+
+    saveTaskStore({ version: 1, activeTaskId: currentTask.taskId, tasks: [currentTask] });
+
+    expect(loadTaskStore()).toMatchObject({
+      activeTaskId: 'stored_task',
+      tasks: [{ taskId: 'stored_task', title: 'Task' }],
+    });
+  });
+
+  test('normalizes backend canvas snapshots into workspace canvases', () => {
+    const canvas = canvasFromBackendSnapshot(
+      'task_1',
+      { task_id: 'task_1', title: 'Backend Task' },
+      {
+        canvas_snapshot: {
+          id: 'canvas_1',
+          name: 'Canvas',
+          workflows: [],
+          edges: [],
+        },
+      },
+    );
+
+    expect(canvas).toMatchObject({
+      id: 'canvas_1',
+      name: 'Canvas',
+      rootWorkflowId: 'canvas_1',
+      workflows: [],
+      edges: [],
+    });
+  });
+
+  test('loads backend task records with temporary resource state', async () => {
+    const loaded = await loadWorkbenchTaskFromBackend(
+      {
+        task_id: 'task_1',
+        title: 'Backend Task',
+        saved_workflow_ref: 'workflows/demo.accflow.json',
+        latest_run_id: 'run_1',
+      },
+      vi.fn().mockResolvedValue({
+        canvas_snapshot: {
+          id: 'canvas_1',
+          name: 'Canvas',
+          workflows: [],
+          edges: [],
+        },
+        temporary_resources: {
+          draft_agent: {
+            draft_id: 'draft_agent',
+            status: 'draft',
+            agent_draft: { id: 'draft_agent', name: 'Draft Agent' },
+            referenced_by: ['agent_node'],
+          },
+        },
+      }),
+    );
+
+    expect(loaded).toMatchObject({
+      taskId: 'task_1',
+      title: 'Backend Task',
+      savedWorkflowRef: 'workflows/demo.accflow.json',
+      latestRunId: 'run_1',
+      authoring: {
+        temporaryResources: {
+          draft_agent: {
+            draft_id: 'draft_agent',
+            status: 'draft',
+            agent_draft: { id: 'draft_agent', name: 'Draft Agent' },
+            referenced_by: ['agent_node'],
+          },
+        },
+      },
+    });
   });
 });
