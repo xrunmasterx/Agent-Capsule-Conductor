@@ -16,4 +16,5 @@ export { DataConnectionsPanel } from './DataConnectionsPanel';
 export { EdgeInspector } from './EdgeInspector';
 export { PortInspector } from './PortInspector';
 export { SelectionInputPane } from './SelectionInputPane';
+export { SelectionOutputPane } from './SelectionOutputPane';
 export { StructuredValueView } from './StructuredValueView';
