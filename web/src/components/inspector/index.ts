@@ -21,6 +21,7 @@ export { CodexExecutionModeSelector } from './CodexExecutionModeSelector';
 export { DataConnectionsPanel } from './DataConnectionsPanel';
 export { EdgeInspector } from './EdgeInspector';
 export { EvidencePreview } from './EvidencePreview';
+export { AgentSessionPanel } from './AgentSessionPanel';
 export { PortInspector } from './PortInspector';
 export {
   SchemaFieldCards,

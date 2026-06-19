@@ -808,6 +808,9 @@ Status: in progress
 - `web/src/components/WorkflowViewer.tsx` is now 159,679 bytes / 4,442 lines after moving `RunEvidenceCard`.
 - Moved artifact evidence preview loading/rendering into `web/src/components/inspector/EvidencePreview.tsx`.
 - `web/src/components/WorkflowViewer.tsx` is now 158,252 bytes / 4,382 lines after moving `EvidencePreview`.
+- Moved Agent Session output/status/debug/timeline rendering into `web/src/components/inspector/AgentSessionPanel.tsx`, including publish actions, pending approval actions, artifact path buttons, message summaries, and agent event timeline display.
+- Restored readable UTF-8 Chinese labels in the extracted Agent Session panel, replacing the damaged legacy strings that were still embedded in `WorkflowViewer.tsx`.
+- `web/src/components/WorkflowViewer.tsx` is now 147,634 bytes / 4,078 lines after moving `AgentSessionPanel`.
 
 ### Added/Updated Tests
 
@@ -834,6 +837,7 @@ Status: in progress
 - Added `web/src/components/inspector/TechnicalDetailsDisclosure.test.tsx` for collapsed/expanded technical evidence, live log, runtime mode, and callable-detail rendering.
 - Added `web/src/components/inspector/RunEvidenceCard.test.tsx` for empty state, run facts, binding/data-flow rows, evidence action callbacks, output summary, and live-log rendering.
 - Added `web/src/components/inspector/EvidencePreview.test.tsx` for empty, loaded artifact, and artifact error rendering.
+- Added `web/src/components/inspector/AgentSessionPanel.test.tsx` for no-render states, publishable session rendering, draft publish, pending approval answers, artifact path actions, session messages, timeline summaries, loading, error, and unbound states.
 - Existing `web/src/App.test.tsx` and `web/src/components/WorkflowViewer.drag.test.tsx` now validate against the real owner imports instead of `WorkflowViewer.tsx` compatibility exports.
 
 ### Validation So Far
@@ -888,6 +892,10 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npm run test -- --run src/components/inspector/EvidencePreview.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 3 files, 186 tests passed. |
 | `npm run test -- --run` | Passed | 87 files, 498 tests passed. |
 | `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
+| `npx tsc --noEmit` | Passed | Agent Session panel extraction compiles. |
+| `npm run test -- --run src/components/inspector/AgentSessionPanel.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 3 files, 187 tests passed. |
+| `npm run test -- --run` | Passed | 88 files, 502 tests passed. |
+| `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
 
 ### Static Gates So Far
 
@@ -919,3 +927,5 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `WorkflowViewer.tsx` no longer defines `RunEvidenceCard`, `EvidenceFact`, `EvidenceAction`, or run-evidence-only binding/output summary helpers.
 - `WorkflowViewer.tsx` no longer imports `statusTone` or `latestLogExcerpt`.
 - `WorkflowViewer.tsx` no longer defines `EvidencePreview`.
+- `WorkflowViewer.tsx` no longer defines `AgentSessionPanel`, `AgentSessionDebugDetails`, `AgentEventTimeline`, or `canPublishAgentOutput`.
+- `WorkflowViewer.tsx` no longer imports `FileText`, `RefreshCw`, or `UploadCloud`.
