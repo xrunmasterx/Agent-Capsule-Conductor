@@ -7,33 +7,41 @@
 
 import { create } from 'zustand';
 import { DEFAULT_TASK_ID, INSPECTOR_DEFAULT_WIDTH } from '../workbench/constants';
+import { defaultTaskStorePayload } from '../workbench/model/taskModel';
 import type {
   BottomDockMode,
+  CanvasSelection,
   ConnectionMode,
   EdgeViewMode,
   TaskWorkspaceView,
   WorkbenchChromeState,
+  WorkbenchTask,
+  WorkspaceCanvasModel,
 } from '../types/workbench';
 
 export type {
   BottomDockMode,
+  CanvasSelection,
   ConnectionMode,
   EdgeViewMode,
   TaskWorkspaceView,
   WorkbenchChromeState,
+  WorkbenchTask,
+  WorkspaceCanvasModel,
 };
 
-/**
- * Minimal shape — the full WorkspaceCanvasModel & WorkbenchTask types are
- * still owned by WorkflowViewer; this store only manages the *identity* and
- * scalar flags so that deeply-nested children can read them without prop
- * drilling.  Canvas mutations continue to live in WorkflowViewer until the
- * full migration (step 13).
- */
+type CanvasUpdater = WorkspaceCanvasModel | ((prev: WorkspaceCanvasModel) => WorkspaceCanvasModel);
+
 export interface WorkbenchStoreState {
-  // --- task identity ---
+  // --- task ownership ---
   activeTaskId: string;
+  taskOrder: string[];
+  tasksById: Record<string, WorkbenchTask>;
+  /** Compatibility mirror for legacy consumers; taskOrder is the canonical ordering field. */
   taskIds: string[];
+  canvasRevisionsByTaskId: Record<string, number>;
+  selectionsByTaskId: Record<string, CanvasSelection>;
+  focusedWorkflowIdByTaskId: Record<string, string | null>;
 
   // --- selection / interaction mode ---
   connectionMode: ConnectionMode;
@@ -47,7 +55,16 @@ export interface WorkbenchStoreState {
   nodeDetailOpen: boolean;
   bottomDockMode: BottomDockMode;
 
-  // --- actions ---
+  // --- task actions ---
+  hydrateTasks: (tasks: WorkbenchTask[], activeTaskId?: string) => void;
+  setTasks: (tasks: WorkbenchTask[], activeTaskId?: string) => void;
+  upsertTask: (task: WorkbenchTask) => void;
+  deleteTask: (taskId: string) => void;
+  updateCanvas: (taskId: string, updater: CanvasUpdater) => void;
+  setSelection: (taskId: string, selection: CanvasSelection) => void;
+  setFocusedWorkflowId: (taskId: string, workflowId: string | null) => void;
+
+  // --- scalar actions ---
   setActiveTaskId: (id: string) => void;
   setTaskIds: (ids: string[]) => void;
   setConnectionMode: (mode: ConnectionMode) => void;
@@ -58,9 +75,73 @@ export interface WorkbenchStoreState {
   setBottomDockMode: (mode: BottomDockMode) => void;
 }
 
+type TaskOwnershipState = Pick<
+  WorkbenchStoreState,
+  | 'activeTaskId'
+  | 'taskOrder'
+  | 'tasksById'
+  | 'taskIds'
+  | 'canvasRevisionsByTaskId'
+  | 'selectionsByTaskId'
+  | 'focusedWorkflowIdByTaskId'
+>;
+
+function selectionForTask(taskId: string): CanvasSelection {
+  return { type: 'task_canvas', taskId };
+}
+
+function taskArrayToMap(tasks: WorkbenchTask[]): Record<string, WorkbenchTask> {
+  return Object.fromEntries(tasks.map((task) => [task.taskId, task]));
+}
+
+function initialTaskOwnershipState(): TaskOwnershipState {
+  const payload = defaultTaskStorePayload();
+  return taskOwnershipStateFromTasks(payload.tasks, payload.activeTaskId);
+}
+
+function taskOwnershipStateFromTasks(
+  tasks: WorkbenchTask[],
+  requestedActiveTaskId?: string,
+  previous?: Partial<TaskOwnershipState>,
+): TaskOwnershipState {
+  const fallbackPayload = defaultTaskStorePayload();
+  const safeTasks = tasks.length ? tasks : fallbackPayload.tasks;
+  const taskOrder = safeTasks.map((task) => task.taskId);
+  const tasksById = taskArrayToMap(safeTasks);
+  const activeTaskId =
+    requestedActiveTaskId && taskOrder.includes(requestedActiveTaskId)
+      ? requestedActiveTaskId
+      : taskOrder.includes(previous?.activeTaskId || '')
+        ? previous?.activeTaskId || taskOrder[0]
+        : taskOrder[0];
+
+  const canvasRevisionsByTaskId: Record<string, number> = {};
+  const selectionsByTaskId: Record<string, CanvasSelection> = {};
+  const focusedWorkflowIdByTaskId: Record<string, string | null> = {};
+
+  taskOrder.forEach((taskId) => {
+    const task = tasksById[taskId];
+    canvasRevisionsByTaskId[taskId] = previous?.canvasRevisionsByTaskId?.[taskId] ?? 0;
+    selectionsByTaskId[taskId] = previous?.selectionsByTaskId?.[taskId] ?? selectionForTask(taskId);
+    focusedWorkflowIdByTaskId[taskId] =
+      previous?.focusedWorkflowIdByTaskId?.[taskId] ?? task.canvas.focusedWorkflowId ?? null;
+  });
+
+  return {
+    activeTaskId,
+    taskOrder,
+    tasksById,
+    taskIds: taskOrder,
+    canvasRevisionsByTaskId,
+    selectionsByTaskId,
+    focusedWorkflowIdByTaskId,
+  };
+}
+
+const initialTaskOwnership = initialTaskOwnershipState();
+
 export const useWorkbenchStore = create<WorkbenchStoreState>((set) => ({
-  activeTaskId: DEFAULT_TASK_ID,
-  taskIds: [DEFAULT_TASK_ID],
+  ...initialTaskOwnership,
 
   connectionMode: 'control',
   edgeViewMode: 'control',
@@ -75,9 +156,81 @@ export const useWorkbenchStore = create<WorkbenchStoreState>((set) => ({
   nodeDetailOpen: false,
   bottomDockMode: 'evidence',
 
-  // --- actions ---
-  setActiveTaskId: (id) => set({ activeTaskId: id }),
-  setTaskIds: (ids) => set({ taskIds: ids }),
+  // --- task actions ---
+  hydrateTasks: (tasks, activeTaskId) =>
+    set((state) => taskOwnershipStateFromTasks(tasks, activeTaskId, state)),
+  setTasks: (tasks, activeTaskId) =>
+    set((state) => taskOwnershipStateFromTasks(tasks, activeTaskId, state)),
+  upsertTask: (task) =>
+    set((state) => {
+      const taskOrder = state.taskOrder.includes(task.taskId)
+        ? state.taskOrder
+        : [...state.taskOrder, task.taskId];
+      return taskOwnershipStateFromTasks(
+        taskOrder
+          .map((taskId) => (taskId === task.taskId ? task : state.tasksById[taskId]))
+          .filter((candidateTask): candidateTask is WorkbenchTask => Boolean(candidateTask)),
+        state.activeTaskId,
+        state,
+      );
+    }),
+  deleteTask: (taskId) =>
+    set((state) => {
+      const nextTasks = state.taskOrder
+        .filter((candidateTaskId) => candidateTaskId !== taskId)
+        .map((candidateTaskId) => state.tasksById[candidateTaskId])
+        .filter((candidateTask): candidateTask is WorkbenchTask => Boolean(candidateTask));
+      const nextActiveTaskId = state.activeTaskId === taskId ? nextTasks[0]?.taskId : state.activeTaskId;
+      return taskOwnershipStateFromTasks(nextTasks, nextActiveTaskId, state);
+    }),
+  updateCanvas: (taskId, updater) =>
+    set((state) => {
+      const task = state.tasksById[taskId];
+      if (!task) {
+        return {};
+      }
+      const nextCanvas = typeof updater === 'function' ? updater(task.canvas) : updater;
+      return {
+        tasksById: {
+          ...state.tasksById,
+          [taskId]: { ...task, canvas: nextCanvas },
+        },
+        canvasRevisionsByTaskId: {
+          ...state.canvasRevisionsByTaskId,
+          [taskId]: (state.canvasRevisionsByTaskId[taskId] ?? 0) + 1,
+        },
+      };
+    }),
+  setSelection: (taskId, selection) =>
+    set((state) => {
+      if (!state.tasksById[taskId]) {
+        return {};
+      }
+      return { selectionsByTaskId: { ...state.selectionsByTaskId, [taskId]: selection } };
+    }),
+  setFocusedWorkflowId: (taskId, workflowId) =>
+    set((state) => {
+      if (!state.tasksById[taskId]) {
+        return {};
+      }
+      return { focusedWorkflowIdByTaskId: { ...state.focusedWorkflowIdByTaskId, [taskId]: workflowId } };
+    }),
+
+  // --- scalar actions ---
+  setActiveTaskId: (id) =>
+    set((state) => (state.tasksById[id] ? { activeTaskId: id } : {})),
+  setTaskIds: (ids) =>
+    set((state) => {
+      const taskOrder = ids.filter((id) => Boolean(state.tasksById[id]));
+      if (!taskOrder.length) {
+        return {};
+      }
+      return {
+        activeTaskId: taskOrder.includes(state.activeTaskId) ? state.activeTaskId : taskOrder[0],
+        taskOrder,
+        taskIds: taskOrder,
+      };
+    }),
   setConnectionMode: (mode) => set({ connectionMode: mode }),
   setEdgeViewMode: (mode) => set({ edgeViewMode: mode }),
   setTaskWorkspaceView: (view) => set({ taskWorkspaceView: view }),
@@ -88,3 +241,27 @@ export const useWorkbenchStore = create<WorkbenchStoreState>((set) => ({
   setNodeDetailOpen: (open) => set({ nodeDetailOpen: open }),
   setBottomDockMode: (mode) => set({ bottomDockMode: mode }),
 }));
+
+export function selectActiveTaskId(state: WorkbenchStoreState): string {
+  return state.activeTaskId;
+}
+
+export function selectTaskOrder(state: WorkbenchStoreState): string[] {
+  return state.taskOrder;
+}
+
+export function selectActiveTask(state: WorkbenchStoreState): WorkbenchTask | undefined {
+  return state.tasksById[state.activeTaskId];
+}
+
+export function selectActiveCanvas(state: WorkbenchStoreState): WorkspaceCanvasModel | undefined {
+  return selectActiveTask(state)?.canvas;
+}
+
+export function selectActiveSelection(state: WorkbenchStoreState): CanvasSelection {
+  return state.selectionsByTaskId[state.activeTaskId] ?? selectionForTask(state.activeTaskId);
+}
+
+export function selectCanvasRevision(state: WorkbenchStoreState, taskId: string): number {
+  return state.canvasRevisionsByTaskId[taskId] ?? 0;
+}

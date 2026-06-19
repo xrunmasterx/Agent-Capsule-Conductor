@@ -688,3 +688,35 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `web/src/components/canvas/WorkspaceCanvas.tsx` no longer re-exports from `WorkflowViewer.tsx`.
 - `web/src/components/canvas/WorkspaceCanvas.tsx` owns ReactFlow root rendering and imports ReactFlow CSS.
 - `rg -n "function WorkspaceCanvas" web/src/components/WorkflowViewer.tsx web/src/components/canvas/WorkspaceCanvas.tsx` reports the function only in `WorkspaceCanvas.tsx`.
+
+## PLAN_08 Store Ownership
+
+Status: in progress
+
+### Scope Completed So Far
+
+- Upgraded `web/src/stores/workbenchStore.ts` from scalar task identity state to a task ownership store for `WorkbenchTask` records, task ordering, active task, per-task canvas revisions, per-task selection, and per-task focused workflow id.
+- Kept `taskIds` as a compatibility mirror of canonical `taskOrder` so existing consumers can migrate incrementally.
+- Added task owner actions for hydrate/set/upsert/delete, canvas updates, per-task selection, and per-task focused workflow state.
+- Added selectors for active task id, task order, active task, active canvas, active selection, and canvas revision.
+- Preserved the store as a frontend state boundary only: no API calls, no ReactFlow dependency, no `WorkflowViewer` dependency, and no `sourceGraph` ownership.
+
+### Added Tests
+
+- Extended `web/src/stores/workbenchStore.types.test.ts` with task hydration, task-isolated canvas revision updates, per-task selection/focus isolation, active-task fallback on delete, and static boundary checks.
+
+### Validation So Far
+
+Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `npx tsc --noEmit` | Passed | Store task ownership contract compiles. |
+| `npm run test -- --run src/stores/workbenchStore.types.test.ts` | Passed | 1 file, 6 tests passed. |
+| `npm run test -- --run src/components/WorkflowViewer.drag.test.tsx` | Passed | 1 file, 101 tests passed; existing WorkflowViewer compatibility exports still work. |
+
+### Remaining PLAN_08 Work
+
+- Rewire `WorkflowViewer.tsx` task/canvas/selection/focus state to consume the store owner contract instead of local `useState`.
+- Partition run and assistant owner state by task where needed, without moving API/EventSource effects into stores.
+- Add integration tests for multi-task switching after the shell consumes store-owned state.
