@@ -8,7 +8,6 @@ import {
   type CSSProperties,
   type Dispatch,
   type DragEvent,
-  type FormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
@@ -75,7 +74,6 @@ import {
   authoringTargetFromSelection,
   authoringValidationFromBackend,
   canvasAuthoringHash,
-  effectiveAssistantTurnReason,
   isInspectableNodeSelection,
   mergeAuthoringValidation,
   replaceTemporaryResourceWithCallable,
@@ -384,6 +382,7 @@ import { useRunRefreshLoader } from '../hooks/useRunRefreshLoader';
 import { useRunnerSubmit } from '../hooks/useRunnerSubmit';
 import { useSelectedAgentActions } from '../hooks/useSelectedAgentActions';
 import { useSelectedAgentTurnActions } from '../hooks/useSelectedAgentTurnActions';
+import { useAssistantProposalGenerateActions } from '../hooks/useAssistantProposalGenerateActions';
 import { useSubmittedRunPolling } from '../hooks/useSubmittedRunPolling';
 import {
   loadTaskStore,
@@ -774,6 +773,10 @@ export function WorkflowViewer({
     setBusy: setAssistantBusy,
     addSystemMessage: addAssistantSystemMessage,
   });
+  const {
+    loadWorkbenchAssistantSession,
+    submitWorkbenchAssistantTurnRequest,
+  } = useWorkbenchAssistantActions();
   const ensureAssistantSession = useCallback(
     (snapshot = currentAuthoringSnapshot()): Promise<string> =>
       ensureAssistantSessionFromPayload({
@@ -784,6 +787,27 @@ export function WorkflowViewer({
       }),
     [activeTaskId, callables, canvas, ensureAssistantSessionFromPayload, selection, workflows],
   );
+  const { generateAssistantProposal } = useAssistantProposalGenerateActions({
+    assistantInput,
+    assistantTurnReason,
+    selection,
+    assistantAgentSession,
+    currentAuthoringSnapshot,
+    ensureAssistantSession,
+    loadWorkbenchAssistantSession,
+    submitWorkbenchAssistantTurnRequest,
+    setAssistantMessages,
+    setAssistantBusy,
+    setAssistantAgentSession,
+    setAssistantPendingTurn,
+    setAssistantSessionStatus,
+    setAssistantInput,
+    setAssistantProposal,
+    setAssistantBackendValidation,
+    setBottomDockMode,
+    setEvidenceDock,
+    setMessage,
+  });
 
   const updateRunProjection = useCallback((runId: string, update: (current: RunProjection) => RunProjection) => {
     setRunsById((current) => {
@@ -856,10 +880,6 @@ export function WorkflowViewer({
   const { validateBoundaryTransfers } = useBoundaryTransferValidation();
   const { pollSubmittedRunUntilTerminal } = useSubmittedRunPolling();
   const { submitRunnerJob } = useRunnerSubmit();
-  const {
-    loadWorkbenchAssistantSession,
-    submitWorkbenchAssistantTurnRequest,
-  } = useWorkbenchAssistantActions();
   const {
     createGraphOpsProposalRequest,
     validateGraphOpsProposalRequest,
@@ -1707,62 +1727,6 @@ export function WorkflowViewer({
       return;
     }
     await runWorkflowGraph(singleNodeWorkflowGraph(node, selectedWorkflow?.id || canvas.id), 'node', node.id);
-  }
-
-  async function generateAssistantProposal(event?: FormEvent<HTMLFormElement>) {
-    event?.preventDefault();
-    const snapshot = currentAuthoringSnapshot();
-    const userText = assistantInput.trim();
-    const effectiveTurnReason = effectiveAssistantTurnReason(assistantTurnReason, selection);
-    if (!userText) {
-      const text = 'Please enter a requirement.';
-      setAssistantMessages((current) => [
-        ...current,
-        { id: authoringId('assistant_msg'), role: 'assistant', content: text },
-      ]);
-      setMessage(text);
-      return;
-    }
-    setAssistantMessages((current) => [
-      ...current,
-      { id: authoringId('assistant_msg'), role: 'user', content: userText },
-    ]);
-    setAssistantBusy(true);
-    try {
-      const sessionId = await ensureAssistantSession(snapshot);
-      const currentSession =
-        assistantAgentSession && assistantAgentSession.session_id === sessionId
-          ? assistantAgentSession
-          : await loadWorkbenchAssistantSession(sessionId);
-      setAssistantAgentSession(currentSession);
-      const turn = await submitWorkbenchAssistantTurnRequest(sessionId, {
-        message: userText,
-        reason: effectiveTurnReason,
-        canvas_hash: snapshot.snapshot_id,
-        canvas_snapshot: authoringBackendCanvasSnapshot(snapshot),
-        selection: authoringSelectionPayload(snapshot.selection),
-        expected_provider_session_id:
-          typeof currentSession.provider_session_id === 'string'
-            ? currentSession.provider_session_id
-            : undefined,
-      });
-      setAssistantPendingTurn(turn);
-      setAssistantSessionStatus(turn.status || 'queued');
-      setAssistantInput('');
-      setBottomDockMode('assistant');
-      setEvidenceDock((current) => ({ ...current, open: true }));
-      setMessage(`AI 助手 turn ${turn.turn_id}: ${turn.status || 'queued'}`);
-    } catch (error) {
-      const text = error instanceof Error ? error.message : String(error);
-      setAssistantProposal(null);
-      setAssistantBackendValidation(null);
-      setAssistantMessages((current) => [
-        ...current,
-        { id: authoringId('assistant_msg'), role: 'system', content: text },
-      ]);
-      setMessage(text);
-      setAssistantBusy(false);
-    }
   }
 
   function applyAssistantProposal() {
