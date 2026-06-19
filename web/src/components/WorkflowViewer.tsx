@@ -381,6 +381,7 @@ import { useAssistantSession } from '../hooks/useAssistantSession';
 import { useRunStream } from '../hooks/useRunStream';
 import { useSelectedAgentSession, type AgentSessionUiState } from '../hooks/useSelectedAgentSession';
 import { useOpenedWorkflowLoader } from '../hooks/useOpenedWorkflowLoader';
+import { useNodeRunDetails } from '../hooks/useNodeRunDetails';
 import { useTaskPersistence } from '../hooks/useTaskPersistence';
 import { useWorkbenchBootstrap } from '../hooks/useWorkbenchBootstrap';
 import {
@@ -2070,7 +2071,6 @@ export function WorkflowViewer({
   const [runsById, setRunsById] = useState<Record<string, RunProjection>>({});
   const [runLogsById, setRunLogsById] = useState<Record<string, Record<string, NodeLiveLogs>>>({});
   const [runLiveEventsById, setRunLiveEventsById] = useState<Record<string, WorkbenchLiveEvent[]>>({});
-  const [nodeRunDetailsByKey, setNodeRunDetailsByKey] = useState<Record<string, NodeRunSummary>>({});
   const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfig | null>(null);
   const [openedExternalWorkflow, setOpenedExternalWorkflow] = useState(false);
   const [focusedWorkflowId, setFocusedWorkflowId] = useState<string | null>(null);
@@ -2594,33 +2594,12 @@ export function WorkflowViewer({
   );
   const rawSelectedNodeRunDetailKey =
     selectedRunId && rawSelectedNodeRun ? nodeRunDetailCacheKey(selectedRunId, rawSelectedNodeRun) : '';
-
-  useEffect(() => {
-    if (!selectedRunId || !rawSelectedNodeRun || !rawSelectedNodeRunDetailKey) {
-      return undefined;
-    }
-    if (nodeRunDetailsByKey[rawSelectedNodeRunDetailKey]) {
-      return undefined;
-    }
-    let cancelled = false;
-    api
-      .node(selectedRunId, rawSelectedNodeRun.node_id)
-      .then((detail) => {
-        if (cancelled) {
-          return;
-        }
-        setNodeRunDetailsByKey((current) => ({
-          ...current,
-          [rawSelectedNodeRunDetailKey]: mergeNodeRunDetail(rawSelectedNodeRun, detail),
-        }));
-      })
-      .catch(() => {
-        // The lightweight run summary remains usable if detail projection is not available yet.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [nodeRunDetailsByKey, rawSelectedNodeRun, rawSelectedNodeRunDetailKey, selectedRunId]);
+  const { nodeRunDetailsByKey } = useNodeRunDetails({
+    runId: selectedRunId,
+    nodeRun: rawSelectedNodeRun,
+    detailKey: rawSelectedNodeRunDetailKey,
+    mergeDetail: mergeNodeRunDetail,
+  });
 
   const enrichedWorkflowRun = useMemo(
     () => mergeWorkflowRunNodeDetails(workflowRun, selectedRunId, nodeRunDetailsByKey),
