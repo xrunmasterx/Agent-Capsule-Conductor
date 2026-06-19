@@ -38,6 +38,26 @@ export function staticInputFromInvocationInput(input: Record<string, unknown>): 
   return staticInput;
 }
 
+export function mergeInvocationInput(
+  input: Record<string, unknown>,
+  userPrompt: string,
+  staticInput: Record<string, unknown>,
+): Record<string, unknown> {
+  const nextInput: Record<string, unknown> = { ...staticInput };
+  if (userPrompt.trim()) {
+    nextInput.user_prompt = userPrompt;
+  }
+  for (const key of Object.keys(input)) {
+    if (key !== 'user_prompt' && key !== 'prompt' && key !== 'topic') {
+      continue;
+    }
+    if (!userPrompt.trim()) {
+      delete nextInput[key];
+    }
+  }
+  return nextInput;
+}
+
 export function workflowInvocationLabel(workflow: WorkflowContainerModel): string {
   return workflow.invocationLabel || workflow.title || workflow.id;
 }

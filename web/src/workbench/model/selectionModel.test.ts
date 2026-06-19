@@ -10,6 +10,7 @@ import {
   normalizeSelectionIntent,
   normalizeWorkbenchSelection,
   promptFromInvocationInput,
+  mergeInvocationInput,
   selectionCanBeDeleted,
   selectionEdgeAddress,
   selectionForEdgeAddress,
@@ -80,6 +81,24 @@ describe('selection model helpers', () => {
         target: 'NVDA',
       }),
     ).toEqual({ target: 'NVDA' });
+  });
+
+  test('merges invocation prompt with static input and removes empty legacy prompt keys', () => {
+    expect(
+      mergeInvocationInput(
+        { prompt: 'Legacy prompt', topic: 'Old topic', target: 'NVDA' },
+        'Updated prompt',
+        { target: 'AAPL', verified_data: true },
+      ),
+    ).toEqual({ target: 'AAPL', verified_data: true, user_prompt: 'Updated prompt' });
+
+    expect(
+      mergeInvocationInput(
+        { user_prompt: 'User prompt', prompt: 'Legacy prompt', topic: 'Old topic', target: 'NVDA' },
+        '',
+        { target: 'AAPL' },
+      ),
+    ).toEqual({ target: 'AAPL' });
   });
 
   test('computes invocation labels with stable fallback order', () => {

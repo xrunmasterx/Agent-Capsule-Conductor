@@ -794,6 +794,9 @@ Status: in progress
 - `web/src/components/WorkflowViewer.tsx` is now 178,229 bytes / 4,772 lines after moving `SelectedNodeRuntimePane`.
 - Moved the Codex execution mode selector into `web/src/components/inspector/CodexExecutionModeSelector.tsx`, restoring readable UTF-8 Chinese labels and risk notices.
 - `web/src/components/WorkflowViewer.tsx` is now 177,128 bytes / 4,743 lines after moving `CodexExecutionModeSelector`.
+- Moved node prompt/static input editing into `web/src/components/inspector/NodePromptEditor.tsx`, restoring readable UTF-8 Chinese labels and validation messages.
+- Moved `mergeInvocationInput(...)` into `web/src/workbench/model/selectionModel.ts`, next to the prompt/static-input projection helpers it composes.
+- `web/src/components/WorkflowViewer.tsx` is now 173,489 bytes / 4,871 lines after moving `NodePromptEditor`.
 
 ### Added/Updated Tests
 
@@ -812,6 +815,8 @@ Status: in progress
 - Added `web/src/components/inspector/SchemaFieldCards.test.tsx` for card rendering, empty state, JSON schema projection, artifact contract projection, fallback port projection, and schema-field de-duplication.
 - Added `web/src/components/inspector/SelectedNodeRuntimePane.test.tsx` for non-node empty state, live output, schema tab, error tab, and tab reset on selected node changes.
 - Added `web/src/components/inspector/CodexExecutionModeSelector.test.tsx` for option rendering, normalized mode changes, and high-risk mode notices.
+- Added `web/src/components/inspector/NodePromptEditor.test.tsx` for prompt editing, clear/reset behavior, advanced static-input editing, object validation, and node-change reset behavior.
+- Extended `web/src/workbench/model/selectionModel.test.ts` with `mergeInvocationInput(...)` coverage for static input preservation and empty legacy prompt-key cleanup.
 - Existing `web/src/App.test.tsx` and `web/src/components/WorkflowViewer.drag.test.tsx` now validate against the real owner imports instead of `WorkflowViewer.tsx` compatibility exports.
 
 ### Validation So Far
@@ -845,6 +850,11 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npm run test -- --run src/components/inspector/CodexExecutionModeSelector.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 3 files, 185 tests passed. |
 | `npm run test -- --run` | Passed | 80 files, 481 tests passed. |
 | `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
+| `npx tsc --noEmit` | Passed | Node prompt editor extraction compiles. |
+| `npm run test -- --run src/components/inspector/NodePromptEditor.test.tsx src/workbench/model/selectionModel.test.ts src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 4 files, 195 tests passed. |
+| `npx tsc --noEmit` | Passed | Full frontend typecheck passes after Node prompt editor extraction. |
+| `npm run test -- --run` | Passed | 81 files, 485 tests passed. |
+| `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
 
 ### Static Gates So Far
 
@@ -868,3 +878,4 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `WorkflowViewer.tsx` no longer defines `SchemaFieldCards`, `schemaFieldsFromPorts`, `schemaFieldsFromArtifactContract`, `schemaFieldsFromJsonSchema`, or `dedupeSchemaFields`.
 - `WorkflowViewer.tsx` no longer defines `SelectedNodeRuntimePane`, `SelectionLiveOutput`, `NodeOutputSchemaPane`, or `NodeErrorPane`.
 - `WorkflowViewer.tsx` no longer defines `CodexExecutionModeSelector`.
+- `WorkflowViewer.tsx` no longer defines `NodePromptEditor` or local prompt-input merge logic.

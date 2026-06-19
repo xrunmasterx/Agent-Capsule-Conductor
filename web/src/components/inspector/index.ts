@@ -10,6 +10,7 @@
  */
 
 export { NodeDetailOverlay } from './NodeDetailOverlay';
+export { NodePromptEditor } from './NodePromptEditor';
 export { RightInspector } from './RightInspector';
 export { SelectionDetailsDock } from './SelectionDetailsDock';
 export { CodexExecutionModeSelector } from './CodexExecutionModeSelector';
