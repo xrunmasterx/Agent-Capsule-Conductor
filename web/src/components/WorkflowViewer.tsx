@@ -9,8 +9,6 @@ import {
   type Dispatch,
   type DragEvent,
   type KeyboardEvent as ReactKeyboardEvent,
-  type MouseEvent as ReactMouseEvent,
-  type PointerEvent as ReactPointerEvent,
   type SetStateAction,
 } from 'react';
 
@@ -46,8 +44,6 @@ import {
   AGENT_DATA_PORT_GAP,
   DEFAULT_WORKFLOW_MAX_CONCURRENCY,
   INSPECTOR_DEFAULT_WIDTH,
-  INSPECTOR_MAX_WIDTH,
-  INSPECTOR_MIN_WIDTH,
   INTERNAL_AGENT_TOOL_NODE_SIZE,
   MAX_LOG_PREVIEW_LINES,
   TEMPORARY_CALLABLE_ID_PREFIX,
@@ -72,7 +68,6 @@ import {
   authoringTargetFromSelection,
   authoringValidationFromBackend,
   canvasAuthoringHash,
-  isInspectableNodeSelection,
   mergeAuthoringValidation,
 } from '../workbench/model/authoringProposal';
 import {
@@ -123,7 +118,6 @@ import {
   type PendingCanvasConnection,
 } from '../workbench/model/canvasEdgeOps';
 import {
-  clamp,
   expandWorkflowToFitChildren,
   expandWorkflowToFitChildrenCenterLocked,
   layoutCanvasForSelection,
@@ -131,14 +125,12 @@ import {
   nextRootPalettePosition,
 } from '../workbench/model/canvasLayout';
 import {
-  deleteSelectionFromCanvas,
   edgeTouchesNode,
   findCanvasEdgeByAddress,
   isActiveCanvasObjectStatus,
   isExecutableNodeWorkflow,
   normalizeSelectionIntent,
   normalizeWorkbenchSelection,
-  selectionCanBeDeleted,
   selectionEdgeAddress,
   selectionMatchesEdge,
   shouldDisconnectEdgeOnClick,
@@ -416,6 +408,7 @@ import {
   useWorkflowSaveValidationActions,
 } from '../hooks/useWorkflowSaveValidationActions';
 import { useAssistantGraphOpsPersistenceActions } from '../hooks/useAssistantGraphOpsPersistenceActions';
+import { useCanvasSelectionUiActions } from '../hooks/useCanvasSelectionUiActions';
 
 type Props = {
   workflows: WorkflowSummary[];
@@ -1602,68 +1595,26 @@ export function WorkflowViewer({
   });
 
 
-  const startInspectorResize = useCallback(
-    (event: ReactPointerEvent<HTMLDivElement>) => {
-      event.preventDefault();
-      const startX = event.clientX;
-      const startWidth = inspectorWidth;
-      const move = (nextEvent: PointerEvent) => {
-        const nextWidth = clamp(startWidth + startX - nextEvent.clientX, INSPECTOR_MIN_WIDTH, INSPECTOR_MAX_WIDTH);
-        setChrome((current) => ({ ...current, inspectorWidth: nextWidth }));
-      };
-      const stop = () => {
-        window.removeEventListener('pointermove', move);
-        window.removeEventListener('pointerup', stop);
-      };
-      window.addEventListener('pointermove', move);
-      window.addEventListener('pointerup', stop, { once: true });
-    },
-    [inspectorWidth],
-  );
-
-  const handleCanvasLayoutPointerDown = useCallback(
-    (_event: ReactPointerEvent<HTMLDivElement>) => {},
-    [],
-  );
-  const handleCanvasLayoutClick = useCallback(
-    (_event: ReactMouseEvent<HTMLDivElement>) => {},
-    [],
-  );
-  const selectCanvasObject = useCallback((nextSelection: CanvasSelection) => {
-    setSelection(nextSelection);
-    if (!isInspectableNodeSelection(nextSelection)) {
-      setNodeDetailOpen(false);
-      setChrome((current) => ({ ...current, rightPanel: 'none' }));
-      return;
-    }
-    setChrome((current) => ({ ...current, rightPanel: 'inspector' }));
-  }, []);
-
-  const openNodeDetails = useCallback((nextSelection: CanvasSelection) => {
-    setSelection(nextSelection);
-    if (!isInspectableNodeSelection(nextSelection)) {
-      setNodeDetailOpen(false);
-      return;
-    }
-    setNodeDetailOpen(true);
-    setChrome((current) => ({
-      ...current,
-      rightPanel: 'none',
-    }));
-  }, []);
-
-  const deleteSelectedCanvasObject = useCallback((targetSelection = selection) => {
-    const eligibility = selectionCanBeDeleted(canvas, targetSelection, isRunning);
-    if (!eligibility.ok) {
-      if (eligibility.reason) {
-        setMessage(eligibility.reason);
-      }
-      return;
-    }
-    updateCanvas((current) => deleteSelectionFromCanvas(current, targetSelection));
-    setSelection({ type: 'task_canvas', taskId: canvas.id });
-    setMessage('已删除选中的画布对象。');
-  }, [canvas, isRunning, selection, updateCanvas]);
+  const {
+    startInspectorResize,
+    handleCanvasLayoutPointerDown,
+    handleCanvasLayoutClick,
+    selectCanvasObject,
+    openNodeDetails,
+    deleteSelectedCanvasObject,
+    openCallableResourceFromNode,
+  } = useCanvasSelectionUiActions({
+    canvas,
+    selection,
+    inspectorWidth,
+    isRunning,
+    setChrome,
+    setNodeDetailOpen,
+    setSelection,
+    updateCanvas,
+    setMessage,
+    setSelectedResource,
+  });
 
   const {
     currentTemporaryResourceIssue,
@@ -1726,15 +1677,6 @@ export function WorkflowViewer({
     runWorkflowGraph,
     setMessage,
   });
-
-  function openCallableResourceFromNode(callableId: string, name: string, kind: 'agent_class' | 'tool_class') {
-    setSelectedResource({
-      kind: kind === 'tool_class' ? 'tool_class' : 'agent_class',
-      callableId,
-      name: name || callableId,
-    });
-    setChrome((current) => ({ ...current, rightPanel: 'resourceDetail' }));
-  }
 
   return (
     <WorkbenchShell durableTasksReady={durableTasksReady}>
