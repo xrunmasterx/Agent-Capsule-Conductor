@@ -22,7 +22,6 @@ import { useWorkbenchStore } from '../stores/workbenchStore';
 import type {
   AgentSessionRecord,
   AgentTurnRecord,
-  ArtifactContent,
   AuthoringAgentSummary,
   AuthoringRequiredAction,
   CallableSummary,
@@ -425,6 +424,10 @@ import { useWorkflowPersistence } from '../hooks/useWorkflowPersistence';
 import { useWorkbenchTaskActions } from '../hooks/useWorkbenchTaskActions';
 import { useDataConnectionActions } from '../hooks/useDataConnectionActions';
 import { useInvocationSettingsActions } from '../hooks/useInvocationSettingsActions';
+import {
+  useEvidenceDockActions,
+  type EvidenceDockState,
+} from '../hooks/useEvidenceDockActions';
 
 type Props = {
   workflows: WorkflowSummary[];
@@ -436,19 +439,6 @@ type Props = {
   selectedWorkflowId: string;
   onSelect: (workflowId: string) => void;
   onChanged?: () => void;
-};
-
-type EvidenceDockState = {
-  open: boolean;
-  title: string;
-  content: ArtifactContent | null;
-  owner?: {
-    kind: 'validation' | 'run' | 'node' | 'artifact';
-    taskId?: string;
-    runId?: string;
-    nodeId?: string;
-    createdAt?: string;
-  };
 };
 
 function trimLiveLog(value: string): string {
@@ -725,6 +715,12 @@ export function WorkflowViewer({
       runId: selectedRunId,
       normalizeContent: truncateLargeLog,
     });
+  const { closeEvidenceDock, readEvidence } = useEvidenceDockActions({
+    activeTaskId,
+    selectedRunId,
+    readArtifactContent,
+    setEvidenceDock,
+  });
   const assistantTurnSessionId = assistantSessionId || assistantPendingTurn?.session_id || null;
   const currentAuthoringState = currentTask?.authoring || emptyWorkbenchAuthoringState();
   const workflowRun = selectedRunProjection?.run || null;
@@ -742,9 +738,6 @@ export function WorkflowViewer({
   const inspectorOpen = viewProjection.inspectorOpen;
   const assistantOpen = viewProjection.assistantOpen;
   const inspectorWidth = chrome.inspectorWidth;
-  function closeEvidenceDock() {
-    setEvidenceDock({ open: false, title: '运行证据', content: null });
-  }
 
   function resetAssistantConversationState() {
     setAssistantInput('');
@@ -1946,26 +1939,6 @@ export function WorkflowViewer({
       );
     }
   }
-
-  async function readEvidence(path: string | null | undefined, title = '运行证据') {
-    if (!path) {
-      return;
-    }
-    const content = await readArtifactContent(path);
-    setEvidenceDock({
-      open: true,
-      title,
-      content: truncateLargeLog(content),
-      owner: {
-        kind: 'artifact',
-        taskId: activeTaskId,
-        runId: selectedRunId || undefined,
-        createdAt: new Date().toISOString(),
-      },
-    });
-  }
-
-
 
   async function generateAssistantProposal(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();

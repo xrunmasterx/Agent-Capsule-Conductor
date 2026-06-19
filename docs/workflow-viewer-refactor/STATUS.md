@@ -838,6 +838,10 @@ Status: in progress
 - Added `web/src/hooks/useOpenedWorkflowCanvas.ts` as the owner for external workflow detail loading projection into canonical graph, workspace canvas, selection, message, and evidence-dock close state.
 - Removed direct `graphToWorkspaceCanvas(...)`, `graphFromLegacyWorkflow(...)`, and `normalizeWorkflowGraph(...)` usage from `WorkflowViewer.tsx`.
 - `web/src/components/WorkflowViewer.tsx` is now 100,162 bytes / 2,651 lines after moving opened-workflow canvas projection.
+- Added `web/src/hooks/useEvidenceDockActions.ts` as the owner for artifact evidence opening, large-log truncation, evidence owner metadata, and dock close state.
+- Removed local `readEvidence(...)` and `closeEvidenceDock(...)` action ownership from `WorkflowViewer.tsx`.
+- Restored readable UTF-8 Chinese default evidence titles in the extracted evidence dock action hook.
+- `web/src/components/WorkflowViewer.tsx` is now 99,574 bytes / 2,627 lines after moving evidence dock actions.
 
 ### Added/Updated Tests
 
@@ -874,6 +878,7 @@ Status: in progress
 - Added `web/src/hooks/useDataConnectionActions.test.tsx` for data connection draft lifecycle, missing-source guard, data-edge creation, new input-port connection, and port add/rename/delete actions.
 - Added `web/src/hooks/useInvocationSettingsActions.test.tsx` for workflow/internal input, label fallback, control-main forwarding, empty-input policy, and Codex execution mode normalization updates.
 - Added `web/src/hooks/useOpenedWorkflowCanvas.test.tsx` for external workflow detail projection, loader integration, disabled-load guard, and empty focus-graph selection behavior.
+- Added `web/src/hooks/useEvidenceDockActions.test.tsx` for close-state reset, missing-path no-op reads, artifact owner metadata, and large-log truncation coverage.
 - Existing `web/src/App.test.tsx` and `web/src/components/WorkflowViewer.drag.test.tsx` now validate against the real owner imports instead of `WorkflowViewer.tsx` compatibility exports.
 
 ### Validation So Far
@@ -965,6 +970,10 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npm run test -- --run src/hooks/useOpenedWorkflowCanvas.test.tsx src/hooks/useOpenedWorkflowLoader.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 4 files, 190 tests passed. |
 | `npm run test -- --run` | Passed | 96 files, 537 tests passed. |
 | `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
+| `npx tsc --noEmit` | Passed | Evidence dock action hook extraction compiles. |
+| `npm run test -- --run src/hooks/useEvidenceDockActions.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 3 files, 186 tests passed. |
+| `npm run test -- --run` | Passed | 97 files, 540 tests passed. |
+| `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
 
 ### Static Gates So Far
 
@@ -1012,4 +1021,5 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `WorkflowViewer.tsx` no longer defines data connection action functions such as `beginDataConnection`, `completeDataConnection`, `completeDataConnectionWithNewInputPort`, `addDataConnectPort`, `renameDataConnectPort`, or `deleteDataConnectPort`.
 - `WorkflowViewer.tsx` no longer imports `normalizedCodexExecutionMode` or defines invocation settings mutation functions for input, labels, forward-main-output, empty-input policy, or Codex execution mode.
 - `WorkflowViewer.tsx` no longer imports `graphToWorkspaceCanvas`, `graphFromLegacyWorkflow`, `normalizeWorkflowGraph`, or `WorkflowDetail` for opened-workflow loading.
+- `WorkflowViewer.tsx` no longer defines `readEvidence(...)` or `closeEvidenceDock(...)`; evidence dock action ownership moved to `useEvidenceDockActions(...)`.
 - `WorkflowViewer.tsx` no longer ends with local helper definitions; the file now ends at the `WorkflowViewer` component close.
