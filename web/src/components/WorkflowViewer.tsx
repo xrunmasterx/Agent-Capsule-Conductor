@@ -11,9 +11,6 @@ import {
 } from 'react';
 
 import { api } from '../api';
-import { useAssistantStore } from '../stores/assistantStore';
-import { useRunStore } from '../stores/runStore';
-import { useWorkbenchStore } from '../stores/workbenchStore';
 import type {
   AuthoringRequiredAction,
   CallableSummary,
@@ -372,6 +369,7 @@ import { useRunRestorationActions } from '../hooks/useRunRestorationActions';
 import { useAssistantTaskStoreBindings } from '../hooks/useAssistantTaskStoreBindings';
 import { useWorkbenchTaskStoreBindings } from '../hooks/useWorkbenchTaskStoreBindings';
 import { useRunStoreBindings } from '../hooks/useRunStoreBindings';
+import { useWorkbenchStoreInitialization } from '../hooks/useWorkbenchStoreInitialization';
 
 type Props = {
   workflows: WorkflowSummary[];
@@ -394,14 +392,7 @@ export function WorkflowViewer({
   onChanged,
 }: Props) {
   const initialTaskStore = useMemo(() => loadTaskStore(), []);
-  const storeInitializedRef = useRef(false);
-  if (!storeInitializedRef.current) {
-    useAssistantStore.setState(useAssistantStore.getInitialState(), true);
-    useRunStore.setState(useRunStore.getInitialState(), true);
-    useWorkbenchStore.setState(useWorkbenchStore.getInitialState(), true);
-    useWorkbenchStore.getState().hydrateTasks(initialTaskStore.tasks, initialTaskStore.activeTaskId);
-    storeInitializedRef.current = true;
-  }
+  useWorkbenchStoreInitialization(initialTaskStore);
   const initialTask = useMemo(
     () =>
       initialTaskStore.tasks.find((task) => task.taskId === initialTaskStore.activeTaskId) ||
