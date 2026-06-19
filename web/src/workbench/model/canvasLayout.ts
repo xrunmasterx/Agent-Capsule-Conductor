@@ -16,7 +16,12 @@ import type {
   WorkflowContainerModel,
   WorkspaceCanvasModel,
 } from '../../types/workbench';
-import { isExecutableNodeWorkflow } from './selectionModel';
+import {
+  isExecutableNodeWorkflow,
+  isWorkflowBoundaryId,
+  workflowInputBoundaryId,
+  workflowOutputBoundaryId,
+} from './workflowNodeModel';
 
 export function layoutWorkspaceCanvas(canvas: WorkspaceCanvasModel): WorkspaceCanvasModel {
   const workflowsWithInternalLayout = canvas.workflows.map(layoutWorkflowInternalNodes);
@@ -340,16 +345,4 @@ function normalizeWorkflowChildBounds(nodes: InternalNodeView[]): {
       maxY: Number.NEGATIVE_INFINITY,
     },
   );
-}
-
-function isWorkflowBoundaryId(nodeId: string): boolean {
-  return nodeId.endsWith('__workflow_inputs') || nodeId.endsWith('__workflow_outputs');
-}
-
-function workflowInputBoundaryId(workflowId: string): string {
-  return `${workflowId}__workflow_inputs`;
-}
-
-function workflowOutputBoundaryId(workflowId: string): string {
-  return `${workflowId}__workflow_outputs`;
 }

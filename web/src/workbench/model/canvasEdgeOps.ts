@@ -9,6 +9,11 @@ import type {
 } from '../../types/workbench';
 import { internalInvocationLabel, workflowInvocationLabel } from './selectionModel';
 import { effectiveOutputPortsForNode, outputPortsFromSchema } from './schemaPorts';
+import {
+  isWorkflowBoundaryId,
+  workflowInputBoundaryId,
+  workflowOutputBoundaryId,
+} from './workflowNodeModel';
 
 export type DataEdgeCommandRequest = {
   scopeWorkflowId: string | null;
@@ -641,20 +646,8 @@ function isWorkflowBoundaryEdge(edge: WorkflowCanvasEdge): boolean {
   return isWorkflowBoundaryId(edge.source.workflowId) || isWorkflowBoundaryId(edge.target.workflowId);
 }
 
-function isWorkflowBoundaryId(nodeId: string): boolean {
-  return nodeId.endsWith('__workflow_inputs') || nodeId.endsWith('__workflow_outputs');
-}
-
 function isWorkflowOutputBoundaryId(nodeId: string): boolean {
   return nodeId.endsWith('__workflow_outputs');
-}
-
-function workflowInputBoundaryId(workflowId: string): string {
-  return `${workflowId}__workflow_inputs`;
-}
-
-function workflowOutputBoundaryId(workflowId: string): string {
-  return `${workflowId}__workflow_outputs`;
 }
 
 function jsonPointerToken(value: string): string {

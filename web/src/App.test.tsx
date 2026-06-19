@@ -12,22 +12,13 @@ import {
   boundedLiveEvents,
   canvasToWorkflowGraph,
   controlEdgeMainTransferMode,
-  deleteSelectionFromCanvas,
   filterLiveEvents,
   graphToWorkspaceCanvas,
-  internalInvocationLabel,
-  isExecutableNodeWorkflow,
   liveStateForNodeRun,
   nodeLiveLogsFor,
   nodeLogDeltaKeys,
   nodeRunForInternalNode,
-  normalizeSelectionIntent,
-  promptFromInvocationInput,
-  selectionCanBeDeleted,
-  shouldDisconnectEdgeOnClick,
-  staticInputFromInvocationInput,
   workspaceDemoCanvas,
-  workflowInvocationLabel,
 } from './components/WorkflowViewer';
 import {
   addPortToDataConnectNode,
@@ -42,6 +33,17 @@ import {
   layoutWorkspaceCanvas,
   nextRootPalettePosition,
 } from './workbench/model/canvasLayout';
+import {
+  deleteSelectionFromCanvas,
+  internalInvocationLabel,
+  isExecutableNodeWorkflow,
+  normalizeSelectionIntent,
+  promptFromInvocationInput,
+  selectionCanBeDeleted,
+  shouldDisconnectEdgeOnClick,
+  staticInputFromInvocationInput,
+  workflowInvocationLabel,
+} from './workbench/model/selectionModel';
 
 // Alias object so that existing `helpers.xxx` test patterns keep working.
 const helpers: Record<string, any> = {

@@ -97,7 +97,9 @@ Status: in progress
 - Added `web/src/workbench/model/boundaryTransferProjection.ts` as the pure owner for Workbench boundary-transfer metadata normalization, serialization, offline pair inference, preview error detection, and unavailable-preview diagnostics.
 - Converted `web/src/components/canvas/boundaryTransfer.ts` into a compatibility facade that re-exports the pure model module.
 - Added `web/src/workbench/model/taskModel.ts` for task defaults, task-store payload migration, authoring-state normalization, run-status mapping, Codex mode normalization, and empty-input policy normalization.
-- Added `web/src/workbench/model/selectionModel.ts` for pure invocation-input projection, workflow/internal node labels, executable-node checks, and edge-disconnect click intent.
+- Added `web/src/workbench/model/selectionModel.ts` for pure invocation-input projection, workflow/internal node labels, scoped edge selection/address normalization, selection intent normalization, deletion eligibility, deletion transforms, active-status checks, and edge-disconnect click intent.
+- Added `web/src/workbench/model/edgeAddress.ts` as the pure owner for root/workflow edge addresses and ReactFlow edge id encoding.
+- Added `web/src/workbench/model/workflowNodeModel.ts` as the pure owner for boundary node ids, executable workflow-node checks, internal flow node ids, and flow-endpoint resolution.
 - Added `web/src/workbench/model/schemaPorts.ts` as the pure owner for schema-derived output-port projection.
 - Added `web/src/workbench/model/canvasEdgeOps.ts` for explicit data-edge creation, data connect node views, data-edge diagnostics, data edge equivalence, and data-port add/rename/delete commands.
 - Added `web/src/workbench/model/canvasLayout.ts` for dagre workspace/internal layout, workflow fit/expand helpers, palette placement, and finite numeric helpers.
@@ -121,10 +123,11 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | --- | --- | --- |
 | `npx tsc --noEmit` | Passed | Pure model imports compile. |
 | `npm run test -- --run src/workbench/model/boundaryTransferProjection.test.ts src/components/canvas/boundaryTransfer.test.ts src/workbench/model/taskModel.test.ts src/workbench/model/selectionModel.test.ts` | Passed | 4 files, 17 tests passed. |
-| `npm run test -- --run` | Passed | 16 files, 235 tests passed. |
+| `npm run test -- --run` | Passed | 16 files, 239 tests passed. |
 | `npm run build` | Passed | Same expected chunk-size warning remains. |
 | `npm run test -- --run src/workbench/model/canvasEdgeOps.test.ts src/workbench/model/schemaPorts.test.ts src/App.test.tsx` | Passed | 3 files, 94 tests passed. |
 | `npm run test -- --run src/workbench/model/canvasLayout.test.ts src/App.test.tsx` | Passed | 2 files, 89 tests passed. |
+| `npm run test -- --run src/workbench/model/selectionModel.test.ts src/App.test.tsx src/components/WorkflowViewer.drag.test.tsx` | Passed | 3 files, 191 tests passed. |
 
 ### Static Gates So Far
 
@@ -132,12 +135,14 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - Boundary-transfer metadata keeps snake_case durable output while preserving camelCase load compatibility.
 - Task-store persistence side effects remain in `WorkflowViewer.tsx`; only pure migration/default logic moved.
 - `App.test.tsx` now imports migrated data-edge and port-command helpers from their real model owner instead of `WorkflowViewer.tsx`.
+- `App.test.tsx` now imports migrated selection helpers from their real model owner instead of `WorkflowViewer.tsx`.
 - `WorkflowViewer.tsx` no longer imports `dagre`; layout tests import the real `canvasLayout` owner.
+- `WorkflowViewer.tsx` no longer owns selection normalization, scoped edge-address lookup, flow endpoint id parsing, active-status checks, or selection deletion transforms.
 
 ### Remaining PLAN_02 Work
 
 - Extract the remaining pure graph/canvas projection helpers.
 - Extract the remaining deterministic control-edge command and scoped connection helpers.
 - Extract remaining flow projection helpers and ReactFlow DTO construction that can be tested without component rendering.
-- Move additional pure selection deletion/detail helpers once their dependency graph is isolated.
+- Move additional pure selected-detail helpers once their dependency graph is isolated.
 - Keep React components, hooks, API calls, EventSource, localStorage IO, and ReactFlow rendering in later plans.
