@@ -119,11 +119,7 @@ import {
 import {
   workbenchViewProjection,
 } from '../workbench/model/workbenchViewProjection';
-import {
-  inspectorDrawerTitle,
-  selectionKey,
-  truncateLargeLog,
-} from '../workbench/model/workflowViewerShell';
+import { selectionKey, truncateLargeLog } from '../workbench/model/workflowViewerShell';
 import { failedAgentEventsText } from '../workbench/model/agentEventText';
 import {
   bindingDirectory,
@@ -166,7 +162,6 @@ import type {
   WorkflowMainInputBindingState,
   WorkflowPortView,
 } from '../types/workbench';
-import { CodeBlock } from './CodeBlock';
 import {
   boundaryTransferFromGraphEdge,
   boundaryTransferPreviewHasErrors,
@@ -273,16 +268,7 @@ import {
 
 import { ExecutionDock as ExecutionDockComponent } from './execution';
 import { LiveOutputViewer } from './execution/RunOverlay';
-import { AgentNodeSettingsPanel } from './inspector/AgentNodeSettingsPanel';
-import { EvidencePreview } from './inspector/EvidencePreview';
-import { EventTimeline } from './inspector/EventTimeline';
-import { InvocationIdentityCard } from './inspector/InvocationIdentityCard';
-import { InvocationInputEditor } from './inspector/InvocationInputEditor';
-import { LiveLogBlocks } from './inspector/LiveLogBlocks';
-import { NodeEvidencePaths } from './inspector/NodeEvidencePaths';
-import { PortList } from './inspector/PortList';
-import { RightInspector } from './inspector/RightInspector';
-import { ResourceInspector, type ResourceTemplate } from './inspector/ResourceInspector';
+import type { ResourceTemplate } from './inspector/ResourceInspector';
 import { evidenceContentForCurrentSelection } from './inspector/SelectionDetailsDock';
 import {
   TaskOverviewPage as TaskOverviewPageComponent,
@@ -338,10 +324,7 @@ import {
 } from '../hooks/useEvidenceDockActions';
 import { useWorkflowRunSubmitActions } from '../hooks/useWorkflowRunSubmitActions';
 import { useWorkflowRunSelectionActions } from '../hooks/useWorkflowRunSelectionActions';
-import {
-  boundaryTransferPreviewSnapshotForCanvas,
-  useWorkflowSaveValidationActions,
-} from '../hooks/useWorkflowSaveValidationActions';
+import { useWorkflowSaveValidationActions } from '../hooks/useWorkflowSaveValidationActions';
 import { useAssistantGraphOpsPersistenceActions } from '../hooks/useAssistantGraphOpsPersistenceActions';
 import { useCanvasSelectionUiActions } from '../hooks/useCanvasSelectionUiActions';
 import { useAssistantAuthoringSessionActions } from '../hooks/useAssistantAuthoringSessionActions';
@@ -354,6 +337,7 @@ import { useRunStoreBindings } from '../hooks/useRunStoreBindings';
 import { useWorkbenchStoreInitialization } from '../hooks/useWorkbenchStoreInitialization';
 import { WorkflowViewerDock } from './workflow-viewer/WorkflowViewerDock';
 import { WorkflowViewerNodeDetailOverlay } from './workflow-viewer/WorkflowViewerNodeDetailOverlay';
+import { WorkflowViewerRightPanel } from './workflow-viewer/WorkflowViewerRightPanel';
 
 type Props = {
   workflows: WorkflowSummary[];
@@ -1308,96 +1292,50 @@ export function WorkflowViewer({
             />
           </>
         )}
-        {resourceDetailOpen ? (
-          <div
-            className="canvas-drawer canvas-drawer-right"
-            style={{ width: inspectorWidth }}
-          >
-            <div
-              className="drawer-resize-handle"
-              role="separator"
-              aria-label="调整节点设置面板宽度"
-              aria-orientation="vertical"
-              onPointerDown={startInspectorResize}
-            />
-            <div className="drawer-title-row">
-              <strong>{inspectorDrawerTitle(selection)}</strong>
-              <button
-                type="button"
-                onClick={() => setChrome((current) => ({ ...current, rightPanel: 'none' }))}
-              >
-                收起
-              </button>
-            </div>
-            {selectedResource ? (
-              <ResourceInspector resource={selectedResource} />
-            ) : null}
-          </div>
-        ) : null}
-        {inspectorOpen ? (
-          <div
-            className="canvas-drawer canvas-drawer-right"
-            style={{ width: inspectorWidth }}
-          >
-            <div
-              className="drawer-resize-handle"
-              role="separator"
-              aria-label="调整节点设置面板宽度"
-              aria-orientation="vertical"
-              onPointerDown={startInspectorResize}
-            />
-            <RightInspector
-              canvas={displayCanvas}
-              selection={selection}
-              selectedWorkflow={selectedWorkflow}
-              selectedPort={selectedPort}
-              selectedEdge={selectedEdge}
-              selectedInternalNode={selectedInternalNode}
-              connectionMode={connectionMode}
-              dataConnectionDraft={dataConnectionDraft}
-              runtimeConfig={runtimeConfig}
-              liveLogs={selectedLiveLogs}
-              workflowRun={enrichedWorkflowRun}
-              workflowEvents={selectedRunLiveEvents}
-              workflows={workflows}
-              binding={selectedWorkflow ? workflowBindings[selectedWorkflow.id] : undefined}
-              renderers={{
-                codeBlock: (props) => <CodeBlock {...props} />,
-                evidencePreview: (props) => <EvidencePreview {...props} />,
-                invocationInputEditor: (props) => <InvocationInputEditor {...props} />,
-                invocationIdentityCard: (props) => <InvocationIdentityCard {...props} />,
-                liveLogBlocks: (logs) => <LiveLogBlocks liveLogs={logs} />,
-                nodeEvidencePaths: (props) => <NodeEvidencePaths {...props} />,
-                portList: (props) => <PortList {...props} />,
-                eventTimeline: (props) => <EventTimeline {...props} />,
-              }}
-              renderAgentNodeSettings={(props) => <AgentNodeSettingsPanel {...props} />}
-              boundaryPreviewSnapshotForCanvas={boundaryTransferPreviewSnapshotForCanvas}
-              onConnectionMode={setConnectionMode}
-              onBeginDataConnection={beginDataConnection}
-              onCancelDataConnection={cancelDataConnection}
-              onUpdateDataConnectionMaterialization={updateDataConnectionMaterialization}
-              onCompleteDataConnection={completeDataConnection}
-              onCompleteDataConnectionWithNewInputPort={completeDataConnectionWithNewInputPort}
-              onAddDataConnectPort={addDataConnectPort}
-              onRenameDataConnectPort={renameDataConnectPort}
-              onDeleteDataConnectPort={deleteDataConnectPort}
-              onReadEvidence={readEvidence}
-              onConfigureBinding={setBindingEditorWorkflowId}
-              onUpdateWorkflowInput={updateWorkflowInvocationInput}
-              onUpdateInternalInput={updateInternalInvocationInput}
-              onUpdateWorkflowLabel={updateWorkflowInvocationLabel}
-              onUpdateInternalLabel={updateInternalInvocationLabel}
-              onUpdateWorkflowForwardMainOutput={updateWorkflowForwardMainOutput}
-              onUpdateInternalForwardMainOutput={updateInternalForwardMainOutput}
-              onUpdateWorkflowEmptyInputPolicy={updateWorkflowEmptyInputPolicy}
-              onUpdateInternalEmptyInputPolicy={updateInternalEmptyInputPolicy}
-              onUpdateWorkflowCodexExecutionMode={updateWorkflowCodexExecutionMode}
-              onUpdateInternalCodexExecutionMode={updateInternalCodexExecutionMode}
-              onOpenCallableResource={openCallableResourceFromNode}
-            />
-          </div>
-        ) : null}
+        <WorkflowViewerRightPanel
+          resourceDetailOpen={resourceDetailOpen}
+          inspectorOpen={inspectorOpen}
+          inspectorWidth={inspectorWidth}
+          selection={selection}
+          selectedResource={selectedResource}
+          canvas={displayCanvas}
+          selectedWorkflow={selectedWorkflow}
+          selectedPort={selectedPort}
+          selectedEdge={selectedEdge}
+          selectedInternalNode={selectedInternalNode}
+          connectionMode={connectionMode}
+          dataConnectionDraft={dataConnectionDraft}
+          runtimeConfig={runtimeConfig}
+          liveLogs={selectedLiveLogs}
+          workflowRun={enrichedWorkflowRun}
+          workflowEvents={selectedRunLiveEvents}
+          workflows={workflows}
+          workflowBindings={workflowBindings}
+          onResizeStart={startInspectorResize}
+          onCollapseRightPanel={() => setChrome((current) => ({ ...current, rightPanel: 'none' }))}
+          onConnectionMode={setConnectionMode}
+          onBeginDataConnection={beginDataConnection}
+          onCancelDataConnection={cancelDataConnection}
+          onUpdateDataConnectionMaterialization={updateDataConnectionMaterialization}
+          onCompleteDataConnection={completeDataConnection}
+          onCompleteDataConnectionWithNewInputPort={completeDataConnectionWithNewInputPort}
+          onAddDataConnectPort={addDataConnectPort}
+          onRenameDataConnectPort={renameDataConnectPort}
+          onDeleteDataConnectPort={deleteDataConnectPort}
+          onReadEvidence={readEvidence}
+          onConfigureBinding={setBindingEditorWorkflowId}
+          onUpdateWorkflowInput={updateWorkflowInvocationInput}
+          onUpdateInternalInput={updateInternalInvocationInput}
+          onUpdateWorkflowLabel={updateWorkflowInvocationLabel}
+          onUpdateInternalLabel={updateInternalInvocationLabel}
+          onUpdateWorkflowForwardMainOutput={updateWorkflowForwardMainOutput}
+          onUpdateInternalForwardMainOutput={updateInternalForwardMainOutput}
+          onUpdateWorkflowEmptyInputPolicy={updateWorkflowEmptyInputPolicy}
+          onUpdateInternalEmptyInputPolicy={updateInternalEmptyInputPolicy}
+          onUpdateWorkflowCodexExecutionMode={updateWorkflowCodexExecutionMode}
+          onUpdateInternalCodexExecutionMode={updateInternalCodexExecutionMode}
+          onOpenCallableResource={openCallableResourceFromNode}
+        />
         <WorkflowViewerNodeDetailOverlay
           open={blueprintViewActive && nodeDetailOpen}
           model={selectedDetailsModelWithAgentEvents}

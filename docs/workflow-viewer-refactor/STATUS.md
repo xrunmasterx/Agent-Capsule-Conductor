@@ -1067,6 +1067,10 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npm run test -- --run src/components/workflow-viewer/WorkflowViewerNodeDetailOverlay.test.tsx src/components/inspector/NodeDetailOverlay.test.tsx src/components/inspector/SelectionInputPane.test.tsx src/components/inspector/SelectionOutputPane.test.tsx src/components/inspector/AgentNodeSettingsPanel.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 7 files, 195 tests passed. |
 | `npm run test -- --run` | Passed | 116 files, 619 tests passed. |
 | `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
+| `npx tsc --noEmit` | Passed | WorkflowViewer right panel extraction compiles. |
+| `npm run test -- --run src/components/workflow-viewer/WorkflowViewerRightPanel.test.tsx src/components/workflow-viewer/WorkflowViewerNodeDetailOverlay.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 4 files, 187 tests passed. |
+| `npm run test -- --run` | Passed | 117 files, 621 tests passed. |
+| `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
 
 ### Static Gates So Far
 
@@ -1134,5 +1138,6 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `WorkflowViewer.tsx` no longer imports the assistant, run, or workbench Zustand stores directly; one-shot reset/hydration ownership moved to `useWorkbenchStoreInitialization(...)`.
 - `WorkflowViewer.tsx` no longer owns the workflow binding dialog, save workflow dialog, or bottom evidence/assistant dock composition; ownership moved to `WorkflowViewerDock`.
 - `WorkflowViewer.tsx` no longer owns node detail overlay pane composition or selected node edit routing; ownership moved to `WorkflowViewerNodeDetailOverlay`.
-- `WorkflowViewer.tsx` is now 50,802 bytes / 1,462 lines after node detail overlay extraction.
+- `WorkflowViewer.tsx` no longer owns right drawer resource/inspector composition or inspector renderer wiring; ownership moved to `WorkflowViewerRightPanel`.
+- `WorkflowViewer.tsx` is now 49,533 bytes / 1,400 lines after right panel extraction.
 - `WorkflowViewer.tsx` no longer ends with local helper definitions; the file now ends at the `WorkflowViewer` component close.
