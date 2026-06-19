@@ -4,12 +4,18 @@ import type { WorkflowContainerModel, WorkflowPortView, WorkspaceCanvasModel } f
 import {
   addPortToDataConnectNode,
   canvasEdgesAreEquivalent,
+  commitResolvedConnection,
+  connectionCandidatesFromPendingEndpoint,
+  connectionFromPendingEndpoint,
   createDataEdgeCommand,
   dataConnectEdges,
   deletePortFromDataConnectNode,
   edgeDiagnosticsForCanvasEdge,
   renamePortOnDataConnectNode,
+  resolveScopedConnection,
+  reverseConnection,
 } from './canvasEdgeOps';
+import { internalFlowNodeId } from './workflowNodeModel';
 
 function port(id: string, direction: 'input' | 'output', cardinality = 'one'): WorkflowPortView {
   return {
@@ -42,6 +48,14 @@ function rootNode(
   };
 }
 
+function rootAgent(id: string): WorkflowContainerModel {
+  return {
+    ...rootNode(id),
+    sourceKind: 'agent_session',
+    callableId: 'fake-agent.generic',
+  };
+}
+
 function canvasFixture(): WorkspaceCanvasModel {
   return {
     id: 'task',
@@ -49,9 +63,10 @@ function canvasFixture(): WorkspaceCanvasModel {
     layout: 'workspace-canvas',
     rootWorkflowId: 'task',
     workflows: [
-      rootNode('source_agent'),
+      rootAgent('source_agent'),
       rootNode('source_flow'),
       rootNode('target_flow', [port('main', 'input'), port('evidence', 'input')]),
+      rootAgent('target_agent'),
       {
         ...rootNode('inline_flow', [port('main', 'input')], [port('main', 'output')]),
         internalNodes: [
@@ -262,6 +277,163 @@ describe('canvasEdgeOps', () => {
     expect(diagnostics.map((item) => item.code)).toEqual([
       'dangling_data_edge_source',
       'dangling_data_edge_target',
+    ]);
+  });
+
+  test('resolves root control connections and rejects slot overflow while preserving equivalent edges', () => {
+    const targets = Array.from({ length: 11 }, (_value, index) => rootAgent(`target_${index + 1}`));
+    const canvas = {
+      ...canvasFixture(),
+      workflows: [rootAgent('source_agent'), ...targets],
+      edges: targets.slice(0, 10).map((target) => ({
+        id: `control_source_agent_${target.id}`,
+        kind: 'control' as const,
+        source: { workflowId: 'source_agent' },
+        target: { workflowId: target.id },
+      })),
+    };
+
+    expect(
+      resolveScopedConnection(
+        canvas,
+        {
+          source: 'source_agent',
+          target: 'target_11',
+          sourceToken: 'source_agent:control:source',
+          targetToken: 'target_11:control:target',
+        },
+        'control',
+      ),
+    ).toEqual({ accepted: false, reason: expect.stringContaining('slot 已满') });
+
+    expect(
+      resolveScopedConnection(
+        canvas,
+        {
+          source: 'source_agent',
+          target: 'target_10',
+          sourceToken: 'source_agent:control:source',
+          targetToken: 'target_10:control:target',
+        },
+        'control',
+      ),
+    ).toEqual(expect.objectContaining({ accepted: true }));
+  });
+
+  test('resolves workflow input inner control to internal boundary binding', () => {
+    const resolved = resolveScopedConnection(
+      canvasFixture(),
+      {
+        source: 'inline_flow',
+        target: internalFlowNodeId('inline_flow', 'codex'),
+        sourceToken: 'inline_flow:workflow-input-inner-source',
+        targetToken: null,
+      },
+      'control',
+    );
+
+    expect(resolved).toEqual(
+      expect.objectContaining({
+        accepted: true,
+        semantic: 'workflow_input_main_binding',
+        scopeWorkflowId: 'inline_flow',
+        edge: expect.objectContaining({
+          kind: 'control',
+          source: { workflowId: 'inline_flow__workflow_inputs' },
+          target: { workflowId: 'codex' },
+        }),
+      }),
+    );
+  });
+
+  test('recovers reversed pending workflow input connection candidates', () => {
+    const candidates = connectionCandidatesFromPendingEndpoint(
+      {
+        nodeId: 'inline_flow',
+        handleId: 'inline_flow:workflow-input-inner-source',
+        mode: 'control',
+        side: 'target',
+        endpoint: {
+          view: 'root-shell',
+          role: 'workflow_inner_input',
+          nodeId: 'inline_flow',
+          workflowId: 'inline_flow',
+          portId: 'main',
+          handleId: 'inline_flow:workflow-input-inner-source',
+        },
+      },
+      {
+        source: internalFlowNodeId('inline_flow', 'codex'),
+        sourceToken: null,
+        target: 'inline_flow',
+        targetToken: 'inline_flow:workflow-input-inner-source',
+      },
+    );
+    const accepted = candidates
+      .map((candidate) => resolveScopedConnection(canvasFixture(), candidate, 'control'))
+      .find((candidate) => candidate.accepted);
+
+    expect(connectionFromPendingEndpoint(
+      {
+        nodeId: 'inline_flow',
+        handleId: 'inline_flow:workflow-input-inner-source',
+        mode: 'control',
+        side: 'source',
+      },
+      {
+        nodeId: internalFlowNodeId('inline_flow', 'codex'),
+        handleId: null,
+        side: 'target',
+      },
+    )).toEqual({
+      source: 'inline_flow',
+      sourceToken: 'inline_flow:workflow-input-inner-source',
+      target: internalFlowNodeId('inline_flow', 'codex'),
+      targetToken: null,
+    });
+    expect(accepted).toEqual(
+      expect.objectContaining({
+        accepted: true,
+        semantic: 'workflow_input_main_binding',
+        scopeWorkflowId: 'inline_flow',
+      }),
+    );
+  });
+
+  test('rejects cross-scope data connections and commits accepted scoped control edges', () => {
+    expect(
+      resolveScopedConnection(
+        canvasFixture(),
+        {
+          source: internalFlowNodeId('inline_flow', 'codex'),
+          sourceToken: 'codex:output:main',
+          target: 'target_agent',
+          targetToken: 'target_agent:input:main',
+        },
+        'data',
+      ),
+    ).toEqual({ accepted: false, reason: 'Data Edge 必须连接同一层级内的节点' });
+
+    const reversed = reverseConnection({
+      source: internalFlowNodeId('inline_flow', 'codex'),
+      sourceToken: null,
+      target: 'inline_flow',
+      targetToken: 'inline_flow:workflow-input-inner-source',
+    });
+    const resolved = resolveScopedConnection(canvasFixture(), reversed || {}, 'control');
+    expect(resolved).toEqual(expect.objectContaining({ accepted: true }));
+    if (!resolved.accepted) {
+      throw new Error('expected accepted scoped connection');
+    }
+    const committed = commitResolvedConnection(canvasFixture(), resolved);
+    const workflow = committed.canvas.workflows.find((item) => item.id === 'inline_flow');
+
+    expect(workflow?.internalEdges).toEqual([
+      expect.objectContaining({
+        kind: 'control',
+        source: { workflowId: 'inline_flow__workflow_inputs' },
+        target: { workflowId: 'codex' },
+      }),
     ]);
   });
 });

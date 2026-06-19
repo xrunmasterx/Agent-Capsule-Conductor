@@ -7,10 +7,6 @@ import {
   WorkspaceCanvas as _WorkspaceCanvas,
   createDataEdgeCommand as _createDataEdgeCommand,
   canvasEdgeToFlowEdge as _canvasEdgeToFlowEdge,
-  resolveScopedConnection as _resolveScopedConnection,
-  connectionCandidatesFromPendingEndpoint as _connectionCandidatesFromPendingEndpoint,
-  connectionFromPendingEndpoint as _connectionFromPendingEndpoint,
-  reverseConnection as _reverseConnection,
   canvasToWorkflowGraph as _canvasToWorkflowGraph,
   captureAuthoringSnapshot as _captureAuthoringSnapshot,
   buildDeterministicCanvasAuthoringProposal as _buildDeterministicCanvasAuthoringProposal,
@@ -27,6 +23,12 @@ import {
   nodeRunHasWorkflowInputBinding as _nodeRunHasWorkflowInputBinding,
   edgeCanonicalPreview as _edgeCanonicalPreview,
 } from './WorkflowViewer';
+import {
+  connectionCandidatesFromPendingEndpoint as _connectionCandidatesFromPendingEndpoint,
+  connectionFromPendingEndpoint as _connectionFromPendingEndpoint,
+  resolveScopedConnection as _resolveScopedConnection,
+  reverseConnection as _reverseConnection,
+} from '../workbench/model/canvasEdgeOps';
 import {
   applyRunOverlayToCanvas,
   liveWorkflowRunFromEvents,
@@ -2514,9 +2516,9 @@ describe('WorkspaceCanvas data edges', () => {
 
     expect(connection).toEqual({
       source: 'source_flow',
-      sourceHandle: 'source_flow:workflow-input-inner-source',
+      sourceToken: 'source_flow:workflow-input-inner-source',
       target: 'source_flow__internal__codex',
-      targetHandle: null,
+      targetToken: null,
     });
   });
 

@@ -18,6 +18,30 @@ export function isWorkflowBoundaryId(nodeId: string): boolean {
   return nodeId.endsWith('__workflow_inputs') || nodeId.endsWith('__workflow_outputs');
 }
 
+export function workflowBoundaryKind(nodeId: string): WorkflowContainerModel['boundaryKind'] | null {
+  if (nodeId.endsWith('__workflow_inputs')) {
+    return 'workflow_input';
+  }
+  if (nodeId.endsWith('__workflow_outputs')) {
+    return 'workflow_output';
+  }
+  return null;
+}
+
+export function isWorkflowOutputBoundaryId(nodeId: string): boolean {
+  return workflowBoundaryKind(nodeId) === 'workflow_output';
+}
+
+export function workflowIdFromBoundaryId(nodeId: string): string | null {
+  if (nodeId.endsWith('__workflow_inputs')) {
+    return nodeId.slice(0, -'__workflow_inputs'.length);
+  }
+  if (nodeId.endsWith('__workflow_outputs')) {
+    return nodeId.slice(0, -'__workflow_outputs'.length);
+  }
+  return null;
+}
+
 export function isExecutableNodeWorkflow(workflow: WorkflowContainerModel): boolean {
   if (workflow.boundaryKind) {
     return false;

@@ -1,4 +1,4 @@
-﻿import {
+import {
   Background,
   BackgroundVariant,
   Controls,
@@ -99,7 +99,6 @@ import {
   AGENT_PORT_VERTICAL_PADDING,
   AGENT_TOOL_NODE_SIZE,
   BOUNDARY_NODE_SIZE,
-  CONTROL_SLOT_LIMIT,
   DEFAULT_CONTAINER_SIZE,
   DEFAULT_TASK_ID,
   DEFAULT_WORKFLOW_MAX_CONCURRENCY,
@@ -137,20 +136,42 @@ import {
 import {
   addPortToDataConnectNode,
   canvasEdgesAreEquivalent,
+  connectionCandidatesFromPendingEndpoint,
+  connectionFromPendingEndpoint,
+  controlSlotLimitIssue,
+  controlSourceTokenId,
+  controlTargetTokenId,
   createDataEdgeCommand,
   dataConnectEdges,
   dataConnectNodes,
   dataEdgesForNode,
+  describeEndpoint,
   deletePortFromDataConnectNode,
   edgeDiagnosticsForCanvasEdge,
   edgeDiagnosticsForWorkflowEdge,
+  endpointCanSource,
   findDataConnectNode,
+  parsePortToken,
+  portTokenId,
   renamePortOnDataConnectNode,
+  resolveScopedConnection,
+  reverseConnection,
+  tryCommitResolvedConnection,
   uniqueInputPortIdForNode,
+  workflowInputInnerSourceTokenId,
+  workflowInputOuterTargetTokenId,
+  workflowOutputInnerTargetTokenId,
+  workflowOutputOuterSourceTokenId,
+  wouldCreateControlCycle,
+  type ConnectionEndpoint,
+  type ConnectionResolution,
   type DataConnectNodeOption,
   type DataEdgeCommandRequest,
   type DataEdgeCommandResult,
   type EdgeDiagnostic,
+  type EndpointDescriptor,
+  type EndpointSide,
+  type PendingCanvasConnection,
 } from '../workbench/model/canvasEdgeOps';
 import {
   clamp,
@@ -263,7 +284,9 @@ import {
   internalFlowNodeId,
   isWorkflowBoundaryId,
   parseInternalFlowNodeId,
+  workflowBoundaryKind,
   workflowInputBoundaryId,
+  workflowIdFromBoundaryId,
   workflowOutputBoundaryId,
   type FlowEndpoint,
 } from '../workbench/model/workflowNodeModel';
@@ -324,14 +347,6 @@ type PaletteDropTarget =
   | { kind: 'workflow_internal'; workflowId: string; position: { x: number; y: number } }
   | { kind: 'rejected'; reason: string };
 
-type PendingCanvasConnection = {
-  nodeId: string;
-  handleId: string | null;
-  mode: ConnectionMode;
-  side: EndpointSide;
-  endpoint: EndpointDescriptor | null;
-};
-
 type DataDropTargetPreview = {
   flowNodeId: string;
   portId: string;
@@ -349,11 +364,6 @@ type NodeCreateMenuState = {
   position: { x: number; y: number };
   pendingConnection?: PendingCanvasConnection;
 } | null;
-
-type ConnectionHandles = {
-  sourceHandle: string | null | undefined;
-  targetHandle: string | null | undefined;
-};
 
 type CanvasInteractionCommand =
   | { type: 'select'; intent: SelectionIntent }
@@ -376,73 +386,7 @@ type BodyDropDataEdgePlan = {
   createdTargetPort: boolean;
 };
 
-type ScopedEdgeSemantic =
-  | 'workflow_input_main_binding'
-  | 'workflow_output_main_binding'
-  | 'internal_control'
-  | 'internal_data'
-  | 'root_control_main'
-  | 'root_control_main_to_workflow'
-  | 'root_control_main_from_workflow'
-  | 'root_workflow_to_workflow_control'
-  | 'root_data';
-
-type ScopedEdgeResult = {
-  edge: WorkflowCanvasEdge;
-  scopeWorkflowId: string | null;
-  semantic: ScopedEdgeSemantic;
-  sourceHandle?: string;
-  targetHandle?: string;
-  rejectionReason?: string;
-};
-
-type EndpointRole =
-  | 'root_executable_output'
-  | 'root_executable_input'
-  | 'workflow_outer_input'
-  | 'workflow_outer_output'
-  | 'workflow_inner_input'
-  | 'workflow_inner_output'
-  | 'internal_executable_output'
-  | 'internal_executable_input'
-  | 'focus_boundary_input_output'
-  | 'focus_boundary_output_input';
-
-type EndpointSide = 'source' | 'target';
-
-type EndpointDescriptor = {
-  view: 'root-shell' | 'workflow-focus';
-  role: EndpointRole;
-  nodeId: string;
-  workflowId: string | null;
-  portId: string;
-  handleId: string | null;
-};
-
-type ConnectionResolution =
-  | {
-      accepted: true;
-      edge: WorkflowCanvasEdge;
-      scopeWorkflowId: string | null;
-      semantic: ScopedEdgeSemantic;
-      sourceHandle?: string;
-      targetHandle?: string;
-    }
-  | {
-      accepted: false;
-      reason: string;
-    };
-
-type CommitConnectionResult = {
-  canvas: WorkspaceCanvasModel;
-  edge: WorkflowCanvasEdge;
-};
-
-type DomConnectionEndpoint = {
-  nodeId: string;
-  handleId: string | null;
-  side: EndpointSide;
-};
+type DomConnectionEndpoint = ConnectionEndpoint;
 
 type ConnectionTraceEvent = {
   event: string;
@@ -7035,9 +6979,9 @@ function WorkspaceCanvas({
           visibleCanvas,
           {
             source: source.workflowId,
-            sourceHandle: portHandleId(source.workflowId, 'output', source.portId),
+            sourceHandle: portTokenId(source.workflowId, 'output', source.portId),
             target: target.workflowId,
-            targetHandle: portHandleId(target.workflowId, 'input', target.portId),
+            targetHandle: portTokenId(target.workflowId, 'input', target.portId),
           },
           'data',
         );
@@ -8221,22 +8165,22 @@ export function WorkflowContainer({
       <Handle
         type="target"
         position={Position.Left}
-        id={workflowInputOuterTargetHandleId(workflow.id)}
+        id={workflowInputOuterTargetTokenId(workflow.id)}
         className="workflow-control-handle input workflow-shell-outer-input"
         data-nodeid={workflow.id}
-        data-handleid={workflowInputOuterTargetHandleId(workflow.id)}
+        data-handleid={workflowInputOuterTargetTokenId(workflow.id)}
         data-acc-connection-mode="control"
         data-acc-connection-side="target"
         onPointerDown={() =>
-          data.onControlHandleMouseDown(workflow.id, workflowInputOuterTargetHandleId(workflow.id), 'target', 'control')
+          data.onControlHandleMouseDown(workflow.id, workflowInputOuterTargetTokenId(workflow.id), 'target', 'control')
         }
         onMouseDown={() =>
-          data.onControlHandleMouseDown(workflow.id, workflowInputOuterTargetHandleId(workflow.id), 'target', 'control')
+          data.onControlHandleMouseDown(workflow.id, workflowInputOuterTargetTokenId(workflow.id), 'target', 'control')
         }
       />
       <ControlConnectHitbox
         nodeId={workflow.id}
-        handleId={workflowInputOuterTargetHandleId(workflow.id)}
+        handleId={workflowInputOuterTargetTokenId(workflow.id)}
         side="target"
         className="input workflow-shell-outer-input"
         onStart={data.onControlHandleMouseDown}
@@ -8244,22 +8188,22 @@ export function WorkflowContainer({
       <Handle
         type="source"
         position={Position.Right}
-        id={workflowInputInnerSourceHandleId(workflow.id)}
+        id={workflowInputInnerSourceTokenId(workflow.id)}
         className="workflow-control-handle input workflow-shell-inner-input workflow-boundary-source"
         data-nodeid={workflow.id}
-        data-handleid={workflowInputInnerSourceHandleId(workflow.id)}
+        data-handleid={workflowInputInnerSourceTokenId(workflow.id)}
         data-acc-connection-mode="control"
         data-acc-connection-side="source"
         onPointerDown={() =>
-          data.onControlHandleMouseDown(workflow.id, workflowInputInnerSourceHandleId(workflow.id), 'source', 'control')
+          data.onControlHandleMouseDown(workflow.id, workflowInputInnerSourceTokenId(workflow.id), 'source', 'control')
         }
         onMouseDown={() =>
-          data.onControlHandleMouseDown(workflow.id, workflowInputInnerSourceHandleId(workflow.id), 'source', 'control')
+          data.onControlHandleMouseDown(workflow.id, workflowInputInnerSourceTokenId(workflow.id), 'source', 'control')
         }
       />
       <ControlConnectHitbox
         nodeId={workflow.id}
-        handleId={workflowInputInnerSourceHandleId(workflow.id)}
+        handleId={workflowInputInnerSourceTokenId(workflow.id)}
         side="source"
         className="input workflow-shell-inner-input workflow-boundary-source"
         onStart={data.onControlHandleMouseDown}
@@ -8267,22 +8211,22 @@ export function WorkflowContainer({
       <Handle
         type="source"
         position={Position.Right}
-        id={workflowOutputOuterSourceHandleId(workflow.id)}
+        id={workflowOutputOuterSourceTokenId(workflow.id)}
         className="workflow-control-handle output workflow-shell-outer-output"
         data-nodeid={workflow.id}
-        data-handleid={workflowOutputOuterSourceHandleId(workflow.id)}
+        data-handleid={workflowOutputOuterSourceTokenId(workflow.id)}
         data-acc-connection-mode="control"
         data-acc-connection-side="source"
         onPointerDown={() =>
-          data.onControlHandleMouseDown(workflow.id, workflowOutputOuterSourceHandleId(workflow.id), 'source', 'control')
+          data.onControlHandleMouseDown(workflow.id, workflowOutputOuterSourceTokenId(workflow.id), 'source', 'control')
         }
         onMouseDown={() =>
-          data.onControlHandleMouseDown(workflow.id, workflowOutputOuterSourceHandleId(workflow.id), 'source', 'control')
+          data.onControlHandleMouseDown(workflow.id, workflowOutputOuterSourceTokenId(workflow.id), 'source', 'control')
         }
       />
       <ControlConnectHitbox
         nodeId={workflow.id}
-        handleId={workflowOutputOuterSourceHandleId(workflow.id)}
+        handleId={workflowOutputOuterSourceTokenId(workflow.id)}
         side="source"
         className="output workflow-shell-outer-output"
         onStart={data.onControlHandleMouseDown}
@@ -8290,22 +8234,22 @@ export function WorkflowContainer({
       <Handle
         type="target"
         position={Position.Left}
-        id={workflowOutputInnerTargetHandleId(workflow.id)}
+        id={workflowOutputInnerTargetTokenId(workflow.id)}
         className="workflow-control-handle output workflow-shell-inner-output workflow-boundary-target"
         data-nodeid={workflow.id}
-        data-handleid={workflowOutputInnerTargetHandleId(workflow.id)}
+        data-handleid={workflowOutputInnerTargetTokenId(workflow.id)}
         data-acc-connection-mode="control"
         data-acc-connection-side="target"
         onPointerDown={() =>
-          data.onControlHandleMouseDown(workflow.id, workflowOutputInnerTargetHandleId(workflow.id), 'target', 'control')
+          data.onControlHandleMouseDown(workflow.id, workflowOutputInnerTargetTokenId(workflow.id), 'target', 'control')
         }
         onMouseDown={() =>
-          data.onControlHandleMouseDown(workflow.id, workflowOutputInnerTargetHandleId(workflow.id), 'target', 'control')
+          data.onControlHandleMouseDown(workflow.id, workflowOutputInnerTargetTokenId(workflow.id), 'target', 'control')
         }
       />
       <ControlConnectHitbox
         nodeId={workflow.id}
-        handleId={workflowOutputInnerTargetHandleId(workflow.id)}
+        handleId={workflowOutputInnerTargetTokenId(workflow.id)}
         side="target"
         className="output workflow-shell-inner-output workflow-boundary-target"
         onStart={data.onControlHandleMouseDown}
@@ -8356,7 +8300,7 @@ function WorkflowBoundaryPortHandles({
     >
       {visibleInputPorts.map((port, index) => {
         const top = agentDataPortTop(index, visibleInputPorts.length, workflow.size.height);
-        const handleId = portHandleId(workflow.id, 'input', port.id);
+        const handleId = portTokenId(workflow.id, 'input', port.id);
         return (
           <Fragment key={`input-${port.id}`}>
             <Handle
@@ -8406,7 +8350,7 @@ function WorkflowBoundaryPortHandles({
       })}
       {visibleOutputPorts.map((port, index) => {
         const top = agentDataPortTop(index, visibleOutputPorts.length, workflow.size.height);
-        const handleId = portHandleId(workflow.id, 'output', port.id);
+        const handleId = portTokenId(workflow.id, 'output', port.id);
         const tooltip = outputPortTooltip(port);
         return (
           <Fragment key={`output-${port.id}`}>
@@ -8571,12 +8515,12 @@ function HiddenAgentPortHandles({
       {visibleInputPorts.map((portValue, index) => (
         <Handle
           key={`input-${portValue.id}`}
-          id={portHandleId(nodeId, 'input', portValue.id)}
+          id={portTokenId(nodeId, 'input', portValue.id)}
           type="target"
           position={Position.Left}
           className="workflow-port-handle hidden input"
           data-nodeid={nodeId}
-          data-handleid={portHandleId(nodeId, 'input', portValue.id)}
+          data-handleid={portTokenId(nodeId, 'input', portValue.id)}
           data-acc-connection-mode="data"
           data-acc-connection-side="target"
           style={{ top: agentDataPortTop(index, visibleInputPorts.length, nodeHeight) }}
@@ -8585,12 +8529,12 @@ function HiddenAgentPortHandles({
       {visibleOutputPorts.map((portValue, index) => (
         <Handle
           key={`output-${portValue.id}`}
-          id={portHandleId(nodeId, 'output', portValue.id)}
+          id={portTokenId(nodeId, 'output', portValue.id)}
           type="source"
           position={Position.Right}
           className="workflow-port-handle hidden output"
           data-nodeid={nodeId}
-          data-handleid={portHandleId(nodeId, 'output', portValue.id)}
+          data-handleid={portTokenId(nodeId, 'output', portValue.id)}
           data-acc-connection-mode="data"
           data-acc-connection-side="source"
           style={{ top: agentDataPortTop(index, visibleOutputPorts.length, nodeHeight) }}
@@ -8613,7 +8557,7 @@ function AgentToolNode({
       return false;
     }
     const portHandle = target.closest('.workflow-port-handle');
-    const parsed = parsePortHandle(portHandle?.getAttribute('data-handleid'));
+    const parsed = parsePortToken(portHandle?.getAttribute('data-handleid'));
     if (!data.showDataPorts || !parsed || parsed.workflowId !== data.id) {
       return false;
     }
@@ -8668,7 +8612,7 @@ function AgentToolNode({
           return;
         }
         const handle = event.target.closest('.workflow-port-handle');
-        const parsed = parsePortHandle(handle?.getAttribute('data-handleid'));
+        const parsed = parsePortToken(handle?.getAttribute('data-handleid'));
         if (!parsed || parsed.workflowId !== data.id) {
           return;
         }
@@ -8695,46 +8639,46 @@ function AgentToolNode({
       }}
     >
       <Handle
-        id={controlTargetHandleId(data.id)}
+        id={controlTargetTokenId(data.id)}
         type="target"
         position={Position.Left}
         className="workflow-control-handle input agent-control-handle"
         data-nodeid={data.id}
-        data-handleid={controlTargetHandleId(data.id)}
+        data-handleid={controlTargetTokenId(data.id)}
         data-acc-connection-mode="control"
         data-acc-connection-side="target"
         style={{ top: AGENT_CONTROL_HANDLE_TOP }}
-        onPointerDown={() => data.onControlHandleMouseDown(data.id, controlTargetHandleId(data.id), 'target', 'control')}
-        onMouseDown={() => data.onControlHandleMouseDown(data.id, controlTargetHandleId(data.id), 'target', 'control')}
+        onPointerDown={() => data.onControlHandleMouseDown(data.id, controlTargetTokenId(data.id), 'target', 'control')}
+        onMouseDown={() => data.onControlHandleMouseDown(data.id, controlTargetTokenId(data.id), 'target', 'control')}
         title="控制输入：接收运行顺序；是否收到完整输出取决于上游节点的“控制线传递完整输出”开关"
         aria-label="控制输入端口，接收运行顺序和可能的完整输出"
       />
       <ControlConnectHitbox
         nodeId={data.id}
-        handleId={controlTargetHandleId(data.id)}
+        handleId={controlTargetTokenId(data.id)}
         side="target"
         className="input agent-control-hitbox"
         style={{ top: AGENT_CONTROL_HANDLE_TOP }}
         onStart={data.onControlHandleMouseDown}
       />
       <Handle
-        id={controlSourceHandleId(data.id)}
+        id={controlSourceTokenId(data.id)}
         type="source"
         position={Position.Right}
         className="workflow-control-handle output agent-control-handle"
         data-nodeid={data.id}
-        data-handleid={controlSourceHandleId(data.id)}
+        data-handleid={controlSourceTokenId(data.id)}
         data-acc-connection-mode="control"
         data-acc-connection-side="source"
         style={{ top: AGENT_CONTROL_HANDLE_TOP }}
-        onPointerDown={() => data.onControlHandleMouseDown(data.id, controlSourceHandleId(data.id), 'source', 'control')}
-        onMouseDown={() => data.onControlHandleMouseDown(data.id, controlSourceHandleId(data.id), 'source', 'control')}
+        onPointerDown={() => data.onControlHandleMouseDown(data.id, controlSourceTokenId(data.id), 'source', 'control')}
+        onMouseDown={() => data.onControlHandleMouseDown(data.id, controlSourceTokenId(data.id), 'source', 'control')}
         title="控制输出：开启“控制线传递完整输出”时，下游 main input 会收到该节点完整输出"
         aria-label="控制输出端口，连接运行顺序和可能的完整输出"
       />
       <ControlConnectHitbox
         nodeId={data.id}
-        handleId={controlSourceHandleId(data.id)}
+        handleId={controlSourceTokenId(data.id)}
         side="source"
         className="output agent-control-hitbox"
         style={{ top: AGENT_CONTROL_HANDLE_TOP }}
@@ -8754,12 +8698,12 @@ function AgentToolNode({
             return (
               <Fragment key={portValue.id}>
                 <Handle
-                  id={portHandleId(data.id, 'input', portValue.id)}
+                  id={portTokenId(data.id, 'input', portValue.id)}
                   type="target"
                   position={Position.Left}
                   className="workflow-port-handle input"
                   data-nodeid={data.id}
-                  data-handleid={portHandleId(data.id, 'input', portValue.id)}
+                  data-handleid={portTokenId(data.id, 'input', portValue.id)}
                   data-acc-connection-mode="data"
                   data-acc-connection-side="target"
                   style={{ top: portTop }}
@@ -8805,12 +8749,12 @@ function AgentToolNode({
             return (
               <Fragment key={portValue.id}>
                 <Handle
-                  id={portHandleId(data.id, 'output', portValue.id)}
+                  id={portTokenId(data.id, 'output', portValue.id)}
                   type="source"
                   position={Position.Right}
                   className="workflow-port-handle output"
                   data-nodeid={data.id}
-                  data-handleid={portHandleId(data.id, 'output', portValue.id)}
+                  data-handleid={portTokenId(data.id, 'output', portValue.id)}
                   data-acc-connection-mode="data"
                   data-acc-connection-side="source"
                   style={{ top: portTop }}
@@ -14165,7 +14109,7 @@ function canvasEdgeToFlowEdge(
               workflowContainerIds,
               parentWorkflowId,
             )
-          : portHandleId(sourceId, 'output', edge.source.portId),
+          : portTokenId(sourceId, 'output', edge.source.portId),
         targetHandle: targetPortMissing
           ? controlTargetHandleForFlowNode(
               targetId,
@@ -14173,7 +14117,7 @@ function canvasEdgeToFlowEdge(
               workflowContainerIds,
               parentWorkflowId,
             )
-          : portHandleId(targetId, 'input', edge.target.portId),
+          : portTokenId(targetId, 'input', edge.target.portId),
         selected: isSelected,
         markerEnd: { type: MarkerType.ArrowClosed, color: broken ? '#ef4444' : isSelected ? '#16b89e' : '#256f91' },
         className: ['workflow-edge-data', broken ? 'workflow-edge-broken' : ''].filter(Boolean).join(' '),
@@ -14226,9 +14170,9 @@ function controlSourceHandleForFlowNode(
   parentWorkflowId?: string,
 ): string | undefined {
   if (!parentWorkflowId && workflowContainerIds.has(workflowId)) {
-    return workflowOutputOuterSourceHandleId(workflowId);
+    return workflowOutputOuterSourceTokenId(workflowId);
   }
-  return controlSourceHandleId(flowNodeId);
+  return controlSourceTokenId(flowNodeId);
 }
 
 function controlTargetHandleForFlowNode(
@@ -14238,9 +14182,9 @@ function controlTargetHandleForFlowNode(
   parentWorkflowId?: string,
 ): string | undefined {
   if (!parentWorkflowId && workflowContainerIds.has(workflowId)) {
-    return workflowInputOuterTargetHandleId(workflowId);
+    return workflowInputOuterTargetTokenId(workflowId);
   }
-  return controlTargetHandleId(flowNodeId);
+  return controlTargetTokenId(flowNodeId);
 }
 
 function workflowIdForBoundaryMainBinding(edge: WorkflowCanvasEdge): string | null {
@@ -14315,8 +14259,8 @@ function shellBoundaryFlowEdge(
       data: flowEdgeData(address),
       source: sourceId,
       target: targetId,
-      sourceHandle: sourceIsWorkflowInput ? workflowInputInnerSourceHandleId(workflowId) : controlSourceHandleId(sourceId),
-      targetHandle: targetIsWorkflowOutput ? workflowOutputInnerTargetHandleId(workflowId) : controlTargetHandleId(targetId),
+      sourceHandle: sourceIsWorkflowInput ? workflowInputInnerSourceTokenId(workflowId) : controlSourceTokenId(sourceId),
+      targetHandle: targetIsWorkflowOutput ? workflowOutputInnerTargetTokenId(workflowId) : controlTargetTokenId(targetId),
       selected: isSelected,
       markerEnd: controlEdgeMarkerEnd(isSelected, '#f8fafc'),
       className: 'workflow-edge-control workflow-edge-boundary-main',
@@ -14332,8 +14276,8 @@ function shellBoundaryFlowEdge(
     data: flowEdgeData(address),
     source: sourceId,
     target: targetId,
-    sourceHandle: sourceIsWorkflowInput ? workflowInputInnerSourceHandleId(workflowId) : controlSourceHandleId(sourceId),
-    targetHandle: targetIsWorkflowOutput ? workflowOutputInnerTargetHandleId(workflowId) : controlTargetHandleId(targetId),
+    sourceHandle: sourceIsWorkflowInput ? workflowInputInnerSourceTokenId(workflowId) : controlSourceTokenId(sourceId),
+    targetHandle: targetIsWorkflowOutput ? workflowOutputInnerTargetTokenId(workflowId) : controlTargetTokenId(targetId),
     selected: isSelected,
     markerEnd: { type: MarkerType.ArrowClosed, color: isSelected ? '#16b89e' : '#38bdf8' },
     className: 'workflow-edge-data workflow-edge-boundary-main',
@@ -14366,11 +14310,11 @@ function focusedBoundaryControlFlowEdge(
     source: edge.source.workflowId,
     target: edge.target.workflowId,
     sourceHandle: sourceIsWorkflowInput
-      ? workflowInputInnerSourceHandleId(edge.source.workflowId)
-      : controlSourceHandleId(edge.source.workflowId),
+      ? workflowInputInnerSourceTokenId(edge.source.workflowId)
+      : controlSourceTokenId(edge.source.workflowId),
     targetHandle: targetIsWorkflowOutput
-      ? workflowOutputInnerTargetHandleId(edge.target.workflowId)
-      : controlTargetHandleId(edge.target.workflowId),
+      ? workflowOutputInnerTargetTokenId(edge.target.workflowId)
+      : controlTargetTokenId(edge.target.workflowId),
     selected: isSelected,
     markerEnd: controlEdgeMarkerEnd(isSelected, connectionMode === 'control' ? '#f8fafc' : '#94a3b8'),
     className: 'workflow-edge-control workflow-edge-boundary-main',
@@ -14384,20 +14328,6 @@ function focusedBoundaryControlFlowEdge(
 function isImplicitMainDataEdge(edge: WorkflowCanvasEdge): boolean {
   const projectionOnlyEdge = edge as WorkflowCanvasEdge & { implicitMainDataEdge?: boolean };
   return edge.kind === 'data' && projectionOnlyEdge.implicitMainDataEdge === true;
-}
-
-function resolveScopedConnection(
-  canvas: WorkspaceCanvasModel,
-  connection: Connection,
-  connectionMode: ConnectionMode,
-): ConnectionResolution {
-  if (!connection.source || !connection.target || connection.source === connection.target) {
-    return { accepted: false, reason: '连接两端必须是不同节点。' };
-  }
-  if (connectionMode === 'data') {
-    return resolveDataConnection(canvas, connection);
-  }
-  return resolveControlConnection(canvas, connection);
 }
 
 function recordConnectionTrace(event: string, detail: Record<string, unknown> = {}) {
@@ -14418,242 +14348,6 @@ function recordConnectionTrace(event: string, detail: Record<string, unknown> = 
   if (window.localStorage?.getItem('acc.connection.trace') === '1') {
     console.info('[acc-connection]', event, detail);
   }
-}
-
-function scopedEdgeFromConnection(
-  canvas: WorkspaceCanvasModel,
-  connection: Connection,
-  connectionMode: ConnectionMode,
-): ScopedEdgeResult | null {
-  const resolved = resolveScopedConnection(canvas, connection, connectionMode);
-  if (!resolved.accepted) {
-    return null;
-  }
-  return resolved;
-}
-
-function scopedControlEdge(
-  canvas: WorkspaceCanvasModel,
-  source: FlowEndpoint,
-  target: FlowEndpoint,
-  handles: ConnectionHandles = { sourceHandle: null, targetHandle: null },
-): ScopedEdgeResult | null {
-  const boundaryDataEdge = scopedBoundaryDataEdge(canvas, source, target, 'main', 'main', handles);
-  if (boundaryDataEdge) {
-    return boundaryDataEdge;
-  }
-  if (source.internal && target.internal && source.workflowId === target.workflowId) {
-    return {
-      scopeWorkflowId: source.workflowId,
-      semantic: 'internal_control',
-      edge: controlEdgeWithId(
-        uniqueEdgeIdForScope(canvas, source.workflowId, 'control', source.nodeId, target.nodeId),
-        source.nodeId,
-        target.nodeId,
-      ),
-    };
-  }
-  if (
-    !source.internal &&
-    target.internal &&
-    target.workflowId &&
-    source.nodeId === target.workflowId &&
-    isWorkflowInputInnerSourceHandle(target.workflowId, handles.sourceHandle)
-  ) {
-    const boundaryId = workflowInputBoundaryId(target.workflowId);
-    return {
-      scopeWorkflowId: target.workflowId,
-      semantic: 'workflow_input_main_binding',
-      edge: controlEdgeWithId(
-        uniqueEdgeIdForScope(canvas, target.workflowId, 'control', boundaryId, target.nodeId),
-        boundaryId,
-        target.nodeId,
-      ),
-    };
-  }
-  if (
-    source.internal &&
-    source.workflowId &&
-    !target.internal &&
-    target.nodeId === source.workflowId &&
-    isWorkflowOutputInnerTargetHandle(source.workflowId, handles.targetHandle)
-  ) {
-    const boundaryId = workflowOutputBoundaryId(source.workflowId);
-    return {
-      scopeWorkflowId: source.workflowId,
-      semantic: 'workflow_output_main_binding',
-      edge: controlEdgeWithId(
-        uniqueEdgeIdForScope(canvas, source.workflowId, 'control', source.nodeId, boundaryId),
-        source.nodeId,
-        boundaryId,
-      ),
-    };
-  }
-  if (!source.internal && !target.internal) {
-    return {
-      scopeWorkflowId: null,
-      semantic: 'root_control_main',
-      edge: controlEdgeWithId(
-        uniqueEdgeIdForScope(canvas, null, 'control', source.nodeId, target.nodeId),
-        source.nodeId,
-        target.nodeId,
-      ),
-    };
-  }
-  return null;
-}
-
-function resolveControlConnection(canvas: WorkspaceCanvasModel, connection: Connection): ConnectionResolution {
-  const source = describeEndpoint(canvas, connection.source || '', connection.sourceHandle, 'source', 'control');
-  const target = describeEndpoint(canvas, connection.target || '', connection.targetHandle, 'target', 'control');
-  if (!source || !target) {
-    return { accepted: false, reason: '无法识别这条控制线的端口方向' };
-  }
-  const transition = controlTransitionForEndpoints(canvas, source, target);
-  if (!transition || !transition.accepted) {
-    return { accepted: false, reason: controlConnectionRejectionReason(source, target) };
-  }
-  const boundaryMainBinding =
-    transition.edge.kind === 'control' &&
-    transition.scopeWorkflowId !== null &&
-    isWorkflowBoundaryMainBinding(transition.scopeWorkflowId, transition.edge);
-  if (
-    transition.edge.kind === 'control' &&
-    !boundaryMainBinding &&
-    wouldCreateControlCycle(canvas, transition.scopeWorkflowId, transition.edge)
-  ) {
-    return { accepted: false, reason: '这条控制线会形成循环' };
-  }
-  if (transition.edge.kind === 'control' && !boundaryMainBinding) {
-    const slotIssue = controlSlotLimitIssue(canvas, transition.scopeWorkflowId, transition.edge);
-    if (slotIssue) {
-      return { accepted: false, reason: slotIssue };
-    }
-  }
-  return transition;
-}
-
-function resolveDataConnection(canvas: WorkspaceCanvasModel, connection: Connection): ConnectionResolution {
-  const source = describeEndpoint(canvas, connection.source || '', connection.sourceHandle, 'source', 'data');
-  const target = describeEndpoint(canvas, connection.target || '', connection.targetHandle, 'target', 'data');
-  if (!source || !target || !endpointCanSource(source) || !endpointCanTarget(target)) {
-    return { accepted: false, reason: 'Data Edge 必须从 output port 连接到 input port' };
-  }
-  const sourceWorkflow = flowEndpointForCanvas(canvas, connection.source || '');
-  const targetWorkflow = flowEndpointForCanvas(canvas, connection.target || '');
-  const dataEdge = scopedDataEdge(canvas, sourceWorkflow, targetWorkflow, source.portId, target.portId, {
-    sourceHandle: connection.sourceHandle,
-    targetHandle: connection.targetHandle,
-  });
-  if (!dataEdge) {
-    return { accepted: false, reason: 'Data Edge 必须连接同一层级内的节点' };
-  }
-  return {
-    accepted: true,
-    edge: dataEdge.edge,
-    scopeWorkflowId: dataEdge.scopeWorkflowId,
-    semantic: dataEdge.semantic,
-  };
-}
-
-function controlConnectionRejectionReason(source: EndpointDescriptor, target: EndpointDescriptor): string {
-  if (
-    source.role === 'workflow_inner_input' ||
-    source.role === 'workflow_inner_output' ||
-    target.role === 'workflow_inner_input' ||
-    target.role === 'workflow_inner_output'
-  ) {
-    return 'Workflow 内侧端口只能连接本 Workflow 内部节点';
-  }
-  if (
-    source.role === 'workflow_outer_input' ||
-    source.role === 'workflow_outer_output' ||
-    target.role === 'workflow_outer_input' ||
-    target.role === 'workflow_outer_output'
-  ) {
-    return 'Workflow 外侧端口只能连接父级画布节点';
-  }
-  return '控制线只能从输出端口连接到输入端口';
-}
-
-function connectionFromPendingEndpoint(
-  pending: PendingCanvasConnection,
-  target: DomConnectionEndpoint | null,
-): Connection | null {
-  if (!target || (pending.nodeId === target.nodeId && pending.handleId === target.handleId)) {
-    return null;
-  }
-  const pendingCanSource = pending.endpoint ? endpointCanSource(pending.endpoint) : pending.side === 'source';
-  const pendingCanTarget = pending.endpoint ? endpointCanTarget(pending.endpoint) : pending.side === 'target';
-  if (pendingCanSource && target.side === 'target') {
-    return {
-      source: pending.nodeId,
-      sourceHandle: pending.handleId,
-      target: target.nodeId,
-      targetHandle: target.handleId,
-    };
-  }
-  if (pendingCanTarget && target.side === 'source') {
-    return {
-      source: target.nodeId,
-      sourceHandle: target.handleId,
-      target: pending.nodeId,
-      targetHandle: pending.handleId,
-    };
-  }
-  return null;
-}
-
-function connectionCandidatesFromPendingEndpoint(
-  pending: PendingCanvasConnection | null,
-  connection: Connection,
-): Connection[] {
-  if (!pending?.endpoint) {
-    return [];
-  }
-  const candidates: Connection[] = [];
-  const seen = new Set<string>();
-  const addCandidate = (endpoint: DomConnectionEndpoint | null) => {
-    const candidate = connectionFromPendingEndpoint(pending, endpoint);
-    if (!candidate) {
-      return;
-    }
-    const key = [
-      candidate.source,
-      candidate.sourceHandle || '',
-      candidate.target,
-      candidate.targetHandle || '',
-    ].join('/');
-    if (seen.has(key)) {
-      return;
-    }
-    seen.add(key);
-    candidates.push(candidate);
-  };
-  const endpoints: Array<{ nodeId?: string | null; handleId?: string | null }> = [
-    { nodeId: connection.source, handleId: connection.sourceHandle },
-    { nodeId: connection.target, handleId: connection.targetHandle },
-  ];
-  for (const endpoint of endpoints) {
-    if (!endpoint.nodeId || (endpoint.nodeId === pending.nodeId && (endpoint.handleId || null) === pending.handleId)) {
-      continue;
-    }
-    addCandidate({ nodeId: endpoint.nodeId, handleId: endpoint.handleId || null, side: 'target' });
-    addCandidate({ nodeId: endpoint.nodeId, handleId: endpoint.handleId || null, side: 'source' });
-  }
-  return candidates;
-}
-
-function reverseConnection(connection: Connection): Connection | null {
-  if (!connection.source || !connection.target || connection.source === connection.target) {
-    return null;
-  }
-  return {
-    source: connection.target,
-    sourceHandle: connection.targetHandle || null,
-    target: connection.source,
-    targetHandle: connection.sourceHandle || null,
-  };
 }
 
 function domConnectionEndpointAtPoint(
@@ -14855,400 +14549,6 @@ function queueControlHandleConnectionStart(
   }
   onControlHandleMouseDown(nodeId, handleId, side, mode);
   return true;
-}
-
-function controlTransitionForEndpoints(
-  canvas: WorkspaceCanvasModel,
-  source: EndpointDescriptor,
-  target: EndpointDescriptor,
-): ConnectionResolution | null {
-  if (source.nodeId === target.nodeId && source.workflowId === target.workflowId) {
-    return null;
-  }
-  if (
-    (source.role === 'root_executable_output' || source.role === 'workflow_outer_output') &&
-    (target.role === 'root_executable_input' || target.role === 'workflow_outer_input')
-  ) {
-    const semantic: ScopedEdgeSemantic =
-      source.role === 'workflow_outer_output' && target.role === 'workflow_outer_input'
-        ? 'root_workflow_to_workflow_control'
-        : source.role === 'workflow_outer_output'
-          ? 'root_control_main_from_workflow'
-          : target.role === 'workflow_outer_input'
-            ? 'root_control_main_to_workflow'
-            : 'root_control_main';
-    return {
-      accepted: true,
-      scopeWorkflowId: null,
-      semantic,
-      sourceHandle: source.role === 'workflow_outer_output' ? workflowOutputOuterSourceHandleId(source.nodeId) : undefined,
-      targetHandle: target.role === 'workflow_outer_input' ? workflowInputOuterTargetHandleId(target.nodeId) : undefined,
-      edge: controlEdgeWithId(
-        uniqueEdgeIdForScope(canvas, null, 'control', source.nodeId, target.nodeId),
-        source.nodeId,
-        target.nodeId,
-      ),
-    };
-  }
-  if (
-    source.role === 'workflow_inner_input' &&
-    target.role === 'internal_executable_input' &&
-    source.nodeId === target.workflowId
-  ) {
-    if ((source.portId || 'main') !== 'main' || (target.portId || 'main') !== 'main') {
-      return null;
-    }
-    const boundaryId = workflowInputBoundaryId(source.nodeId);
-    return {
-      accepted: true,
-      scopeWorkflowId: source.nodeId,
-      semantic: 'workflow_input_main_binding',
-      sourceHandle: workflowInputInnerSourceHandleId(source.nodeId),
-      edge: controlEdgeWithId(
-        uniqueEdgeIdForScope(canvas, source.nodeId, 'control', boundaryId, target.nodeId),
-        boundaryId,
-        target.nodeId,
-      ),
-    };
-  }
-  if (
-    source.role === 'internal_executable_output' &&
-    target.role === 'workflow_inner_output' &&
-    source.workflowId === target.nodeId
-  ) {
-    if ((source.portId || 'main') !== 'main' || (target.portId || 'main') !== 'main') {
-      return null;
-    }
-    const boundaryId = workflowOutputBoundaryId(target.nodeId);
-    return {
-      accepted: true,
-      scopeWorkflowId: target.nodeId,
-      semantic: 'workflow_output_main_binding',
-      targetHandle: workflowOutputInnerTargetHandleId(target.nodeId),
-      edge: controlEdgeWithId(
-        uniqueEdgeIdForScope(canvas, target.nodeId, 'control', source.nodeId, boundaryId),
-        source.nodeId,
-        boundaryId,
-      ),
-    };
-  }
-  if (
-    source.role === 'internal_executable_output' &&
-    target.role === 'internal_executable_input' &&
-    source.workflowId === target.workflowId &&
-    source.workflowId
-  ) {
-    return {
-      accepted: true,
-      scopeWorkflowId: source.workflowId,
-      semantic: 'internal_control',
-      edge: controlEdgeWithId(
-        uniqueEdgeIdForScope(canvas, source.workflowId, 'control', source.nodeId, target.nodeId),
-        source.nodeId,
-        target.nodeId,
-      ),
-    };
-  }
-  if (source.role === 'focus_boundary_input_output' && target.role === 'internal_executable_input') {
-    const workflowId = source.workflowId;
-    if (!workflowId || workflowId !== target.workflowId) {
-      return null;
-    }
-    if ((source.portId || 'main') !== 'main' || (target.portId || 'main') !== 'main') {
-      return null;
-    }
-    const boundaryId = workflowInputBoundaryId(workflowId);
-    return {
-      accepted: true,
-      scopeWorkflowId: workflowId,
-      semantic: 'workflow_input_main_binding',
-      edge: controlEdgeWithId(
-        uniqueEdgeIdForScope(canvas, workflowId, 'control', boundaryId, target.nodeId),
-        boundaryId,
-        target.nodeId,
-      ),
-    };
-  }
-  if (source.role === 'internal_executable_output' && target.role === 'focus_boundary_output_input') {
-    const workflowId = target.workflowId;
-    if (!workflowId || workflowId !== source.workflowId) {
-      return null;
-    }
-    if ((source.portId || 'main') !== 'main' || (target.portId || 'main') !== 'main') {
-      return null;
-    }
-    const boundaryId = workflowOutputBoundaryId(workflowId);
-    return {
-      accepted: true,
-      scopeWorkflowId: workflowId,
-      semantic: 'workflow_output_main_binding',
-      edge: controlEdgeWithId(
-        uniqueEdgeIdForScope(canvas, workflowId, 'control', source.nodeId, boundaryId),
-        source.nodeId,
-        boundaryId,
-      ),
-    };
-  }
-  return null;
-}
-
-function describeEndpoint(
-  canvas: WorkspaceCanvasModel,
-  flowNodeId: string,
-  handleId: string | null | undefined,
-  side: EndpointSide,
-  mode: ConnectionMode,
-): EndpointDescriptor | null {
-  const view = canvas.layout === 'workflow-focus' ? 'workflow-focus' : 'root-shell';
-  const endpointSide = controlHandleSide(flowNodeId, handleId) || side;
-  const portHandle = parsePortHandle(handleId);
-  const portId = portHandle?.portId || 'main';
-  const internal = parseInternalFlowNodeId(flowNodeId);
-  if (internal) {
-    return {
-      view,
-      role: endpointSide === 'source' ? 'internal_executable_output' : 'internal_executable_input',
-      nodeId: internal.nodeId,
-      workflowId: internal.workflowId,
-      portId,
-      handleId: handleId || null,
-    };
-  }
-  const boundaryKind = workflowBoundaryKind(flowNodeId);
-  if (view === 'workflow-focus' && boundaryKind) {
-    const workflowId = workflowIdFromBoundaryId(flowNodeId);
-    if (!workflowId) {
-      return null;
-    }
-    if (boundaryKind === 'workflow_input' && endpointSide === 'source') {
-      return { view, role: 'focus_boundary_input_output', nodeId: flowNodeId, workflowId, portId, handleId: handleId || null };
-    }
-    if (boundaryKind === 'workflow_output' && endpointSide === 'target') {
-      return { view, role: 'focus_boundary_output_input', nodeId: flowNodeId, workflowId, portId, handleId: handleId || null };
-    }
-    return null;
-  }
-  if (view === 'workflow-focus') {
-    const focusedWorkflowId = canvas.focusedWorkflowId;
-    const focusedNode = canvas.workflows.find((workflow) => workflow.id === flowNodeId && !workflow.boundaryKind);
-    if (focusedWorkflowId && focusedNode) {
-      return {
-        view,
-        role: endpointSide === 'source' ? 'internal_executable_output' : 'internal_executable_input',
-        nodeId: flowNodeId,
-        workflowId: focusedWorkflowId,
-        portId,
-        handleId: handleId || null,
-      };
-    }
-  }
-  const workflow = canvas.workflows.find((item) => item.id === flowNodeId);
-  if (!workflow || workflow.boundaryKind) {
-    return null;
-  }
-  if (workflow.sourceKind && workflow.sourceKind !== 'workflow') {
-    return {
-      view,
-      role: endpointSide === 'source' ? 'root_executable_output' : 'root_executable_input',
-      nodeId: flowNodeId,
-      workflowId: null,
-      portId,
-      handleId: handleId || null,
-    };
-  }
-  if (endpointSide === 'source') {
-    if (handleId === workflowOutputOuterSourceHandleId(flowNodeId)) {
-      return { view, role: 'workflow_outer_output', nodeId: flowNodeId, workflowId: null, portId, handleId };
-    }
-    if (isWorkflowInputInnerSourceHandle(flowNodeId, handleId)) {
-      return { view, role: 'workflow_inner_input', nodeId: flowNodeId, workflowId: flowNodeId, portId, handleId: handleId || null };
-    }
-    return mode === 'data' && portHandle?.direction === 'output'
-      ? { view, role: 'root_executable_output', nodeId: flowNodeId, workflowId: null, portId, handleId: handleId || null }
-      : null;
-  }
-  if (handleId === workflowInputOuterTargetHandleId(flowNodeId)) {
-    return { view, role: 'workflow_outer_input', nodeId: flowNodeId, workflowId: null, portId, handleId };
-  }
-  if (isWorkflowOutputInnerTargetHandle(flowNodeId, handleId)) {
-    return { view, role: 'workflow_inner_output', nodeId: flowNodeId, workflowId: flowNodeId, portId, handleId: handleId || null };
-  }
-  return mode === 'data' && portHandle?.direction === 'input'
-    ? { view, role: 'root_executable_input', nodeId: flowNodeId, workflowId: null, portId, handleId: handleId || null }
-    : null;
-}
-
-function endpointCanSource(endpoint: EndpointDescriptor): boolean {
-  return endpoint.role.endsWith('_output') || endpoint.role === 'workflow_inner_input';
-}
-
-function endpointCanTarget(endpoint: EndpointDescriptor): boolean {
-  return endpoint.role.endsWith('_input') || endpoint.role === 'workflow_inner_output';
-}
-
-function wouldCreateControlCycle(
-  canvas: WorkspaceCanvasModel,
-  scopeWorkflowId: string | null,
-  edge: Extract<WorkflowCanvasEdge, { kind: 'control' }>,
-): boolean {
-  const edges = dataConnectEdges(canvas, scopeWorkflowId).filter(
-    (candidate): candidate is Extract<WorkflowCanvasEdge, { kind: 'control' }> => candidate.kind === 'control',
-  );
-  const adjacency = new Map<string, string[]>();
-  for (const candidate of edges) {
-    const list = adjacency.get(candidate.source.workflowId) || [];
-    list.push(candidate.target.workflowId);
-    adjacency.set(candidate.source.workflowId, list);
-  }
-  const stack = [edge.target.workflowId];
-  const visited = new Set<string>();
-  while (stack.length > 0) {
-    const nodeId = stack.pop();
-    if (!nodeId || visited.has(nodeId)) {
-      continue;
-    }
-    if (nodeId === edge.source.workflowId) {
-      return true;
-    }
-    visited.add(nodeId);
-    stack.push(...(adjacency.get(nodeId) || []));
-  }
-  return false;
-}
-
-function scopedDataEdge(
-  canvas: WorkspaceCanvasModel,
-  source: FlowEndpoint,
-  target: FlowEndpoint,
-  sourcePortId: string,
-  targetPortId: string,
-  handles: ConnectionHandles = { sourceHandle: null, targetHandle: null },
-): ScopedEdgeResult | null {
-  const boundaryDataEdge = scopedBoundaryDataEdge(
-    canvas,
-    source,
-    target,
-    sourcePortId,
-    targetPortId,
-    handles,
-  );
-  if (boundaryDataEdge) {
-    return boundaryDataEdge;
-  }
-  if (source.internal && target.internal && source.workflowId === target.workflowId) {
-    return {
-      scopeWorkflowId: source.workflowId,
-      semantic: 'internal_data',
-      edge: dataEdgeWithId(
-        uniqueEdgeIdForScope(canvas, source.workflowId, 'data', source.nodeId, target.nodeId),
-        source.nodeId,
-        sourcePortId,
-        target.nodeId,
-        targetPortId,
-      ),
-    };
-  }
-  if (!source.internal && !target.internal) {
-    return {
-      scopeWorkflowId: null,
-      semantic: 'root_data',
-      edge: dataEdgeWithId(
-        uniqueEdgeIdForScope(canvas, null, 'data', source.nodeId, target.nodeId),
-        source.nodeId,
-        sourcePortId,
-        target.nodeId,
-        targetPortId,
-      ),
-    };
-  }
-  return null;
-}
-
-function scopedBoundaryDataEdge(
-  canvas: WorkspaceCanvasModel,
-  source: FlowEndpoint,
-  target: FlowEndpoint,
-  sourcePortId: string,
-  targetPortId: string,
-  handles: ConnectionHandles = { sourceHandle: null, targetHandle: null },
-): ScopedEdgeResult | null {
-  const sourceBoundary = workflowBoundaryKind(source.nodeId);
-  const targetBoundary = workflowBoundaryKind(target.nodeId);
-  if (sourceBoundary === 'workflow_input' && target.internal) {
-    const scopeWorkflowId = workflowIdFromBoundaryId(source.nodeId);
-    if (!scopeWorkflowId || target.workflowId !== scopeWorkflowId) {
-      return null;
-    }
-    return {
-      scopeWorkflowId,
-      semantic: 'workflow_input_main_binding',
-      edge: dataEdgeWithId(
-        uniqueEdgeIdForScope(canvas, scopeWorkflowId, 'data', source.nodeId, target.nodeId),
-        source.nodeId,
-        sourcePortId,
-        target.nodeId,
-        targetPortId,
-      ),
-    };
-  }
-  if (source.internal && targetBoundary === 'workflow_output') {
-    const scopeWorkflowId = workflowIdFromBoundaryId(target.nodeId);
-    if (!scopeWorkflowId || source.workflowId !== scopeWorkflowId) {
-      return null;
-    }
-    return {
-      scopeWorkflowId,
-      semantic: 'workflow_output_main_binding',
-      edge: dataEdgeWithId(
-        uniqueEdgeIdForScope(canvas, scopeWorkflowId, 'data', source.nodeId, target.nodeId),
-        source.nodeId,
-        sourcePortId,
-        target.nodeId,
-        targetPortId,
-      ),
-    };
-  }
-  if (
-    !source.internal &&
-    target.internal &&
-    source.nodeId === target.workflowId &&
-    target.workflowId &&
-    isWorkflowInputInnerSourceHandle(target.workflowId, handles.sourceHandle)
-  ) {
-    const boundaryId = workflowInputBoundaryId(target.workflowId);
-    return {
-      scopeWorkflowId: target.workflowId,
-      semantic: 'workflow_input_main_binding',
-      edge: dataEdgeWithId(
-        uniqueEdgeIdForScope(canvas, target.workflowId, 'data', boundaryId, target.nodeId),
-        boundaryId,
-        sourcePortId,
-        target.nodeId,
-        targetPortId,
-      ),
-    };
-  }
-  if (
-    source.internal &&
-    !target.internal &&
-    target.nodeId === source.workflowId &&
-    source.workflowId &&
-    isWorkflowOutputInnerTargetHandle(source.workflowId, handles.targetHandle)
-  ) {
-    const boundaryId = workflowOutputBoundaryId(source.workflowId);
-    return {
-      scopeWorkflowId: source.workflowId,
-      semantic: 'workflow_output_main_binding',
-      edge: dataEdgeWithId(
-        uniqueEdgeIdForScope(canvas, source.workflowId, 'data', source.nodeId, boundaryId),
-        source.nodeId,
-        sourcePortId,
-        boundaryId,
-        targetPortId,
-      ),
-    };
-  }
-  return null;
 }
 
 function graphToWorkspaceCanvas(
@@ -17383,72 +16683,6 @@ function portViewToGraphPort(portView: WorkflowPortView): WorkflowPort {
   };
 }
 
-function portHandleId(workflowId: string, direction: PortDirection, portId: string): string {
-  return `${workflowId}:${direction}:${encodeURIComponent(portId)}`;
-}
-
-function controlSourceHandleId(flowNodeId: string): string {
-  return `${flowNodeId}:control:source`;
-}
-
-function controlTargetHandleId(flowNodeId: string): string {
-  return `${flowNodeId}:control:target`;
-}
-
-function controlHandleSide(flowNodeId: string, handleId: string | null | undefined): EndpointSide | null {
-  if (handleId === controlSourceHandleId(flowNodeId)) {
-    return 'source';
-  }
-  if (handleId === controlTargetHandleId(flowNodeId)) {
-    return 'target';
-  }
-  return null;
-}
-
-function workflowInputOuterTargetHandleId(workflowId: string): string {
-  return `${workflowId}:workflow-input-outer-target`;
-}
-
-function workflowInputInnerSourceHandleId(workflowId: string): string {
-  return `${workflowId}:workflow-input-inner-source`;
-}
-
-function workflowOutputInnerTargetHandleId(workflowId: string): string {
-  return `${workflowId}:workflow-output-inner-target`;
-}
-
-function workflowOutputOuterSourceHandleId(workflowId: string): string {
-  return `${workflowId}:workflow-output-outer-source`;
-}
-
-function isWorkflowInputInnerSourceHandle(workflowId: string, handle: string | null | undefined): boolean {
-  return handle === workflowInputInnerSourceHandleId(workflowId) || handle === `${workflowId}:workflow-input-source`;
-}
-
-function isWorkflowOutputInnerTargetHandle(workflowId: string, handle: string | null | undefined): boolean {
-  return handle === workflowOutputInnerTargetHandleId(workflowId) || handle === `${workflowId}:workflow-output-target`;
-}
-
-function parsePortHandle(handle: string | null | undefined):
-  | { workflowId: string; direction: PortDirection; portId: string }
-  | null {
-  if (!handle) {
-    return null;
-  }
-  const [workflowId, direction, ...portParts] = handle.split(':');
-  const encodedPortId = portParts.join(':');
-  let portId = '';
-  try {
-    portId = encodedPortId ? decodeURIComponent(encodedPortId) : '';
-  } catch {
-    return null;
-  }
-  if (!workflowId || (direction !== 'input' && direction !== 'output') || !portId) {
-    return null;
-  }
-  return { workflowId, direction, portId };
-}
-
 function uniqueEdgeId(
   canvas: WorkspaceCanvasModel,
   kind: 'data' | 'control',
@@ -17524,106 +16758,6 @@ function addEdgeWithControlDependency(
     edgeToStore.target.workflowId,
   );
   return { ...canvas, edges: [...edges, control] };
-}
-
-function commitResolvedConnection(
-  canvas: WorkspaceCanvasModel,
-  resolved: Extract<ConnectionResolution, { accepted: true }>,
-): CommitConnectionResult {
-  const { edge, scopeWorkflowId } = resolved;
-  if (edge.kind === 'data') {
-    const result = createDataEdgeCommand(canvas, {
-      scopeWorkflowId,
-      sourceNodeId: edge.source.workflowId,
-      sourcePortId: edge.source.portId,
-      targetNodeId: edge.target.workflowId,
-      targetPortId: edge.target.portId,
-      materialization: edge.materialization,
-    });
-    return { canvas: result.canvas, edge: result.edge };
-  }
-  if (scopeWorkflowId) {
-    const workflow = canvas.workflows.find((item) => item.id === scopeWorkflowId);
-    const existing = workflow?.internalEdges.find((item) => canvasEdgesAreEquivalent(item, edge));
-    const edgeToStore = existing || edge;
-    return {
-      edge: edgeToStore,
-      canvas: {
-        ...canvas,
-        workflows: canvas.workflows.map((item) =>
-          item.id === scopeWorkflowId
-            ? {
-                ...item,
-                internalEdges: [
-                  ...item.internalEdges.filter(
-                    (candidate) =>
-                      candidate.id !== edgeToStore.id && !canvasEdgesAreEquivalent(candidate, edgeToStore),
-                  ),
-                  edgeToStore,
-                ],
-              }
-            : item,
-        ),
-      },
-    };
-  }
-  const existing = canvas.edges.find((item) => canvasEdgesAreEquivalent(item, edge));
-  const edgeToStore = existing || edge;
-  return {
-    edge: edgeToStore,
-    canvas: {
-      ...canvas,
-      edges: [
-        ...canvas.edges.filter(
-          (candidate) => candidate.id !== edgeToStore.id && !canvasEdgesAreEquivalent(candidate, edgeToStore),
-        ),
-        edgeToStore,
-      ],
-    },
-  };
-}
-
-type CommitConnectionAttempt =
-  | { ok: true; result: CommitConnectionResult }
-  | { ok: false; message: string };
-
-function tryCommitResolvedConnection(
-  canvas: WorkspaceCanvasModel,
-  resolved: Extract<ConnectionResolution, { accepted: true }>,
-): CommitConnectionAttempt {
-  try {
-    return { ok: true, result: commitResolvedConnection(canvas, resolved) };
-  } catch (error) {
-    return { ok: false, message: connectionCommitErrorMessage(error) };
-  }
-}
-
-function connectionCommitErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : '连接创建失败';
-}
-
-function controlSlotLimitIssue(
-  canvas: WorkspaceCanvasModel,
-  scopeWorkflowId: string | null,
-  edge: Extract<WorkflowCanvasEdge, { kind: 'control' }>,
-): string | null {
-  const edges =
-    scopeWorkflowId === null
-      ? canvas.edges
-      : canvas.workflows.find((workflow) => workflow.id === scopeWorkflowId)?.internalEdges || [];
-  const controlEdges = edges.filter((item): item is Extract<WorkflowCanvasEdge, { kind: 'control' }> => item.kind === 'control');
-  if (controlEdges.some((item) => canvasEdgesAreEquivalent(item, edge))) {
-    return null;
-  }
-  const outgoing = controlEdges.filter((item) => item.source.workflowId === edge.source.workflowId).length;
-  if (outgoing >= CONTROL_SLOT_LIMIT) {
-    return `控制线输出 slot 已满，当前节点最多支持 ${CONTROL_SLOT_LIMIT} 个输出`;
-  }
-  const incoming = controlEdges.filter((item) => item.target.workflowId === edge.target.workflowId).length;
-  if (incoming >= CONTROL_SLOT_LIMIT) {
-    return `控制线输入 slot 已满，当前节点最多支持 ${CONTROL_SLOT_LIMIT} 个输入`;
-  }
-  return null;
 }
 
 function normalizeCanvasEdges(canvas: WorkspaceCanvasModel): WorkspaceCanvasModel {
@@ -17802,30 +16936,6 @@ function addInputPortToDataConnectNode(
   portId: string,
 ): WorkspaceCanvasModel {
   return addPortToDataConnectNode(canvas, scopeWorkflowId, nodeId, 'input', portId);
-}
-
-function workflowBoundaryKind(nodeId: string): WorkflowContainerModel['boundaryKind'] | null {
-  if (nodeId.endsWith('__workflow_inputs')) {
-    return 'workflow_input';
-  }
-  if (nodeId.endsWith('__workflow_outputs')) {
-    return 'workflow_output';
-  }
-  return null;
-}
-
-function isWorkflowOutputBoundaryId(nodeId: string): boolean {
-  return workflowBoundaryKind(nodeId) === 'workflow_output';
-}
-
-function workflowIdFromBoundaryId(nodeId: string): string | null {
-  if (nodeId.endsWith('__workflow_inputs')) {
-    return nodeId.slice(0, -'__workflow_inputs'.length);
-  }
-  if (nodeId.endsWith('__workflow_outputs')) {
-    return nodeId.slice(0, -'__workflow_outputs'.length);
-  }
-  return null;
 }
 
 function internalEdgeEndpointToFlowId(workflowId: string, nodeId: string): string {
@@ -18823,7 +17933,7 @@ function edgeFromPendingConnection(
   pending: PendingCanvasConnection,
   newNodeId: string,
 ): WorkflowCanvasEdge | null {
-  const sourceHandle = parsePortHandle(pending.handleId);
+  const sourceHandle = parsePortToken(pending.handleId);
   if (pending.mode === 'control') {
     const sourceNodeId = sourceHandle?.workflowId || pending.nodeId;
     if (!sourceNodeId || isWorkflowBoundaryId(sourceNodeId) || isWorkflowBoundaryId(newNodeId)) {
@@ -19447,13 +18557,13 @@ function schemaFieldFromValue(name: string, value: unknown): SchemaFieldCard {
   if (!isPlainRecord(value)) {
     return {
       name,
-      type: typeof value === 'string' ? value : '鏁版嵁',
+      type: typeof value === 'string' ? value : '数据',
       required: false,
       description: '',
     };
   }
   const nestedSchema = isPlainRecord(value.schema) ? value.schema : undefined;
-  const typeValue = value.type || nestedSchema?.type || value.kind || value.format || '鏁版嵁';
+  const typeValue = value.type || nestedSchema?.type || value.kind || value.format || '数据';
   const description = value.description || value.label || nestedSchema?.description || '';
   const example = value.example ?? value.default ?? nestedSchema?.example ?? nestedSchema?.default;
   return {
