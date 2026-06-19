@@ -691,7 +691,7 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 
 ## PLAN_08 Store Ownership
 
-Status: in progress
+Status: complete
 
 ### Scope Completed So Far
 
@@ -708,6 +708,9 @@ Status: in progress
 - Kept both stores pure: no API calls, no EventSource, no ReactFlow, and no `WorkflowViewer` dependency.
 - Rewired `WorkflowViewer.tsx` run projections, node live logs, live events, and runtime config to consume `runStore` instead of local React state.
 - Rewired `useWorkflowBindings(...)` to store binding lookup state in `runStore.workflowBindings` while keeping binding API calls inside the hook layer.
+- Rewired `WorkflowViewer.tsx` assistant input, transcript, proposal, session identity, pending turn, stream events, validation, required actions, GraphOps review, busy flag, selected authoring agent, authoring agents list, and apply undo state to consume `assistantStore`.
+- Kept assistant hooks unchanged at the effect boundary by adapting their existing setter callbacks to per-task store actions inside `WorkflowViewer.tsx`.
+- `WorkflowViewer.tsx` no longer has local `useState` owner declarations for task/canvas/selection/focus, run projections/logs/events/runtime config, workflow bindings, or assistant session/proposal/review state.
 
 ### Added Tests
 
@@ -733,8 +736,14 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npm run test -- --run src/App.test.tsx` | Passed | 1 file, 82 tests passed after runStore wiring. |
 | `npm run test -- --run` | Passed | 67 files, 441 tests passed after runStore wiring. |
 | `npm run build` | Passed | Same expected Vite chunk-size warning remains after runStore wiring. |
+| `npm run test -- --run src/stores/assistantStore.test.ts src/hooks/useAssistantSession.test.tsx src/hooks/useAssistantStream.test.tsx src/components/assistant/assistantTranscript.test.ts` | Passed | 4 files, 20 tests passed after assistantStore wiring. |
+| `npm run test -- --run src/App.test.tsx -t "Workbench AI assistant generates and applies a canvas-local proposal\|Workbench AI chat completion does not validate previous authoring draft\|Workbench AI assistant resets conversation state when switching tasks\|Workbench AI temporary agent blocks save validate and run after task reload\|Workbench AI temporary agent persists through GraphOps proposal approval"` | Passed | 5 selected assistant/GraphOps integration tests passed after assistantStore wiring. |
+| `npm run test -- --run src/components/WorkflowViewer.drag.test.tsx` | Passed | 1 file, 101 tests passed after assistantStore wiring. |
+| `npm run test -- --run` | Passed | 67 files, 441 tests passed after assistantStore wiring. |
+| `npm run build` | Passed | Same expected Vite chunk-size warning remains after assistantStore wiring. |
 
-### Remaining PLAN_08 Work
+### Static Gates
 
-- Rewire `WorkflowViewer.tsx` assistant local state to dispatch through `assistantStore` selectors/actions, without moving assistant API/EventSource effects into the store.
-- Continue reducing `WorkflowViewer.tsx` shell glue now that task/canvas owner state has moved to the store.
+- `rg -n "const \[assistantInput|const \[assistantMessages|const \[assistantProposal|const \[authoringAgents|const \[selectedAuthoringAgentId|const \[assistantSessionId|const \[assistantAgentSession|const \[assistantPendingTurn|const \[assistantEvents|const \[assistantTurnReason|const \[assistantSessionStatus|const \[assistantBackendValidation|const \[assistantRequiredActions|const \[assistantGraphOpsReview|const \[assistantBusy|const \[assistantApplyUndo" web/src/components/WorkflowViewer.tsx` reports no matches.
+- `rg -n "const \[runsById|const \[runLogsById|const \[runLiveEventsById|const \[runtimeConfig" web/src/components/WorkflowViewer.tsx` reports no matches.
+- Remaining `WorkflowViewer.tsx` `useState` instances are local UI/transient controls or nested component state, not global Workbench owner state.

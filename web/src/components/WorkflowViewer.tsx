@@ -25,6 +25,7 @@ import {
 
 import { api } from '../api';
 import { shortPath, statusTone } from '../format';
+import { emptyAssistantTaskState, useAssistantStore } from '../stores/assistantStore';
 import { useRunStore } from '../stores/runStore';
 import { useWorkbenchStore } from '../stores/workbenchStore';
 import type {
@@ -494,6 +495,10 @@ function trimLiveLog(value: string): string {
   return lines.slice(-MAX_LOG_PREVIEW_LINES).join('\n');
 }
 
+function resolveSetState<T>(current: T, next: SetStateAction<T>): T {
+  return typeof next === 'function' ? (next as (value: T) => T)(current) : next;
+}
+
 function boundaryTransferPreviewSnapshot(canvas: WorkspaceCanvasModel): Record<string, unknown> {
   const strippedCanvas = stripRuntimeStateFromCanvas(canvas);
   return {
@@ -513,6 +518,7 @@ export function WorkflowViewer({
   const initialTaskStore = useMemo(() => loadTaskStore(), []);
   const storeInitializedRef = useRef(false);
   if (!storeInitializedRef.current) {
+    useAssistantStore.setState(useAssistantStore.getInitialState(), true);
     useRunStore.setState(useRunStore.getInitialState(), true);
     useWorkbenchStore.setState(useWorkbenchStore.getInitialState(), true);
     useWorkbenchStore.getState().hydrateTasks(initialTaskStore.tasks, initialTaskStore.activeTaskId);
@@ -627,24 +633,126 @@ export function WorkflowViewer({
   const [saveWorkflowDialog, setSaveWorkflowDialog] = useState<SaveWorkflowDialogState | null>(
     null,
   );
-  const [assistantInput, setAssistantInput] = useState('');
-  const [assistantMessages, setAssistantMessages] = useState<AssistantChatMessage[]>([]);
-  const [assistantProposal, setAssistantProposal] = useState<CanvasAuthoringProposal | null>(null);
-  const [authoringAgents, setAuthoringAgents] = useState<AuthoringAgentSummary[]>([]);
-  const [selectedAuthoringAgentId, setSelectedAuthoringAgentId] = useState('');
-  const [assistantSessionId, setAssistantSessionId] = useState<string | null>(null);
-  const [assistantAgentSession, setAssistantAgentSession] = useState<AgentSessionRecord | null>(null);
-  const [assistantPendingTurn, setAssistantPendingTurn] = useState<AgentTurnRecord | null>(null);
-  const [assistantEvents, setAssistantEvents] = useState<RunEvent[]>([]);
-  const [assistantTurnReason, setAssistantTurnReason] = useState<AssistantTurnReason>('workbench_chat');
-  const [assistantSessionStatus, setAssistantSessionStatus] = useState('disconnected');
-  const [assistantBackendValidation, setAssistantBackendValidation] =
-    useState<CanvasAuthoringValidationResult | null>(null);
-  const [assistantRequiredActions, setAssistantRequiredActions] = useState<AuthoringRequiredAction[]>([]);
-  const [assistantGraphOpsReview, setAssistantGraphOpsReview] =
-    useState<AssistantGraphOpsReview | null>(null);
-  const [assistantBusy, setAssistantBusy] = useState(false);
-  const [assistantApplyUndo, setAssistantApplyUndo] = useState<AssistantApplyUndoToken | null>(null);
+  const assistantTaskState =
+    useAssistantStore((state) => state.assistantByTaskId[activeTaskId]) || emptyAssistantTaskState();
+  const authoringAgents = useAssistantStore((state) => state.authoringAgents);
+  const {
+    assistantInput,
+    assistantMessages,
+    assistantProposal,
+    selectedAuthoringAgentId,
+    assistantSessionId,
+    assistantAgentSession,
+    assistantPendingTurn,
+    assistantEvents,
+    assistantTurnReason,
+    assistantSessionStatus,
+    assistantBackendValidation,
+    assistantRequiredActions,
+    assistantGraphOpsReview,
+    assistantBusy,
+    assistantApplyUndo,
+  } = assistantTaskState;
+  const setAuthoringAgents = useCallback((next: SetStateAction<AuthoringAgentSummary[]>) => {
+    const store = useAssistantStore.getState();
+    store.setAuthoringAgents(resolveSetState(store.authoringAgents, next));
+  }, []);
+  const setAssistantInput = useCallback((next: SetStateAction<string>) => {
+    const current = useAssistantStore.getState().assistantByTaskId[activeTaskId] || emptyAssistantTaskState();
+    useAssistantStore.getState().setAssistantInput(activeTaskId, resolveSetState(current.assistantInput, next));
+  }, [activeTaskId]);
+  const setAssistantMessages = useCallback((next: SetStateAction<AssistantChatMessage[]>) => {
+    const current = useAssistantStore.getState().assistantByTaskId[activeTaskId] || emptyAssistantTaskState();
+    useAssistantStore.getState().setAssistantMessages(
+      activeTaskId,
+      resolveSetState(current.assistantMessages, next),
+    );
+  }, [activeTaskId]);
+  const setAssistantProposal = useCallback((next: SetStateAction<CanvasAuthoringProposal | null>) => {
+    const current = useAssistantStore.getState().assistantByTaskId[activeTaskId] || emptyAssistantTaskState();
+    useAssistantStore.getState().setAssistantProposal(
+      activeTaskId,
+      resolveSetState(current.assistantProposal, next),
+    );
+  }, [activeTaskId]);
+  const setSelectedAuthoringAgentId = useCallback((next: SetStateAction<string>) => {
+    const current = useAssistantStore.getState().assistantByTaskId[activeTaskId] || emptyAssistantTaskState();
+    useAssistantStore.getState().setSelectedAuthoringAgentId(
+      activeTaskId,
+      resolveSetState(current.selectedAuthoringAgentId, next),
+    );
+  }, [activeTaskId]);
+  const setAssistantSessionId = useCallback((next: SetStateAction<string | null>) => {
+    const current = useAssistantStore.getState().assistantByTaskId[activeTaskId] || emptyAssistantTaskState();
+    useAssistantStore.getState().setAssistantSessionId(
+      activeTaskId,
+      resolveSetState(current.assistantSessionId, next),
+    );
+  }, [activeTaskId]);
+  const setAssistantAgentSession = useCallback((next: SetStateAction<AgentSessionRecord | null>) => {
+    const current = useAssistantStore.getState().assistantByTaskId[activeTaskId] || emptyAssistantTaskState();
+    useAssistantStore.getState().setAssistantAgentSession(
+      activeTaskId,
+      resolveSetState(current.assistantAgentSession, next),
+    );
+  }, [activeTaskId]);
+  const setAssistantPendingTurn = useCallback((next: SetStateAction<AgentTurnRecord | null>) => {
+    const current = useAssistantStore.getState().assistantByTaskId[activeTaskId] || emptyAssistantTaskState();
+    useAssistantStore.getState().setAssistantPendingTurn(
+      activeTaskId,
+      resolveSetState(current.assistantPendingTurn, next),
+    );
+  }, [activeTaskId]);
+  const setAssistantEvents = useCallback((next: SetStateAction<RunEvent[]>) => {
+    const current = useAssistantStore.getState().assistantByTaskId[activeTaskId] || emptyAssistantTaskState();
+    useAssistantStore.getState().setAssistantEvents(activeTaskId, resolveSetState(current.assistantEvents, next));
+  }, [activeTaskId]);
+  const setAssistantTurnReason = useCallback((next: SetStateAction<AssistantTurnReason>) => {
+    const current = useAssistantStore.getState().assistantByTaskId[activeTaskId] || emptyAssistantTaskState();
+    useAssistantStore.getState().setAssistantTurnReason(
+      activeTaskId,
+      resolveSetState(current.assistantTurnReason, next),
+    );
+  }, [activeTaskId]);
+  const setAssistantSessionStatus = useCallback((next: SetStateAction<string>) => {
+    const current = useAssistantStore.getState().assistantByTaskId[activeTaskId] || emptyAssistantTaskState();
+    useAssistantStore.getState().setAssistantSessionStatus(
+      activeTaskId,
+      resolveSetState(current.assistantSessionStatus, next),
+    );
+  }, [activeTaskId]);
+  const setAssistantBackendValidation = useCallback((next: SetStateAction<CanvasAuthoringValidationResult | null>) => {
+    const current = useAssistantStore.getState().assistantByTaskId[activeTaskId] || emptyAssistantTaskState();
+    useAssistantStore.getState().setAssistantBackendValidation(
+      activeTaskId,
+      resolveSetState(current.assistantBackendValidation, next),
+    );
+  }, [activeTaskId]);
+  const setAssistantRequiredActions = useCallback((next: SetStateAction<AuthoringRequiredAction[]>) => {
+    const current = useAssistantStore.getState().assistantByTaskId[activeTaskId] || emptyAssistantTaskState();
+    useAssistantStore.getState().setAssistantRequiredActions(
+      activeTaskId,
+      resolveSetState(current.assistantRequiredActions, next),
+    );
+  }, [activeTaskId]);
+  const setAssistantGraphOpsReview = useCallback((next: SetStateAction<AssistantGraphOpsReview | null>) => {
+    const current = useAssistantStore.getState().assistantByTaskId[activeTaskId] || emptyAssistantTaskState();
+    useAssistantStore.getState().setAssistantGraphOpsReview(
+      activeTaskId,
+      resolveSetState(current.assistantGraphOpsReview, next),
+    );
+  }, [activeTaskId]);
+  const setAssistantBusy = useCallback((next: SetStateAction<boolean>) => {
+    const current = useAssistantStore.getState().assistantByTaskId[activeTaskId] || emptyAssistantTaskState();
+    useAssistantStore.getState().setAssistantBusy(activeTaskId, resolveSetState(current.assistantBusy, next));
+  }, [activeTaskId]);
+  const setAssistantApplyUndo = useCallback((next: SetStateAction<AssistantApplyUndoToken | null>) => {
+    const current = useAssistantStore.getState().assistantByTaskId[activeTaskId] || emptyAssistantTaskState();
+    useAssistantStore.getState().setAssistantApplyUndo(
+      activeTaskId,
+      resolveSetState(current.assistantApplyUndo, next),
+    );
+  }, [activeTaskId]);
   const graphRef = useRef(sourceGraph);
   const selectedRunId = currentTask?.activeRunId || currentTask?.latestRunId || null;
   const selectedRunProjection = selectedRunId ? runsById[selectedRunId] : undefined;
