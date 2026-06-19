@@ -6,9 +6,9 @@
  * fallback, and canonical state refresh on terminal events.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { api } from '../api';
-import type { AgentSessionRecord, AgentTurnRecord, RunEvent } from '../types';
+import type { AgentMessage, AgentSessionRecord, AgentTurnRecord, RunEvent } from '../types';
 import type {
   AssistantChatMessage,
   AssistantTurnReason,
@@ -47,14 +47,19 @@ function mergeAgentEvents(base: RunEvent[], incoming: RunEvent[]): RunEvent[] {
   return merged;
 }
 
-function agentMessagesToAssistantMessages(
-  messages: Array<{ role: string; content: string; turn_id?: string }>,
-): AssistantChatMessage[] {
-  return messages.map((item, index) => ({
-    id: `agent_msg_${item.turn_id || index}`,
-    role: item.role === 'user' ? 'user' : item.role === 'system' ? 'system' : 'assistant',
-    content: item.content,
-  }));
+function agentMessagesToAssistantMessages(messages: AgentMessage[]): AssistantChatMessage[] {
+  return messages
+    .filter((message) => typeof message.content === 'string' && message.content.trim())
+    .map((message, index) => ({
+      id: `${message.turn_id || 'assistant_msg'}_${index}`,
+      role:
+        message.role === 'user' || message.role === 'assistant' || message.role === 'system'
+          ? message.role
+          : 'system',
+      content: message.content,
+      turnId: typeof message.turn_id === 'string' ? message.turn_id : undefined,
+      createdAt: typeof message.created_at === 'string' ? message.created_at : undefined,
+    }));
 }
 
 // ---------------------------------------------------------------------------
@@ -119,9 +124,14 @@ export function useAssistantTurnStream(
 
       const draftTurnId =
         typeof session.current_output_turn_id === 'string' ? session.current_output_turn_id : '';
-      if (draftTurnId) {
+      const pendingTurnReason = pendingTurn.reason || turnReason || 'workbench_chat';
+      const hasDraft =
+        pendingTurnReason !== 'workbench_chat' &&
+        Boolean(draftTurnId) &&
+        draftTurnId === pendingTurn.turn_id;
+      if (hasDraft) {
         try {
-          const draft = await (api as any).validateAssistantDraft(session.session_id, draftTurnId);
+          const draft = await api.validateAssistantDraft(session.session_id, draftTurnId);
           if (!cancelled) {
             cb.setProposal(draft.proposal || null);
             cb.setBackendValidation({

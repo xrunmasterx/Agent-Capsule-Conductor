@@ -2136,6 +2136,7 @@ export function WorkflowViewer({
   const graphRef = useRef(sourceGraph);
   const selectedRunId = currentTask?.activeRunId || currentTask?.latestRunId || null;
   const selectedRunProjection = selectedRunId ? runsById[selectedRunId] : undefined;
+  const assistantTurnSessionId = assistantSessionId || assistantPendingTurn?.session_id || null;
   const currentAuthoringState = currentTask?.authoring || emptyWorkbenchAuthoringState();
   const workflowRun = selectedRunProjection?.run || null;
   const workflowEvents = selectedRunProjection?.events || [];
@@ -2399,120 +2400,27 @@ export function WorkflowViewer({
     });
   }, [assistantBusy, assistantOpen, assistantSessionId]);
 
-  useEffect(() => {
-    if (!assistantPendingTurn || !assistantSessionId) {
-      return;
-    }
-    let cancelled = false;
-    let source: EventSource | null = null;
-
-    async function refreshAssistantTurn(terminal = false) {
-      if (!assistantSessionId || !assistantPendingTurn || cancelled) {
-        return;
-      }
-      const [session, messages, eventPayload] = await Promise.all([
-        api.getAgentSession(assistantSessionId),
-        api.getAgentSessionMessages(assistantSessionId),
-        api.getAgentTurnEvents(assistantSessionId, assistantPendingTurn.turn_id),
-      ]);
-      if (cancelled) {
-        return;
-      }
-      setAssistantAgentSession(session);
-      setAssistantSessionStatus(session.status || assistantPendingTurn.status || 'running');
-      setAssistantMessages(agentMessagesToAssistantMessages(messages.messages || []));
-      setAssistantEvents((current) => mergeAgentEvents(current, eventPayload.events || []));
-      const draftTurnId =
-        typeof session.current_output_turn_id === 'string' ? session.current_output_turn_id : '';
-      const pendingTurnReason = assistantPendingTurn.reason || 'workbench_chat';
-      const hasDraft =
-        pendingTurnReason !== 'workbench_chat' &&
-        Boolean(draftTurnId) &&
-        draftTurnId === assistantPendingTurn.turn_id;
-      if (hasDraft) {
-        try {
-          const draft = await api.validateAssistantDraft(session.session_id, draftTurnId);
-          if (!cancelled) {
-            const proposal = draft.proposal as CanvasAuthoringProposal | null | undefined;
-            setAssistantProposal(proposal || null);
-            setAssistantBackendValidation(
-              authoringValidationFromBackend({ status: draft.status, errors: [], warnings: [] }),
-            );
-            setAssistantRequiredActions(draft.required_actions || []);
-          }
-        } catch (error) {
-          if (!cancelled) {
-            setAssistantBackendValidation({
-              status: 'invalid',
-              errors: [error instanceof Error ? error.message : String(error)],
-              warnings: [],
-            });
-          }
-        }
-      }
-      const isTerminal =
-        terminal ||
-        !['queued', 'running'].includes(String(session.status || assistantPendingTurn.status || ''));
-      if (isTerminal) {
-        setAssistantPendingTurn(null);
-        setAssistantBusy(false);
-      }
-    }
-
-    if (typeof window.EventSource === 'function') {
-      source = new window.EventSource(
-        api.streamAgentTurnEventsUrl(assistantSessionId, assistantPendingTurn.turn_id),
-      );
-      source.addEventListener('agent_event', (event) => {
-        try {
-          const payload = JSON.parse((event as MessageEvent).data) as RunEvent;
-          setAssistantEvents((current) => mergeAgentEvents(current, [payload]));
-        } catch {
-          // Polling below refreshes canonical state if an SSE frame is malformed.
-        }
-      });
-      source.addEventListener('terminal', () => {
-        void refreshAssistantTurn(true).catch((error) => {
-          setAssistantMessages((current) => [
-            ...current,
-            {
-              id: authoringId('assistant_msg'),
-              role: 'system',
-              content: error instanceof Error ? error.message : String(error),
-            },
-          ]);
-          setAssistantBusy(false);
-        });
-        source?.close();
-      });
-      source.onerror = () => {
-        source?.close();
-      };
-    }
-
-    const interval = window.setInterval(() => {
-      void refreshAssistantTurn().catch((error) => {
-        setAssistantMessages((current) => [
-          ...current,
-          {
-            id: authoringId('assistant_msg'),
-            role: 'system',
-            content: error instanceof Error ? error.message : String(error),
-          },
-        ]);
-        setAssistantPendingTurn(null);
-        setAssistantBusy(false);
-      });
-    }, 1000);
-    void refreshAssistantTurn().catch(() => {
-      // The interval retries while the background turn is settling.
-    });
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-      source?.close();
-    };
-  }, [assistantPendingTurn, assistantSessionId]);
+  useAssistantTurnStream(assistantTurnSessionId, assistantPendingTurn, assistantTurnReason, {
+    setAgentSession: setAssistantAgentSession,
+    setSessionStatus: setAssistantSessionStatus,
+    setMessages: setAssistantMessages,
+    setEvents: setAssistantEvents,
+    setProposal: (proposal) =>
+      setAssistantProposal((proposal as CanvasAuthoringProposal | null | undefined) || null),
+    setBackendValidation: setAssistantBackendValidation,
+    setRequiredActions: (actions) => setAssistantRequiredActions(actions as AuthoringRequiredAction[]),
+    setPendingTurn: setAssistantPendingTurn,
+    setBusy: setAssistantBusy,
+    addSystemMessage: (content) =>
+      setAssistantMessages((current) => [
+        ...current,
+        {
+          id: authoringId('assistant_msg'),
+          role: 'system',
+          content,
+        },
+      ]),
+  });
 
   useEffect(() => {
     if (!durableTasksReady) {

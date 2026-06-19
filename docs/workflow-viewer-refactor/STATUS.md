@@ -208,13 +208,18 @@ Status: in progress
 - `WorkflowViewer.tsx` now memoizes boundary preview snapshots before passing them to the hook, preventing render-triggered duplicate preview requests.
 - Extended `web/src/hooks/useRunStream.ts` to own selected-run EventSource streaming for `node_log_delta`, `agent_event`, `live_event`, and `summary` frames.
 - Replaced the selected-run inline EventSource effect in `WorkflowViewer.tsx` with `useRunStream(...)`.
-- `web/src/components/WorkflowViewer.tsx` is now 576,566 bytes / 15,785 lines after the latest slice.
+- Fixed and wired `web/src/hooks/useAssistantStream.ts` as the hook owner for assistant turn EventSource streaming, polling refresh, terminal cleanup, assistant transcript message projection, and authoring-draft validation gating.
+- Replaced the assistant turn inline EventSource/polling effect in `WorkflowViewer.tsx` with `useAssistantTurnStream(...)`.
+- Preserved the critical `workbench_chat` gate: ordinary assistant chat still does not validate a previous authoring draft, even when `current_output_turn_id` is present.
+- `WorkflowViewer.tsx` passes a stable assistant turn session id derived from `assistantSessionId || assistantPendingTurn.session_id`, so the hook does not depend on outer React state landing before the submitted turn record.
+- `web/src/components/WorkflowViewer.tsx` is now 573,309 bytes / 16,334 lines after the latest slice.
 
 ### Added Tests
 
 - `web/src/hooks/useWorkbenchLiveStream.test.tsx`
 - `web/src/hooks/useBoundaryTransferPreview.test.tsx`
 - `web/src/hooks/useRunStream.test.tsx`
+- `web/src/hooks/useAssistantStream.test.tsx`
 - Extended `web/src/hooks/streamTypes.test.ts`
 
 ### Validation So Far
@@ -235,10 +240,18 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npx tsc --noEmit` | Passed | Run stream hook extraction compiles. |
 | `npm run test -- --run` | Passed | 23 files, 275 tests passed. |
 | `npm run build` | Passed | Same expected chunk-size warning remains. |
+| `npm run test -- --run src/hooks/useAssistantStream.test.tsx src/hooks/streamTypes.test.ts` | Passed | 2 files, 8 tests passed. |
+| `npm run test -- --run src/App.test.tsx -t "Workbench AI chat completion does not validate previous authoring draft"` | Passed | Confirms ordinary chat does not call assistant draft validation after hook wiring. |
+| `npm run test -- --run src/hooks/useAssistantStream.test.tsx src/hooks/streamTypes.test.ts src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 4 files, 191 tests passed. |
+| `npx tsc --noEmit` | Passed | Assistant turn stream hook wiring compiles. |
+| `npm run test -- --run` | Passed | 24 files, 281 tests passed. |
+| `npm run build` | Passed | Same expected chunk-size warning remains. |
 
 ### Static Gates So Far
 
 - `WorkflowViewer.tsx` no longer defines the Workbench live stream hook or its pure live-event helper functions.
 - EdgeInspector no longer owns boundary preview loading state, API effect, or unavailable-preview fallback logic.
 - `WorkflowViewer.tsx` no longer directly creates the selected-run `EventSource`; run stream ownership lives in `useRunStream`.
-- `WorkflowViewer.tsx` still has direct `api.*`, `runnerApi.*`, `EventSource`, and timer usage for assistant turn stream, run submit, task bootstrap/autosave, submit-time boundary preview, binding actions, and artifact loading. These are remaining PLAN_03 slices.
+- `WorkflowViewer.tsx` no longer directly creates the assistant turn `EventSource`, assistant turn polling interval, or assistant draft validation request; assistant turn stream ownership lives in `useAssistantTurnStream`.
+- `useAssistantStream.test.tsx` locks ordinary `workbench_chat` turns against accidental `validateAssistantDraft` calls, verifies authoring-turn validation only when the output turn id matches, and covers terminal cleanup.
+- `WorkflowViewer.tsx` still has direct `api.*`, `runnerApi.*`, and timer usage for run submit, task bootstrap/autosave, submit-time boundary preview, binding actions, and artifact loading. These are remaining PLAN_03 slices.
