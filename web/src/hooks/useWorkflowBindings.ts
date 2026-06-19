@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 
 import { api } from '../api';
+import { useRunStore } from '../stores/runStore';
 import type { WorkflowBindingView, WorkflowDirectorySelection } from '../types';
 
 export type UseWorkflowBindingsOptions = {
@@ -70,7 +71,9 @@ export function useWorkflowBindings({
   onSaved,
   onOpenedFolder,
 }: UseWorkflowBindingsOptions): UseWorkflowBindingsResult {
-  const [workflowBindings, setWorkflowBindings] = useState<Record<string, WorkflowBindingView>>({});
+  const workflowBindings = useRunStore((state) => state.workflowBindings);
+  const setWorkflowBindings = useRunStore((state) => state.setWorkflowBindings);
+  const setWorkflowBinding = useRunStore((state) => state.setWorkflowBinding);
   const workflowBindingKey = useMemo(
     () => Array.from(new Set(workflowIds)).sort().join('|'),
     [workflowIds],
@@ -104,11 +107,11 @@ export function useWorkflowBindings({
     async (workflowId: string, workspaceRoot: string): Promise<WorkflowBindingView> => {
       const result = await api.saveWorkflowBinding(workflowId, workspaceRoot);
       const normalized = normalizeBinding(result, workflowId);
-      setWorkflowBindings((current) => ({ ...current, [workflowId]: normalized }));
+      setWorkflowBinding(workflowId, normalized);
       onSaved?.(workflowId, normalized, workspaceRoot);
       return normalized;
     },
-    [onSaved],
+    [onSaved, setWorkflowBinding],
   );
 
   const validateBinding = useCallback(

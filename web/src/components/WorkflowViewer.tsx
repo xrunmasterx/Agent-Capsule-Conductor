@@ -25,6 +25,7 @@ import {
 
 import { api } from '../api';
 import { shortPath, statusTone } from '../format';
+import { useRunStore } from '../stores/runStore';
 import { useWorkbenchStore } from '../stores/workbenchStore';
 import type {
   AgentMessage,
@@ -512,6 +513,7 @@ export function WorkflowViewer({
   const initialTaskStore = useMemo(() => loadTaskStore(), []);
   const storeInitializedRef = useRef(false);
   if (!storeInitializedRef.current) {
+    useRunStore.setState(useRunStore.getInitialState(), true);
     useWorkbenchStore.setState(useWorkbenchStore.getInitialState(), true);
     useWorkbenchStore.getState().hydrateTasks(initialTaskStore.tasks, initialTaskStore.activeTaskId);
     storeInitializedRef.current = true;
@@ -563,10 +565,14 @@ export function WorkflowViewer({
   );
   const [message, setMessage] = useState('已加载工作台');
   const [durableTasksReady, setDurableTasksReady] = useState(false);
-  const [runsById, setRunsById] = useState<Record<string, RunProjection>>({});
-  const [runLogsById, setRunLogsById] = useState<Record<string, Record<string, NodeLiveLogs>>>({});
-  const [runLiveEventsById, setRunLiveEventsById] = useState<Record<string, WorkbenchLiveEvent[]>>({});
-  const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfig | null>(null);
+  const runsById = useRunStore((state) => state.runsById);
+  const setRunsById = useRunStore((state) => state.setRunsById);
+  const runLogsById = useRunStore((state) => state.runLogsById);
+  const setRunLogsById = useRunStore((state) => state.setRunLogsById);
+  const runLiveEventsById = useRunStore((state) => state.liveEventsByRunId);
+  const setRunLiveEventsById = useRunStore((state) => state.setLiveEventsByRunId);
+  const runtimeConfig = useRunStore((state) => state.runtimeConfig);
+  const setRuntimeConfig = useRunStore((state) => state.setRuntimeConfig);
   const [openedExternalWorkflow, setOpenedExternalWorkflow] = useState(false);
   const [dataConnectionDraft, setDataConnectionDraft] = useState<DataConnectionDraft>(null);
 

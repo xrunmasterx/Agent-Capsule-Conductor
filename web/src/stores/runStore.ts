@@ -22,6 +22,18 @@ export interface RunStoreState {
 
   setRuntimeConfig: (config: RuntimeConfig | null) => void;
   setWorkflowBindings: (bindings: Record<string, WorkflowBindingView>) => void;
+  setWorkflowBinding: (workflowId: string, binding: WorkflowBindingView) => void;
+  setRunsById: (updater: Record<string, RunProjection> | ((current: Record<string, RunProjection>) => Record<string, RunProjection>)) => void;
+  setRunLogsById: (
+    updater:
+      | Record<string, Record<string, NodeLiveLogs>>
+      | ((current: Record<string, Record<string, NodeLiveLogs>>) => Record<string, Record<string, NodeLiveLogs>>),
+  ) => void;
+  setLiveEventsByRunId: (
+    updater:
+      | Record<string, WorkbenchLiveEvent[]>
+      | ((current: Record<string, WorkbenchLiveEvent[]>) => Record<string, WorkbenchLiveEvent[]>),
+  ) => void;
   upsertRun: (run: RunProjection) => void;
   patchRun: (runId: string, patch: Partial<RunProjection>) => void;
   removeRun: (runId: string) => void;
@@ -39,6 +51,21 @@ function appendUnique(values: string[], value: string): string[] {
   return values.includes(value) ? values : [...values, value];
 }
 
+function runIndexesFromRuns(
+  runsById: Record<string, RunProjection>,
+  activeRunIdsByTaskId: Record<string, string | null>,
+): Pick<RunStoreState, 'runIdsByTaskId' | 'activeRunIdsByTaskId'> {
+  const runIdsByTaskId: Record<string, string[]> = {};
+  Object.values(runsById).forEach((run) => {
+    runIdsByTaskId[run.taskId] = appendUnique(runIdsByTaskId[run.taskId] || [], run.runId);
+  });
+  const nextActiveRunIdsByTaskId: Record<string, string | null> = {};
+  Object.entries(activeRunIdsByTaskId).forEach(([taskId, runId]) => {
+    nextActiveRunIdsByTaskId[taskId] = runId && runsById[runId] ? runId : null;
+  });
+  return { runIdsByTaskId, activeRunIdsByTaskId: nextActiveRunIdsByTaskId };
+}
+
 export const useRunStore = create<RunStoreState>((set) => ({
   runsById: {},
   runIdsByTaskId: {},
@@ -50,6 +77,27 @@ export const useRunStore = create<RunStoreState>((set) => ({
 
   setRuntimeConfig: (config) => set({ runtimeConfig: config }),
   setWorkflowBindings: (bindings) => set({ workflowBindings: bindings }),
+  setWorkflowBinding: (workflowId, binding) =>
+    set((state) => ({ workflowBindings: { ...state.workflowBindings, [workflowId]: binding } })),
+
+  setRunsById: (updater) =>
+    set((state) => {
+      const runsById = typeof updater === 'function' ? updater(state.runsById) : updater;
+      return {
+        runsById,
+        ...runIndexesFromRuns(runsById, state.activeRunIdsByTaskId),
+      };
+    }),
+
+  setRunLogsById: (updater) =>
+    set((state) => ({
+      runLogsById: typeof updater === 'function' ? updater(state.runLogsById) : updater,
+    })),
+
+  setLiveEventsByRunId: (updater) =>
+    set((state) => ({
+      liveEventsByRunId: typeof updater === 'function' ? updater(state.liveEventsByRunId) : updater,
+    })),
 
   upsertRun: (run) =>
     set((state) => ({

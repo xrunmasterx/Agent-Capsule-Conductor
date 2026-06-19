@@ -706,6 +706,8 @@ Status: in progress
 - Upgraded `web/src/stores/runStore.ts` into a run/task partitioned owner for run projections, task run indexes, active run ids, node logs, live events, runtime config, and workflow bindings.
 - Upgraded `web/src/stores/assistantStore.ts` into a per-task assistant owner with session/proposal/review/undo state and stale turn-completion guards.
 - Kept both stores pure: no API calls, no EventSource, no ReactFlow, and no `WorkflowViewer` dependency.
+- Rewired `WorkflowViewer.tsx` run projections, node live logs, live events, and runtime config to consume `runStore` instead of local React state.
+- Rewired `useWorkflowBindings(...)` to store binding lookup state in `runStore.workflowBindings` while keeping binding API calls inside the hook layer.
 
 ### Added Tests
 
@@ -726,8 +728,13 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npm run test -- --run` | Passed | 65 files, 431 tests passed. |
 | `npm run build` | Passed | Same expected Vite chunk-size warning remains. |
 | `npm run test -- --run src/stores/runStore.test.ts src/stores/assistantStore.test.ts src/stores/workbenchStore.types.test.ts` | Passed | 3 files, 16 tests passed for store ownership contracts. |
+| `npm run test -- --run src/stores/runStore.test.ts src/hooks/useWorkflowBindings.test.tsx` | Passed | 2 files, 11 tests passed after binding lookup moved to runStore. |
+| `npm run test -- --run src/components/WorkflowViewer.drag.test.tsx` | Passed | 1 file, 101 tests passed after runStore wiring. |
+| `npm run test -- --run src/App.test.tsx` | Passed | 1 file, 82 tests passed after runStore wiring. |
+| `npm run test -- --run` | Passed | 67 files, 441 tests passed after runStore wiring. |
+| `npm run build` | Passed | Same expected Vite chunk-size warning remains after runStore wiring. |
 
 ### Remaining PLAN_08 Work
 
-- Rewire `WorkflowViewer.tsx` run/assistant local state to dispatch through `runStore` and `assistantStore` selectors/actions, without moving API/EventSource effects into stores.
+- Rewire `WorkflowViewer.tsx` assistant local state to dispatch through `assistantStore` selectors/actions, without moving assistant API/EventSource effects into the store.
 - Continue reducing `WorkflowViewer.tsx` shell glue now that task/canvas owner state has moved to the store.
