@@ -219,6 +219,47 @@ export type AgentNodeSettingsModel = {
   raw: unknown;
 };
 
+export type AgentNodeConnectionEditor = {
+  canvas: WorkspaceCanvasModel;
+  canvasNodeKind: 'workflow' | 'internal';
+  scopeWorkflowId: string | null;
+  nodeId: string;
+  nodeLabel: string;
+  callableId: string;
+  inputPorts: WorkflowPortView[];
+  outputPorts: WorkflowPortView[];
+  outputPortsReadonly?: boolean;
+  dataConnectionDraft: DataConnectionDraft;
+  onBeginDataConnection: (draft: Exclude<DataConnectionDraft, null>) => void;
+  onCancelDataConnection: () => void;
+  onUpdateDataConnectionMaterialization: (materialization: 'copy' | 'reference') => void;
+  onCompleteDataConnection: (
+    targetNodeId: string,
+    targetPortId: string,
+    options?: { replaceExisting?: boolean },
+  ) => void;
+  onCompleteDataConnectionWithNewInputPort: (targetNodeId: string, requestedPortId: string) => void;
+  onAddPort: (
+    scopeWorkflowId: string | null,
+    nodeId: string,
+    direction: PortDirection,
+    requestedPortId: string,
+  ) => void;
+  onRenamePort: (
+    scopeWorkflowId: string | null,
+    nodeId: string,
+    direction: PortDirection,
+    portId: string,
+    requestedPortId: string,
+  ) => void;
+  onDeletePort: (
+    scopeWorkflowId: string | null,
+    nodeId: string,
+    direction: PortDirection,
+    portId: string,
+  ) => void;
+};
+
 export type SelectedEntityDetailsModel = {
   key: string;
   kind: SelectedDetailsKind;

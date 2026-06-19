@@ -12,6 +12,7 @@
  */
 
 export { NodeDetailOverlay } from './NodeDetailOverlay';
+export { RightInspector } from './RightInspector';
 export { SelectionDetailsDock } from './SelectionDetailsDock';
 export { DataConnectionsPanel } from './DataConnectionsPanel';
 export { EdgeInspector } from './EdgeInspector';

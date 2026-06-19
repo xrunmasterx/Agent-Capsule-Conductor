@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 
+import type { BoundaryTransferPreview } from '../../types';
 import type { WorkflowCanvasEdge, WorkspaceCanvasModel } from '../../types/workbench';
 import { useBoundaryTransferPreview } from '../../hooks/useBoundaryTransferPreview';
 import {
@@ -13,10 +14,6 @@ import {
   workflowIdForBoundaryMainBinding,
 } from '../../workbench/model/canvasEdgeOps';
 import { edgeCanonicalPreview } from '../../workbench/model/workflowGraphProjection';
-import {
-  boundaryTransferPreviewHasErrors,
-  unavailableBoundaryTransferPreview,
-} from '../../workbench/model/boundaryTransferProjection';
 
 export function EdgeInspector({
   edge,
@@ -62,7 +59,7 @@ export function EdgeInspector({
   }
   if (tab === 'mapping') {
     const preview = isBoundaryControlEdge
-      ? boundaryPreview || unavailableBoundaryTransferPreview()
+      ? boundaryPreview || unavailablePreview()
       : edgeCanonicalPreview(edge, canvas);
     return (
       <CodeBlock
@@ -105,7 +102,7 @@ export function EdgeInspector({
       {boundaryPreview?.diagnostics.length ? (
         <>
           <dt>边界传输</dt>
-          <dd>{boundaryTransferPreviewHasErrors(boundaryPreview) ? '配置错误' : '可预览'}</dd>
+          <dd>{previewHasErrors(boundaryPreview) ? '配置错误' : '可预览'}</dd>
           <dt>边界诊断</dt>
           <dd>{boundaryPreview.diagnostics.map((diagnostic) => diagnostic.message).join('；')}</dd>
         </>
@@ -138,6 +135,31 @@ export function EdgeInspector({
       ) : null}
     </dl>
   );
+}
+
+function previewHasErrors(preview: BoundaryTransferPreview | null): boolean {
+  return Boolean(preview?.diagnostics.some((diagnostic) => diagnostic.severity === 'error'));
+}
+
+function unavailablePreview(): BoundaryTransferPreview {
+  return {
+    status: 'unavailable',
+    bindings: {
+      workflow_input_bindings: [],
+      workflow_output_bindings: [],
+    },
+    diagnostics: [
+      {
+        code: 'preview_unavailable',
+        severity: 'warning',
+        message: '边界传输预览暂不可用。',
+      },
+    ],
+    canonical_preview: {
+      workbench_projection: 'boundary_control_port_binding',
+      runtime_control_edge: false,
+    },
+  };
 }
 
 function CodeBlock({

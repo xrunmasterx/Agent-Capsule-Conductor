@@ -499,7 +499,7 @@ PLAN_05 may start. It should keep the presentational component ownership from PL
 
 ## PLAN_05 Inspector
 
-Status: in progress
+Status: complete
 
 ### Scope Completed So Far
 
@@ -512,7 +512,13 @@ Status: in progress
 - Added `web/src/components/inspector/PortInspector.tsx` and removed the local `PortInspector` from `WorkflowViewer.tsx`.
 - Added `web/src/components/inspector/EdgeInspector.tsx` and removed the local `EdgeInspector` from `WorkflowViewer.tsx`.
 - `EdgeInspector` receives the boundary preview snapshot builder from the parent and uses `useBoundaryTransferPreview`; it does not directly call API or construct canonical graph snapshots itself.
-- `web/src/components/WorkflowViewer.tsx` is now 523,301 bytes / 14,781 lines after this PLAN_05 checkpoint.
+- Added `web/src/components/inspector/InspectorRenderers.ts` as the prop boundary for renderer primitives still owned by the shell during the transition.
+- Added `web/src/components/inspector/WorkflowInspector.tsx` and removed the local `WorkflowInspector` from `WorkflowViewer.tsx`.
+- Added `web/src/components/inspector/InternalNodeInspector.tsx` and removed the local `InternalNodeInspector` from `WorkflowViewer.tsx`.
+- Added `web/src/components/inspector/RightInspector.tsx` and removed the local `RightInspector` and `InspectorTabs` from `WorkflowViewer.tsx`.
+- Moved `AgentNodeConnectionEditor` into `web/src/types/workbench.ts`, so the extracted right inspector and the shell share a stable editor contract.
+- Kept callable-detail loading in `useCallableDetail(...)`; inspector components do not call API directly.
+- `web/src/components/WorkflowViewer.tsx` is now 487,990 bytes / 13,796 lines after PLAN_05 completion.
 
 ### Added Tests
 
@@ -520,6 +526,9 @@ Status: in progress
 - `web/src/components/inspector/DataConnectionsPanel.test.tsx`
 - `web/src/components/inspector/PortInspector.test.tsx`
 - `web/src/components/inspector/EdgeInspector.test.tsx`
+- `web/src/components/inspector/WorkflowInspector.test.tsx`
+- `web/src/components/inspector/InternalNodeInspector.test.tsx`
+- `web/src/components/inspector/RightInspector.test.tsx`
 
 ### Validation So Far
 
@@ -532,16 +541,25 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npm run test -- --run src/components/inspector/EdgeInspector.test.tsx src/components/inspector/PortInspector.test.tsx src/components/WorkflowViewer.drag.test.tsx` | Passed | 3 files, 106 tests passed. |
 | `npm run test -- --run` | Passed | 49 files, 367 tests passed. |
 | `npm run build` | Passed | Same expected chunk-size warning remains. |
+| `npx tsc --noEmit` | Passed | Right/Workflow/Internal inspector extraction compiles. |
+| `npm run test -- --run src/components/inspector/WorkflowInspector.test.tsx src/components/inspector/InternalNodeInspector.test.tsx src/components/inspector/RightInspector.test.tsx src/components/inspector/EdgeInspector.test.tsx src/components/inspector/PortInspector.test.tsx src/components/inspector/DataConnectionsPanel.test.tsx` | Passed | 6 files, 16 tests passed. |
+| `npm run test -- --run` | Passed | 54 files, 379 tests passed. |
+| `npm run build` | Passed | Same expected chunk-size warning remains. |
 
 ### Static Gates So Far
 
 - `WorkflowViewer.tsx` no longer defines local `DataConnectionsPanel`.
 - `WorkflowViewer.tsx` no longer defines local `PortInspector`.
 - `WorkflowViewer.tsx` no longer defines local `EdgeInspector`.
+- `WorkflowViewer.tsx` no longer defines local `WorkflowInspector`.
+- `WorkflowViewer.tsx` no longer defines local `InternalNodeInspector`.
+- `WorkflowViewer.tsx` no longer defines local `RightInspector` or `InspectorTabs`.
 - `web/src/components/inspector` has no direct `api.*` usage.
+- `web/src/components/inspector` has no direct boundary-transfer preview implementation; `EdgeInspector` depends on the hook boundary only.
 - `web/src/components/WorkflowViewer.tsx`, `web/src/components/inspector`, and `web/src/workbench/model` have no `window.prompt` usage.
+- `web/src` has no `selection.kind` usage.
 - `web/src/workbench/model/inspectorActions.ts` imports no React, API modules, stores, or `WorkflowViewer`.
 
-### Next PLAN_05 Slice
+## Next Plan
 
-Continue by extracting `RightInspector`, `WorkflowInspector`, `PortInspector`, `EdgeInspector`, `InternalNodeInspector`, and the reusable inspector primitives they need. Keep callable loading in `useCallableDetail` or another hook, not in `components/inspector`.
+PLAN_06 may start. It should keep the inspector ownership boundaries from PLAN_05 intact and move assistant/authoring/GraphOps orchestration out of `WorkflowViewer.tsx` without weakening proposal validation, dry-run, approval, or temporary-resource guards.
