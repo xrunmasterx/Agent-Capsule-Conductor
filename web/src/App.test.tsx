@@ -6,7 +6,6 @@ import { App } from './App';
 import {
   addCallableNodeFromPalette,
   addInternalNodeFromPalette,
-  addPortToDataConnectNode,
   addWorkflowFromPalette,
   assistantDisplayStatus,
   buildAssistantTranscriptItems,
@@ -14,7 +13,6 @@ import {
   canvasToWorkflowGraph,
   controlEdgeMainTransferMode,
   deleteSelectionFromCanvas,
-  createDataEdgeCommand,
   expandWorkflowToFitChildren,
   expandWorkflowToFitChildrenCenterLocked,
   filterLiveEvents,
@@ -30,14 +28,18 @@ import {
   nodeRunForInternalNode,
   normalizeSelectionIntent,
   promptFromInvocationInput,
-  deletePortFromDataConnectNode,
-  renamePortOnDataConnectNode,
   selectionCanBeDeleted,
   shouldDisconnectEdgeOnClick,
   staticInputFromInvocationInput,
   workspaceDemoCanvas,
   workflowInvocationLabel,
 } from './components/WorkflowViewer';
+import {
+  addPortToDataConnectNode,
+  createDataEdgeCommand,
+  deletePortFromDataConnectNode,
+  renamePortOnDataConnectNode,
+} from './workbench/model/canvasEdgeOps';
 
 // Alias object so that existing `helpers.xxx` test patterns keep working.
 const helpers: Record<string, any> = {
