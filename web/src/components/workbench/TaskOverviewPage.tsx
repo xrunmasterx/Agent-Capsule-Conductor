@@ -1,8 +1,5 @@
 /**
  * TaskOverviewPage - task list + artifact channel overview.
- *
- * Displayed when the workspace switcher is set to "overview".
- * Shows a left-side list of tasks and a right-side artifact preview pane.
  */
 
 import { FileText, Trash2 } from 'lucide-react';

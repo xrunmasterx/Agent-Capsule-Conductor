@@ -1,7 +1,6 @@
 /**
  * ExecutionDock - run control panel.
  *
- * Extracted from WorkflowViewer.tsx lines 4686-4727.
  * A thin presentational toolbar that shows the runtime mode and
  * provides run-task / run-workflow / run-node buttons.
  */

@@ -7,9 +7,19 @@
 
 import type { ReactNode } from 'react';
 
-export function WorkbenchShell({ children }: { children: ReactNode }) {
+export function WorkbenchShell({
+  children,
+  durableTasksReady,
+}: {
+  children: ReactNode;
+  durableTasksReady: boolean;
+}) {
   return (
-    <section className="panel workflow-viewer graph-workbench-v2" aria-label="ACC Workbench">
+    <section
+      className="panel workflow-viewer graph-workbench-v2"
+      aria-label="ACC Workbench"
+      data-durable-tasks-ready={durableTasksReady ? 'true' : 'false'}
+    >
       {children}
     </section>
   );

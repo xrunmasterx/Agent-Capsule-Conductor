@@ -429,3 +429,41 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 ## Next Plan
 
 PLAN_04 may start. It must keep the hook ownership boundaries from PLAN_03 intact and avoid reintroducing endpoint calls, EventSource construction, or polling timers into `WorkflowViewer.tsx`.
+
+## PLAN_04 Presentational Components
+
+Status: in progress
+
+### Scope Completed So Far
+
+- Switched the main `WorkflowViewer.tsx` render path for the Workbench shell, top bar, task workspace switcher, task overview page, save workflow dialog, and execution dock to the extracted presentational modules.
+- Added `durableTasksReady` support to the extracted `WorkbenchShell`, preserving the `data-durable-tasks-ready` marker used by startup and regression tests.
+- Removed the corresponding local `WorkflowViewer.tsx` function declarations for `WorkbenchShell`, `SaveWorkflowDialog`, `ExecutionDock`, `TaskWorkspaceSwitcher`, `TaskOverviewPage`, `TaskArtifactsPane`, `TaskRail`, and `TopBar`.
+- Restored the stable `Task workspace view` aria label while keeping the visible task switcher labels on the extracted component path.
+- `web/src/components/WorkflowViewer.tsx` is now 554,141 bytes / 15,666 lines after this slice.
+
+### Added Tests
+
+- `web/src/components/execution/ExecutionDock.test.tsx`
+- `web/src/components/workbench/WorkbenchShell.test.tsx`
+- `web/src/components/workbench/TopBar.test.tsx`
+
+### Validation So Far
+
+Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `npm run test -- --run src/components/execution/ExecutionDock.test.tsx src/components/workbench/WorkbenchShell.test.tsx src/components/workbench/TopBar.test.tsx` | Passed | 3 files, 5 tests passed. |
+| `npx tsc --noEmit` | Passed | Extracted workbench/execution component wiring compiles. |
+| `npm run test -- --run src/App.test.tsx src/components/WorkflowViewer.drag.test.tsx` | Passed | 2 files, 183 tests passed after preserving `Task workspace view` aria label. |
+| `npm run test -- --run src/components/execution/ExecutionDock.test.tsx src/components/workbench/WorkbenchShell.test.tsx src/components/workbench/TopBar.test.tsx src/App.test.tsx src/components/WorkflowViewer.drag.test.tsx` | Passed | 5 files, 188 tests passed. |
+| `npm run test -- --run` | Passed | 45 files, 356 tests passed. |
+| `npm run build` | Passed | Same expected chunk-size warning remains. |
+
+### Static Gates So Far
+
+- `WorkflowViewer.tsx` no longer defines the low-risk workbench/execution local display functions listed above.
+- The main render path uses the extracted workbench/execution components for the top-level shell, task overview, save dialog, and run controls.
+- `WorkflowViewer.tsx` still contains `Extracted` migration aliases for assistant, live output, node detail, and selection-details components; those remain for later PLAN_04 slices.
+- `NodeDetailOverlay`, `SelectionDetailsDock`, and `LiveOutputViewer` are not yet switched to extracted modules in the main render path.

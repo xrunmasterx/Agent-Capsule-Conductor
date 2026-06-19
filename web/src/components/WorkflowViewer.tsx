@@ -21,18 +21,14 @@ import {
   ChevronDown,
   ChevronUp,
   CircleDot,
-  Database,
   FileText,
   FolderCog,
   GitBranch,
   LayoutDashboard,
   Link2,
   Bot,
-  Play,
   RefreshCw,
-  Save,
   TestTube,
-  Trash2,
   UploadCloud,
 } from 'lucide-react';
 import {
@@ -367,9 +363,7 @@ import {
   SelectedNodeRuntimePane as SelectedNodeRuntimePaneExtracted,
 } from './assistant';
 import { AssistantTurnList as AssistantTurnListExtracted } from './assistant/AssistantTurnList';
-import {
-  ExecutionDock as ExecutionDockExtracted,
-} from './execution';
+import { ExecutionDock as ExecutionDockComponent } from './execution';
 import { LiveOutputViewer as LiveOutputViewerExtracted } from './execution/RunOverlay';
 import {
   NodeDetailOverlay as NodeDetailOverlayExtracted,
@@ -378,6 +372,14 @@ import {
   SelectionDetailsDock as SelectionDetailsDockExtracted,
   evidenceContentForCurrentSelection,
 } from './inspector/SelectionDetailsDock';
+import {
+  SaveWorkflowDialog as SaveWorkflowDialogComponent,
+  TaskOverviewPage as TaskOverviewPageComponent,
+  TaskWorkspaceSwitcher as TaskWorkspaceSwitcherComponent,
+  TopBar as TopBarComponent,
+  WorkbenchShell,
+  type SaveWorkflowDialogState,
+} from './workbench';
 import { useAssistantTurnStream } from '../hooks/useAssistantStream';
 import { useArtifactContentCache } from '../hooks/useArtifactContentCache';
 import { useAssistantSession } from '../hooks/useAssistantSession';
@@ -491,12 +493,6 @@ type EvidenceDockState = {
     nodeId?: string;
     createdAt?: string;
   };
-};
-
-type SaveWorkflowDialogState = {
-  name: string;
-  saving: boolean;
-  error: string | null;
 };
 
 type AssistantProcessEvent = {
@@ -4074,7 +4070,7 @@ export function WorkflowViewer({
 
   return (
     <WorkbenchShell durableTasksReady={durableTasksReady}>
-      <TopBar
+      <TopBarComponent
         title={canvas.name}
         subtitle="WorkflowFunctionTemplate / ScopeFrame / SessionInstance / ArtifactBundle 统一视图"
         isRunning={isRunning}
@@ -4119,9 +4115,9 @@ export function WorkflowViewer({
         onPointerDownCapture={handleCanvasLayoutPointerDown}
         onClickCapture={handleCanvasLayoutClick}
       >
-        <TaskWorkspaceSwitcher value={taskWorkspaceView} onChange={setTaskWorkspaceView} />
+        <TaskWorkspaceSwitcherComponent value={taskWorkspaceView} onChange={setTaskWorkspaceView} />
         {taskWorkspaceView === 'overview' ? (
-          <TaskOverviewPage
+          <TaskOverviewPageComponent
             tasks={tasks}
             activeTaskId={activeTaskId}
             onSelectTask={switchTask}
@@ -4156,7 +4152,7 @@ export function WorkflowViewer({
                 setBindingEditorWorkflowId(workflowId);
               }}
             />
-            <ExecutionDock
+            <ExecutionDockComponent
               isRunning={isRunning}
               runtimeConfig={runtimeConfig}
               canRunWorkflow={canRunSelectedWorkflow}
@@ -4317,7 +4313,7 @@ export function WorkflowViewer({
         />
       ) : null}
       {saveWorkflowDialog ? (
-        <SaveWorkflowDialog
+        <SaveWorkflowDialogComponent
           state={saveWorkflowDialog}
           onName={(name) =>
             setSaveWorkflowDialog((current) => (current ? { ...current, name } : current))
@@ -4384,24 +4380,6 @@ export function WorkflowViewer({
   );
 }
 
-function WorkbenchShell({
-  children,
-  durableTasksReady,
-}: {
-  children: ReactNode;
-  durableTasksReady: boolean;
-}) {
-  return (
-    <section
-      className="panel workflow-viewer graph-workbench-v2"
-      aria-label="ACC Workbench"
-      data-durable-tasks-ready={durableTasksReady ? 'true' : 'false'}
-    >
-      {children}
-    </section>
-  );
-}
-
 function workbenchViewProjection({
   taskWorkspaceView,
   chrome,
@@ -4424,356 +4402,12 @@ function workbenchViewProjection({
   };
 }
 
-function SaveWorkflowDialog({
-  state,
-  onName,
-  onCancel,
-  onConfirm,
-}: {
-  state: SaveWorkflowDialogState;
-  onName: (name: string) => void;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  return (
-    <div className="modal-backdrop" role="presentation">
-      <form
-        className="modal-panel save-workflow-dialog"
-        aria-label="保存 Workflow"
-        onSubmit={(event) => {
-          event.preventDefault();
-          onConfirm();
-        }}
-      >
-        <div className="modal-title-row">
-          <h3>发布为可复用 Workflow</h3>
-          <button type="button" onClick={onCancel} disabled={state.saving}>
-            关闭
-          </button>
-        </div>
-        <label className="form-field">
-          <span>Workflow 名称</span>
-          <input
-            value={state.name}
-            onChange={(event) => onName(event.target.value)}
-            disabled={state.saving}
-            autoFocus
-          />
-        </label>
-        <p className="form-help">
-          发布会写入 canonical <code>.accflow.json</code>，使当前任务蓝图成为可复用的 WorkflowFunctionTemplate。
-        </p>
-        {state.error ? <p className="form-error">{state.error}</p> : null}
-        <div className="modal-actions">
-          <button type="button" onClick={onCancel} disabled={state.saving}>
-            取消
-          </button>
-          <button type="submit" className="primary-action" disabled={state.saving}>
-            {state.saving ? '发布中...' : '发布到 canonical .accflow.json'}
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-}
 
-function ExecutionDock({
-  isRunning,
-  runtimeConfig,
-  canRunWorkflow,
-  canRunNode,
-  onRunTask,
-  onRunWorkflow,
-  onRunNode,
-}: {
-  isRunning: boolean;
-  runtimeConfig: RuntimeConfig | null;
-  canRunWorkflow: boolean;
-  canRunNode: boolean;
-  onRunTask: () => void;
-  onRunWorkflow: () => void;
-  onRunNode: () => void;
-}) {
-  const modeLabel = runtimeConfig?.real_external_agents_enabled
-    ? '生产模式：将调用真实外部 Agent'
-    : runtimeConfig?.run_mode === 'production'
-      ? '生产模式：真实外部 Agent 未启用'
-      : '隔离模式：不调用外部 Agent';
-  return (
-    <div className="execution-dock" aria-label="执行控制">
-      <span className="runtime-mode-pill">{modeLabel}</span>
-      <span className="execution-scope-pill">运行范围：当前任务</span>
-      <button type="button" className="primary-action run-task-action" onClick={onRunTask} disabled={isRunning}>
-        <Play aria-hidden="true" size={18} />
-        {isRunning ? '运行中...' : '运行当前任务'}
-      </button>
-      {canRunWorkflow ? (
-        <button type="button" onClick={onRunWorkflow} disabled={isRunning}>
-          只运行此 Workflow
-        </button>
-      ) : null}
-      {canRunNode ? (
-        <button type="button" onClick={onRunNode} disabled={isRunning}>
-          只运行此 Agent/Tool
-        </button>
-      ) : null}
-    </div>
-  );
-}
 
-function TaskWorkspaceSwitcher({
-  value,
-  onChange,
-}: {
-  value: TaskWorkspaceView;
-  onChange: (value: TaskWorkspaceView) => void;
-}) {
-  return (
-    <div className="task-workspace-switcher" aria-label="Task workspace view">
-      <button
-        type="button"
-        className={value === 'overview' ? 'active' : ''}
-        onClick={() => onChange('overview')}
-      >
-        <LayoutDashboard aria-hidden="true" size={15} />
-        任务总览
-      </button>
-      <button
-        type="button"
-        className={value === 'blueprint' ? 'active' : ''}
-        onClick={() => onChange('blueprint')}
-      >
-        <GitBranch aria-hidden="true" size={15} />
-        任务蓝图
-      </button>
-    </div>
-  );
-}
 
-function TaskOverviewPage({
-  tasks,
-  activeTaskId,
-  onSelectTask,
-  onOpenBlueprint,
-  onNewTask,
-  onDeleteTask,
-}: {
-  tasks: WorkbenchTask[];
-  activeTaskId: string;
-  onSelectTask: (taskId: string) => void;
-  onOpenBlueprint: () => void;
-  onNewTask: () => void;
-  onDeleteTask: (taskId: string) => void;
-}) {
-  const activeTask = tasks.find((task) => task.taskId === activeTaskId) || tasks[0];
-  const openTaskBlueprint = (taskId: string) => {
-    onSelectTask(taskId);
-    onOpenBlueprint();
-  };
-  return (
-    <section className="task-overview-page" aria-label="任务总览">
-      <aside className="task-overview-list" aria-label="任务列表">
-        <div className="task-overview-header">
-          <span>任务队列</span>
-          <button type="button" onClick={onNewTask}>
-            新建任务
-          </button>
-        </div>
-        <div className="task-overview-items">
-          {tasks.map((task) => (
-            <article
-              key={task.taskId}
-              className={[
-                'task-overview-item',
-                task.taskId === activeTaskId ? 'active' : '',
-                `status-${task.status}`,
-              ]
-                .filter(Boolean)
-                .join(' ')}
-              onDoubleClick={() => openTaskBlueprint(task.taskId)}
-            >
-              <button
-                type="button"
-                className="task-overview-select"
-                aria-label={`选择任务 ${task.title}`}
-                onClick={() => onSelectTask(task.taskId)}
-                onDoubleClick={(event) => {
-                  event.stopPropagation();
-                  openTaskBlueprint(task.taskId);
-                }}
-              >
-                <strong>{task.title}</strong>
-                <small>{task.activeRunId || task.latestRunId || '未运行'}</small>
-              </button>
-              <button
-                type="button"
-                className="task-overview-delete"
-                aria-label={`删除任务 ${task.title}`}
-                title="删除任务"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onDeleteTask(task.taskId);
-                }}
-              >
-                <Trash2 aria-hidden="true" size={15} />
-              </button>
-            </article>
-          ))}
-        </div>
-      </aside>
-      <TaskArtifactsPane task={activeTask} />
-    </section>
-  );
-}
 
-function TaskArtifactsPane({ task }: { task?: WorkbenchTask }) {
-  return (
-    <section className="task-artifacts-pane" aria-label="任务产物">
-      <header>
-        <span>产物通道</span>
-        <strong>{task?.title || '未选择任务'}</strong>
-      </header>
-      <div className="task-artifacts-empty">
-        <FileText aria-hidden="true" size={28} />
-        <p>当前任务还没有可展示的产物。</p>
-        <small>运行输出、报告和审计文件会在这里归档展示。</small>
-      </div>
-    </section>
-  );
-}
 
-function TaskRail({
-  tasks,
-  activeTaskId,
-  onSelectTask,
-  onNewTask,
-  onDeleteTask,
-}: {
-  tasks: WorkbenchTask[];
-  activeTaskId: string;
-  onSelectTask: (taskId: string) => void;
-  onNewTask: () => void;
-  onDeleteTask: (taskId: string) => void;
-}) {
-  return (
-    <aside className="task-rail" aria-label="任务列表">
-      <button type="button" className="task-rail-new" onClick={onNewTask}>
-        新建任务
-      </button>
-      {tasks.map((task) => (
-        <article
-          key={task.taskId}
-          className={[
-            'task-rail-item',
-            task.taskId === activeTaskId ? 'active' : '',
-            `status-${task.status}`,
-          ]
-            .filter(Boolean)
-            .join(' ')}
-        >
-          <button type="button" className="task-rail-select" onClick={() => onSelectTask(task.taskId)}>
-            <strong>{task.title}</strong>
-            <small>{task.activeRunId || task.latestRunId || '未运行'}</small>
-          </button>
-          <button
-            type="button"
-            className="task-rail-delete"
-            aria-label={`删除任务 ${task.title}`}
-            title="删除任务"
-            onClick={(event) => {
-              event.stopPropagation();
-              onDeleteTask(task.taskId);
-            }}
-          >
-            <Trash2 aria-hidden="true" size={15} />
-          </button>
-        </article>
-      ))}
-    </aside>
-  );
-}
 
-function TopBar({
-  title,
-  subtitle,
-  isRunning,
-  onNew,
-  onLoadDemo,
-  onSave,
-  onValidate,
-  onRun,
-  onAutoLayout,
-  assistantOpen,
-  onToggleAssistant,
-  detailsOpen,
-  onToggleDetails,
-}: {
-  title: string;
-  subtitle: string;
-  isRunning: boolean;
-  onNew: () => void;
-  onLoadDemo: () => void;
-  onSave: () => void;
-  onValidate: () => void;
-  onRun: () => void;
-  onAutoLayout: () => void;
-  assistantOpen: boolean;
-  onToggleAssistant: () => void;
-  detailsOpen: boolean;
-  onToggleDetails: () => void;
-}) {
-  return (
-    <header className="workbench-topbar">
-      <div className="topbar-title">
-        <span className="topbar-kicker">Workspace Canvas</span>
-        <h2>{title}</h2>
-        <p>{subtitle}</p>
-      </div>
-      <div className="toolbar-actions" aria-label="工作流工具栏">
-        <button
-          type="button"
-          className={detailsOpen ? 'toggle-action active' : 'toggle-action'}
-          onClick={onToggleDetails}
-        >
-          <Database aria-hidden="true" size={16} />
-          运行详情
-        </button>
-        <button
-          type="button"
-          className={assistantOpen ? 'toggle-action active' : 'toggle-action'}
-          onClick={onToggleAssistant}
-        >
-          <Bot aria-hidden="true" size={16} />
-          AI 助手
-        </button>
-        <button type="button" onClick={onNew}>
-          <GitBranch aria-hidden="true" size={16} />
-          新建任务
-        </button>
-        <button type="button" onClick={onLoadDemo}>
-          <LayoutDashboard aria-hidden="true" size={16} />
-          加载示例
-        </button>
-        <button type="button" onClick={onSave} disabled={isRunning}>
-          <Save aria-hidden="true" size={16} />
-          发布为可复用 Workflow
-        </button>
-        <button type="button" onClick={onValidate} disabled={isRunning}>
-          <TestTube aria-hidden="true" size={16} />
-          校验
-        </button>
-        <button type="button" className="primary-action topbar-run-action" onClick={onRun} disabled={isRunning}>
-          <Play aria-hidden="true" size={16} />
-          {isRunning ? '运行中...' : '运行'}
-        </button>
-        <button type="button" onClick={onAutoLayout}>
-          <LayoutDashboard aria-hidden="true" size={16} />
-          自动布局
-        </button>
-      </div>
-    </header>
-  );
-}
 
 function authoringSelectionLabel(
   selection: CanvasSelection,
@@ -16051,7 +15685,6 @@ export {
   AssistantControlRailExtracted,
   AssistantProposalSummaryExtracted,
   SelectedNodeRuntimePaneExtracted,
-  ExecutionDockExtracted,
   LiveOutputViewerExtracted,
   NodeDetailOverlayExtracted,
   SelectionDetailsDockExtracted,

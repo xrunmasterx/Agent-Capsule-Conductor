@@ -1,8 +1,5 @@
 /**
  * TaskRail - left sidebar listing workbench tasks.
- *
- * Shows a vertical list of task cards. Each card can be selected
- * or deleted. A "new task" button sits at the top.
  */
 
 import { Trash2 } from 'lucide-react';
