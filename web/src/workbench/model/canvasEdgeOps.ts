@@ -1562,7 +1562,7 @@ function port(
   return { id, label, direction, required, cardinality, artifactTypes: ['artifact'] };
 }
 
-function isWorkflowBoundaryEdge(edge: WorkflowCanvasEdge): boolean {
+export function isWorkflowBoundaryEdge(edge: WorkflowCanvasEdge): boolean {
   return isWorkflowBoundaryId(edge.source.workflowId) || isWorkflowBoundaryId(edge.target.workflowId);
 }
 
