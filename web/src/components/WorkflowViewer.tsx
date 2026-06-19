@@ -25,13 +25,9 @@ import {
   validateCanvasAuthoringProposal,
 } from './authoring/authoringRuntime';
 import {
-  findDataConnectNode,
-} from '../workbench/model/canvasEdgeOps';
-import {
   isExecutableNodeWorkflow,
-  normalizeWorkbenchSelection,
 } from '../workbench/model/selectionModel';
-import { selectionKey, truncateLargeLog } from '../workbench/model/workflowViewerShell';
+import { truncateLargeLog } from '../workbench/model/workflowViewerShell';
 import type {
   CanvasAuthoringProposal,
   DataConnectionDraft,
@@ -108,6 +104,7 @@ import { WorkflowViewerDock } from './workflow-viewer/WorkflowViewerDock';
 import { WorkflowViewerMainStage } from './workflow-viewer/WorkflowViewerMainStage';
 import { WorkflowViewerNodeDetailOverlay } from './workflow-viewer/WorkflowViewerNodeDetailOverlay';
 import { WorkflowViewerRightPanel } from './workflow-viewer/WorkflowViewerRightPanel';
+import { useWorkflowViewerCanvasGuards } from './workflow-viewer/useWorkflowViewerCanvasGuards';
 import { useWorkflowViewerChromeState } from './workflow-viewer/useWorkflowViewerChromeState';
 import { useWorkflowViewerGraphState } from './workflow-viewer/useWorkflowViewerGraphState';
 import { useWorkflowViewerSelectionState } from './workflow-viewer/useWorkflowViewerSelectionState';
@@ -530,10 +527,6 @@ export function WorkflowViewer({
     onChanged,
   });
 
-  const normalizedSelection = useMemo(
-    () => normalizeWorkbenchSelection(displayCanvas, selection, focusedWorkflowId),
-    [displayCanvas, focusedWorkflowId, selection],
-  );
   const paletteTargetWorkflow =
     focusedWorkflowId
       ? canvas.workflows.find((workflow) => workflow.id === focusedWorkflowId)
@@ -671,38 +664,17 @@ export function WorkflowViewer({
     onBackendAutosaveError: handleBackendAutosaveError,
   });
 
-  useEffect(() => {
-    if (selectionKey(normalizedSelection) !== selectionKey(selection)) {
-      setSelection(normalizedSelection);
-      if (normalizedSelection.type === 'task_canvas') {
-        setChrome((current) => ({ ...current, rightPanel: 'none' }));
-        setNodeDetailOpen(false);
-      }
-    }
-  }, [normalizedSelection, selection]);
-
-  useEffect(() => {
-    if (connectionMode !== 'data') {
-      setDataConnectionDraft(null);
-    }
-  }, [connectionMode]);
-
-  useEffect(() => {
-    if (!dataConnectionDraft) {
-      return;
-    }
-    const sourceNode = findDataConnectNode(
-      displayCanvas,
-      dataConnectionDraft.scopeWorkflowId,
-      dataConnectionDraft.sourceNodeId,
-    );
-    const hasSourcePort = sourceNode?.outputPorts.some(
-      (portValue) => portValue.id === dataConnectionDraft.sourcePortId,
-    );
-    if (!sourceNode || !hasSourcePort) {
-      setDataConnectionDraft(null);
-    }
-  }, [dataConnectionDraft, displayCanvas]);
+  useWorkflowViewerCanvasGuards({
+    displayCanvas,
+    selection,
+    focusedWorkflowId,
+    connectionMode,
+    dataConnectionDraft,
+    setSelection,
+    setChrome,
+    setNodeDetailOpen,
+    setDataConnectionDraft,
+  });
 
   const {
     beginDataConnection,

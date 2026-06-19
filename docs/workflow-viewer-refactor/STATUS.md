@@ -1091,6 +1091,10 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npm run test -- --run src/components/workflow-viewer/useWorkflowViewerChromeState.test.tsx src/workbench/model/workbenchViewProjection.test.ts src/components/workbench/TopBar.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 5 files, 191 tests passed. |
 | `npm run test -- --run` | Passed | 122 files, 632 tests passed. |
 | `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
+| `npx tsc --noEmit` | Passed | WorkflowViewer canvas guard hook extraction compiles. |
+| `npm run test -- --run src/components/workflow-viewer/useWorkflowViewerCanvasGuards.test.tsx src/workbench/model/selectionModel.test.ts src/hooks/useDataConnectionActions.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 5 files, 201 tests passed. |
+| `npm run test -- --run` | Passed | 123 files, 636 tests passed. |
+| `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
 
 ### Static Gates So Far
 
@@ -1165,5 +1169,6 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `WorkflowViewer.tsx` no longer imports ReactFlow/ReactFlow-node-renderer/DOM connection helper implementation details.
 - `WorkflowViewer.tsx` no longer directly imports `canvasToWorkflowGraph`; source graph initialization and layout sync state ownership moved to `useWorkflowViewerGraphState`.
 - `WorkflowViewer.tsx` no longer directly imports `workbenchViewProjection` or owns TopBar assistant/details dock toggle branching; ownership moved to `useWorkflowViewerChromeState`.
-- `WorkflowViewer.tsx` is now 35,097 bytes / 998 lines after chrome/view projection hook extraction.
+- `WorkflowViewer.tsx` no longer directly imports `findDataConnectNode`, `normalizeWorkbenchSelection`, or `selectionKey`; selection normalization and data-connection draft guard ownership moved to `useWorkflowViewerCanvasGuards`.
+- `WorkflowViewer.tsx` is now 34,119 bytes / 972 lines after canvas guard hook extraction.
 - `WorkflowViewer.tsx` no longer ends with local helper definitions; the file now ends at the `WorkflowViewer` component close.
