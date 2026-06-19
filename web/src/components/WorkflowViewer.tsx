@@ -117,7 +117,6 @@ import {
   workflowInvocationLabel,
 } from '../workbench/model/selectionModel';
 import {
-  authoringSelectionLabel,
   workbenchViewProjection,
 } from '../workbench/model/workbenchViewProjection';
 import {
@@ -292,19 +291,13 @@ import { NodeEvidencePaths } from './inspector/NodeEvidencePaths';
 import { PortList } from './inspector/PortList';
 import { RightInspector } from './inspector/RightInspector';
 import { ResourceInspector, type ResourceTemplate } from './inspector/ResourceInspector';
-import { SelectedNodeRuntimePane } from './inspector/SelectedNodeRuntimePane';
-import {
-  SelectionDetailsDock,
-  evidenceContentForCurrentSelection,
-} from './inspector/SelectionDetailsDock';
+import { evidenceContentForCurrentSelection } from './inspector/SelectionDetailsDock';
 import { SelectionInputPane } from './inspector/SelectionInputPane';
 import { SelectionOutputPane } from './inspector/SelectionOutputPane';
 import {
-  SaveWorkflowDialog as SaveWorkflowDialogComponent,
   TaskOverviewPage as TaskOverviewPageComponent,
   TaskWorkspaceSwitcher as TaskWorkspaceSwitcherComponent,
   TopBar as TopBarComponent,
-  WorkflowBindingDialog as WorkflowBindingDialogComponent,
   WorkbenchShell,
   type SaveWorkflowDialogState,
 } from './workbench';
@@ -335,7 +328,6 @@ import {
   type AssistantDisplayStatus,
   type AssistantTranscriptItem,
 } from './assistant/assistantTranscript';
-import { AssistantDockContent } from './assistant/AssistantConsole';
 import { useWorkbenchTaskDurability } from '../hooks/useWorkbenchTaskDurability';
 import {
   useWorkbenchTaskCanvasPersistence,
@@ -370,6 +362,7 @@ import { useAssistantTaskStoreBindings } from '../hooks/useAssistantTaskStoreBin
 import { useWorkbenchTaskStoreBindings } from '../hooks/useWorkbenchTaskStoreBindings';
 import { useRunStoreBindings } from '../hooks/useRunStoreBindings';
 import { useWorkbenchStoreInitialization } from '../hooks/useWorkbenchStoreInitialization';
+import { WorkflowViewerDock } from './workflow-viewer/WorkflowViewerDock';
 
 type Props = {
   workflows: WorkflowSummary[];
@@ -1487,88 +1480,64 @@ export function WorkflowViewer({
           </NodeDetailOverlay>
         ) : null}
       </div>
-      {bindingEditorWorkflowId ? (
-        <WorkflowBindingDialogComponent
-          workflowId={bindingEditorWorkflowId}
-          binding={workflowBindings[bindingEditorWorkflowId]}
-          onClose={() => setBindingEditorWorkflowId(null)}
-          onValidate={validateBinding}
-          onSave={saveBinding}
-          onOpenFolder={openBindingsFolder}
-          onSelectDirectory={selectBindingDirectory}
-        />
-      ) : null}
-      {saveWorkflowDialog ? (
-        <SaveWorkflowDialogComponent
-          state={saveWorkflowDialog}
-          onName={(name) =>
-            setSaveWorkflowDialog((current) => (current ? { ...current, name } : current))
-          }
-          onCancel={() => setSaveWorkflowDialog(null)}
-          onConfirm={confirmSaveWorkflow}
-        />
-      ) : null}
-      {blueprintViewActive ? (
-        <SelectionDetailsDock
-          state={evidenceDock}
-          mode={bottomDockMode}
-          message={message}
-          model={selectedDetailsModelWithAgentEvents}
-          currentTaskId={currentTask?.taskId}
-          selectedRunId={selectedRunId}
-          onToggle={() => setEvidenceDock((current) => ({ ...current, open: !current.open }))}
-          onReadEvidence={readEvidence}
-          assistantContent={
-          <AssistantDockContent
-            input={assistantInput}
-            messages={assistantMessages}
-            proposal={assistantProposal}
-            validation={assistantValidation}
-            temporaryResources={currentAuthoringState.temporaryResources}
-            authoringAgents={authoringAgents}
-            selectedAuthoringAgentId={selectedAuthoringAgentId}
-            sessionId={assistantSessionId}
-            agentSession={assistantAgentSession}
-            sessionStatus={assistantSessionStatus}
-            pendingTurn={assistantPendingTurn}
-            assistantEvents={assistantEvents}
-            liveState={assistantLiveState}
-            turnReason={assistantTurnReason}
-            requiredActions={assistantRequiredActions}
-            graphOpsReview={assistantGraphOpsReview}
-            busy={assistantBusy}
-            targetLabel={authoringSelectionLabel(selection, selectedWorkflow, selectedInternalNode)}
-            hasSelectedRunNode={Boolean(selectedAgentSessionContext)}
-            canShowNodeContext={selectedDetailsModelWithAgentEvents.kind !== 'canvas' && selectedDetailsModelWithAgentEvents.kind !== 'empty'}
-            runtimePane={
-              <SelectedNodeRuntimePane
-                model={selectedDetailsModelWithAgentEvents}
-                agentEventText={agentEventsLiveText(selectedDetailsModelWithAgentEvents.events)}
-                failedEventText={failedAgentEventsText(selectedDetailsModelWithAgentEvents.events)}
-              />
-            }
-            canUndoApply={canUndoAssistantApply}
-            onAgentChange={(agentId) => {
-              setSelectedAuthoringAgentId(agentId);
-              setAssistantSessionId(null);
-              setAssistantAgentSession(null);
-              setAssistantPendingTurn(null);
-              setAssistantEvents([]);
-              setAssistantSessionStatus('disconnected');
-            }}
-            onTurnReasonChange={setAssistantTurnReason}
-            onInput={setAssistantInput}
-            onSubmit={generateAssistantProposal}
-            onApply={applyAssistantProposal}
-            onDiscard={discardAssistantProposal}
-            onUndoApply={undoLastAssistantApply}
-            onPersistTemporaryResource={persistTemporaryResourceDraft}
-            onApplyGraphOpsReview={applyGraphOpsPersistenceReview}
-            onDiscardGraphOpsReview={() => setAssistantGraphOpsReview(null)}
-          />
-          }
-        />
-      ) : null}
+      <WorkflowViewerDock
+        bindingEditorWorkflowId={bindingEditorWorkflowId}
+        setBindingEditorWorkflowId={setBindingEditorWorkflowId}
+        workflowBindings={workflowBindings}
+        validateBinding={validateBinding}
+        saveBinding={saveBinding}
+        openBindingsFolder={openBindingsFolder}
+        selectBindingDirectory={selectBindingDirectory}
+        saveWorkflowDialog={saveWorkflowDialog}
+        setSaveWorkflowDialog={setSaveWorkflowDialog}
+        confirmSaveWorkflow={confirmSaveWorkflow}
+        blueprintViewActive={blueprintViewActive}
+        evidenceDock={evidenceDock}
+        setEvidenceDock={setEvidenceDock}
+        bottomDockMode={bottomDockMode}
+        message={message}
+        selectedDetailsModel={selectedDetailsModelWithAgentEvents}
+        currentTaskId={currentTask?.taskId}
+        selectedRunId={selectedRunId}
+        readEvidence={readEvidence}
+        assistantInput={assistantInput}
+        assistantMessages={assistantMessages}
+        assistantProposal={assistantProposal}
+        assistantValidation={assistantValidation}
+        temporaryResources={currentAuthoringState.temporaryResources}
+        authoringAgents={authoringAgents}
+        selectedAuthoringAgentId={selectedAuthoringAgentId}
+        assistantSessionId={assistantSessionId}
+        assistantAgentSession={assistantAgentSession}
+        assistantSessionStatus={assistantSessionStatus}
+        assistantPendingTurn={assistantPendingTurn}
+        assistantEvents={assistantEvents}
+        assistantLiveState={assistantLiveState}
+        assistantTurnReason={assistantTurnReason}
+        assistantRequiredActions={assistantRequiredActions}
+        assistantGraphOpsReview={assistantGraphOpsReview}
+        assistantBusy={assistantBusy}
+        selection={selection}
+        selectedWorkflow={selectedWorkflow}
+        selectedInternalNode={selectedInternalNode}
+        hasSelectedRunNode={Boolean(selectedAgentSessionContext)}
+        canUndoAssistantApply={canUndoAssistantApply}
+        setSelectedAuthoringAgentId={setSelectedAuthoringAgentId}
+        setAssistantSessionId={setAssistantSessionId}
+        setAssistantAgentSession={setAssistantAgentSession}
+        setAssistantPendingTurn={setAssistantPendingTurn}
+        setAssistantEvents={setAssistantEvents}
+        setAssistantSessionStatus={setAssistantSessionStatus}
+        setAssistantTurnReason={setAssistantTurnReason}
+        setAssistantInput={setAssistantInput}
+        generateAssistantProposal={generateAssistantProposal}
+        applyAssistantProposal={applyAssistantProposal}
+        discardAssistantProposal={discardAssistantProposal}
+        undoLastAssistantApply={undoLastAssistantApply}
+        persistTemporaryResourceDraft={persistTemporaryResourceDraft}
+        applyGraphOpsPersistenceReview={applyGraphOpsPersistenceReview}
+        setAssistantGraphOpsReview={setAssistantGraphOpsReview}
+      />
     </WorkbenchShell>
   );
 }
