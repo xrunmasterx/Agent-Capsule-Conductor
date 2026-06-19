@@ -700,6 +700,9 @@ Status: in progress
 - Added task owner actions for hydrate/set/upsert/delete, canvas updates, per-task selection, and per-task focused workflow state.
 - Added selectors for active task id, task order, active task, active canvas, active selection, and canvas revision.
 - Preserved the store as a frontend state boundary only: no API calls, no ReactFlow dependency, no `WorkflowViewer` dependency, and no `sourceGraph` ownership.
+- Rewired `WorkflowViewer.tsx` to consume store-owned task list, active task, canvas, selection, focused workflow id, connection mode, edge view mode, task workspace view, chrome, bottom dock mode, and node-detail open state.
+- Kept `sourceGraph` as a local derived projection and kept run/assistant/API/EventSource state out of the store.
+- Reset store UI scalars on each `WorkflowViewer` mount before hydrating persisted tasks, preserving per-instance behavior that local React state previously provided and preventing test/runtime cross-instance leakage.
 
 ### Added Tests
 
@@ -714,9 +717,11 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npx tsc --noEmit` | Passed | Store task ownership contract compiles. |
 | `npm run test -- --run src/stores/workbenchStore.types.test.ts` | Passed | 1 file, 6 tests passed. |
 | `npm run test -- --run src/components/WorkflowViewer.drag.test.tsx` | Passed | 1 file, 101 tests passed; existing WorkflowViewer compatibility exports still work. |
+| `npm run test -- --run src/App.test.tsx` | Passed | 1 file, 82 tests passed after WorkflowViewer consumed store-owned state. |
+| `npm run test -- --run` | Passed | 65 files, 431 tests passed. |
+| `npm run build` | Passed | Same expected Vite chunk-size warning remains. |
 
 ### Remaining PLAN_08 Work
 
-- Rewire `WorkflowViewer.tsx` task/canvas/selection/focus state to consume the store owner contract instead of local `useState`.
 - Partition run and assistant owner state by task where needed, without moving API/EventSource effects into stores.
-- Add integration tests for multi-task switching after the shell consumes store-owned state.
+- Continue reducing `WorkflowViewer.tsx` shell glue now that task/canvas owner state has moved to the store.
