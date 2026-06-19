@@ -131,6 +131,16 @@ import {
   persistentCallableIdForDraft,
 } from '../workbench/model/graphOpsProposal';
 import {
+  addCallableNodeFromPalette,
+  addInternalNodeFromPalette,
+  addWorkflowFromPalette,
+  internalNodeFromPaletteItem,
+  nextPaletteSelection,
+  paletteItemBaseId,
+  slugId,
+  uniqueId,
+} from '../workbench/model/paletteCanvasOps';
+import {
   addPortToDataConnectNode,
   canvasEdgesAreEquivalent,
   connectionCandidatesFromPendingEndpoint,
@@ -13113,20 +13123,6 @@ function isChildWorkflowSummary(workflow: WorkflowSummary): boolean {
   return /__[^/\\]+\.accflow\.json$/u.test(path) || id.includes('__');
 }
 
-function uniqueInvocationLabel(baseLabel: string, existingLabels: Set<string>): string {
-  const normalizedBase = baseLabel.trim() || 'Invocation';
-  if (!existingLabels.has(normalizedBase)) {
-    return normalizedBase;
-  }
-  let index = 2;
-  let nextLabel = `${normalizedBase} #${index}`;
-  while (existingLabels.has(nextLabel)) {
-    index += 1;
-    nextLabel = `${normalizedBase} #${index}`;
-  }
-  return nextLabel;
-}
-
 function isTextEditingKeyboardTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) {
     return false;
@@ -13172,110 +13168,6 @@ function selectionKey(selection: CanvasSelection): string {
   return `internal:${selection.workflowId}:${selection.nodeId}`;
 }
 
-function addWorkflowFromPalette(
-  canvas: WorkspaceCanvasModel,
-  item: Extract<PaletteItem, { kind: 'workflow' }>,
-  position: { x: number; y: number },
-): WorkspaceCanvasModel {
-  const baseId = slugId(item.workflowRef || item.label || 'workflow');
-  const id = uniqueId(baseId || 'workflow', new Set(canvas.workflows.map((workflow) => workflow.id)));
-  const invocationLabel = uniqueInvocationLabel(
-    item.label || id,
-    new Set(canvas.workflows.map(workflowInvocationLabel)),
-  );
-  const workflow: WorkflowContainerModel = {
-    id,
-    title: invocationLabel,
-    invocationLabel,
-    sourceKind: 'workflow',
-    workflowBodyKind: 'inline_container',
-    workflowRef: item.workflowRef,
-    directory: '未绑定工作目录',
-    bindingPath: `bindings/${id}.binding.local.json`,
-    status: 'not_run',
-    inputPorts: [port('main', '输入', 'input')],
-    outputPorts: [port('main', '输出', 'output')],
-    internalNodes: [],
-    internalEdges: [],
-    position,
-    size: DEFAULT_CONTAINER_SIZE,
-    warnings: [],
-  };
-  return { ...canvas, workflows: [...canvas.workflows, workflow] };
-}
-
-function nextPaletteSelection(
-  canvas: WorkspaceCanvasModel,
-  item: Exclude<PaletteItem, { kind: 'workflow' }>,
-  targetWorkflowId: string | null,
-): CanvasSelection {
-  if (targetWorkflowId) {
-    const workflow = canvas.workflows.find((candidate) => candidate.id === targetWorkflowId);
-    const existingIds = new Set(workflow?.internalNodes.map((node) => node.id) || []);
-    return {
-      type: 'internal',
-      workflowId: targetWorkflowId,
-      nodeId: uniqueId(paletteItemBaseId(item), existingIds),
-    };
-  }
-  return {
-    type: 'workflow',
-    id: uniqueId(paletteItemBaseId(item), new Set(canvas.workflows.map((workflow) => workflow.id))),
-  };
-}
-
-function addCallableNodeFromPalette(
-  canvas: WorkspaceCanvasModel,
-  item: Exclude<PaletteItem, { kind: 'workflow' }>,
-  position: { x: number; y: number },
-): WorkspaceCanvasModel {
-  const existingIds = new Set(canvas.workflows.map((workflow) => workflow.id));
-  const existingLabels = new Set(canvas.workflows.map(workflowInvocationLabel));
-  const node = internalNodeFromPaletteItem(item, position, existingIds, existingLabels);
-  const id = node.id;
-  const workflow: WorkflowContainerModel = {
-    id,
-    title: node.name,
-    invocationLabel: node.invocationLabel || node.name,
-    sourceKind: node.kind === 'Tool' ? 'tool' : 'agent_session',
-    callableId: node.callableId,
-    sourceInput: node.input,
-    control: node.control,
-    outputSchema: node.outputSchema,
-    forwardMainOutputOnControl: node.forwardMainOutputOnControl ?? null,
-    directory: 'Root canvas environment',
-    status: 'not_run',
-    inputPorts: node.inputPorts || [port('main', 'input', 'input')],
-    outputPorts: internalNodeOutputPorts(node),
-    internalNodes: [],
-    internalEdges: [],
-    position,
-    size: AGENT_TOOL_NODE_SIZE,
-    warnings: [],
-  };
-  return { ...canvas, workflows: [...canvas.workflows, workflow] };
-}
-
-function addInternalNodeFromPalette(
-  canvas: WorkspaceCanvasModel,
-  workflowId: string,
-  item: Exclude<PaletteItem, { kind: 'workflow' }>,
-  position: { x: number; y: number },
-): WorkspaceCanvasModel {
-  return {
-    ...canvas,
-    workflows: canvas.workflows.map((workflow) => {
-      if (workflow.id !== workflowId) {
-        return workflow;
-      }
-      const existingIds = new Set(workflow.internalNodes.map((node) => node.id));
-      const existingLabels = new Set(workflow.internalNodes.map(internalInvocationLabel));
-      const node = internalNodeFromPaletteItem(item, position, existingIds, existingLabels);
-      return expandWorkflowToFitChildren({ ...workflow, internalNodes: [...workflow.internalNodes, node] });
-    }),
-  };
-}
-
 function addInternalNodeFromPaletteWithConnection(
   canvas: WorkspaceCanvasModel,
   workflowId: string,
@@ -13308,49 +13200,6 @@ function addInternalNodeFromPaletteWithConnection(
       });
     }),
   };
-}
-
-function internalNodeFromPaletteItem(
-  item: Exclude<PaletteItem, { kind: 'workflow' }>,
-  position: { x: number; y: number },
-  existingIds: Set<string>,
-  existingLabels: Set<string> = new Set(),
-): InternalNodeView {
-  const callableId = item.kind === 'file_source' ? 'file-source.local' : item.callableId;
-  const id = uniqueId(paletteItemBaseId(item), existingIds);
-  const isTool = item.kind === 'tool' || item.kind === 'file_source';
-  const invocationLabel = uniqueInvocationLabel(item.label || callableId || id, existingLabels);
-  const task = isTool ? '本地工具节点' : invocationLabel;
-  return {
-    id,
-    name: invocationLabel,
-    invocationLabel,
-    task,
-    kind: isTool ? 'Tool' : 'Agent',
-    status: 'not_run',
-    callableId,
-    runtime: callableId,
-    input:
-      item.kind === 'file_source'
-        ? { path: '' }
-        : { user_prompt: invocationLabel },
-    inputPorts:
-      item.kind === 'file_source'
-        ? [port('main', 'input', 'input')]
-        : item.inputPorts || [port('main', 'input', 'input')],
-    outputPorts:
-      item.kind === 'file_source'
-        ? [port('main', 'output', 'output')]
-        : outputPortsFromSchema(item.outputSchema, item.outputPorts || [port('main', 'output', 'output')]),
-    outputSchema: item.kind === 'file_source' ? undefined : item.outputSchema,
-    forwardMainOutputOnControl: null,
-    position,
-  };
-}
-
-function paletteItemBaseId(item: Exclude<PaletteItem, { kind: 'workflow' }>): string {
-  const stableRef = item.kind === 'file_source' ? item.callableId : item.callableId;
-  return slugId(stableRef || item.label || 'node');
 }
 
 function edgeFromPendingConnection(
@@ -13417,15 +13266,6 @@ function connectionPreviewFromHandle(handle: HTMLElement, fallback: { x: number;
     ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
     : fallback;
   return { start, end: fallback };
-}
-
-function slugId(value: string): string {
-  const slug = value
-    .trim()
-    .replace(/[^a-zA-Z0-9_]+/gu, '_')
-    .replace(/^_+|_+$/gu, '')
-    .slice(0, 48);
-  return slug || 'node';
 }
 
 function isJsdomRuntime(): boolean {
@@ -13663,17 +13503,6 @@ function dedupeSchemaFields(fields: SchemaFieldCard[]): SchemaFieldCard[] {
     return true;
   });
 }
-
-function uniqueId(baseId: string, existingIds: Set<string>): string {
-  let id = baseId;
-  let index = 1;
-  while (existingIds.has(id)) {
-    index += 1;
-    id = `${baseId}_${index}`;
-  }
-  return id;
-}
-
 
 function textArtifact(name: string, content: string, type: ArtifactContent['type']): ArtifactContent {
   return { name, path: name, content, type, size_bytes: content.length };

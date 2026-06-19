@@ -569,10 +569,13 @@ Status: in progress
 - Added `web/src/workbench/model/graphOpsProposal.ts` as the pure owner for temporary-agent GraphOps proposal id creation, persistent callable id derivation, temporary callable id detection, and create-agent transaction construction.
 - Removed the corresponding local GraphOps helper functions from `WorkflowViewer.tsx`; the component now imports the pure model helpers.
 - Preserved existing temporary-agent fallback id behavior for compatibility: `tmp_agent_empty` still maps to `agentempty`.
+- Added `web/src/workbench/model/paletteCanvasOps.ts` as the pure owner for palette item to canvas node/container creation, next-selection prediction, id slugging, and unique id allocation.
+- Removed the corresponding local palette canvas creation helpers from `WorkflowViewer.tsx`; the ReactFlow-specific pending-connection helper remains local and calls the pure node factory.
 
 ### Added Tests
 
 - `web/src/workbench/model/graphOpsProposal.test.ts`
+- `web/src/workbench/model/paletteCanvasOps.test.ts`
 
 ### Validation So Far
 
@@ -583,6 +586,8 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npx tsc --noEmit` | Passed | GraphOps proposal model extraction compiles. |
 | `npm run test -- --run src/workbench/model/graphOpsProposal.test.ts` | Passed | 1 file, 4 tests passed. |
 | `npm run test -- --run src/workbench/model/graphOpsProposal.test.ts src/hooks/useGraphOpsPersistence.test.tsx src/App.test.tsx -t "temporary agent|GraphOps|Workbench AI temporary"` | Passed | 3 files, 6 selected tests passed; temporary-agent GraphOps integration tests still pass. |
+| `npx tsc --noEmit` | Passed | Palette canvas op extraction compiles. |
+| `npm run test -- --run src/workbench/model/paletteCanvasOps.test.ts src/components/WorkflowViewer.drag.test.tsx` | Passed | 2 files, 105 tests passed. |
 
 ### Static Gates So Far
 
@@ -590,3 +595,4 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `WorkflowViewer.tsx` no longer defines local `persistentCallableIdForDraft`.
 - `WorkflowViewer.tsx` no longer defines local `graphOpsTransactionForTemporaryAgent`.
 - `WorkflowViewer.tsx` no longer defines local `isTemporaryCallableId`.
+- `WorkflowViewer.tsx` no longer defines local `addWorkflowFromPalette`, `addCallableNodeFromPalette`, `addInternalNodeFromPalette`, `internalNodeFromPaletteItem`, `nextPaletteSelection`, `paletteItemBaseId`, `slugId`, `uniqueId`, or `uniqueInvocationLabel`.
