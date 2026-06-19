@@ -30,7 +30,6 @@ import type {
   RunSummary,
   BoundaryTransferPreview,
   WorkflowDataEdge,
-  WorkflowBindingView,
   WorkflowGraph,
   WorkflowGraphEdge,
   WorkflowRunResult,
@@ -161,7 +160,6 @@ import {
   selectedNodeSettingsModel,
   statusLabel,
   workflowMainInputBindingState,
-  workspaceRootOf,
   type NodeRunLookupContext,
 } from '../workbench/model/selectedNodeModel';
 import type {
@@ -376,7 +374,6 @@ import {
   useWorkbenchBootstrapLoaders,
 } from '../hooks/useWorkbenchBootstrap';
 import {
-  bindingPathOf,
   useWorkflowBindings,
 } from '../hooks/useWorkflowBindings';
 import { useWorkflowPersistence } from '../hooks/useWorkflowPersistence';
@@ -397,6 +394,7 @@ import { useAssistantGraphOpsPersistenceActions } from '../hooks/useAssistantGra
 import { useCanvasSelectionUiActions } from '../hooks/useCanvasSelectionUiActions';
 import { useAssistantAuthoringSessionActions } from '../hooks/useAssistantAuthoringSessionActions';
 import { useRunProjectionActions } from '../hooks/useRunProjectionActions';
+import { useCanvasGraphStateActions } from '../hooks/useCanvasGraphStateActions';
 
 type Props = {
   workflows: WorkflowSummary[];
@@ -842,49 +840,25 @@ export function WorkflowViewer({
     addSystemMessage: addAssistantSystemMessage,
   });
 
-  const updateCanvas = useCallback((next: SetStateAction<WorkspaceCanvasModel>) => {
-    setCanvas((current) => {
-      const nextCanvas = normalizeCanvasEdges(
-        typeof next === 'function'
-          ? (next as (current: WorkspaceCanvasModel) => WorkspaceCanvasModel)(current)
-          : next,
-      );
-      setTasks((currentTasks) =>
-        currentTasks.map((task) =>
-          task.taskId === activeTaskId
-            ? { ...task, title: nextCanvas.name, canvas: stripRuntimeStateFromCanvas(nextCanvas) }
-            : task,
-        ),
-      );
-      return nextCanvas;
-    });
-  }, [activeTaskId]);
+  const {
+    updateCanvas,
+    updateCanvasAndGraph,
+    handleWorkflowBindingSaved,
+    handleWorkflowBindingFolderOpened,
+  } = useCanvasGraphStateActions({
+    activeTaskId,
+    sourceGraph,
+    graphRef,
+    setCanvas,
+    setTasks,
+    setSourceGraph,
+    setMessage,
+  });
 
   const workflowBindingIds = useMemo(
     () => [canvas.id, ...canvas.workflows.map((item) => item.id)],
     [canvas.id, canvas.workflows],
   );
-  const handleWorkflowBindingSaved = useCallback(
-    (workflowId: string, normalized: WorkflowBindingView) => {
-      updateCanvas((current) => ({
-        ...current,
-        workflows: current.workflows.map((workflow) =>
-          workflow.id === workflowId
-            ? {
-                ...workflow,
-                bindingPath: bindingPathOf(normalized),
-                directory: workspaceRootOf(normalized),
-              }
-            : workflow,
-        ),
-      }));
-      setMessage(`已保存 ${workflowId} workspace binding`);
-    },
-    [updateCanvas],
-  );
-  const handleWorkflowBindingFolderOpened = useCallback((workflowId: string) => {
-    setMessage(`已打开 ${workflowId} 的 bindings 目录`);
-  }, []);
   const {
     workflowBindings,
     saveBinding,
@@ -896,32 +870,6 @@ export function WorkflowViewer({
     onSaved: handleWorkflowBindingSaved,
     onOpenedFolder: handleWorkflowBindingFolderOpened,
   });
-
-  function updateCanvasAndGraph(next: SetStateAction<WorkspaceCanvasModel>) {
-    setCanvas((current) => {
-      const nextCanvas =
-        normalizeCanvasEdges(
-          typeof next === 'function'
-            ? (next as (current: WorkspaceCanvasModel) => WorkspaceCanvasModel)(current)
-            : next,
-        );
-      const nextGraph = canvasToWorkflowGraph(nextCanvas);
-      graphRef.current = nextGraph;
-      setSourceGraph(nextGraph);
-      setTasks((currentTasks) =>
-        currentTasks.map((task) =>
-          task.taskId === activeTaskId
-            ? { ...task, title: nextCanvas.name, canvas: stripRuntimeStateFromCanvas(nextCanvas) }
-            : task,
-        ),
-      );
-      return nextCanvas;
-    });
-  }
-
-  useEffect(() => {
-    graphRef.current = sourceGraph;
-  }, [sourceGraph]);
 
   const restorationRunId = currentTask?.activeRunId || currentTask?.latestRunId || null;
   const shouldRestoreRun = Boolean(restorationRunId && !runsById[restorationRunId]?.run);
