@@ -212,7 +212,10 @@ Status: in progress
 - Replaced the assistant turn inline EventSource/polling effect in `WorkflowViewer.tsx` with `useAssistantTurnStream(...)`.
 - Preserved the critical `workbench_chat` gate: ordinary assistant chat still does not validate a previous authoring draft, even when `current_output_turn_id` is present.
 - `WorkflowViewer.tsx` passes a stable assistant turn session id derived from `assistantSessionId || assistantPendingTurn.session_id`, so the hook does not depend on outer React state landing before the submitted turn record.
-- `web/src/components/WorkflowViewer.tsx` is now 573,309 bytes / 16,334 lines after the latest slice.
+- Added `web/src/hooks/useTaskPersistence.ts` as the owner for local task-store save, current canvas snapshot publish debounce, backend task autosave debounce, backend autosave de-dupe, timer cleanup, and failure retry reset.
+- Replaced the localStorage save, 400ms snapshot publish, and 700ms backend task autosave effects in `WorkflowViewer.tsx` with `useTaskPersistence(...)`.
+- Kept snapshot construction and backend DTO serialization in the existing authoring helpers for now, so this PLAN_03 slice changes effect ownership without moving authoring/GraphOps semantics.
+- `web/src/components/WorkflowViewer.tsx` is now 572,604 bytes / 16,303 lines after the latest slice.
 
 ### Added Tests
 
@@ -220,6 +223,7 @@ Status: in progress
 - `web/src/hooks/useBoundaryTransferPreview.test.tsx`
 - `web/src/hooks/useRunStream.test.tsx`
 - `web/src/hooks/useAssistantStream.test.tsx`
+- `web/src/hooks/useTaskPersistence.test.tsx`
 - Extended `web/src/hooks/streamTypes.test.ts`
 
 ### Validation So Far
@@ -246,6 +250,11 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npx tsc --noEmit` | Passed | Assistant turn stream hook wiring compiles. |
 | `npm run test -- --run` | Passed | 24 files, 281 tests passed. |
 | `npm run build` | Passed | Same expected chunk-size warning remains. |
+| `npm run test -- --run src/hooks/useTaskPersistence.test.tsx` | Passed | 1 file, 6 tests passed. |
+| `npm run test -- --run src/App.test.tsx src/components/WorkflowViewer.drag.test.tsx` | Passed | 2 files, 183 tests passed. |
+| `npx tsc --noEmit` | Passed | Task persistence hook wiring compiles. |
+| `npm run test -- --run` | Passed | 25 files, 287 tests passed. |
+| `npm run build` | Passed | Same expected chunk-size warning remains. |
 
 ### Static Gates So Far
 
@@ -254,4 +263,6 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `WorkflowViewer.tsx` no longer directly creates the selected-run `EventSource`; run stream ownership lives in `useRunStream`.
 - `WorkflowViewer.tsx` no longer directly creates the assistant turn `EventSource`, assistant turn polling interval, or assistant draft validation request; assistant turn stream ownership lives in `useAssistantTurnStream`.
 - `useAssistantStream.test.tsx` locks ordinary `workbench_chat` turns against accidental `validateAssistantDraft` calls, verifies authoring-turn validation only when the output turn id matches, and covers terminal cleanup.
-- `WorkflowViewer.tsx` still has direct `api.*`, `runnerApi.*`, and timer usage for run submit, task bootstrap/autosave, submit-time boundary preview, binding actions, and artifact loading. These are remaining PLAN_03 slices.
+- `WorkflowViewer.tsx` no longer owns task persistence timers for localStorage save, current canvas snapshot publish, or backend task autosave; debounce, cleanup, and autosave de-dupe live in `useTaskPersistence`.
+- `useTaskPersistence.test.tsx` covers not-ready suppression, local save, latest snapshot wins, backend de-dupe, failure retry reset, and cleanup clearing pending timers.
+- `WorkflowViewer.tsx` still has direct `api.*`, `runnerApi.*`, and timer usage for run submit, task bootstrap, submit-time boundary preview, binding actions, artifact loading, selected-agent polling, and UI-only defer timers. These are remaining PLAN_03 slices.

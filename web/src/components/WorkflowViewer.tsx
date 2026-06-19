@@ -377,6 +377,7 @@ import {
 } from './inspector/SelectionDetailsDock';
 import { useAssistantTurnStream } from '../hooks/useAssistantStream';
 import { useRunStream } from '../hooks/useRunStream';
+import { useTaskPersistence } from '../hooks/useTaskPersistence';
 
 type Props = {
   workflows: WorkflowSummary[];
@@ -2049,8 +2050,6 @@ export function WorkflowViewer({
   const [tasks, setTasks] = useState<WorkbenchTask[]>(() => initialTaskStore.tasks);
   const [activeTaskId, setActiveTaskId] = useState(initialTaskStore.activeTaskId);
   const durableTaskBootstrapStartedRef = useRef(false);
-  const backendTaskPersistTimerRef = useRef<number | null>(null);
-  const lastBackendTaskPersistKeyRef = useRef('');
   const callablesRef = useRef(callables);
   const workflowsRef = useRef(workflows);
   const currentTask = useMemo(
@@ -2422,49 +2421,12 @@ export function WorkflowViewer({
       ]),
   });
 
-  useEffect(() => {
-    if (!durableTasksReady) {
-      return undefined;
-    }
-    const snapshot = currentAuthoringSnapshot();
-    const timeout = window.setTimeout(() => {
-      void api
-        .putWorkbenchTaskCanvas(snapshot.task_id, {
-          canvas_hash: snapshot.snapshot_id,
-          canvas_snapshot: authoringBackendCanvasSnapshot(snapshot),
-          selection: authoringSelectionPayload(snapshot.selection),
-          temporary_resources: currentAuthoringState.temporaryResources,
-        })
-        .catch(() => {
-          // Snapshot publishing is an MCP bridge; Workbench editing stays local if it fails.
-        });
-    }, 400);
-    return () => {
-      window.clearTimeout(timeout);
-    };
-  }, [
-    activeTaskId,
-    canvas,
-    selection,
-    callables,
-    workflows,
-    currentAuthoringState.temporaryResources,
-    durableTasksReady,
-  ]);
-
   useRunStream(selectedRunId, {
     appendNodeLogDelta,
     appendRunAgentEvent,
     appendRunLiveEvent,
     updateRunProjection,
   });
-
-  useEffect(() => {
-    if (!durableTasksReady) {
-      return;
-    }
-    saveTaskStore({ version: 1, activeTaskId, tasks });
-  }, [activeTaskId, durableTasksReady, tasks]);
 
   const updateCanvas = useCallback((next: SetStateAction<WorkspaceCanvasModel>) => {
     setCanvas((current) => {
@@ -3039,6 +3001,39 @@ export function WorkflowViewer({
     () => canvasAuthoringHash(activeTaskId, stripRuntimeStateFromCanvas(canvas)),
     [activeTaskId, canvas],
   );
+  const publishCurrentTaskSnapshot = useCallback(async () => {
+    const snapshot = currentAuthoringSnapshot();
+    await api.putWorkbenchTaskCanvas(snapshot.task_id, {
+      canvas_hash: snapshot.snapshot_id,
+      canvas_snapshot: authoringBackendCanvasSnapshot(snapshot),
+      selection: authoringSelectionPayload(snapshot.selection),
+      temporary_resources: currentAuthoringState.temporaryResources,
+    });
+  }, [
+    activeTaskId,
+    canvas,
+    selection,
+    callables,
+    workflows,
+    currentAuthoringState.temporaryResources,
+  ]);
+  const buildBackendTaskSnapshot = useCallback((): WorkbenchTask | null => {
+    if (!currentTask) {
+      return null;
+    }
+    return {
+      ...currentTask,
+      canvas: stripRuntimeStateFromCanvas(canvas),
+    };
+  }, [canvas, currentTask]);
+  const persistBackendTaskSnapshot = useCallback(
+    (taskSnapshot: WorkbenchTask) =>
+      persistWorkbenchTaskToBackend(taskSnapshot, callables, workflows),
+    [callables, workflows],
+  );
+  const handleBackendAutosaveError = useCallback((error: unknown) => {
+    console.warn('Workbench task autosave failed', error);
+  }, []);
   const canUndoAssistantApply =
     Boolean(assistantApplyUndo) &&
     assistantApplyUndo?.taskId === activeTaskId &&
@@ -3046,44 +3041,18 @@ export function WorkflowViewer({
     !isRunning &&
     !assistantPendingTurn;
 
-  useEffect(() => {
-    if (!durableTasksReady || !currentTask) {
-      return undefined;
-    }
-    const persistKey = `${activeTaskId}:${currentAuthoringCanvasHash}`;
-    if (lastBackendTaskPersistKeyRef.current === persistKey) {
-      return undefined;
-    }
-    if (backendTaskPersistTimerRef.current) {
-      window.clearTimeout(backendTaskPersistTimerRef.current);
-    }
-    const taskSnapshot: WorkbenchTask = {
-      ...currentTask,
-      canvas: stripRuntimeStateFromCanvas(canvas),
-    };
-    backendTaskPersistTimerRef.current = window.setTimeout(() => {
-      backendTaskPersistTimerRef.current = null;
-      lastBackendTaskPersistKeyRef.current = persistKey;
-      void persistWorkbenchTaskToBackend(taskSnapshot, callables, workflows).catch((error) => {
-        lastBackendTaskPersistKeyRef.current = '';
-        console.warn('Workbench task autosave failed', error);
-      });
-    }, 700);
-    return () => {
-      if (backendTaskPersistTimerRef.current) {
-        window.clearTimeout(backendTaskPersistTimerRef.current);
-        backendTaskPersistTimerRef.current = null;
-      }
-    };
-  }, [
-    activeTaskId,
-    callables,
-    canvas,
-    currentAuthoringCanvasHash,
-    currentTask,
+  useTaskPersistence({
     durableTasksReady,
-    workflows,
-  ]);
+    activeTaskId,
+    tasks,
+    saveLocalTaskStore: saveTaskStore,
+    snapshotPublishKey: `${activeTaskId}:${currentAuthoringCanvasHash}:${selectionKey(selection)}`,
+    publishCurrentSnapshot: publishCurrentTaskSnapshot,
+    backendPersistKey: currentTask ? `${activeTaskId}:${currentAuthoringCanvasHash}` : '',
+    buildBackendTaskSnapshot,
+    persistTaskToBackend: persistBackendTaskSnapshot,
+    onBackendAutosaveError: handleBackendAutosaveError,
+  });
 
   useEffect(() => {
     if (selectionKey(normalizedSelection) !== selectionKey(selection)) {
