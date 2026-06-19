@@ -4,28 +4,25 @@
  * This module encapsulates the AI assistant authoring session lifecycle:
  * snapshot capture, proposal generation, validation, and application.
  *
- * Functions extracted from WorkflowViewer.tsx lines ~830-2200.
+ * Functions extracted from WorkflowViewer.tsx.
  */
-
-// ---------------------------------------------------------------------------
-// Re-export the authoring pure functions from WorkflowViewer via named imports.
-// After the full extraction these will become direct exports from this module.
-// ---------------------------------------------------------------------------
 
 export {
   captureAuthoringSnapshot,
   buildDeterministicCanvasAuthoringProposal,
   validateCanvasAuthoringProposal,
   applyCanvasAuthoringProposal,
+} from './authoringRuntime';
+
+export {
   temporaryResourceIssueForCanvas,
   temporaryResourceIssueForGraph,
-} from '../WorkflowViewer';
+} from '../../workbench/model/authoringProposal';
 
 /**
  * Re-exported authoring type references.
  *
- * After full extraction these will be owned by this module.
- * For now they remain inline in WorkflowViewer.tsx.
+ * Authoring domain types are owned by `types/workbench`.
  */
 export type {
   // - AuthoringContextSnapshot

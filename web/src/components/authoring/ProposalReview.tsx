@@ -11,7 +11,7 @@
  * - mergeAuthoringValidation
  * - authoringValidationFromBackend
  *
- * Currently these remain in WorkflowViewer.tsx; named imports provide access.
+ * Runtime proposal operations live in `authoringRuntime`.
  */
 
 export {
@@ -19,4 +19,4 @@ export {
   validateCanvasAuthoringProposal,
   applyCanvasAuthoringProposal,
   captureAuthoringSnapshot,
-} from '../WorkflowViewer';
+} from './authoringRuntime';

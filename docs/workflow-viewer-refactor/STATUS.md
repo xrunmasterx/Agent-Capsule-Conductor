@@ -576,6 +576,10 @@ Status: in progress
 - Added `web/src/components/assistant/assistantTranscript.ts` as the owner for assistant transcript item projection, live-event merging, GraphOps list filtering, and assistant display-status derivation.
 - Removed the corresponding transcript projection helpers and local assistant transcript/status types from `WorkflowViewer.tsx`; the component now keeps only transcript rendering components and imports the projection model.
 - `WorkflowViewer.tsx` is now 454,062 bytes / 12,238 lines, below the previous Babel 500KB deopt threshold.
+- Added `web/src/components/authoring/authoringRuntime.ts` as the owner for authoring id creation, snapshot capture, deterministic proposal build, proposal validation, proposal apply, and authoring canvas operation helpers.
+- Removed the local authoring runtime implementation from `WorkflowViewer.tsx`; the component now invokes the authoring runtime through imports.
+- `web/src/components/authoring/AuthoringSession.tsx` and `ProposalReview.tsx` now re-export from the real authoring owner instead of `WorkflowViewer.tsx`.
+- `WorkflowViewer.tsx` is now 412,224 bytes / 11,109 lines after authoring runtime extraction.
 
 ### Added Tests
 
@@ -583,6 +587,7 @@ Status: in progress
 - `web/src/workbench/model/paletteCanvasOps.test.ts`
 - `web/src/workbench/model/authoringProposal.test.ts`
 - `web/src/components/assistant/assistantTranscript.test.ts`
+- Existing `web/src/components/WorkflowViewer.drag.test.tsx` authoring assertions now import proposal runtime helpers from `web/src/components/authoring/authoringRuntime.ts`.
 
 ### Validation So Far
 
@@ -602,6 +607,9 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npm run test -- --run src/components/assistant/assistantTranscript.test.ts` | Passed | 1 file, 5 tests passed. |
 | `npm run test -- --run src/components/assistant/assistantTranscript.test.ts src/App.test.tsx -t "Workbench AI chat completion does not validate previous authoring draft\|Workbench AI temporary agent blocks save validate and run after task reload\|Workbench AI temporary agent persists through GraphOps proposal approval\|Workbench AI assistant generates and applies a canvas-local proposal\|assistantTranscript"` | Passed | 2 files, 9 selected tests passed. |
 | `npm run test -- --run src/components/WorkflowViewer.drag.test.tsx` | Passed | 1 file, 101 tests passed. |
+| `npx tsc --noEmit` | Passed | Authoring runtime extraction compiles. |
+| `npm run test -- --run src/workbench/model/authoringProposal.test.ts src/components/WorkflowViewer.drag.test.tsx` | Passed | 2 files, 106 tests passed; drag test authoring helpers import the new runtime owner. |
+| `npm run test -- --run src/App.test.tsx -t "Workbench AI assistant generates and applies a canvas-local proposal\|Workbench AI chat completion does not validate previous authoring draft\|Workbench AI temporary agent blocks save validate and run after task reload\|Workbench AI temporary agent persists through GraphOps proposal approval"` | Passed | 4 selected assistant/GraphOps integration tests passed. |
 
 ### Static Gates So Far
 
@@ -613,3 +621,5 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `WorkflowViewer.tsx` no longer defines local `canvasAuthoringHash`, `stableJsonStringify`, `hashString`, `authoringTargetFromSelection`, `effectiveAssistantTurnReason`, `mergeAuthoringValidation`, `authoringValidationFromBackend`, `authoringBackendCanvasSnapshot`, `authoringSelectionPayload`, `replaceTemporaryResourceWithCallable`, `temporaryResourceIssueForCanvas`, `temporaryResourceIssueForGraph`, `authoringOperationSummary`, or `isInspectableNodeSelection`.
 - `WorkflowViewer.tsx` no longer defines local `AssistantProcessEvent`, `AssistantTranscriptItem`, `AssistantDisplayStatus`, `graphOpsStringList`, `buildAssistantTranscriptItems`, or `assistantDisplayStatus`.
 - `components/assistant/assistantTranscript.ts` has no React import and contains no API, store, localStorage, EventSource, or ReactFlow dependency.
+- `WorkflowViewer.tsx` no longer defines local `authoringId`, `captureAuthoringSnapshot`, `buildDeterministicCanvasAuthoringProposal`, `validateCanvasAuthoringProposal`, or `applyCanvasAuthoringProposal`.
+- `components/authoring`, `components/assistant`, `hooks`, and `workbench` no longer import from `WorkflowViewer.tsx`.

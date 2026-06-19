@@ -1485,7 +1485,7 @@ function addEdgeWithControlDependency(
   return { ...canvas, edges: [...edges, control] };
 }
 
-function controlEdgeWithId(
+export function controlEdgeWithId(
   id: string,
   sourceWorkflowId: string,
   targetWorkflowId: string,
@@ -1516,7 +1516,7 @@ function dataEdgeWithId(
   };
 }
 
-function uniqueEdgeIdForScope(
+export function uniqueEdgeIdForScope(
   canvas: WorkspaceCanvasModel,
   scopeWorkflowId: string | null,
   kind: 'data' | 'control',
@@ -1564,6 +1564,17 @@ function port(
 
 export function isWorkflowBoundaryEdge(edge: WorkflowCanvasEdge): boolean {
   return isWorkflowBoundaryId(edge.source.workflowId) || isWorkflowBoundaryId(edge.target.workflowId);
+}
+
+export function normalizeCanvasEdges(canvas: WorkspaceCanvasModel): WorkspaceCanvasModel {
+  return {
+    ...canvas,
+    edges: uniqueCanvasEdges(canvas.edges),
+    workflows: canvas.workflows.map((workflow) => ({
+      ...workflow,
+      internalEdges: uniqueCanvasEdges(workflow.internalEdges),
+    })),
+  };
 }
 
 function jsonPointerToken(value: string): string {

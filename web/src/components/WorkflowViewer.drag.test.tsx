@@ -6,10 +6,6 @@ import {
   AgentToolNode as _AgentToolNode,
   WorkspaceCanvas as _WorkspaceCanvas,
   createDataEdgeCommand as _createDataEdgeCommand,
-  captureAuthoringSnapshot as _captureAuthoringSnapshot,
-  buildDeterministicCanvasAuthoringProposal as _buildDeterministicCanvasAuthoringProposal,
-  applyCanvasAuthoringProposal as _applyCanvasAuthoringProposal,
-  validateCanvasAuthoringProposal as _validateCanvasAuthoringProposal,
   temporaryResourceIssueForCanvas as _temporaryResourceIssueForCanvas,
   temporaryResourceIssueForGraph as _temporaryResourceIssueForGraph,
   deleteSelectionFromCanvas as _deleteSelectionFromCanvas,
@@ -35,6 +31,12 @@ import {
   mergeWorkflowRunWithEvents,
   runOverlayFromRun,
 } from './workflow-viewer/runState';
+import {
+  applyCanvasAuthoringProposal as _applyCanvasAuthoringProposal,
+  buildDeterministicCanvasAuthoringProposal as _buildDeterministicCanvasAuthoringProposal,
+  captureAuthoringSnapshot as _captureAuthoringSnapshot,
+  validateCanvasAuthoringProposal as _validateCanvasAuthoringProposal,
+} from './authoring/authoringRuntime';
 
 const flowMock = vi.hoisted(() => ({
   props: null as Record<string, unknown> | null,
