@@ -8762,7 +8762,7 @@ function SelectionOutputPane({
       {outputView === 'live' ? (
         <section className="selection-output-content" aria-label="实时输出内容">
           {liveState?.events.length ? (
-            <LiveOutputViewer events={liveState.events} status={liveState.status} emptyText="当前节点还没有实时输出。" />
+            <LiveOutputViewerExtracted events={liveState.events} status={liveState.status} emptyText="当前节点还没有实时输出。" />
           ) : (
             <>
               <div className="selection-log-stream-tabs" role="tablist" aria-label="Live output stream">
@@ -9951,115 +9951,6 @@ function parentPath(path: string | null | undefined): string {
   return index > 0 ? normalized.slice(0, index) : '';
 }
 
-function LiveOutputViewer({
-  events,
-  status,
-  emptyText,
-}: {
-  events: WorkbenchLiveEvent[];
-  status: string;
-  emptyText: string;
-}) {
-  const [filter, setFilter] = useState<LiveOutputFilter>('all');
-  const [isPinnedToBottom, setIsPinnedToBottom] = useState(true);
-  const outputRef = useRef<HTMLDivElement | null>(null);
-  const visibleEntries = useMemo(() => {
-    const entries = buildAccTranscript(events, filter);
-    if (filter === 'all' && entries.length === 0) {
-      return buildAccTranscript(events, 'logs').slice(-160);
-    }
-    return entries.slice(-160);
-  }, [events, filter]);
-  const hasEvents = visibleEntries.length > 0;
-  const shouldShowJump = hasEvents && !isPinnedToBottom;
-
-  const scrollToBottom = useCallback(() => {
-    const element = outputRef.current;
-    if (!element) {
-      return;
-    }
-    element.scrollTop = element.scrollHeight;
-  }, []);
-
-  useEffect(() => {
-    if (!isPinnedToBottom) {
-      return;
-    }
-    const frame = window.requestAnimationFrame(scrollToBottom);
-    return () => window.cancelAnimationFrame(frame);
-  }, [filter, isPinnedToBottom, scrollToBottom, visibleEntries.length]);
-
-  const onOutputScroll = useCallback(() => {
-    const element = outputRef.current;
-    if (!element) {
-      return;
-    }
-    const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
-    setIsPinnedToBottom(distanceFromBottom <= 40);
-  }, []);
-
-  const selectFilter = useCallback((nextFilter: LiveOutputFilter) => {
-    const element = outputRef.current;
-    if (element) {
-      const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
-      setIsPinnedToBottom(distanceFromBottom <= 40);
-    }
-    setFilter(nextFilter);
-  }, []);
-
-  const jumpToLatest = useCallback(() => {
-    setIsPinnedToBottom(true);
-    window.requestAnimationFrame(scrollToBottom);
-  }, [scrollToBottom]);
-
-  return (
-    <section className="live-output-viewer" aria-label="实时输出">
-      <header className="live-output-header">
-        <div>
-          <span>实时输出</span>
-          <strong>{statusLabel(status || 'not_run')}</strong>
-        </div>
-        <div className="selection-log-stream-tabs" role="tablist" aria-label="Live output filters">
-          {(['all', 'logs', 'stdout', 'stderr', 'errors', 'raw'] as const).map((item) => (
-            <button
-              key={item}
-              type="button"
-              className={filter === item ? 'active' : ''}
-              onClick={() => selectFilter(item)}
-            >
-              {liveOutputFilterLabel(item)}
-            </button>
-          ))}
-        </div>
-      </header>
-      <div
-        ref={outputRef}
-        className="selection-log-output selection-live-output"
-        role="log"
-        aria-live="polite"
-        onScroll={onOutputScroll}
-      >
-        {hasEvents ? (
-          <div className="live-output-lines">
-            {visibleEntries.map((entry) => (
-              <article key={entry.id} className={`live-output-line stream-${entry.stream}`}>
-                <span>{transcriptEntryLabel(entry)}</span>
-                <pre>{entry.text}</pre>
-              </article>
-            ))}
-          </div>
-        ) : (
-          <p className="empty-state">{emptyText}</p>
-        )}
-      </div>
-      {shouldShowJump ? (
-        <button type="button" className="live-output-jump" onClick={jumpToLatest}>
-          跳到最新
-        </button>
-      ) : null}
-    </section>
-  );
-}
 
 function filterLiveEvents(
   events: WorkbenchLiveEvent[],
