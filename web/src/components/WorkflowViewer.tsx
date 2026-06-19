@@ -341,7 +341,6 @@ import { useAssistantProposalApplyActions } from '../hooks/useAssistantProposalA
 import { useSubmittedRunPolling } from '../hooks/useSubmittedRunPolling';
 import {
   loadTaskStore,
-  loadWorkbenchTaskFromBackend,
   persistWorkbenchTaskToBackend,
   saveTaskStore,
   useTaskPersistence,
@@ -359,9 +358,8 @@ import {
   useWorkbenchTaskCanvasPersistence,
 } from '../hooks/useWorkbenchTaskCanvasPersistence';
 import {
-  useWorkbenchBootstrap,
-  useWorkbenchBootstrapLoaders,
-} from '../hooks/useWorkbenchBootstrap';
+  useWorkbenchDurableTaskBootstrapActions,
+} from '../hooks/useWorkbenchDurableTaskBootstrapActions';
 import {
   useWorkflowBindings,
 } from '../hooks/useWorkflowBindings';
@@ -747,7 +745,6 @@ export function WorkflowViewer({
     setRunLiveEventsById,
   });
 
-  const { loadRuntimeConfig, loadWorkbenchTaskRecords } = useWorkbenchBootstrapLoaders();
   const { loadWorkbenchTaskCanvas, saveWorkbenchTaskCanvas } = useWorkbenchTaskCanvasPersistence();
   const { validateBoundaryTransfers } = useBoundaryTransferValidation();
   const { pollSubmittedRunUntilTerminal } = useSubmittedRunPolling();
@@ -759,51 +756,20 @@ export function WorkflowViewer({
     answerSelectedAgentInteractionRequest,
   } = useSelectedAgentActions();
   const { saveWorkflowGraph, validateWorkflowGraph } = useWorkflowPersistence();
-  const loadDurableWorkbenchTask = useCallback(
-    (taskRecord: Record<string, unknown>) => loadWorkbenchTaskFromBackend(taskRecord, loadWorkbenchTaskCanvas),
-    [loadWorkbenchTaskCanvas],
-  );
-  const persistInitialWorkbenchTask = useCallback(
-    (task: WorkbenchTask) =>
-      persistWorkbenchTaskToBackend(
-        task,
-        callablesRef.current,
-        workflowsRef.current,
-        saveWorkbenchTaskCanvas,
-      ),
-    [saveWorkbenchTaskCanvas],
-  );
-  const handleLoadedDurableTasks = useCallback(
-    (loadedTasks: WorkbenchTask[], nextActiveTask: WorkbenchTask) => {
-      const nextCanvas = normalizeCanvasEdges(nextActiveTask.canvas);
-      setTasks(loadedTasks);
-      setActiveTaskId(nextActiveTask.taskId);
-      setCanvas(nextCanvas);
-      const nextGraph = canvasToWorkflowGraph(nextCanvas);
-      graphRef.current = nextGraph;
-      setSourceGraph(nextGraph);
-      setSelection({ type: 'task_canvas', taskId: nextCanvas.id });
-      setMessage('已从本地 runner 加载持久化任务');
-    },
-    [],
-  );
-  const handleMigratedInitialTasks = useCallback(() => {
-    setMessage('已迁移浏览器任务缓存到本地 runner');
-  }, []);
-  const handleWorkbenchBootstrapError = useCallback((error: unknown) => {
-    setMessage(error instanceof Error ? error.message : String(error));
-  }, []);
-
-  useWorkbenchBootstrap({
+  useWorkbenchDurableTaskBootstrapActions({
     initialTaskStore,
-    loadRuntimeConfig,
-    loadWorkbenchTaskRecords,
-    loadWorkbenchTask: loadDurableWorkbenchTask,
-    persistInitialTask: persistInitialWorkbenchTask,
-    onRuntimeConfig: setRuntimeConfig,
-    onLoadedTasks: handleLoadedDurableTasks,
-    onMigratedInitialTasks: handleMigratedInitialTasks,
-    onBootstrapError: handleWorkbenchBootstrapError,
+    callablesRef,
+    workflowsRef,
+    graphRef,
+    loadWorkbenchTaskCanvas,
+    saveWorkbenchTaskCanvas,
+    setRuntimeConfig,
+    setTasks,
+    setActiveTaskId,
+    setCanvas,
+    setSourceGraph,
+    setSelection,
+    setMessage,
     setDurableTasksReady,
   });
 

@@ -1039,6 +1039,10 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npm run test -- --run src/hooks/useRunRestorationActions.test.tsx src/hooks/useRunRestorationLoader.test.tsx src/components/WorkflowViewer.drag.test.tsx` | Passed | 3 files, 111 tests passed. |
 | `npm run test -- --run` | Passed | 109 files, 599 tests passed. |
 | `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
+| `npx tsc --noEmit` | Passed | Durable task bootstrap action hook extraction compiles. |
+| `npm run test -- --run src/hooks/useWorkbenchDurableTaskBootstrapActions.test.tsx src/hooks/useWorkbenchBootstrap.test.tsx src/hooks/useTaskPersistence.test.tsx src/components/WorkflowViewer.drag.test.tsx` | Passed | 4 files, 121 tests passed. |
+| `npm run test -- --run` | Passed | 110 files, 604 tests passed. |
+| `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
 
 ### Static Gates So Far
 
@@ -1099,5 +1103,6 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `WorkflowViewer.tsx` no longer defines run projection callbacks such as `updateRunProjection(...)`, `appendNodeLogDelta(...)`, `appendRunAgentEventToProjection(...)`, `appendRunLiveEvent(...)`, or `refreshRunProjection(...)`; ownership moved to `useRunProjectionActions(...)`.
 - `WorkflowViewer.tsx` no longer defines canvas/task/graph sync actions such as `updateCanvas(...)`, `updateCanvasAndGraph(...)`, `handleWorkflowBindingSaved(...)`, or `handleWorkflowBindingFolderOpened(...)`; ownership moved to `useCanvasGraphStateActions(...)`.
 - `WorkflowViewer.tsx` no longer defines selected task run restoration callbacks; ownership moved to `useRunRestorationActions(...)`.
-- `WorkflowViewer.tsx` is now 65,533 bytes / 1,719 lines after run restoration action extraction.
+- `WorkflowViewer.tsx` no longer defines durable task bootstrap loader/persist/state callbacks; ownership moved to `useWorkbenchDurableTaskBootstrapActions(...)`.
+- `WorkflowViewer.tsx` is now 63,992 bytes / 1,686 lines after durable task bootstrap action extraction.
 - `WorkflowViewer.tsx` no longer ends with local helper definitions; the file now ends at the `WorkflowViewer` component close.
