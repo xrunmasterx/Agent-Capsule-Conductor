@@ -23,6 +23,7 @@ export {
   schemaFieldsFromPorts,
   type SchemaFieldCard,
 } from './SchemaFieldCards';
+export { SelectedNodeRuntimePane } from './SelectedNodeRuntimePane';
 export { SelectionInputPane } from './SelectionInputPane';
 export { SelectionOutputPane } from './SelectionOutputPane';
 export { StructuredValueView } from './StructuredValueView';

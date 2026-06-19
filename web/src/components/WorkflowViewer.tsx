@@ -192,7 +192,6 @@ import {
   bindingDirectory,
   boundaryInputMainConflictMessage,
   boundaryMainBindingLabel,
-  combinedLogText,
   controlEdgeMainTransferMode,
   effectiveNodeRunDir,
   latestLogExcerpt,
@@ -399,6 +398,7 @@ import {
   schemaFieldsFromJsonSchema,
   schemaFieldsFromPorts,
 } from './inspector/SchemaFieldCards';
+import { SelectedNodeRuntimePane } from './inspector/SelectedNodeRuntimePane';
 import {
   SelectionDetailsDock,
   evidenceContentForCurrentSelection,
@@ -2997,7 +2997,13 @@ export function WorkflowViewer({
             targetLabel={authoringSelectionLabel(selection, selectedWorkflow, selectedInternalNode)}
             hasSelectedRunNode={Boolean(selectedAgentSessionContext)}
             canShowNodeContext={selectedDetailsModelWithAgentEvents.kind !== 'canvas' && selectedDetailsModelWithAgentEvents.kind !== 'empty'}
-            runtimePane={<SelectedNodeRuntimePane model={selectedDetailsModelWithAgentEvents} />}
+            runtimePane={
+              <SelectedNodeRuntimePane
+                model={selectedDetailsModelWithAgentEvents}
+                agentEventText={agentEventsLiveText(selectedDetailsModelWithAgentEvents.events)}
+                failedEventText={failedAgentEventsText(selectedDetailsModelWithAgentEvents.events)}
+              />
+            }
             canUndoApply={canUndoAssistantApply}
             onAgentChange={(agentId) => {
               setSelectedAuthoringAgentId(agentId);
@@ -3023,98 +3029,6 @@ export function WorkflowViewer({
     </WorkbenchShell>
   );
 }
-
-function SelectedNodeRuntimePane({ model }: { model: SelectedEntityDetailsModel }) {
-  const [tab, setTab] = useState<'live' | 'schema' | 'error'>('live');
-
-  useEffect(() => {
-    setTab('live');
-  }, [model.key]);
-
-  if (!isNodeDetailModel(model)) {
-    return (
-      <section className="selected-node-runtime-pane" aria-label="选中节点输出">
-        <header>
-          <span>选中节点输出</span>
-          <strong>未选择节点</strong>
-        </header>
-        <p className="empty-state">选择一个 Agent/Tool/Workflow 节点查看输出。</p>
-      </section>
-    );
-  }
-
-  return (
-    <section className="selected-node-runtime-pane" aria-label="选中节点输出">
-      <header>
-        <div>
-          <span>选中节点输出</span>
-          <strong>{model.title}</strong>
-        </div>
-        <small className={`evidence-dock-status status-${model.status || 'not_run'}`}>
-          {statusLabel(model.status || 'not_run')}
-        </small>
-      </header>
-      <div className="selected-node-runtime-tabs" role="tablist" aria-label="选中节点输出视图">
-        <button type="button" className={tab === 'live' ? 'active' : ''} onClick={() => setTab('live')}>
-          实时输出
-        </button>
-        <button type="button" className={tab === 'schema' ? 'active' : ''} onClick={() => setTab('schema')}>
-          output schema
-        </button>
-        <button type="button" className={tab === 'error' ? 'active' : ''} onClick={() => setTab('error')}>
-          error
-        </button>
-      </div>
-      {tab === 'live' ? <SelectionLiveOutput model={model} /> : null}
-      {tab === 'schema' ? <NodeOutputSchemaPane model={model} /> : null}
-      {tab === 'error' ? <NodeErrorPane model={model} /> : null}
-    </section>
-  );
-}
-
-function SelectionLiveOutput({ model }: { model: SelectedEntityDetailsModel }) {
-  const combinedLog = combinedLogText(model.log);
-  const agentEventLog = agentEventsLiveText(model.events);
-  const visibleLog = [combinedLog || model.log.excerpt, agentEventLog].filter(Boolean).join('\n\n');
-  return (
-    <div className="selection-log-output selection-live-output assistant-runtime-content" role="log" aria-live="polite">
-      {visibleLog.trim() ? <pre>{visibleLog}</pre> : <p className="empty-state">当前节点还没有实时输出。</p>}
-    </div>
-  );
-}
-
-function NodeOutputSchemaPane({ model }: { model: SelectedEntityDetailsModel }) {
-  const nodeSettings = model.nodeSettings;
-  const fields =
-    nodeSettings?.outputSchema && hasProjectedOutputPorts(nodeSettings.outputSchema)
-      ? schemaDerivedOutputFields(nodeSettings.outputSchema)
-      : dedupeSchemaFields([
-          ...(nodeSettings?.outputSchema ? schemaFieldsFromJsonSchema(nodeSettings.outputSchema) : []),
-          ...schemaFieldsFromPorts(undefined, nodeSettings?.outputPorts || []),
-        ]);
-  return (
-    <div className="assistant-runtime-content output-schema-content">
-      <SchemaFieldCards title="output schema" fields={fields} emptyText="当前节点没有声明 output schema。" />
-    </div>
-  );
-}
-
-function NodeErrorPane({ model }: { model: SelectedEntityDetailsModel }) {
-  const failedEvents = model.events
-    .filter((event) => String(event.event || '').includes('failed') || String(event.status || '').includes('failed'))
-    .map(agentEventLiveLine)
-    .filter((line) => line.trim());
-  const errorText = [model.log.stderr, ...failedEvents].filter(Boolean).join('\n\n');
-  return (
-    <div className="selection-log-output assistant-runtime-content error-output" role="log" aria-live="polite">
-      {errorText.trim() ? <pre>{errorText}</pre> : <p className="empty-state">当前节点没有错误输出。</p>}
-    </div>
-  );
-}
-
-
-
-
 
 function AgentNodeSettings({
   node,
@@ -4933,6 +4847,14 @@ function agentEventsLiveText(events: RunEvent[]): string {
     .map(agentEventLiveLine)
     .filter(Boolean);
   return lines.length ? ['[agent events]', ...lines].join('\n') : '';
+}
+
+function failedAgentEventsText(events: RunEvent[]): string {
+  return events
+    .filter((event) => String(event.event || event.type || '').includes('failed') || String(event.status || '').includes('failed'))
+    .map(agentEventLiveLine)
+    .filter((line) => line.trim())
+    .join('\n');
 }
 
 function agentEventLiveLine(event: RunEvent): string {
