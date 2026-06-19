@@ -129,7 +129,6 @@ import {
   addCallableNodeFromPalette,
   addInternalNodeFromPalette,
   addWorkflowFromPalette,
-  internalNodeFromPaletteItem,
   nextPaletteSelection,
   paletteItemBaseId,
   slugId,
@@ -156,7 +155,6 @@ import {
   isWorkflowInputBoundaryControlBinding,
   isWorkflowOutputBoundaryControlBinding,
   normalizeCanvasEdges,
-  parsePortToken,
   portTokenId,
   renamePortOnDataConnectNode,
   resolveScopedConnection,
@@ -392,6 +390,7 @@ import {
 } from './canvas/canvasPointer';
 import { focusCanvas } from './canvas/canvasFocus';
 import {
+  addInternalNodeFromPaletteWithConnection,
   commitDraggedNodeToCanvas,
   internalNodeFromExecutableWorkflow,
   moveInternalNode,
@@ -7920,62 +7919,6 @@ function selectionKey(selection: CanvasSelection): string {
     return `port:${selection.workflowId}:${selection.direction}:${selection.portId}`;
   }
   return `internal:${selection.workflowId}:${selection.nodeId}`;
-}
-
-function addInternalNodeFromPaletteWithConnection(
-  canvas: WorkspaceCanvasModel,
-  workflowId: string,
-  item: Exclude<PaletteItem, { kind: 'workflow' }>,
-  position: { x: number; y: number },
-  pendingConnection?: PendingCanvasConnection,
-): WorkspaceCanvasModel {
-  return {
-    ...canvas,
-    workflows: canvas.workflows.map((workflow) => {
-      if (workflow.id !== workflowId) {
-        return workflow;
-      }
-      const existingIds = new Set(workflow.internalNodes.map((node) => node.id));
-      const existingLabels = new Set(workflow.internalNodes.map(internalInvocationLabel));
-      const node = internalNodeFromPaletteItem(item, position, existingIds, existingLabels);
-      const pendingEdge = pendingConnection
-        ? edgeFromPendingConnection(
-            { ...focusCanvas(canvas, workflowId), workflows: [] },
-            pendingConnection,
-            node.id,
-          )
-        : null;
-      return expandWorkflowToFitChildren({
-        ...workflow,
-        internalNodes: [...workflow.internalNodes, node],
-        internalEdges: pendingEdge
-          ? [...workflow.internalEdges.filter((edge) => edge.id !== pendingEdge.id), pendingEdge]
-          : workflow.internalEdges,
-      });
-    }),
-  };
-}
-
-function edgeFromPendingConnection(
-  canvas: WorkspaceCanvasModel,
-  pending: PendingCanvasConnection,
-  newNodeId: string,
-): WorkflowCanvasEdge | null {
-  const sourceHandle = parsePortToken(pending.handleId);
-  if (pending.mode === 'control') {
-    const sourceNodeId = sourceHandle?.workflowId || pending.nodeId;
-    if (!sourceNodeId || isWorkflowBoundaryId(sourceNodeId) || isWorkflowBoundaryId(newNodeId)) {
-      return null;
-    }
-    return controlEdge(sourceNodeId, newNodeId);
-  }
-  if (!sourceHandle) {
-    return null;
-  }
-  if (sourceHandle.direction === 'output') {
-    return dataEdge(sourceHandle.workflowId, sourceHandle.portId, newNodeId, 'main');
-  }
-  return dataEdge(newNodeId, 'main', sourceHandle.workflowId, sourceHandle.portId);
 }
 
 function isJsdomRuntime(): boolean {

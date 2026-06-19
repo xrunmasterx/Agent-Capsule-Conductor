@@ -1,14 +1,25 @@
 import { AGENT_TOOL_NODE_SIZE } from '../../workbench/constants';
 import {
   defaultInternalNodePosition,
+  expandWorkflowToFitChildren,
   expandWorkflowToFitChildrenCenterLocked,
   finitePosition,
 } from '../../workbench/model/canvasLayout';
-import { edgeTouchesNode } from '../../workbench/model/selectionModel';
+import {
+  edgeTouchesNode,
+  internalInvocationLabel,
+} from '../../workbench/model/selectionModel';
 import { internalNodeOutputPorts, port, workflowOutputPorts } from '../../workbench/model/workflowGraphProjection';
-import { internalFlowNodeId, isExecutableNodeWorkflow, parseInternalFlowNodeId } from '../../workbench/model/workflowNodeModel';
-import { uniqueId } from '../../workbench/model/paletteCanvasOps';
-import type { CanvasSelection, InternalNodeView, WorkflowContainerModel, WorkspaceCanvasModel } from '../../types/workbench';
+import { internalFlowNodeId, isExecutableNodeWorkflow, isWorkflowBoundaryId, parseInternalFlowNodeId } from '../../workbench/model/workflowNodeModel';
+import {
+  internalNodeFromPaletteItem,
+  uniqueId,
+} from '../../workbench/model/paletteCanvasOps';
+import {
+  parsePortToken,
+  type PendingCanvasConnection,
+} from '../../workbench/model/canvasEdgeOps';
+import type { CanvasSelection, InternalNodeView, WorkflowCanvasEdge, WorkflowContainerModel, WorkspaceCanvasModel } from '../../types/workbench';
 import type { CanvasFlowNode } from './NodeRenderer';
 import type { PaletteItem } from '../workflow-viewer/palette';
 
@@ -419,6 +430,81 @@ export function internalNodeFromExecutableWorkflow(
       workflow.forwardMainOutputOnControl ?? wrapped?.forwardMainOutputOnControl ?? null,
     emptyInputPolicy: workflow.emptyInputPolicy ?? wrapped?.emptyInputPolicy ?? 'allow',
     position,
+  };
+}
+
+export function addInternalNodeFromPaletteWithConnection(
+  canvas: WorkspaceCanvasModel,
+  workflowId: string,
+  item: Exclude<PaletteItem, { kind: 'workflow' }>,
+  position: { x: number; y: number },
+  pendingConnection?: PendingCanvasConnection,
+): WorkspaceCanvasModel {
+  return {
+    ...canvas,
+    workflows: canvas.workflows.map((workflow) => {
+      if (workflow.id !== workflowId) {
+        return workflow;
+      }
+      const existingIds = new Set(workflow.internalNodes.map((node) => node.id));
+      const existingLabels = new Set(workflow.internalNodes.map(internalInvocationLabel));
+      const node = internalNodeFromPaletteItem(item, position, existingIds, existingLabels);
+      const pendingEdge = pendingConnection
+        ? edgeFromPendingConnection(pendingConnection, node.id)
+        : null;
+      return expandWorkflowToFitChildren({
+        ...workflow,
+        internalNodes: [...workflow.internalNodes, node],
+        internalEdges: pendingEdge
+          ? [...workflow.internalEdges.filter((edge) => edge.id !== pendingEdge.id), pendingEdge]
+          : workflow.internalEdges,
+      });
+    }),
+  };
+}
+
+function edgeFromPendingConnection(
+  pending: PendingCanvasConnection,
+  newNodeId: string,
+): WorkflowCanvasEdge | null {
+  const sourceHandle = parsePortToken(pending.handleId);
+  if (pending.mode === 'control') {
+    const sourceNodeId = sourceHandle?.workflowId || pending.nodeId;
+    if (!sourceNodeId || isWorkflowBoundaryId(sourceNodeId) || isWorkflowBoundaryId(newNodeId)) {
+      return null;
+    }
+    return controlEdge(sourceNodeId, newNodeId);
+  }
+  if (!sourceHandle) {
+    return null;
+  }
+  if (sourceHandle.direction === 'output') {
+    return dataEdge(sourceHandle.workflowId, sourceHandle.portId, newNodeId, 'main');
+  }
+  return dataEdge(newNodeId, 'main', sourceHandle.workflowId, sourceHandle.portId);
+}
+
+function dataEdge(
+  sourceWorkflowId: string,
+  sourcePortId: string,
+  targetWorkflowId: string,
+  targetPortId: string,
+): WorkflowCanvasEdge {
+  return {
+    id: `data_${sourceWorkflowId}_${sourcePortId}_${targetWorkflowId}_${targetPortId}`,
+    kind: 'data',
+    source: { workflowId: sourceWorkflowId, portId: sourcePortId },
+    target: { workflowId: targetWorkflowId, portId: targetPortId },
+    materialization: 'copy',
+  };
+}
+
+function controlEdge(sourceWorkflowId: string, targetWorkflowId: string): WorkflowCanvasEdge {
+  return {
+    id: `control_${sourceWorkflowId}_${targetWorkflowId}`,
+    kind: 'control',
+    source: { workflowId: sourceWorkflowId },
+    target: { workflowId: targetWorkflowId },
   };
 }
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { WorkspaceCanvasModel } from '../../types/workbench';
 import {
+  addInternalNodeFromPaletteWithConnection,
   commitDraggedNodeToCanvas,
   internalNodeFromExecutableWorkflow,
   moveInternalNode,
@@ -115,5 +116,32 @@ describe('canvasMutation', () => {
     const canvas = commitDraggedNodeToCanvas(canvasFixture(), [node], node);
 
     expect(canvas.workflows[0].position).toEqual({ x: 240, y: 260 });
+  });
+
+  it('adds an internal node from the palette with a pending control connection', () => {
+    const canvas = addInternalNodeFromPaletteWithConnection(
+      canvasFixture(),
+      'workflow-a',
+      { kind: 'agent', callableId: 'agent.b', label: 'Agent B' },
+      { x: 180, y: 210 },
+      {
+        nodeId: 'agent-a',
+        handleId: 'agent-a:control:source',
+        mode: 'control',
+        side: 'source',
+      },
+    );
+
+    const workflow = canvas.workflows[0];
+    expect(workflow.internalNodes.map((node) => node.name)).toContain('Agent B');
+    expect(workflow.internalEdges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'control',
+          source: { workflowId: 'agent-a' },
+          target: { workflowId: 'agent_b' },
+        }),
+      ]),
+    );
   });
 });
