@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
-import { canvasEdgeToFlowEdge, toFlowEdges } from './flowProjection';
+import { canvasEdgeToFlowEdge, toFlowEdges, toFlowNodes } from './flowProjection';
 import type {
   CanvasSelection,
   WorkflowCanvasEdge,
@@ -264,5 +264,113 @@ describe('flowProjection', () => {
 
     expect(flowEdges).toHaveLength(1);
     expect(flowEdges[0]).toEqual(expect.objectContaining({ id: 'root::control_source_agent_target_agent' }));
+  });
+
+  test('projects workflow containers and internal nodes for React Flow', () => {
+    const nodes = toFlowNodes(
+      canvasFixture(),
+      taskSelection,
+      {},
+      () => {},
+      () => {},
+      () => {},
+      () => {},
+      () => {},
+      () => {},
+      true,
+      true,
+      false,
+      () => {},
+      () => {},
+      () => {},
+      'control',
+      'all',
+      null,
+      () => {},
+    );
+
+    expect(nodes.map((node) => node.id)).toEqual(
+      expect.arrayContaining([
+        'source_flow',
+        'source_flow__internal__codex',
+        'source_flow__internal__reviewer',
+        'target_flow',
+      ]),
+    );
+    expect(nodes.find((node) => node.id === 'source_flow')).toEqual(
+      expect.objectContaining({ type: 'workflowContainer', position: { x: 100, y: 100 } }),
+    );
+    expect(nodes.find((node) => node.id === 'source_flow__internal__codex')).toEqual(
+      expect.objectContaining({
+        type: 'agentToolNode',
+        parentId: 'source_flow',
+        extent: 'parent',
+        position: { x: 40, y: 72 },
+      }),
+    );
+  });
+
+  test('projects executable root agent workflows as agent tool nodes', () => {
+    const canvas: WorkspaceCanvasModel = {
+      ...canvasFixture(),
+      workflows: [
+        {
+          id: 'root_agent',
+          title: 'Root Agent',
+          directory: '',
+          sourceKind: 'agent',
+          status: 'not_run',
+          callableId: 'fake-agent.generic',
+          inputPorts: [{ id: 'main', label: 'main', direction: 'input' }],
+          outputPorts: [{ id: 'main', label: 'main', direction: 'output' }],
+          internalNodes: [],
+          internalEdges: [],
+          position: { x: 24, y: 32 },
+          size: { width: 276, height: 132 },
+          warnings: [],
+        },
+      ],
+    };
+
+    const [node] = toFlowNodes(
+      canvas,
+      { type: 'workflow', id: 'root_agent' },
+      {},
+      () => {},
+      () => {},
+      () => {},
+      () => {},
+      () => {},
+      () => {},
+      true,
+      true,
+      true,
+      () => {},
+      () => {},
+      () => {},
+      'data',
+      'all',
+      null,
+      () => {},
+    );
+
+    expect(node).toEqual(
+      expect.objectContaining({
+        id: 'root_agent',
+        type: 'agentToolNode',
+        position: { x: 24, y: 32 },
+        selected: true,
+      }),
+    );
+    expect(node.data).toEqual(
+      expect.objectContaining({
+        id: 'root_agent',
+        kind: 'Agent',
+        callableId: 'fake-agent.generic',
+        selected: true,
+        showDataPorts: true,
+        showDataPortLabels: true,
+      }),
+    );
   });
 });

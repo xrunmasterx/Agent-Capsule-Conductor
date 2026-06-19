@@ -72,8 +72,6 @@ import {
   AGENT_CONTROL_HANDLE_FALLBACK_TOP,
   AGENT_CONTROL_HANDLE_TOP,
   AGENT_DATA_PORT_GAP,
-  AGENT_MAX_DATA_PORTS,
-  AGENT_PORT_VERTICAL_PADDING,
   AGENT_TOOL_NODE_SIZE,
   BOUNDARY_NODE_SIZE,
   DEFAULT_CONTAINER_SIZE,
@@ -86,11 +84,7 @@ import {
   MAX_LOG_PREVIEW_LINES,
   TASK_STORE_KEY,
   TEMPORARY_CALLABLE_ID_PREFIX,
-  WORKFLOW_CONTAINER_Z_INDEX,
   WORKFLOW_INNER_HANDLE_X,
-  WORKFLOW_INTERNAL_NODE_Z_INDEX,
-  WORKFLOW_INTERNAL_SELECTED_NODE_Z_INDEX,
-  agentDataPortMaxOffset,
   agentDataPortTop,
 } from '../workbench/constants';
 import {
@@ -351,7 +345,13 @@ import {
 } from './workflow-viewer/workflowConnectionState';
 import {
   canvasEdgeToFlowEdge,
+  dragCommitKey,
+  flowNodeIdentityKey,
+  flowNodeLayoutKey,
+  reconcileFlowNodes,
   toFlowEdges,
+  toFlowNodes,
+  type DataDropTargetPreview,
 } from './canvas/flowProjection';
 import {
   flowEndpointForCanvas,
@@ -479,11 +479,6 @@ type PaletteDropTarget =
   | { kind: 'workflow_internal'; workflowId: string; position: { x: number; y: number } }
   | { kind: 'rejected'; reason: string };
 
-type DataDropTargetPreview = {
-  flowNodeId: string;
-  portId: string;
-};
-
 type NodeCreateMenuState = {
   x: number;
   y: number;
@@ -546,10 +541,6 @@ type CanvasPointerEvent =
   | ReactPointerEvent<Element>
   | ReactMouseEvent<Element>
   | ReactTouchEvent<Element>;
-
-function visibleAgentDataPorts(ports: WorkflowPortView[]): WorkflowPortView[] {
-  return ports.slice(0, AGENT_MAX_DATA_PORTS);
-}
 
 function trimLiveLog(value: string): string {
   const lines = value.split(/\r?\n/);
@@ -6685,257 +6676,6 @@ function EventTimeline({ events, title }: { events: RunEvent[]; title: string })
     </section>
   );
 }
-
-function reconcileFlowNodes(
-  current: CanvasFlowNode[],
-  projected: CanvasFlowNode[],
-  options: { preservePositions: boolean },
-): CanvasFlowNode[] {
-  if (!options.preservePositions) {
-    return projected;
-  }
-  const currentById = new Map(current.map((node) => [node.id, node]));
-  return projected.map((node) => {
-    const existing = currentById.get(node.id);
-    if (!existing) {
-      return node;
-    }
-    return {
-      ...node,
-      position: existing.position,
-      dragging: existing.dragging,
-      measured: existing.measured ?? node.measured,
-      width: existing.width ?? node.width,
-      height: existing.height ?? node.height,
-    };
-  }) as CanvasFlowNode[];
-}
-
-function flowNodeIdentityKey(nodes: CanvasFlowNode[]): string {
-  return nodes
-    .map((node) => `${node.id}:${node.type || ''}:${node.parentId || ''}`)
-    .sort()
-    .join('|');
-}
-
-function flowNodeLayoutKey(nodes: CanvasFlowNode[]): string {
-  return nodes
-    .map((node) => {
-      const size = flowNodeSize(node);
-      return `${node.id}:${Math.round(node.position.x)}:${Math.round(node.position.y)}:${size.width}:${size.height}`;
-    })
-    .sort()
-    .join('|');
-}
-
-function flowNodeSize(node: CanvasFlowNode): { width: number | string; height: number | string } {
-  if (node.type === 'workflowContainer') {
-    return {
-      width: node.data.workflow.size.width,
-      height: node.data.workflow.size.height,
-    };
-  }
-  return {
-    width: node.width ?? node.measured?.width ?? '',
-    height: node.height ?? node.measured?.height ?? '',
-  };
-}
-
-function dragCommitKey(node: CanvasFlowNode): string {
-  return `${node.id}:${node.parentId || ''}:${Math.round(node.position.x)}:${Math.round(node.position.y)}`;
-}
-
-function toFlowNodes(
-  canvas: WorkspaceCanvasModel,
-  selection: CanvasSelection,
-  bindings: Record<string, WorkflowBindingView>,
-  onSelectWorkflowFn: (workflowId: string) => void,
-  onSelectPortFn: (workflowId: string, port: WorkflowPortView) => void,
-  onSelectInternalFn: (workflowId: string, nodeId: string) => void,
-  onOpenNodeDetails: (selection: CanvasSelection) => void,
-  onOpenFocus: (workflowId: string) => void,
-  onConfigureWorkflow: (workflowId: string) => void,
-  showDataPorts: boolean,
-  showAgentDataPorts: boolean,
-  showDataPortLabels: boolean,
-  onResize: (workflowId: string, size: { width: number; height: number }) => void,
-  onMoveInternal: (
-    workflowId: string,
-    nodeId: string,
-    position: { x: number; y: number },
-  ) => void,
-  onControlHandleMouseDown: (
-    nodeId: string,
-    handleId: string,
-    side: EndpointSide,
-    mode?: ConnectionMode,
-  ) => void,
-  connectionMode: ConnectionMode,
-  edgeViewMode: EdgeViewMode,
-  dataDropTargetPreview: DataDropTargetPreview | null,
-  onSelectEdge: (address: EdgeAddress, altKey?: boolean) => void,
-): CanvasFlowNode[] {
-  return canvas.workflows.flatMap((workflow) => {
-    if (isExecutableNodeWorkflow(workflow)) {
-      return [
-        topLevelAgentToolFlowNode(
-          workflow,
-          selection,
-          showAgentDataPorts,
-          showDataPortLabels,
-          onSelectWorkflowFn,
-          onSelectPortFn,
-          onControlHandleMouseDown,
-          dataDropTargetPreview,
-        ),
-      ];
-    }
-    const workflowNode: WorkflowFlowNode = {
-      id: workflow.id,
-      type: 'workflowContainer',
-      position: workflow.position,
-      selected: selection.type === 'workflow' && selection.id === workflow.id,
-      zIndex: WORKFLOW_CONTAINER_Z_INDEX,
-      data: {
-        workflow,
-        binding: bindings[workflow.id],
-        selection,
-        connectionMode,
-        edgeViewMode,
-        selected: selection.type === 'workflow' && selection.id === workflow.id,
-        dataDropHint:
-          dataDropTargetPreview?.flowNodeId === workflow.id
-            ? `释放后创建输入端口：${dataDropTargetPreview.portId}`
-            : undefined,
-        showDataPorts,
-        showDataPortLabels,
-        onSelectEdge,
-        onSelectPort: onSelectPortFn,
-        onSelectInternal: onSelectInternalFn,
-        onOpenNodeDetails,
-        onOpenFocus,
-        onConfigureWorkflow,
-        onResize,
-        onMoveInternal,
-        onControlHandleMouseDown,
-      },
-    };
-    const internalNodes = workflow.internalNodes.map((node, index): AgentToolFlowNode => {
-      const inputPorts = internalNodeInputPorts(node);
-      const outputPorts = internalNodeOutputPorts(node);
-      const selected =
-        selection.type === 'internal' &&
-        selection.workflowId === workflow.id &&
-        selection.nodeId === node.id;
-      return {
-        id: internalFlowNodeId(workflow.id, node.id),
-        type: 'agentToolNode',
-        parentId: workflow.id,
-        extent: 'parent',
-        position: node.position || defaultInternalNodePosition(index),
-        selected,
-        zIndex: selected ? WORKFLOW_INTERNAL_SELECTED_NODE_Z_INDEX : WORKFLOW_INTERNAL_NODE_Z_INDEX,
-        data: {
-          id: internalFlowNodeId(workflow.id, node.id),
-          title: internalInvocationLabel(node),
-          subtitle: node.callableId || node.runtime,
-          scopeLabel: `Inside: ${workflowInvocationLabel(workflow)}`,
-          kind: node.kind,
-          status: node.status,
-          callableId: node.callableId || node.runtime,
-          temporaryResourceId: node.temporaryResourceId,
-          workflowId: workflow.id,
-          internalNodeId: node.id,
-          inputPorts,
-          outputPorts,
-          size: agentToolNodeSize(inputPorts, outputPorts, showAgentDataPorts),
-          selected,
-          dataDropHint:
-            dataDropTargetPreview?.flowNodeId === internalFlowNodeId(workflow.id, node.id)
-              ? `释放后创建输入端口：${dataDropTargetPreview.portId}`
-              : undefined,
-          showDataPorts: showAgentDataPorts,
-          showDataPortLabels,
-          onSelect: () => onSelectInternalFn(workflow.id, node.id),
-          onSelectPort: onSelectPortFn,
-          onControlHandleMouseDown,
-        },
-      };
-    });
-    return [workflowNode, ...internalNodes];
-  });
-}
-
-function topLevelAgentToolFlowNode(
-  workflow: WorkflowContainerModel,
-  selection: CanvasSelection,
-  showDataPorts: boolean,
-  showDataPortLabels: boolean,
-  onSelectWorkflowFn: (workflowId: string) => void,
-  onSelectPortFn: (workflowId: string, port: WorkflowPortView) => void,
-  onControlHandleMouseDown: (
-    nodeId: string,
-    handleId: string,
-    side: EndpointSide,
-    mode?: ConnectionMode,
-  ) => void,
-  dataDropTargetPreview: DataDropTargetPreview | null,
-): AgentToolFlowNode {
-  const kind = workflow.sourceKind === 'tool' ? 'Tool' : 'Agent';
-  const inputPorts = workflow.inputPorts;
-  const outputPorts = workflowOutputPorts(workflow);
-  return {
-    id: workflow.id,
-    type: 'agentToolNode',
-    position: workflow.position,
-    selected: selection.type === 'workflow' && selection.id === workflow.id,
-    data: {
-      id: workflow.id,
-      title: workflowInvocationLabel(workflow),
-      subtitle: workflow.callableId,
-      kind,
-      status: workflow.status,
-      callableId: workflow.callableId,
-      temporaryResourceId: workflow.temporaryResourceId,
-      inputPorts,
-      outputPorts,
-      size: agentToolNodeSize(inputPorts, outputPorts, showDataPorts),
-      selected: selection.type === 'workflow' && selection.id === workflow.id,
-      dataDropHint:
-        dataDropTargetPreview?.flowNodeId === workflow.id
-          ? `释放后创建输入端口：${dataDropTargetPreview.portId}`
-          : undefined,
-      showDataPorts,
-      showDataPortLabels,
-      onSelect: () => onSelectWorkflowFn(workflow.id),
-      onSelectPort: onSelectPortFn,
-      onControlHandleMouseDown,
-    },
-  };
-}
-
-function agentToolNodeSize(
-  inputPorts: WorkflowPortView[],
-  outputPorts: WorkflowPortView[],
-  showDataPorts: boolean,
-): { width: number; height: number } {
-  if (!showDataPorts) {
-    return AGENT_TOOL_NODE_SIZE;
-  }
-  const visiblePortCount = Math.max(
-    Math.min(inputPorts.length, AGENT_MAX_DATA_PORTS),
-    Math.min(outputPorts.length, AGENT_MAX_DATA_PORTS),
-  );
-  const requiredHeight =
-    visiblePortCount > 0
-      ? (agentDataPortMaxOffset(visiblePortCount) + AGENT_PORT_VERTICAL_PADDING) * 2
-      : AGENT_TOOL_NODE_SIZE.height;
-  return {
-    width: AGENT_TOOL_NODE_SIZE.width,
-    height: Math.max(AGENT_TOOL_NODE_SIZE.height, requiredHeight),
-  };
-}
-
 function recordConnectionTrace(event: string, detail: Record<string, unknown> = {}) {
   if (typeof window === 'undefined') {
     return;
