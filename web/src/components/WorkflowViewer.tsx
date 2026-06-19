@@ -401,6 +401,7 @@ import {
   bindingRefOfPath,
   useWorkflowBindings,
 } from '../hooks/useWorkflowBindings';
+import { useWorkflowPersistence } from '../hooks/useWorkflowPersistence';
 
 type Props = {
   workflows: WorkflowSummary[];
@@ -2288,6 +2289,7 @@ export function WorkflowViewer({
   const { loadWorkbenchTaskCanvas, saveWorkbenchTaskCanvas } = useWorkbenchTaskCanvasPersistence();
   const { validateBoundaryTransfers } = useBoundaryTransferValidation();
   const { pollSubmittedRunUntilTerminal } = useSubmittedRunPolling();
+  const { saveWorkflowGraph, validateWorkflowGraph } = useWorkflowPersistence();
   const loadDurableWorkbenchTask = useCallback(
     (taskRecord: Record<string, unknown>) => loadWorkbenchTaskFromBackend(taskRecord, loadWorkbenchTaskCanvas),
     [loadWorkbenchTaskCanvas],
@@ -3148,7 +3150,7 @@ export function WorkflowViewer({
       : baseGraph;
     graphRef.current = graph;
     setSourceGraph(graph);
-    const result = await api.saveWorkflow(graph, true);
+    const result = await saveWorkflowGraph(graph, true);
     setMessage(`已保存 ${result.workflow_id}`);
     if (selectSavedWorkflow) {
       onSelect(result.workflow_id);
@@ -3167,7 +3169,7 @@ export function WorkflowViewer({
     }
     try {
       await saveGraph({ selectSavedWorkflow: false, refreshIndex: false });
-      const result = await api.validateWorkflow(graphRef.current.id);
+      const result = await validateWorkflowGraph(graphRef.current.id);
       setMessage(`校验通过: ${result.workflow_id}`);
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error);
