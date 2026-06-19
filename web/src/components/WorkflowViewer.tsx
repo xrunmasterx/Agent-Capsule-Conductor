@@ -380,6 +380,7 @@ import { ExecutionDock as ExecutionDockComponent } from './execution';
 import { LiveOutputViewer } from './execution/RunOverlay';
 import { CodexExecutionModeSelector } from './inspector/CodexExecutionModeSelector';
 import { DataConnectionsPanel } from './inspector/DataConnectionsPanel';
+import { EvidencePreview } from './inspector/EvidencePreview';
 import { InvocationIdentityCard } from './inspector/InvocationIdentityCard';
 import { InvocationInputEditor } from './inspector/InvocationInputEditor';
 import { LiveLogBlocks } from './inspector/LiveLogBlocks';
@@ -4004,66 +4005,6 @@ function isCodexAgentNode(node: AgentNodeSettingsModel, detail: CallableDetail |
   }
   const callableId = node.callableId.toLowerCase();
   return callableId.includes('codex');
-}
-
-function EvidencePreview({
-  path,
-  title,
-  emptyText,
-}: {
-  path?: string | null;
-  title: string;
-  emptyText: string;
-}) {
-  const [state, setState] = useState<{ status: 'empty' | 'loading' | 'loaded' | 'error'; content: string; type: ArtifactContent['type'] }>({
-    status: path ? 'loading' : 'empty',
-    content: '',
-    type: 'text',
-  });
-
-  useEffect(() => {
-    let ignore = false;
-    if (!path) {
-      setState({ status: 'empty', content: '', type: 'text' });
-      return () => {
-        ignore = true;
-      };
-    }
-    setState({ status: 'loading', content: '', type: 'text' });
-    api
-      .artifact(path)
-      .then((artifact) => {
-        if (!ignore) {
-          setState({ status: 'loaded', content: artifact.content, type: artifact.type });
-        }
-      })
-      .catch((error) => {
-        if (!ignore) {
-          setState({
-            status: 'error',
-            content: error instanceof Error ? error.message : String(error),
-            type: 'log',
-          });
-        }
-      });
-    return () => {
-      ignore = true;
-    };
-  }, [path]);
-
-  if (state.status === 'empty') {
-    return <p className="empty-state">{emptyText}</p>;
-  }
-  if (state.status === 'loading') {
-    return <p className="empty-state">正在读取 {shortPath(path)}...</p>;
-  }
-  return (
-    <CodeBlock
-      title={`${title}${path ? ` - ${shortPath(path)}` : ''}`}
-      content={state.content}
-      variant={state.type}
-    />
-  );
 }
 
 function stringValue(value: unknown): string {
