@@ -19,8 +19,6 @@ import {
   isActiveTaskStatus,
 } from '../workbench/model/taskModel';
 import {
-  authoringBackendCanvasSnapshot,
-  authoringSelectionPayload,
   canvasAuthoringHash,
   mergeAuthoringValidation,
 } from '../workbench/model/authoringProposal';
@@ -41,7 +39,6 @@ import { selectionKey, truncateLargeLog } from '../workbench/model/workflowViewe
 import type {
   CanvasAuthoringProposal,
   DataConnectionDraft,
-  WorkbenchTask,
 } from '../types/workbench';
 import {
   buildAccTranscript,
@@ -81,9 +78,7 @@ import { useAssistantProposalApplyActions } from '../hooks/useAssistantProposalA
 import { useSubmittedRunPolling } from '../hooks/useSubmittedRunPolling';
 import {
   loadTaskStore,
-  persistWorkbenchTaskToBackend,
   saveTaskStore,
-  useTaskPersistence,
 } from '../hooks/useTaskPersistence';
 import { useWorkbenchTaskDurability } from '../hooks/useWorkbenchTaskDurability';
 import {
@@ -121,6 +116,7 @@ import { WorkflowViewerMainStage } from './workflow-viewer/WorkflowViewerMainSta
 import { WorkflowViewerNodeDetailOverlay } from './workflow-viewer/WorkflowViewerNodeDetailOverlay';
 import { WorkflowViewerRightPanel } from './workflow-viewer/WorkflowViewerRightPanel';
 import { useWorkflowViewerSelectionState } from './workflow-viewer/useWorkflowViewerSelectionState';
+import { useWorkflowViewerTaskPersistence } from './workflow-viewer/useWorkflowViewerTaskPersistence';
 
 type Props = {
   workflows: WorkflowSummary[];
@@ -562,37 +558,6 @@ export function WorkflowViewer({
     () => canvasAuthoringHash(activeTaskId, stripRuntimeStateFromCanvas(canvas)),
     [activeTaskId, canvas],
   );
-  const publishCurrentTaskSnapshot = useCallback(async () => {
-    const snapshot = currentAuthoringSnapshot();
-    await saveWorkbenchTaskCanvas(snapshot.task_id, {
-      canvas_hash: snapshot.snapshot_id,
-      canvas_snapshot: authoringBackendCanvasSnapshot(snapshot),
-      selection: authoringSelectionPayload(snapshot.selection),
-      temporary_resources: currentAuthoringState.temporaryResources,
-    });
-  }, [
-    activeTaskId,
-    canvas,
-    selection,
-    callables,
-    workflows,
-    currentAuthoringState.temporaryResources,
-    saveWorkbenchTaskCanvas,
-  ]);
-  const buildBackendTaskSnapshot = useCallback((): WorkbenchTask | null => {
-    if (!currentTask) {
-      return null;
-    }
-    return {
-      ...currentTask,
-      canvas: stripRuntimeStateFromCanvas(canvas),
-    };
-  }, [canvas, currentTask]);
-  const persistBackendTaskSnapshot = useCallback(
-    (taskSnapshot: WorkbenchTask) =>
-      persistWorkbenchTaskToBackend(taskSnapshot, callables, workflows, saveWorkbenchTaskCanvas),
-    [callables, workflows, saveWorkbenchTaskCanvas],
-  );
   const handleBackendAutosaveError = useCallback((error: unknown) => {
     console.warn('Workbench task autosave failed', error);
   }, []);
@@ -685,16 +650,20 @@ export function WorkflowViewer({
     onChanged,
   });
 
-  useTaskPersistence({
+  useWorkflowViewerTaskPersistence({
     durableTasksReady,
     activeTaskId,
     tasks,
+    currentTask,
+    canvas,
+    selection,
+    callables,
+    workflows,
+    temporaryResources: currentAuthoringState.temporaryResources,
+    currentAuthoringSnapshot,
+    currentAuthoringCanvasHash,
     saveLocalTaskStore: saveTaskStore,
-    snapshotPublishKey: `${activeTaskId}:${currentAuthoringCanvasHash}:${selectionKey(selection)}`,
-    publishCurrentSnapshot: publishCurrentTaskSnapshot,
-    backendPersistKey: currentTask ? `${activeTaskId}:${currentAuthoringCanvasHash}` : '',
-    buildBackendTaskSnapshot,
-    persistTaskToBackend: persistBackendTaskSnapshot,
+    saveWorkbenchTaskCanvas,
     onBackendAutosaveError: handleBackendAutosaveError,
   });
 

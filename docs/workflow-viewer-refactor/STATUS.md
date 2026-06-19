@@ -1079,6 +1079,10 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npm run test -- --run src/components/workflow-viewer/useWorkflowViewerSelectionState.test.tsx src/components/workflow-viewer/WorkflowViewerMainStage.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 4 files, 187 tests passed. |
 | `npm run test -- --run` | Passed | 119 files, 625 tests passed. |
 | `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
+| `npx tsc --noEmit` | Passed | WorkflowViewer task persistence glue extraction compiles. |
+| `npm run test -- --run src/components/workflow-viewer/useWorkflowViewerTaskPersistence.test.tsx src/components/workflow-viewer/useWorkflowViewerSelectionState.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 4 files, 187 tests passed. |
+| `npm run test -- --run` | Passed | 120 files, 627 tests passed. |
+| `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
 
 ### Static Gates So Far
 
@@ -1149,6 +1153,7 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `WorkflowViewer.tsx` no longer owns right drawer resource/inspector composition or inspector renderer wiring; ownership moved to `WorkflowViewerRightPanel`.
 - `WorkflowViewer.tsx` no longer owns task workspace main-stage composition; ownership for task view switching, overview rendering, canvas rendering, and execution dock wiring moved to `WorkflowViewerMainStage`.
 - `WorkflowViewer.tsx` no longer owns selected workflow/port/edge/internal-node lookup, selected detail model enrichment, callable detail lookup, selected agent session binding, or selected agent live-state projection; ownership moved to `useWorkflowViewerSelectionState`.
+- `WorkflowViewer.tsx` no longer owns current task snapshot publishing or backend task autosave payload assembly; ownership moved to `useWorkflowViewerTaskPersistence`.
 - `WorkflowViewer.tsx` no longer imports ReactFlow/ReactFlow-node-renderer/DOM connection helper implementation details; the remaining graph-conversion static gate hit is the existing `canvasToWorkflowGraph` source-graph initialization debt.
-- `WorkflowViewer.tsx` is now 37,390 bytes / 1,045 lines after selection-state hook extraction.
+- `WorkflowViewer.tsx` is now 36,155 bytes / 1,014 lines after task persistence glue extraction.
 - `WorkflowViewer.tsx` no longer ends with local helper definitions; the file now ends at the `WorkflowViewer` component close.
