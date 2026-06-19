@@ -121,14 +121,10 @@ import {
 } from '../workbench/model/workbenchViewProjection';
 import {
   inspectorDrawerTitle,
-  isNodeDetailModel,
   selectionKey,
   truncateLargeLog,
 } from '../workbench/model/workflowViewerShell';
-import {
-  agentEventsLiveText,
-  failedAgentEventsText,
-} from '../workbench/model/agentEventText';
+import { failedAgentEventsText } from '../workbench/model/agentEventText';
 import {
   bindingDirectory,
   boundaryInputMainConflictMessage,
@@ -277,23 +273,17 @@ import {
 
 import { ExecutionDock as ExecutionDockComponent } from './execution';
 import { LiveOutputViewer } from './execution/RunOverlay';
-import {
-  AgentNodeSettingsPanel,
-  SelectionPropertiesPane,
-} from './inspector/AgentNodeSettingsPanel';
+import { AgentNodeSettingsPanel } from './inspector/AgentNodeSettingsPanel';
 import { EvidencePreview } from './inspector/EvidencePreview';
 import { EventTimeline } from './inspector/EventTimeline';
 import { InvocationIdentityCard } from './inspector/InvocationIdentityCard';
 import { InvocationInputEditor } from './inspector/InvocationInputEditor';
 import { LiveLogBlocks } from './inspector/LiveLogBlocks';
-import { NodeDetailOverlay } from './inspector/NodeDetailOverlay';
 import { NodeEvidencePaths } from './inspector/NodeEvidencePaths';
 import { PortList } from './inspector/PortList';
 import { RightInspector } from './inspector/RightInspector';
 import { ResourceInspector, type ResourceTemplate } from './inspector/ResourceInspector';
 import { evidenceContentForCurrentSelection } from './inspector/SelectionDetailsDock';
-import { SelectionInputPane } from './inspector/SelectionInputPane';
-import { SelectionOutputPane } from './inspector/SelectionOutputPane';
 import {
   TaskOverviewPage as TaskOverviewPageComponent,
   TaskWorkspaceSwitcher as TaskWorkspaceSwitcherComponent,
@@ -363,6 +353,7 @@ import { useWorkbenchTaskStoreBindings } from '../hooks/useWorkbenchTaskStoreBin
 import { useRunStoreBindings } from '../hooks/useRunStoreBindings';
 import { useWorkbenchStoreInitialization } from '../hooks/useWorkbenchStoreInitialization';
 import { WorkflowViewerDock } from './workflow-viewer/WorkflowViewerDock';
+import { WorkflowViewerNodeDetailOverlay } from './workflow-viewer/WorkflowViewerNodeDetailOverlay';
 
 type Props = {
   workflows: WorkflowSummary[];
@@ -1407,78 +1398,36 @@ export function WorkflowViewer({
             />
           </div>
         ) : null}
-        {blueprintViewActive && nodeDetailOpen && isNodeDetailModel(selectedDetailsModelWithAgentEvents) ? (
-          <NodeDetailOverlay
-            model={selectedDetailsModelWithAgentEvents}
-            onClose={() => setNodeDetailOpen(false)}
-          >
-            <SelectionInputPane
-              model={selectedDetailsModelWithAgentEvents}
-              artifactCacheByPath={artifactCacheByPath}
-              onEnsureArtifactContent={ensureArtifactContent}
-            />
-            <SelectionPropertiesPane
-              model={selectedDetailsModelWithAgentEvents}
-              callableState={selectedCallableDetailState}
-              runtimeConfig={runtimeConfig}
-              agentSessionState={agentSessionState}
-              onReadEvidence={readEvidence}
-              onRefreshAgentSession={refreshAgentSession}
-              onPublishAgentOutput={publishSelectedAgentOutput}
-              onAnswerAgentInteraction={answerSelectedAgentInteraction}
-              onUpdateInput={(nextInput) => {
-                if (selection.type === 'workflow' && selectedWorkflow && isExecutableNodeWorkflow(selectedWorkflow)) {
-                  updateWorkflowInvocationInput(selectedWorkflow.id, nextInput);
-                }
-                if (selection.type === 'internal' && selectedWorkflow && selectedInternalNode) {
-                  updateInternalInvocationInput(selectedWorkflow.id, selectedInternalNode.id, nextInput);
-                }
-              }}
-              onUpdateLabel={(label) => {
-                if (selection.type === 'workflow' && selectedWorkflow && isExecutableNodeWorkflow(selectedWorkflow)) {
-                  updateWorkflowInvocationLabel(selectedWorkflow.id, label);
-                }
-                if (selection.type === 'internal' && selectedWorkflow && selectedInternalNode) {
-                  updateInternalInvocationLabel(selectedWorkflow.id, selectedInternalNode.id, label);
-                }
-              }}
-              onUpdateForwardMainOutput={(value) => {
-                if (selection.type === 'workflow' && selectedWorkflow && isExecutableNodeWorkflow(selectedWorkflow)) {
-                  updateWorkflowForwardMainOutput(selectedWorkflow.id, value);
-                }
-                if (selection.type === 'internal' && selectedWorkflow && selectedInternalNode) {
-                  updateInternalForwardMainOutput(selectedWorkflow.id, selectedInternalNode.id, value);
-                }
-              }}
-              onUpdateEmptyInputPolicy={(value) => {
-                if (selection.type === 'workflow' && selectedWorkflow && isExecutableNodeWorkflow(selectedWorkflow)) {
-                  updateWorkflowEmptyInputPolicy(selectedWorkflow.id, value);
-                }
-                if (selection.type === 'internal' && selectedWorkflow && selectedInternalNode) {
-                  updateInternalEmptyInputPolicy(selectedWorkflow.id, selectedInternalNode.id, value);
-                }
-              }}
-              onUpdateCodexExecutionMode={(value) => {
-                if (selection.type === 'workflow' && selectedWorkflow && isExecutableNodeWorkflow(selectedWorkflow)) {
-                  updateWorkflowCodexExecutionMode(selectedWorkflow.id, value);
-                }
-                if (selection.type === 'internal' && selectedWorkflow && selectedInternalNode) {
-                  updateInternalCodexExecutionMode(selectedWorkflow.id, selectedInternalNode.id, value);
-                }
-              }}
-              onOpenCallableResource={openCallableResourceFromNode}
-            />
-            <SelectionOutputPane
-              model={selectedDetailsModelWithAgentEvents}
-              liveState={
-                selectedAgentTurnLiveState.events.length ? selectedAgentTurnLiveState : selectedAgentLiveState
-              }
-              agentEventText={agentEventsLiveText(selectedDetailsModelWithAgentEvents.events)}
-              artifactCacheByPath={artifactCacheByPath}
-              onEnsureArtifactContent={ensureArtifactContent}
-            />
-          </NodeDetailOverlay>
-        ) : null}
+        <WorkflowViewerNodeDetailOverlay
+          open={blueprintViewActive && nodeDetailOpen}
+          model={selectedDetailsModelWithAgentEvents}
+          selection={selection}
+          selectedWorkflow={selectedWorkflow}
+          selectedInternalNode={selectedInternalNode}
+          artifactCacheByPath={artifactCacheByPath}
+          selectedAgentTurnLiveState={selectedAgentTurnLiveState}
+          selectedAgentLiveState={selectedAgentLiveState}
+          callableState={selectedCallableDetailState}
+          runtimeConfig={runtimeConfig}
+          agentSessionState={agentSessionState}
+          onClose={() => setNodeDetailOpen(false)}
+          onEnsureArtifactContent={ensureArtifactContent}
+          onReadEvidence={readEvidence}
+          onRefreshAgentSession={refreshAgentSession}
+          onPublishAgentOutput={publishSelectedAgentOutput}
+          onAnswerAgentInteraction={answerSelectedAgentInteraction}
+          onUpdateWorkflowInput={updateWorkflowInvocationInput}
+          onUpdateInternalInput={updateInternalInvocationInput}
+          onUpdateWorkflowLabel={updateWorkflowInvocationLabel}
+          onUpdateInternalLabel={updateInternalInvocationLabel}
+          onUpdateWorkflowForwardMainOutput={updateWorkflowForwardMainOutput}
+          onUpdateInternalForwardMainOutput={updateInternalForwardMainOutput}
+          onUpdateWorkflowEmptyInputPolicy={updateWorkflowEmptyInputPolicy}
+          onUpdateInternalEmptyInputPolicy={updateInternalEmptyInputPolicy}
+          onUpdateWorkflowCodexExecutionMode={updateWorkflowCodexExecutionMode}
+          onUpdateInternalCodexExecutionMode={updateInternalCodexExecutionMode}
+          onOpenCallableResource={openCallableResourceFromNode}
+        />
       </div>
       <WorkflowViewerDock
         bindingEditorWorkflowId={bindingEditorWorkflowId}
