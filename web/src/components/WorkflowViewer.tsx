@@ -382,6 +382,7 @@ import { useRunStream } from '../hooks/useRunStream';
 import { useSelectedAgentSession, type AgentSessionUiState } from '../hooks/useSelectedAgentSession';
 import { useOpenedWorkflowLoader } from '../hooks/useOpenedWorkflowLoader';
 import { useNodeRunDetails } from '../hooks/useNodeRunDetails';
+import { useRunRestorationLoader } from '../hooks/useRunRestorationLoader';
 import { useTaskPersistence } from '../hooks/useTaskPersistence';
 import { useWorkbenchTaskDurability } from '../hooks/useWorkbenchTaskDurability';
 import { useWorkbenchBootstrap } from '../hooks/useWorkbenchBootstrap';
@@ -2450,87 +2451,78 @@ export function WorkflowViewer({
     graphRef.current = sourceGraph;
   }, [sourceGraph]);
 
-  useEffect(() => {
-    if (!currentTask) {
-      return;
-    }
-    const runId = currentTask.activeRunId || currentTask.latestRunId;
-    if (!runId || runsById[runId]?.run) {
-      return;
-    }
-
-    let ignore = false;
-    const taskGraph = canvasToWorkflowGraph(currentTask.canvas);
-    api
-      .run(runId)
-      .then(async (summary) => {
-        if (ignore) {
-          return;
-        }
-        const restoredRun = await api
-          .runState(runId)
-          .then((state) => workflowRunFromRunStateSnapshot(state, taskGraph))
-          .catch(() => workflowRunFromRunSummary(summary, taskGraph));
-        const events = await api.runEvents(runId).catch(() => null);
-        if (ignore) {
-          return;
-        }
-        const liveRun = events
-          ? mergeWorkflowRunWithEvents(
-              restoredRun,
-              liveWorkflowRunFromEvents(taskGraph, summary.run_dir || `runs/${runId}`, events.events || []),
-            )
-          : restoredRun;
-        const overlay = runOverlayFromRun(liveRun, {
+  const restorationRunId = currentTask?.activeRunId || currentTask?.latestRunId || null;
+  const shouldRestoreRun = Boolean(restorationRunId && !runsById[restorationRunId]?.run);
+  const handleRunRestorationLoaded = useCallback(
+    ({ runId, summary, stateSnapshot, events }: {
+      runId: string;
+      summary: RunSummary;
+      stateSnapshot: WorkflowRunResult | null;
+      events: RunEvent[] | null;
+    }) => {
+      if (!currentTask) {
+        return;
+      }
+      const taskGraph = canvasToWorkflowGraph(currentTask.canvas);
+      const restoredRun = stateSnapshot
+        ? workflowRunFromRunStateSnapshot(stateSnapshot, taskGraph)
+        : workflowRunFromRunSummary(summary, taskGraph);
+      const liveRun = events
+        ? mergeWorkflowRunWithEvents(
+            restoredRun,
+            liveWorkflowRunFromEvents(taskGraph, summary.run_dir || `runs/${runId}`, events),
+          )
+        : restoredRun;
+      const overlay = runOverlayFromRun(liveRun, {
+        runId,
+        scope: 'task',
+        targetId: taskGraph.id,
+      });
+      setRunsById((current) => ({
+        ...current,
+        [runId]: {
           runId,
+          taskId: currentTask.taskId,
+          status: normalizeTaskRunStatus(restoredRun.status),
           scope: 'task',
           targetId: taskGraph.id,
-        });
-        setRunsById((current) => ({
-          ...current,
-          [runId]: {
-            runId,
-            taskId: currentTask.taskId,
-            status: normalizeTaskRunStatus(restoredRun.status),
-            scope: 'task',
-            targetId: taskGraph.id,
-            graph: taskGraph,
-            runDir: summary.run_dir,
-            summary,
-            run: liveRun,
-            events: events?.events || [],
-            overlay,
-            pollState: 'idle',
-          },
-        }));
-        setTasks((current) =>
-          current.map((task) =>
-            task.taskId === currentTask.taskId
-              ? {
-                  ...task,
-                  status: taskStatusFromRunStatus(restoredRun.status),
-                  latestRunId: runId,
-                  activeRunId: isActiveRunStatus(restoredRun.status) ? runId : undefined,
-                }
-              : task,
-          ),
-        );
-      })
-      .catch(() => {
-        if (ignore) {
-          return;
-        }
-        setRunsById((current) => {
-          const next = { ...current };
-          delete next[runId];
-          return next;
-        });
-      });
-
-    return () => {
-      ignore = true;
-    };
-  }, [currentTask?.activeRunId, currentTask?.latestRunId, currentTask?.taskId, runsById]);
+          graph: taskGraph,
+          runDir: summary.run_dir,
+          summary,
+          run: liveRun,
+          events: events || [],
+          overlay,
+          pollState: 'idle',
+        },
+      }));
+      setTasks((current) =>
+        current.map((task) =>
+          task.taskId === currentTask.taskId
+            ? {
+                ...task,
+                status: taskStatusFromRunStatus(restoredRun.status),
+                latestRunId: runId,
+                activeRunId: isActiveRunStatus(restoredRun.status) ? runId : undefined,
+              }
+            : task,
+        ),
+      );
+    },
+    [currentTask],
+  );
+  const handleRunRestorationFailed = useCallback((runId: string) => {
+    setRunsById((current) => {
+      const next = { ...current };
+      delete next[runId];
+      return next;
+    });
+  }, []);
+  useRunRestorationLoader({
+    enabled: shouldRestoreRun,
+    runId: restorationRunId,
+    onLoaded: handleRunRestorationLoaded,
+    onLoadFailed: handleRunRestorationFailed,
+  });
 
   const handleOpenedExternalWorkflow = useCallback((workflow: WorkflowDetail) => {
     const nextGraph = normalizeWorkflowGraph(workflow.graph || graphFromLegacyWorkflow(workflow));

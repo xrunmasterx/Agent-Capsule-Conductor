@@ -234,7 +234,9 @@ Status: in progress
 - Replaced the local selected node detail cache `useState` and detail loading effect in `WorkflowViewer.tsx` with `useNodeRunDetails(...)`; the component keeps cache-key calculation and merge strategy.
 - Added `web/src/hooks/useWorkbenchTaskDurability.ts` as the owner for durable Workbench task create/delete API side effects, readiness gating, create-race suppression, and delete-error reporting.
 - Replaced direct `api.createWorkbenchTask(...)` / `api.deleteWorkbenchTask(...)` calls in `WorkflowViewer.tsx` with `useWorkbenchTaskDurability(...)`; the component keeps task list, active task, canvas, and selection projection.
-- `web/src/components/WorkflowViewer.tsx` is now 563,937 bytes / 16,020 lines after the latest slice.
+- Added `web/src/hooks/useRunRestorationLoader.ts` as the owner for run restoration summary/state/events loading, readiness gating, stale-response cancellation, partial state/events fallback, and summary-load error reporting.
+- Replaced the local run restoration effect in `WorkflowViewer.tsx` with `useRunRestorationLoader(...)`; the component keeps summary/state/events projection into `RunProjection` and task status updates.
+- `web/src/components/WorkflowViewer.tsx` is now 563,929 bytes / 16,012 lines after the latest slice.
 
 ### Added Tests
 
@@ -251,6 +253,7 @@ Status: in progress
 - `web/src/hooks/useOpenedWorkflowLoader.test.tsx`
 - `web/src/hooks/useNodeRunDetails.test.tsx`
 - `web/src/hooks/useWorkbenchTaskDurability.test.tsx`
+- `web/src/hooks/useRunRestorationLoader.test.tsx`
 - Extended `web/src/hooks/streamTypes.test.ts`
 
 ### Validation So Far
@@ -322,6 +325,11 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npm run test -- --run src/App.test.tsx src/components/WorkflowViewer.drag.test.tsx` | Passed | 2 files, 183 tests passed. |
 | `npm run test -- --run` | Passed | 33 files, 325 tests passed. |
 | `npm run build` | Passed | Same expected chunk-size warning remains. |
+| `npm run test -- --run src/hooks/useRunRestorationLoader.test.tsx` | Passed | 1 file, 5 tests passed. |
+| `npx tsc --noEmit` | Passed | Run restoration loader hook wiring compiles. |
+| `npm run test -- --run src/App.test.tsx src/components/WorkflowViewer.drag.test.tsx` | Passed | 2 files, 183 tests passed. |
+| `npm run test -- --run` | Passed | 34 files, 330 tests passed. |
+| `npm run build` | Passed | Same expected chunk-size warning remains. |
 
 ### Static Gates So Far
 
@@ -348,4 +356,6 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `useNodeRunDetails.test.tsx` covers missing-context suppression, detail load and merge, cached-key no-reload behavior, cleanup suppression of stale responses, and detail-load failure fallback.
 - `WorkflowViewer.tsx` no longer owns durable task create/delete API calls or readiness gating; this ownership lives in `useWorkbenchTaskDurability`.
 - `useWorkbenchTaskDurability.test.tsx` covers readiness suppression, create request payloads, create-race suppression, delete requests, and delete-error reporting.
-- `WorkflowViewer.tsx` still has direct `api.*`, `runnerApi.*`, and timer usage for run submit, submit-time boundary preview, selected-agent action APIs, GraphOps/publish actions, run restoration, current snapshot publish callbacks, and UI-only defer timers. These are remaining PLAN_03 or later PLAN_06 slices.
+- `WorkflowViewer.tsx` no longer owns run restoration summary/state/events loading, stale-response cancellation, or partial state/events fallback; this ownership lives in `useRunRestorationLoader`.
+- `useRunRestorationLoader.test.tsx` covers disabled/missing-id suppression, summary/state/events loading, state/events fallback, cleanup suppression of stale responses, and summary-load error reporting.
+- `WorkflowViewer.tsx` still has direct `api.*`, `runnerApi.*`, and timer usage for run submit, submit-time boundary preview, selected-agent action APIs, GraphOps/publish actions, current snapshot publish callbacks, run refresh polling, and UI-only defer timers. These are remaining PLAN_03 or later PLAN_06 slices.
