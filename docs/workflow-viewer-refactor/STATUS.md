@@ -636,17 +636,36 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 
 ## PLAN_07 ReactFlow Canvas
 
-Status: in progress
+Status: complete
 
 ### Scope Completed So Far
 
 - Replaced the `web/src/components/canvas/NodeRenderer.tsx` re-export shim with the real `WorkflowContainer`, `AgentToolNode`, stable `nodeTypes`, `FlowNodeLayoutContext`, and ReactFlow node data types.
 - Removed local `WorkflowContainer`, `AgentToolNode`, node-renderer data types, and local `nodeTypes` ownership from `WorkflowViewer.tsx`; `WorkspaceCanvas` now consumes them from `NodeRenderer.tsx`.
-- Kept `WorkspaceCanvas` and ReactFlow connect/drag lifecycle in `WorkflowViewer.tsx` for the next PLAN_07 slice.
+- Added `web/src/components/canvas/connectionDom.ts` for connection handle classification, endpoint lookup, flow-node DOM lookup, connection trace buffering, and handle lookup by endpoint.
+- Added `web/src/components/canvas/CanvasToolbar.tsx` for canvas toolbar controls, node-create menu, and connection preview line rendering.
+- Extended `web/src/components/canvas/flowProjection.ts` to own ReactFlow node projection, node identity/layout keys, node reconciliation, drag commit keys, and flow-edge address decoding.
+- Added `web/src/components/canvas/canvasPointer.ts` for pointer/touch coordinate normalization, ReactFlow coordinate fallback, and connection-preview start-point calculation.
+- Added `web/src/components/canvas/canvasFocus.ts` for workflow-focus canvas projection with input/output boundary pseudo nodes.
+- Added `web/src/components/canvas/canvasMutation.ts` for canvas resize/move, drag commit/reparenting, palette drop target resolution, executable-root/internal-node conversion, and pending palette connection mutation.
+- Added `web/src/components/canvas/canvasDomGuards.ts` for text-editing keyboard target and node-detail double-click guard logic.
+- Added `web/src/components/canvas/canvasDataDrop.ts` for data-edge body-drop preview and command creation.
+- Replaced `web/src/components/canvas/WorkspaceCanvas.tsx` re-export shim with the real ReactFlow canvas root and moved ReactFlow CSS import there.
+- Removed local `WorkspaceCanvas`, ReactFlow imports, canvas toolbar/menu/preview components, connection DOM helpers, pointer helpers, focus projection, canvas mutation helpers, and data body-drop helpers from `WorkflowViewer.tsx`.
+- `WorkflowViewer.tsx` is now 253,016 bytes / 6,731 lines after the latest PLAN_07 slice.
 
 ### Added/Updated Tests
 
 - Existing `web/src/components/WorkflowViewer.drag.test.tsx` now exercises node renderer through the extracted `NodeRenderer.tsx` implementation.
+- Added/extended canvas module tests:
+  - `web/src/components/canvas/connectionDom.test.ts`
+  - `web/src/components/canvas/CanvasToolbar.test.tsx`
+  - `web/src/components/canvas/flowProjection.test.ts`
+  - `web/src/components/canvas/canvasPointer.test.ts`
+  - `web/src/components/canvas/canvasFocus.test.ts`
+  - `web/src/components/canvas/canvasMutation.test.ts`
+  - `web/src/components/canvas/canvasDomGuards.test.ts`
+  - `web/src/components/canvas/canvasDataDrop.test.ts`
 
 ### Validation So Far
 
@@ -656,9 +675,16 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | --- | --- | --- |
 | `npx tsc --noEmit` | Passed | NodeRenderer extraction compiles. |
 | `npm run test -- --run src/components/WorkflowViewer.drag.test.tsx` | Passed | 1 file, 101 tests passed. |
+| `npx tsc --noEmit` | Passed | WorkspaceCanvas and canvas helper extraction compile. |
+| `npm run test -- --run src/components/WorkflowViewer.drag.test.tsx src/components/canvas/canvasMutation.test.ts src/components/canvas/canvasDataDrop.test.ts src/components/canvas/flowProjection.test.ts` | Passed | 4 files, 120 tests passed. |
+| `npm run test -- --run` | Passed | 65 files, 426 tests passed. |
+| `npm run build` | Passed | Vite still reports the expected chunk-size warning for the main production JS chunk. |
 
 ### Static Gates So Far
 
 - `WorkflowViewer.tsx` no longer defines local `AgentToolNode`, `WorkflowContainer`, or local `nodeTypes`.
 - `web/src/components/canvas/NodeRenderer.tsx` no longer re-exports from `WorkflowViewer.tsx`.
-- `web/src/components/canvas/WorkspaceCanvas.tsx` is still a re-export shim and remains the next PLAN_07 target.
+- `WorkflowViewer.tsx` no longer defines local `WorkspaceCanvas`.
+- `web/src/components/canvas/WorkspaceCanvas.tsx` no longer re-exports from `WorkflowViewer.tsx`.
+- `web/src/components/canvas/WorkspaceCanvas.tsx` owns ReactFlow root rendering and imports ReactFlow CSS.
+- `rg -n "function WorkspaceCanvas" web/src/components/WorkflowViewer.tsx web/src/components/canvas/WorkspaceCanvas.tsx` reports the function only in `WorkspaceCanvas.tsx`.
