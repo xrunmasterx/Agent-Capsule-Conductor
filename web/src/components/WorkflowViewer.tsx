@@ -387,6 +387,7 @@ import { useOpenedWorkflowLoader } from '../hooks/useOpenedWorkflowLoader';
 import { useNodeRunDetails } from '../hooks/useNodeRunDetails';
 import { useRunRestorationLoader } from '../hooks/useRunRestorationLoader';
 import { useRunRefreshLoader } from '../hooks/useRunRefreshLoader';
+import { useSubmittedRunPolling } from '../hooks/useSubmittedRunPolling';
 import { useTaskPersistence } from '../hooks/useTaskPersistence';
 import { useWorkbenchTaskDurability } from '../hooks/useWorkbenchTaskDurability';
 import {
@@ -2286,6 +2287,7 @@ export function WorkflowViewer({
   const loadWorkbenchTaskRecords = useCallback(() => api.workbenchTasks(), []);
   const { loadWorkbenchTaskCanvas, saveWorkbenchTaskCanvas } = useWorkbenchTaskCanvasPersistence();
   const { validateBoundaryTransfers } = useBoundaryTransferValidation();
+  const { pollSubmittedRunUntilTerminal } = useSubmittedRunPolling();
   const loadDurableWorkbenchTask = useCallback(
     (taskRecord: Record<string, unknown>) => loadWorkbenchTaskFromBackend(taskRecord, loadWorkbenchTaskCanvas),
     [loadWorkbenchTaskCanvas],
@@ -3254,69 +3256,6 @@ export function WorkflowViewer({
     const bindingPath = binding?.exists ? bindingPathOf(binding) : '';
     const taskId = activeTaskId;
 
-    async function pollRunUntilTerminal() {
-      try {
-        const [summary, stateSnapshot, result] = await Promise.all([
-          api.run(runId),
-          api.runState(runId).catch(() => null),
-          api.runEvents(runId).catch(() => ({ events: [] as RunEvent[] })),
-        ]);
-        const snapshotRun = stateSnapshot
-          ? workflowRunFromRunStateSnapshot(stateSnapshot, runnableGraph)
-          : workflowRunFromRunSummary(summary, runnableGraph);
-        const liveRun = mergeWorkflowRunWithEvents(
-          snapshotRun,
-          liveWorkflowRunFromEvents(runnableGraph, summary.run_dir || runDir, result.events),
-        );
-        const runStatus = normalizeTaskRunStatus(summary.status || liveRun.status);
-        const overlay = runOverlayFromRun({ ...liveRun, status: runStatus }, { runId, scope, targetId });
-        setRunsById((current) => ({
-          ...current,
-          [runId]: {
-            ...(current[runId] || {
-              runId,
-              taskId,
-              scope,
-              targetId,
-              graph: runnableGraph,
-              runDir,
-            }),
-            status: runStatus,
-            summary,
-            run: { ...liveRun, status: runStatus },
-            events: result.events,
-            overlay,
-            pollState: 'polling',
-          },
-        }));
-        setTasks((current) =>
-          current.map((task) =>
-            task.taskId === taskId
-              ? {
-                  ...task,
-                  status: taskStatusFromRunStatus(runStatus),
-                  activeRunId: isActiveRunStatus(runStatus) ? runId : undefined,
-                  latestRunId: runId,
-                }
-              : task,
-          ),
-        );
-        if (isActiveRunStatus(runStatus)) {
-          window.setTimeout(() => {
-            void pollRunUntilTerminal();
-          }, selectedRunId === runId ? 1000 : 2500);
-          return;
-        }
-        setMessage(`运行 ${liveRun.workflow_id}: ${statusLabel(runStatus)}`);
-        onChanged?.();
-      } catch {
-        updateRunProjection(runId, (current) => ({ ...current, pollState: 'error' }));
-        window.setTimeout(() => {
-          void pollRunUntilTerminal();
-        }, 2500);
-      }
-    }
-
     try {
       if (scope === 'task') {
         graphRef.current = graph;
@@ -3371,7 +3310,61 @@ export function WorkflowViewer({
             : task,
         ),
       );
-      void pollRunUntilTerminal();
+      pollSubmittedRunUntilTerminal({
+        runId,
+        foreground: selectedRunId === runId,
+        onSnapshot: ({ summary, stateSnapshot, events }) => {
+          const snapshotRun = stateSnapshot
+            ? workflowRunFromRunStateSnapshot(stateSnapshot, runnableGraph)
+            : workflowRunFromRunSummary(summary, runnableGraph);
+          const liveRun = mergeWorkflowRunWithEvents(
+            snapshotRun,
+            liveWorkflowRunFromEvents(runnableGraph, summary.run_dir || runDir, events),
+          );
+          const runStatus = normalizeTaskRunStatus(summary.status || liveRun.status);
+          const overlay = runOverlayFromRun({ ...liveRun, status: runStatus }, { runId, scope, targetId });
+          setRunsById((current) => ({
+            ...current,
+            [runId]: {
+              ...(current[runId] || {
+                runId,
+                taskId,
+                scope,
+                targetId,
+                graph: runnableGraph,
+                runDir,
+              }),
+              status: runStatus,
+              summary,
+              run: { ...liveRun, status: runStatus },
+              events,
+              overlay,
+              pollState: 'polling',
+            },
+          }));
+          setTasks((current) =>
+            current.map((task) =>
+              task.taskId === taskId
+                ? {
+                    ...task,
+                    status: taskStatusFromRunStatus(runStatus),
+                    activeRunId: isActiveRunStatus(runStatus) ? runId : undefined,
+                    latestRunId: runId,
+                  }
+                : task,
+            ),
+          );
+          if (isActiveRunStatus(runStatus)) {
+            return true;
+          }
+          setMessage(`运行 ${liveRun.workflow_id}: ${statusLabel(runStatus)}`);
+          onChanged?.();
+          return false;
+        },
+        onError: () => {
+          updateRunProjection(runId, (current) => ({ ...current, pollState: 'error' }));
+        },
+      });
       setMessage(`运行 ${runId}: 已提交`);
       onChanged?.();
     } catch (error) {
