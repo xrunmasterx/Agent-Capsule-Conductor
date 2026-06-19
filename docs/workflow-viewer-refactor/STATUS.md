@@ -509,12 +509,17 @@ Status: in progress
 - Replaced the old prompt-based port rename interaction with an inline rename form, making the behavior testable and avoiding `window.prompt` in inspector code.
 - Moved `DataConnectionDraft` into `web/src/types/workbench.ts` so inspector components no longer depend on a main-file-local type.
 - Added `web/src/hooks/useCallableDetail.ts` and removed the local `useCallableDetail(...)` implementation from `WorkflowViewer.tsx`, keeping callable API access in the hook layer instead of the inspector component layer.
-- `web/src/components/WorkflowViewer.tsx` is now 529,300 bytes / 14,964 lines after this PLAN_05 checkpoint.
+- Added `web/src/components/inspector/PortInspector.tsx` and removed the local `PortInspector` from `WorkflowViewer.tsx`.
+- Added `web/src/components/inspector/EdgeInspector.tsx` and removed the local `EdgeInspector` from `WorkflowViewer.tsx`.
+- `EdgeInspector` receives the boundary preview snapshot builder from the parent and uses `useBoundaryTransferPreview`; it does not directly call API or construct canonical graph snapshots itself.
+- `web/src/components/WorkflowViewer.tsx` is now 523,301 bytes / 14,781 lines after this PLAN_05 checkpoint.
 
 ### Added Tests
 
 - `web/src/workbench/model/inspectorActions.test.ts`
 - `web/src/components/inspector/DataConnectionsPanel.test.tsx`
+- `web/src/components/inspector/PortInspector.test.tsx`
+- `web/src/components/inspector/EdgeInspector.test.tsx`
 
 ### Validation So Far
 
@@ -524,12 +529,15 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | --- | --- | --- |
 | `npx tsc --noEmit` | Passed | Data connection model/component extraction compiles. |
 | `npm run test -- --run src/workbench/model/inspectorActions.test.ts src/components/inspector/DataConnectionsPanel.test.tsx` | Passed | 2 files, 6 tests passed. |
+| `npm run test -- --run src/components/inspector/EdgeInspector.test.tsx src/components/inspector/PortInspector.test.tsx src/components/WorkflowViewer.drag.test.tsx` | Passed | 3 files, 106 tests passed. |
 | `npm run test -- --run` | Passed | 49 files, 367 tests passed. |
 | `npm run build` | Passed | Same expected chunk-size warning remains. |
 
 ### Static Gates So Far
 
 - `WorkflowViewer.tsx` no longer defines local `DataConnectionsPanel`.
+- `WorkflowViewer.tsx` no longer defines local `PortInspector`.
+- `WorkflowViewer.tsx` no longer defines local `EdgeInspector`.
 - `web/src/components/inspector` has no direct `api.*` usage.
 - `web/src/components/WorkflowViewer.tsx`, `web/src/components/inspector`, and `web/src/workbench/model` have no `window.prompt` usage.
 - `web/src/workbench/model/inspectorActions.ts` imports no React, API modules, stores, or `WorkflowViewer`.
