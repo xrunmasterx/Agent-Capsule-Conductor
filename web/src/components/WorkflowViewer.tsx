@@ -172,16 +172,13 @@ import {
   findCanvasEdgeByAddress,
   isActiveCanvasObjectStatus,
   isExecutableNodeWorkflow,
-  mergeInvocationInput,
   normalizeSelectionIntent,
   normalizeWorkbenchSelection,
-  promptFromInvocationInput,
   selectionCanBeDeleted,
   selectionEdgeAddress,
   selectionForEdgeAddress,
   selectionMatchesEdge,
   shouldDisconnectEdgeOnClick,
-  staticInputFromInvocationInput,
   type SelectionIntent,
   workflowInvocationLabel,
 } from '../workbench/model/selectionModel';
@@ -387,6 +384,8 @@ import { ExecutionDock as ExecutionDockComponent } from './execution';
 import { LiveOutputViewer } from './execution/RunOverlay';
 import { CodexExecutionModeSelector } from './inspector/CodexExecutionModeSelector';
 import { DataConnectionsPanel } from './inspector/DataConnectionsPanel';
+import { InvocationIdentityCard } from './inspector/InvocationIdentityCard';
+import { InvocationInputEditor } from './inspector/InvocationInputEditor';
 import { LiveLogBlocks } from './inspector/LiveLogBlocks';
 import { NodeDetailOverlay } from './inspector/NodeDetailOverlay';
 import { NodeEvidencePaths } from './inspector/NodeEvidencePaths';
@@ -4069,149 +4068,6 @@ function TechnicalDetailsDisclosure({
           ) : null}
         </div>
       ) : null}
-    </section>
-  );
-}
-
-function InvocationIdentityCard({
-  scope,
-  nodeId,
-  label,
-  callableId,
-  workflowRef,
-  onLabelChange,
-}: {
-  scope: string;
-  nodeId: string;
-  label: string;
-  callableId?: string;
-  workflowRef?: string;
-  onLabelChange?: (label: string) => void;
-}) {
-  return (
-    <dl className="invocation-identity-card">
-      <dt>scope</dt>
-      <dd>{scope}</dd>
-      <dt>node_id</dt>
-      <dd>{nodeId}</dd>
-      <dt>invocation</dt>
-      <dd>
-        {onLabelChange ? (
-          <input
-            type="text"
-            value={label}
-            onChange={(event) => onLabelChange(event.target.value)}
-            aria-label="Invocation label"
-          />
-        ) : (
-          label
-        )}
-      </dd>
-      {callableId ? (
-        <>
-          <dt>callable_id</dt>
-          <dd>{callableId}</dd>
-        </>
-      ) : null}
-      {workflowRef ? (
-        <>
-          <dt>workflow_ref</dt>
-          <dd>{workflowRef}</dd>
-        </>
-      ) : null}
-    </dl>
-  );
-}
-
-function InvocationInputEditor({
-  input,
-  onChange,
-}: {
-  input: Record<string, unknown>;
-  onChange: (input: Record<string, unknown>) => void;
-}) {
-  const [jsonText, setJsonText] = useState(() => JSON.stringify(staticInputFromInvocationInput(input), null, 2));
-  const [error, setError] = useState('');
-  const [lastSavedInput, setLastSavedInput] = useState(input);
-  useEffect(() => {
-    setJsonText(JSON.stringify(staticInputFromInvocationInput(input), null, 2));
-    setLastSavedInput(input);
-    setError('');
-  }, [input]);
-
-  function updatePrompt(value: string) {
-    onChange(mergeInvocationInput(input, value, staticInputFromInvocationInput(input)));
-  }
-
-  function updateJson(value: string) {
-    setJsonText(value);
-    try {
-      const parsed = JSON.parse(value);
-      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-        setError('');
-        onChange(mergeInvocationInput(input, promptFromInvocationInput(input), parsed as Record<string, unknown>));
-        return;
-      }
-      setError('JSON 必须是对象；当前修改不会提交。');
-    } catch (parseError) {
-      setError(parseError instanceof Error ? parseError.message : String(parseError));
-    }
-  }
-
-  function clearPrompt() {
-    updatePrompt('');
-  }
-
-  function resetInput() {
-    setJsonText(JSON.stringify(staticInputFromInvocationInput(lastSavedInput), null, 2));
-    setError('');
-    onChange(lastSavedInput);
-  }
-
-  function formatJson() {
-    try {
-      const parsed = JSON.parse(jsonText);
-      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-        setJsonText(JSON.stringify(parsed, null, 2));
-        setError('');
-        return;
-      }
-      setError('JSON 必须是对象；当前修改不会提交。');
-    } catch (parseError) {
-      setError(parseError instanceof Error ? parseError.message : String(parseError));
-    }
-  }
-
-  return (
-    <section className="invocation-input-editor" aria-label="Invocation 配置">
-      <label>
-        User Prompt
-        <textarea
-          aria-label="User Prompt"
-          rows={5}
-          value={promptFromInvocationInput(input)}
-          onChange={(event) => updatePrompt(event.target.value)}
-          placeholder="本节点实例的任务说明"
-        />
-      </label>
-      <div className="inline-action-row">
-        <button type="button" className="secondary-action compact-action" onClick={clearPrompt}>
-          娓呯┖ User Prompt
-        </button>
-        <button type="button" className="secondary-action compact-action" onClick={resetInput}>
-          重置为当前值
-        </button>
-      </div>
-      <label>
-        Static Input JSON
-        <textarea aria-label="Static Input JSON" rows={7} value={jsonText} onChange={(event) => updateJson(event.target.value)} />
-      </label>
-      <div className="inline-action-row">
-        <button type="button" className="secondary-action compact-action" onClick={formatJson}>
-          格式化 JSON
-        </button>
-      </div>
-      {error ? <p className="notice compact-notice">{error}</p> : null}
     </section>
   );
 }

@@ -10,6 +10,8 @@
  */
 
 export { NodeDetailOverlay } from './NodeDetailOverlay';
+export { InvocationIdentityCard } from './InvocationIdentityCard';
+export { InvocationInputEditor } from './InvocationInputEditor';
 export { NodePromptEditor } from './NodePromptEditor';
 export { RightInspector } from './RightInspector';
 export { SelectionDetailsDock } from './SelectionDetailsDock';
