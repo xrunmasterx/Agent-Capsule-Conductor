@@ -71,9 +71,7 @@ import {
   mergeAuthoringValidation,
 } from '../workbench/model/authoringProposal';
 import {
-  authoringId,
   buildDeterministicCanvasAuthoringProposal,
-  captureAuthoringSnapshot,
   validateCanvasAuthoringProposal,
 } from './authoring/authoringRuntime';
 import {
@@ -176,7 +174,6 @@ import type {
   AssistantChatMessage,
   AssistantGraphOpsReview,
   AssistantTurnReason,
-  AuthoringContextSnapshot,
   BoundaryTransfer,
   BoundaryTransferMapping,
   BottomDockMode,
@@ -350,7 +347,6 @@ import {
 } from './workbench';
 import { useAssistantTurnStream } from '../hooks/useAssistantStream';
 import { useArtifactContentCache } from '../hooks/useArtifactContentCache';
-import { useAssistantSession } from '../hooks/useAssistantSession';
 import { useRunStream } from '../hooks/useRunStream';
 import { useSelectedAgentSession, type AgentSessionUiState } from '../hooks/useSelectedAgentSession';
 import { useOpenedWorkflowCanvas } from '../hooks/useOpenedWorkflowCanvas';
@@ -372,7 +368,6 @@ import {
   saveTaskStore,
   useTaskPersistence,
 } from '../hooks/useTaskPersistence';
-import { useWorkbenchAssistantActions } from '../hooks/useWorkbenchAssistantActions';
 import {
   assistantDisplayStatus,
   buildAssistantTranscriptItems,
@@ -409,6 +404,7 @@ import {
 } from '../hooks/useWorkflowSaveValidationActions';
 import { useAssistantGraphOpsPersistenceActions } from '../hooks/useAssistantGraphOpsPersistenceActions';
 import { useCanvasSelectionUiActions } from '../hooks/useCanvasSelectionUiActions';
+import { useAssistantAuthoringSessionActions } from '../hooks/useAssistantAuthoringSessionActions';
 
 type Props = {
   workflows: WorkflowSummary[];
@@ -712,65 +708,38 @@ export function WorkflowViewer({
   const assistantOpen = viewProjection.assistantOpen;
   const inspectorWidth = chrome.inspectorWidth;
 
-  function resetAssistantConversationState() {
-    setAssistantInput('');
-    setAssistantMessages([]);
-    setAssistantProposal(null);
-    setAssistantApplyUndo(null);
-    setAssistantTurnReason('workbench_chat');
-    setAssistantBackendValidation(null);
-    setAssistantRequiredActions([]);
-    setAssistantGraphOpsReview(null);
-    setAssistantSessionId(null);
-    setAssistantAgentSession(null);
-    setAssistantPendingTurn(null);
-    setAssistantEvents([]);
-    setAssistantSessionStatus('disconnected');
-    setAssistantBusy(false);
-  }
-
-  function currentAuthoringSnapshot(): AuthoringContextSnapshot {
-    return captureAuthoringSnapshot({
-      taskId: activeTaskId,
-      canvas,
-      selection,
-      callables,
-      workflows,
-    });
-  }
-
-  const addAssistantSystemMessage = useCallback((content: string) => {
-    setAssistantMessages((current) => [
-      ...current,
-      { id: authoringId('assistant_msg'), role: 'system', content },
-    ]);
-  }, []);
-  const ensureAssistantSessionFromPayload = useAssistantSession({
-    sessionId: assistantSessionId,
+  const {
+    resetAssistantConversationState,
+    currentAuthoringSnapshot,
+    addAssistantSystemMessage,
+    ensureAssistantSession,
+    loadWorkbenchAssistantSession,
+    submitWorkbenchAssistantTurnRequest,
+  } = useAssistantAuthoringSessionActions({
+    activeTaskId,
+    canvas,
+    selection,
+    callables,
+    workflows,
+    assistantSessionId,
     selectedAuthoringAgentId,
     setAuthoringAgents,
     setSelectedAuthoringAgentId,
-    setSessionId: setAssistantSessionId,
-    setAgentSession: setAssistantAgentSession,
-    setSessionStatus: setAssistantSessionStatus,
-    setMessages: setAssistantMessages,
-    setBusy: setAssistantBusy,
-    addSystemMessage: addAssistantSystemMessage,
+    setAssistantInput,
+    setAssistantMessages,
+    setAssistantProposal,
+    setAssistantApplyUndo,
+    setAssistantTurnReason,
+    setAssistantBackendValidation,
+    setAssistantRequiredActions,
+    setAssistantGraphOpsReview,
+    setAssistantSessionId,
+    setAssistantAgentSession,
+    setAssistantPendingTurn,
+    setAssistantEvents,
+    setAssistantSessionStatus,
+    setAssistantBusy,
   });
-  const {
-    loadWorkbenchAssistantSession,
-    submitWorkbenchAssistantTurnRequest,
-  } = useWorkbenchAssistantActions();
-  const ensureAssistantSession = useCallback(
-    (snapshot = currentAuthoringSnapshot()): Promise<string> =>
-      ensureAssistantSessionFromPayload({
-        taskId: snapshot.task_id,
-        canvasHash: snapshot.snapshot_id,
-        canvasSnapshot: authoringBackendCanvasSnapshot(snapshot),
-        selection: authoringSelectionPayload(snapshot.selection),
-      }),
-    [activeTaskId, callables, canvas, ensureAssistantSessionFromPayload, selection, workflows],
-  );
   const { generateAssistantProposal } = useAssistantProposalGenerateActions({
     assistantInput,
     assistantTurnReason,
@@ -939,15 +908,7 @@ export function WorkflowViewer({
     setRequiredActions: (actions) => setAssistantRequiredActions(actions as AuthoringRequiredAction[]),
     setPendingTurn: setAssistantPendingTurn,
     setBusy: setAssistantBusy,
-    addSystemMessage: (content) =>
-      setAssistantMessages((current) => [
-        ...current,
-        {
-          id: authoringId('assistant_msg'),
-          role: 'system',
-          content,
-        },
-      ]),
+    addSystemMessage: addAssistantSystemMessage,
   });
 
   const updateCanvas = useCallback((next: SetStateAction<WorkspaceCanvasModel>) => {

@@ -1023,6 +1023,10 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npm run test -- --run src/hooks/useCanvasSelectionUiActions.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 3 files, 190 tests passed. |
 | `npm run test -- --run` | Passed | 105 files, 577 tests passed. |
 | `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
+| `npx tsc --noEmit` | Passed | Assistant authoring session action hook extraction compiles. |
+| `npm run test -- --run src/hooks/useAssistantAuthoringSessionActions.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 3 files, 190 tests passed. |
+| `npm run test -- --run` | Passed | 106 files, 584 tests passed. |
+| `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
 
 ### Static Gates So Far
 
@@ -1079,5 +1083,6 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `WorkflowViewer.tsx` no longer defines `persistTemporaryResourceDraft(...)` or `applyGraphOpsPersistenceReview(...)`; assistant temporary-resource GraphOps persistence ownership moved to `useAssistantGraphOpsPersistenceActions(...)`.
 - `WorkflowViewer.tsx` no longer defines `runGraph(...)`, `runSelectedWorkflow(...)`, or `runSelectedNode(...)`; selected run entry-point ownership moved to `useWorkflowRunSelectionActions(...)`.
 - `WorkflowViewer.tsx` no longer defines selection UI actions such as `startInspectorResize(...)`, `selectCanvasObject(...)`, `openNodeDetails(...)`, `deleteSelectedCanvasObject(...)`, or `openCallableResourceFromNode(...)`; ownership moved to `useCanvasSelectionUiActions(...)`.
-- `WorkflowViewer.tsx` is now 74,554 bytes / 2,023 lines after canvas selection UI action extraction.
+- `WorkflowViewer.tsx` no longer defines assistant authoring session glue such as `resetAssistantConversationState(...)`, `currentAuthoringSnapshot(...)`, `addAssistantSystemMessage(...)`, or `ensureAssistantSession(...)`; ownership moved to `useAssistantAuthoringSessionActions(...)`.
+- `WorkflowViewer.tsx` is now 73,087 bytes / 1,984 lines after assistant authoring session action extraction.
 - `WorkflowViewer.tsx` no longer ends with local helper definitions; the file now ends at the `WorkflowViewer` component close.
