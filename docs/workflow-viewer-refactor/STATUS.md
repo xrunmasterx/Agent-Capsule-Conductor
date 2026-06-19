@@ -193,3 +193,34 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 ## Next Plan
 
 PLAN_03 may start. It must migrate effect/hooks ownership without changing the pure model contracts established in PLAN_01 and PLAN_02.
+
+## PLAN_03 Effect Hooks
+
+Status: in progress
+
+### Scope Completed So Far
+
+- Added `web/src/hooks/useWorkbenchLiveStream.ts` as the hook owner for Workbench live EventSource streaming, scope keys, run/turn scope filtering, gap refill, live event bounding, and agent-run-event replay projection.
+- Removed local `useWorkbenchLiveStream`, `WorkbenchLiveStreamScope`, `WorkbenchLiveStreamState`, `boundedLiveEvents`, `liveEventFromAgentRunEvent`, and live stream matcher/refill helpers from `web/src/components/WorkflowViewer.tsx`.
+- `WorkflowViewer.tsx` now consumes live stream state through `useWorkbenchLiveStream(...)` for selected agent turns and assistant turns.
+- `web/src/components/WorkflowViewer.tsx` is now 579,312 bytes / 15,865 lines after the latest slice.
+
+### Added Tests
+
+- `web/src/hooks/useWorkbenchLiveStream.test.tsx`
+
+### Validation So Far
+
+Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `npx tsc --noEmit` | Passed | Extracted live stream hook compiles. |
+| `npm run test -- --run src/hooks/useWorkbenchLiveStream.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 3 files, 186 tests passed. |
+| `npm run test -- --run` | Passed | 21 files, 268 tests passed. |
+| `npm run build` | Passed | Same expected chunk-size warning remains. |
+
+### Static Gates So Far
+
+- `WorkflowViewer.tsx` no longer defines the Workbench live stream hook or its pure live-event helper functions.
+- `WorkflowViewer.tsx` still has direct `api.*`, `runnerApi.*`, `EventSource`, and timer usage for assistant turn stream, run stream, run submit, task bootstrap/autosave, boundary preview, binding actions, and artifact loading. These are remaining PLAN_03 slices.
