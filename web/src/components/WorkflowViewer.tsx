@@ -259,20 +259,16 @@ import {
   rectCenter,
   type DomConnectionEndpoint,
 } from './canvas/connectionDom';
-import { WorkspaceCanvas } from './canvas/WorkspaceCanvas';
 import {
   applyRunOverlayToCanvas,
   stripRuntimeStateFromCanvas,
   workflowRunFailureText,
 } from './workflow-viewer/runState';
 
-import { ExecutionDock as ExecutionDockComponent } from './execution';
 import { LiveOutputViewer } from './execution/RunOverlay';
 import type { ResourceTemplate } from './inspector/ResourceInspector';
 import { evidenceContentForCurrentSelection } from './inspector/SelectionDetailsDock';
 import {
-  TaskOverviewPage as TaskOverviewPageComponent,
-  TaskWorkspaceSwitcher as TaskWorkspaceSwitcherComponent,
   TopBar as TopBarComponent,
   WorkbenchShell,
   type SaveWorkflowDialogState,
@@ -336,6 +332,7 @@ import { useWorkbenchTaskStoreBindings } from '../hooks/useWorkbenchTaskStoreBin
 import { useRunStoreBindings } from '../hooks/useRunStoreBindings';
 import { useWorkbenchStoreInitialization } from '../hooks/useWorkbenchStoreInitialization';
 import { WorkflowViewerDock } from './workflow-viewer/WorkflowViewerDock';
+import { WorkflowViewerMainStage } from './workflow-viewer/WorkflowViewerMainStage';
 import { WorkflowViewerNodeDetailOverlay } from './workflow-viewer/WorkflowViewerNodeDetailOverlay';
 import { WorkflowViewerRightPanel } from './workflow-viewer/WorkflowViewerRightPanel';
 
@@ -1196,6 +1193,10 @@ export function WorkflowViewer({
     runWorkflowGraph,
     setMessage,
   });
+  const configureWorkflow = useCallback((workflowId: string) => {
+    setSelection({ type: 'workflow', id: workflowId });
+    setBindingEditorWorkflowId(workflowId);
+  }, []);
 
   return (
     <WorkbenchShell durableTasksReady={durableTasksReady}>
@@ -1244,54 +1245,41 @@ export function WorkflowViewer({
         onPointerDownCapture={handleCanvasLayoutPointerDown}
         onClickCapture={handleCanvasLayoutClick}
       >
-        <TaskWorkspaceSwitcherComponent value={taskWorkspaceView} onChange={setTaskWorkspaceView} />
-        {taskWorkspaceView === 'overview' ? (
-          <TaskOverviewPageComponent
-            tasks={tasks}
-            activeTaskId={activeTaskId}
-            onSelectTask={switchTask}
-            onOpenBlueprint={() => setTaskWorkspaceView('blueprint')}
-            onNewTask={newTask}
-            onDeleteTask={deleteTask}
-          />
-        ) : (
-          <>
-            <WorkspaceCanvas
-              canvas={displayCanvas}
-              layoutSyncVersion={layoutSyncVersion}
-              selection={selection}
-              connectionMode={connectionMode}
-              workflowRun={workflowRun}
-              focusedWorkflowId={focusedWorkflowId}
-              callables={callables}
-              workflows={workflows}
-              bindings={workflowBindings}
-              onFocusedWorkflow={setFocusedWorkflowId}
-              onCanvasChange={updateCanvas}
-              onSelect={selectCanvasObject}
-              onOpenNodeDetails={openNodeDetails}
-              onDeleteSelection={deleteSelectedCanvasObject}
-              edgeViewMode={edgeViewMode}
-              onConnectionMode={setConnectionMode}
-              onEdgeViewMode={setEdgeViewMode}
-              onBlankCanvas={() => undefined}
-              onNotice={setMessage}
-              onConfigureWorkflow={(workflowId) => {
-                setSelection({ type: 'workflow', id: workflowId });
-                setBindingEditorWorkflowId(workflowId);
-              }}
-            />
-            <ExecutionDockComponent
-              isRunning={isRunning}
-              runtimeConfig={runtimeConfig}
-              canRunWorkflow={canRunSelectedWorkflow}
-              canRunNode={canRunSelectedNode}
-              onRunTask={runGraph}
-              onRunWorkflow={runSelectedWorkflow}
-              onRunNode={runSelectedNode}
-            />
-          </>
-        )}
+        <WorkflowViewerMainStage
+          taskWorkspaceView={taskWorkspaceView}
+          onTaskWorkspaceViewChange={setTaskWorkspaceView}
+          tasks={tasks}
+          activeTaskId={activeTaskId}
+          onSelectTask={switchTask}
+          onNewTask={newTask}
+          onDeleteTask={deleteTask}
+          canvas={displayCanvas}
+          layoutSyncVersion={layoutSyncVersion}
+          selection={selection}
+          connectionMode={connectionMode}
+          edgeViewMode={edgeViewMode}
+          workflowRun={workflowRun}
+          focusedWorkflowId={focusedWorkflowId}
+          callables={callables}
+          workflows={workflows}
+          workflowBindings={workflowBindings}
+          onFocusedWorkflow={setFocusedWorkflowId}
+          onCanvasChange={updateCanvas}
+          onSelectCanvasObject={selectCanvasObject}
+          onOpenNodeDetails={openNodeDetails}
+          onDeleteSelection={deleteSelectedCanvasObject}
+          onConnectionMode={setConnectionMode}
+          onEdgeViewMode={setEdgeViewMode}
+          onNotice={setMessage}
+          onConfigureWorkflow={configureWorkflow}
+          isRunning={isRunning}
+          runtimeConfig={runtimeConfig}
+          canRunWorkflow={canRunSelectedWorkflow}
+          canRunNode={canRunSelectedNode}
+          onRunTask={runGraph}
+          onRunWorkflow={runSelectedWorkflow}
+          onRunNode={runSelectedNode}
+        />
         <WorkflowViewerRightPanel
           resourceDetailOpen={resourceDetailOpen}
           inspectorOpen={inspectorOpen}
