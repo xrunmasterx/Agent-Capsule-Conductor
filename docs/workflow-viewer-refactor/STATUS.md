@@ -105,7 +105,10 @@ Status: in progress
 - Added `web/src/workbench/model/canvasLayout.ts` for dagre workspace/internal layout, workflow fit/expand helpers, palette placement, and finite numeric helpers.
 - Extended `web/src/workbench/model/canvasEdgeOps.ts` to own deterministic scoped connection resolution, pending endpoint recovery, control/data edge commit, control cycle checks, control slot limits, and connection token encode/decode.
 - Added boundary-node helpers to `web/src/workbench/model/workflowNodeModel.ts` so connection logic no longer depends on component-local boundary parsing.
+- Added `web/src/components/canvas/flowProjection.ts` as the owner for ReactFlow edge DTO projection, scoped edge ids, boundary-shell edge handles, focused-boundary control rendering, and explicit data-edge visibility.
+- Extended `web/src/workbench/model/canvasEdgeOps.ts` to own unique canvas-edge de-duplication and workflow-boundary control binding identification shared by save/preview/projection paths.
 - Removed the corresponding local function definitions from `web/src/components/WorkflowViewer.tsx`; existing exports remain as migration compatibility for older tests and callers.
+- `web/src/components/WorkflowViewer.tsx` is now 647,233 bytes / 17,632 lines after this slice.
 
 ### Added Tests
 
@@ -116,6 +119,7 @@ Status: in progress
 - `web/src/workbench/model/schemaPorts.test.ts`
 - `web/src/workbench/model/canvasEdgeOps.test.ts`
 - `web/src/workbench/model/canvasLayout.test.ts`
+- `web/src/components/canvas/flowProjection.test.ts`
 
 ### Validation So Far
 
@@ -133,6 +137,10 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npm run test -- --run src/workbench/model/canvasEdgeOps.test.ts src/components/WorkflowViewer.drag.test.tsx` | Passed | 2 files, 113 tests passed. |
 | `npm run test -- --run` | Passed | 16 files, 243 tests passed. |
 | `npm run build` | Passed | Same expected chunk-size warning remains. |
+| `npm run test -- --run src/components/canvas/flowProjection.test.ts src/components/WorkflowViewer.drag.test.tsx` | Passed | 2 files, 108 tests passed. |
+| `npx tsc --noEmit` | Passed | Flow projection extraction compiles. |
+| `npm run test -- --run` | Passed | 17 files, 250 tests passed. |
+| `npm run build` | Passed | Same expected chunk-size warning remains. |
 
 ### Static Gates So Far
 
@@ -144,11 +152,11 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `WorkflowViewer.tsx` no longer imports `dagre`; layout tests import the real `canvasLayout` owner.
 - `WorkflowViewer.tsx` no longer owns selection normalization, scoped edge-address lookup, flow endpoint id parsing, active-status checks, or selection deletion transforms.
 - `WorkflowViewer.tsx` no longer owns scoped connection resolution, pending endpoint recovery, connection commit, control cycle/slot validation, or connection token encode/decode.
+- `WorkflowViewer.tsx` no longer owns ReactFlow edge DTO projection, unique Flow edge id filtering, implicit main data-edge filtering, or boundary-shell/focused-boundary edge handle mapping.
 - `web/src/workbench/model` has no direct `ReactFlow`, `Handle`, `NodeResizer`, React hook, `localStorage`, API, store, or `WorkflowViewer` dependency.
 
 ### Remaining PLAN_02 Work
 
 - Extract the remaining pure graph/canvas projection helpers.
-- Extract remaining flow projection helpers and ReactFlow DTO construction that can be tested without component rendering.
 - Move additional pure selected-detail helpers once their dependency graph is isolated.
 - Keep React components, hooks, API calls, EventSource, localStorage IO, and ReactFlow rendering in later plans.

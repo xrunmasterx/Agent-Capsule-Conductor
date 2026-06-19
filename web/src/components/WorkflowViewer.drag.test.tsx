@@ -6,7 +6,6 @@ import {
   AgentToolNode as _AgentToolNode,
   WorkspaceCanvas as _WorkspaceCanvas,
   createDataEdgeCommand as _createDataEdgeCommand,
-  canvasEdgeToFlowEdge as _canvasEdgeToFlowEdge,
   canvasToWorkflowGraph as _canvasToWorkflowGraph,
   captureAuthoringSnapshot as _captureAuthoringSnapshot,
   buildDeterministicCanvasAuthoringProposal as _buildDeterministicCanvasAuthoringProposal,
@@ -23,6 +22,7 @@ import {
   nodeRunHasWorkflowInputBinding as _nodeRunHasWorkflowInputBinding,
   edgeCanonicalPreview as _edgeCanonicalPreview,
 } from './WorkflowViewer';
+import { canvasEdgeToFlowEdge as _canvasEdgeToFlowEdge } from './canvas/flowProjection';
 import {
   connectionCandidatesFromPendingEndpoint as _connectionCandidatesFromPendingEndpoint,
   connectionFromPendingEndpoint as _connectionFromPendingEndpoint,

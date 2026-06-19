@@ -59,6 +59,13 @@ export function internalFlowNodeId(workflowId: string, nodeId: string): string {
   return `${workflowId}__internal__${nodeId}`;
 }
 
+export function internalEdgeEndpointToFlowId(workflowId: string, nodeId: string): string {
+  if (nodeId === workflowInputBoundaryId(workflowId) || nodeId === workflowOutputBoundaryId(workflowId)) {
+    return nodeId;
+  }
+  return internalFlowNodeId(workflowId, nodeId);
+}
+
 export function parseInternalFlowNodeId(nodeId: string): { workflowId: string; nodeId: string } | null {
   const marker = '__internal__';
   const index = nodeId.lastIndexOf(marker);

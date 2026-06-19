@@ -462,6 +462,17 @@ export function canvasEdgesAreEquivalent(left: WorkflowCanvasEdge, right: Workfl
   );
 }
 
+export function uniqueCanvasEdges(edges: WorkflowCanvasEdge[]): WorkflowCanvasEdge[] {
+  const unique: WorkflowCanvasEdge[] = [];
+  for (const edge of edges) {
+    if (unique.some((item) => canvasEdgesAreEquivalent(item, edge))) {
+      continue;
+    }
+    unique.push(edge);
+  }
+  return unique;
+}
+
 export function resolveScopedConnection(
   canvas: WorkspaceCanvasModel,
   connection: CanvasConnection,
@@ -1198,12 +1209,44 @@ function scopedBoundaryDataEdge(
   return null;
 }
 
-function isWorkflowBoundaryMainBinding(workflowId: string, edge: WorkflowCanvasEdge): boolean {
+export function workflowIdForBoundaryMainBinding(edge: WorkflowCanvasEdge): string | null {
+  const sourceWorkflowId = workflowIdFromBoundaryId(edge.source.workflowId);
+  if (sourceWorkflowId && workflowBoundaryKind(edge.source.workflowId) === 'workflow_input') {
+    return sourceWorkflowId;
+  }
+  const targetWorkflowId = workflowIdFromBoundaryId(edge.target.workflowId);
+  if (targetWorkflowId && workflowBoundaryKind(edge.target.workflowId) === 'workflow_output') {
+    return targetWorkflowId;
+  }
+  return null;
+}
+
+export function isWorkflowInputBoundaryControlBinding(
+  workflowId: string,
+  edge: WorkflowCanvasEdge,
+): edge is Extract<WorkflowCanvasEdge, { kind: 'control' }> {
   return (
-    (edge.source.workflowId === workflowInputBoundaryId(workflowId) &&
-      !isWorkflowBoundaryId(edge.target.workflowId)) ||
-    (!isWorkflowBoundaryId(edge.source.workflowId) &&
-      edge.target.workflowId === workflowOutputBoundaryId(workflowId))
+    edge.kind === 'control' &&
+    edge.source.workflowId === workflowInputBoundaryId(workflowId) &&
+    !isWorkflowBoundaryId(edge.target.workflowId)
+  );
+}
+
+export function isWorkflowOutputBoundaryControlBinding(
+  workflowId: string,
+  edge: WorkflowCanvasEdge,
+): edge is Extract<WorkflowCanvasEdge, { kind: 'control' }> {
+  return (
+    edge.kind === 'control' &&
+    !isWorkflowBoundaryId(edge.source.workflowId) &&
+    edge.target.workflowId === workflowOutputBoundaryId(workflowId)
+  );
+}
+
+export function isWorkflowBoundaryMainBinding(workflowId: string, edge: WorkflowCanvasEdge): boolean {
+  return (
+    isWorkflowInputBoundaryControlBinding(workflowId, edge) ||
+    isWorkflowOutputBoundaryControlBinding(workflowId, edge)
   );
 }
 
