@@ -803,6 +803,9 @@ Status: in progress
 - Moved selected-detail property group rendering into `web/src/components/inspector/PropertyGroups.tsx`, restoring the readable Chinese section label.
 - Moved node technical detail disclosure into `web/src/components/inspector/TechnicalDetailsDisclosure.tsx`, including local expand/collapse state and technical evidence JSON blocks.
 - `web/src/components/WorkflowViewer.tsx` is now 167,172 bytes / 4,662 lines after moving property and technical detail components.
+- Moved node run evidence rendering into `web/src/components/inspector/RunEvidenceCard.tsx`, including evidence facts, data-flow rows, evidence path actions, output summary projection, and live-log excerpt display.
+- Removed the corresponding run-evidence-only helper functions from `WorkflowViewer.tsx`; the shell keeps only generic agent-event string helpers still used elsewhere.
+- `web/src/components/WorkflowViewer.tsx` is now 159,679 bytes / 4,442 lines after moving `RunEvidenceCard`.
 
 ### Added/Updated Tests
 
@@ -827,6 +830,7 @@ Status: in progress
 - Added `web/src/components/inspector/InvocationInputEditor.test.tsx` for prompt updates, static JSON edits, object validation, formatting, and reset behavior.
 - Added `web/src/components/inspector/PropertyGroups.test.tsx` for grouped property row rendering.
 - Added `web/src/components/inspector/TechnicalDetailsDisclosure.test.tsx` for collapsed/expanded technical evidence, live log, runtime mode, and callable-detail rendering.
+- Added `web/src/components/inspector/RunEvidenceCard.test.tsx` for empty state, run facts, binding/data-flow rows, evidence action callbacks, output summary, and live-log rendering.
 - Existing `web/src/App.test.tsx` and `web/src/components/WorkflowViewer.drag.test.tsx` now validate against the real owner imports instead of `WorkflowViewer.tsx` compatibility exports.
 
 ### Validation So Far
@@ -873,6 +877,10 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npm run test -- --run src/components/inspector/PropertyGroups.test.tsx src/components/inspector/TechnicalDetailsDisclosure.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 4 files, 186 tests passed. |
 | `npm run test -- --run` | Passed | 85 files, 493 tests passed. |
 | `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
+| `npx tsc --noEmit` | Passed | Run evidence card extraction compiles. |
+| `npm run test -- --run src/components/inspector/RunEvidenceCard.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 3 files, 185 tests passed. |
+| `npm run test -- --run` | Passed | 86 files, 495 tests passed. |
+| `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
 
 ### Static Gates So Far
 
@@ -901,3 +909,5 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `WorkflowViewer.tsx` no longer imports prompt/static input projection helpers from `selectionModel`.
 - `WorkflowViewer.tsx` no longer defines `PropertyGroups` or `TechnicalDetailsDisclosure`.
 - `WorkflowViewer.tsx` no longer imports `Fragment`, `ChevronDown`, or `ChevronUp`.
+- `WorkflowViewer.tsx` no longer defines `RunEvidenceCard`, `EvidenceFact`, `EvidenceAction`, or run-evidence-only binding/output summary helpers.
+- `WorkflowViewer.tsx` no longer imports `statusTone` or `latestLogExcerpt`.

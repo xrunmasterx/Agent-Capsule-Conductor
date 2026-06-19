@@ -15,6 +15,7 @@ export { InvocationInputEditor } from './InvocationInputEditor';
 export { NodePromptEditor } from './NodePromptEditor';
 export { PropertyGroups } from './PropertyGroups';
 export { RightInspector } from './RightInspector';
+export { RunEvidenceCard } from './RunEvidenceCard';
 export { SelectionDetailsDock } from './SelectionDetailsDock';
 export { CodexExecutionModeSelector } from './CodexExecutionModeSelector';
 export { DataConnectionsPanel } from './DataConnectionsPanel';
