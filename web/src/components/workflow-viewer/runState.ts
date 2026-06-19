@@ -1,18 +1,5 @@
 import type { NodeRunSummary, RunEvent, WorkflowGraph, WorkflowRunResult } from '../../types';
-
-export type WorkflowStatus =
-  | 'not_run'
-  | 'queued'
-  | 'scheduled'
-  | 'running'
-  | 'success'
-  | 'failed'
-  | 'cancel_requested'
-  | 'cancelled'
-  | 'crashed'
-  | 'schema_error'
-  | 'artifact_error'
-  | 'manual_review';
+import type { WorkflowStatus } from '../../types/workbench';
 
 export type RunOverlayState = {
   runId: string;

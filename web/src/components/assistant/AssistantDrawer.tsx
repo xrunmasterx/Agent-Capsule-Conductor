@@ -21,26 +21,23 @@ import type {
   AuthoringRequiredAction,
   RunEvent,
 } from '../../types';
+import type {
+  AssistantGraphOpsReview,
+  AssistantTurnReason,
+  CanvasAuthoringProposal,
+  CanvasAuthoringValidationResult,
+} from '../../types/workbench';
 import { AssistantTurnList, type AssistantChatMessage } from './AssistantTurnList';
 
 // ---------------------------------------------------------------------------
 // Types re-exported for consumers
 // ---------------------------------------------------------------------------
 
-export type AssistantTurnReason = 'workbench_chat' | 'canvas_revision' | 'selected_node_revision';
-
-export type CanvasAuthoringValidationResult = {
-  status: 'valid' | 'invalid';
-  errors: string[];
-  warnings: string[];
-};
-
-export type AssistantGraphOpsReview = {
-  resourceDraftId: string;
-  callableId: string;
-  proposal: any;
-  validation: Record<string, unknown>;
-  dryRun: any;
+export type {
+  AssistantGraphOpsReview,
+  AssistantTurnReason,
+  CanvasAuthoringProposal,
+  CanvasAuthoringValidationResult,
 };
 
 export type TemporaryResourceDraft = {
@@ -49,15 +46,6 @@ export type TemporaryResourceDraft = {
   status: 'draft' | 'approved_for_canvas' | 'discarded';
   agent_draft: { name?: string };
   referenced_by: string[];
-};
-
-export type CanvasAuthoringProposal = {
-  proposal_id: string;
-  base_task_id: string;
-  base_canvas_hash: string;
-  target: unknown;
-  rationale: string;
-  operations: Array<{ op: string; [key: string]: unknown }>;
 };
 
 export type WorkbenchLiveStreamState = {

@@ -1,5 +1,5 @@
 /**
- * SaveWorkflowDialog - modal for saving a task as a persistent workflow.
+ * SaveWorkflowDialog - modal for publishing a task as a reusable workflow.
  */
 
 export type SaveWorkflowDialogState = {
@@ -23,14 +23,14 @@ export function SaveWorkflowDialog({
     <div className="modal-backdrop" role="presentation">
       <form
         className="modal-panel save-workflow-dialog"
-        aria-label="Save Workflow"
+        aria-label="发布 Workflow"
         onSubmit={(event) => {
           event.preventDefault();
           onConfirm();
         }}
       >
         <div className="modal-title-row">
-          <h3>保存任务为 Workflow</h3>
+          <h3>发布为可复用 Workflow</h3>
           <button type="button" onClick={onCancel} disabled={state.saving}>
             关闭
           </button>
@@ -44,13 +44,17 @@ export function SaveWorkflowDialog({
             autoFocus
           />
         </label>
+        <p className="form-help">
+          发布会写入 canonical <code>.accflow.json</code>，使当前任务蓝图成为可复用的
+          WorkflowFunctionTemplate。
+        </p>
         {state.error ? <p className="form-error">{state.error}</p> : null}
         <div className="modal-actions">
           <button type="button" onClick={onCancel} disabled={state.saving}>
             取消
           </button>
           <button type="submit" className="primary-action" disabled={state.saving}>
-            {state.saving ? 'Saving...' : 'Save'}
+            {state.saving ? '发布中...' : '发布到 canonical .accflow.json'}
           </button>
         </div>
       </form>

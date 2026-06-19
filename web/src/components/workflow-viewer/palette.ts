@@ -1,23 +1,9 @@
 import type { DragEvent } from 'react';
 
 import type { CallableSummary, WorkflowSummary } from '../../types';
+import type { PortDirection, WorkflowPortView } from '../../types/workbench';
 
-export type PortDirection = 'input' | 'output';
-
-export type WorkflowPortView = {
-  id: string;
-  label: string;
-  direction: PortDirection;
-  required?: boolean;
-  cardinality?: string;
-  artifactTypes?: string[];
-  description?: string;
-  jsonPath?: string;
-  schemaType?: string;
-  projectionSource?: 'output_schema' | 'manual' | 'template';
-  diagnostic?: string;
-  readonly?: boolean;
-};
+export type { PortDirection, WorkflowPortView };
 
 export type PaletteItem =
   | { kind: 'workflow'; workflowRef?: string; label: string }

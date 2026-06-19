@@ -28,6 +28,7 @@ import type {
   RunSummary,
   WorkflowDetail,
   WorkflowBindingView,
+  BoundaryTransferPreview,
   WorkflowDirectorySelection,
   WorkflowGraph,
   WorkflowRunResult,
@@ -216,6 +217,15 @@ export const api = {
     ),
   getWorkbenchTaskCanvas: (taskId: string) =>
     getJson<Record<string, unknown>>(`/api/workbench/tasks/${encodeURIComponent(taskId)}/canvas`),
+  boundaryTransferPreview: (payload: {
+    canvas_snapshot: Record<string, unknown>;
+    edge_id?: string | null;
+  }) =>
+    sendJson<BoundaryTransferPreview>(
+      'POST',
+      '/api/workbench/boundary-transfer/preview',
+      payload,
+    ),
   runs: () => getJson<RunIndex>('/api/runs'),
   run: (runId: string) => getJson<RunSummary>(`/api/runs/${encodeURIComponent(runId)}`),
   cancelRun: (runId: string) =>

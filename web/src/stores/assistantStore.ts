@@ -12,41 +12,22 @@ import type {
   AuthoringRequiredAction,
   RunEvent,
 } from '../types';
+import type {
+  AssistantApplyUndoToken,
+  AssistantChatMessage,
+  AssistantGraphOpsReview,
+  AssistantTurnReason,
+  CanvasAuthoringProposal,
+  CanvasAuthoringValidationResult,
+} from '../types/workbench';
 
-// ---------------------------------------------------------------------------
-// Local type mirrors (will unify with types/workbench.ts in a later step)
-// ---------------------------------------------------------------------------
-
-export type AssistantChatMessage = {
-  id: string;
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-};
-
-export type AssistantTurnReason = 'workbench_chat' | 'canvas_revision' | 'selected_node_revision';
-
-export type AssistantGraphOpsReview = {
-  resourceDraftId: string;
-  callableId: string;
-  proposal: unknown;
-  validation: Record<string, unknown>;
-  dryRun: unknown;
-};
-
-export type CanvasAuthoringValidationResult = {
-  status: 'valid' | 'invalid';
-  errors: string[];
-  warnings: string[];
-};
-
-export type AssistantApplyUndoToken = {
-  proposalId: string;
-  taskId: string;
-  beforeCanvas: unknown;
-  beforeTemporaryResources: unknown;
-  beforeSelection: unknown;
-  afterCanvasHash: string;
-  affectedSelection: unknown;
+export type {
+  AssistantApplyUndoToken,
+  AssistantChatMessage,
+  AssistantGraphOpsReview,
+  AssistantTurnReason,
+  CanvasAuthoringProposal,
+  CanvasAuthoringValidationResult,
 };
 
 export interface AssistantStoreState {
@@ -55,7 +36,7 @@ export interface AssistantStoreState {
   assistantMessages: AssistantChatMessage[];
 
   // --- proposal ---
-  assistantProposal: unknown | null;
+  assistantProposal: CanvasAuthoringProposal | null;
 
   // --- session identity ---
   assistantSessionId: string | null;
@@ -82,7 +63,7 @@ export interface AssistantStoreState {
   setAssistantInput: (input: string) => void;
   addAssistantMessage: (message: AssistantChatMessage) => void;
   setAssistantMessages: (messages: AssistantChatMessage[]) => void;
-  setAssistantProposal: (proposal: unknown | null) => void;
+  setAssistantProposal: (proposal: CanvasAuthoringProposal | null) => void;
   setAssistantSessionId: (id: string | null) => void;
   setAssistantAgentSession: (session: AgentSessionRecord | null) => void;
   setAssistantPendingTurn: (turn: AgentTurnRecord | null) => void;

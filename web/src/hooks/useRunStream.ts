@@ -10,6 +10,7 @@
 import { useEffect } from 'react';
 import { api } from '../api';
 import type { NodeLogDelta, RunEvent, RunSummary } from '../types';
+import type { WorkflowStatus } from '../types/workbench';
 
 // ---------------------------------------------------------------------------
 // Re-exported local types
@@ -17,16 +18,7 @@ import type { NodeLogDelta, RunEvent, RunSummary } from '../types';
 
 export type { NodeLogDelta };
 
-export type WorkflowStatus =
-  | 'not_run'
-  | 'queued'
-  | 'running'
-  | 'success'
-  | 'failed'
-  | 'cancel_requested'
-  | 'cancelled'
-  | 'crashed'
-  | 'scheduled';
+export type { WorkflowStatus };
 
 // ---------------------------------------------------------------------------
 // Hook: useRunStream

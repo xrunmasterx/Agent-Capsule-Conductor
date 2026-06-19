@@ -128,6 +128,18 @@ const demoInternalRunPath = (runId: string) =>
   `runs/${runId}/nodes/${demoWorkflowNodeId}/internal/${demoInternalNodeId}`;
 
 const routes: Record<string, unknown> = {
+  'POST /api/workbench/boundary-transfer/preview': {
+    status: 'valid',
+    bindings: {
+      workflow_input_bindings: [],
+      workflow_output_bindings: [],
+    },
+    diagnostics: [],
+    canonical_preview: {
+      workbench_projection: 'boundary_control_port_binding',
+      runtime_control_edge: false,
+    },
+  },
   '/api/runs': { version: '2.0', runs: [runSummary] },
   '/api/runs/ui_acceptance_fake': runSummary,
   '/api/runs/ui_acceptance_fake/interactions': {
@@ -922,6 +934,20 @@ beforeEach(() => {
           { status: 200, headers: { 'Content-Type': 'application/json' } },
         );
       }
+      const workbenchTaskCanvasRoute = url.match(/^\/api\/workbench\/tasks\/([^/]+)\/canvas$/u);
+      if (method === 'PUT' && workbenchTaskCanvasRoute) {
+        const body = JSON.parse(String(init?.body || '{}'));
+        const taskId = decodeURIComponent(workbenchTaskCanvasRoute[1]);
+        return new Response(
+          JSON.stringify({
+            task_id: taskId,
+            canvas_hash: body.canvas_hash,
+            canvas_snapshot: body.canvas_snapshot,
+            saved_at: '2026-06-19T00:00:00Z',
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
       if (method === 'POST' && url === '/api/graphops/proposals') {
         const body = JSON.parse(String(init?.body || '{}'));
         return new Response(
@@ -1389,7 +1415,11 @@ describe('Agent Callable Workbench editable UI', () => {
     expect(canvas).toHaveTextContent('stock-publication-reviewer.codex');
     const toolbar = await screen.findByLabelText('工作流工具栏');
     expect(within(toolbar).getByRole('button', { name: /^运行详情$/i })).toBeInTheDocument();
-    await user.click(within(await screen.findByLabelText('连接模式')).getByRole('button', { name: '数据' }));
+    await user.click(
+      within(await screen.findByLabelText('连接模式')).getByRole('button', {
+        name: '连接模式：数据',
+      }),
+    );
     expect(canvas).toHaveTextContent('main');
     expect(canvas).toHaveTextContent(demoInternalCallableId);
     expect(canvas).toHaveTextContent('workflows/demo/core_v2/fundamentals');
@@ -3440,7 +3470,7 @@ describe('Agent Callable Workbench editable UI', () => {
     await openNavIndex(user, 0);
     const toolbar = await screen.findByLabelText('工作流工具栏');
     await user.click(within(toolbar).getByRole('button', { name: '新建任务' }));
-    await user.click(within(toolbar).getByRole('button', { name: /\u4fdd\u5b58/i }));
+    await user.click(within(toolbar).getByRole('button', { name: /发布/i }));
 
     const calls = vi.mocked(fetch).mock.calls;
     const workflowSaveCalls = calls.filter(([url, init]) => url === '/api/workflows' && init?.method === 'POST');
@@ -3460,7 +3490,7 @@ describe('Agent Callable Workbench editable UI', () => {
     await openNavIndex(user, 0);
     await loadWorkspaceDemo(user);
     const toolbar = await screen.findByLabelText('工作流工具栏');
-    await user.click(within(toolbar).getByRole('button', { name: /\u4fdd\u5b58/i }));
+    await user.click(within(toolbar).getByRole('button', { name: /发布/i }));
 
     const calls = vi.mocked(fetch).mock.calls;
     const saveCall = calls
@@ -3652,7 +3682,7 @@ describe('Agent Callable Workbench editable UI', () => {
     await loadWorkspaceDemo(user);
     fireEvent.doubleClick(await screen.findByTestId(`workflow-container-${demoWorkflowNodeId}`));
     expect(screen.queryByText('返回 Workspace')).not.toBeInTheDocument();
-    await user.click(screen.getAllByRole('button', { name: /\u4fdd\u5b58/i })[0]);
+    await user.click(screen.getAllByRole('button', { name: /发布/i })[0]);
 
     const calls = vi.mocked(fetch).mock.calls;
     const saveCall = calls
@@ -3692,7 +3722,7 @@ describe('Agent Callable Workbench editable UI', () => {
             : '',
       },
     });
-    await user.click(screen.getAllByRole('button', { name: /\u4fdd\u5b58/i })[0]);
+    await user.click(screen.getAllByRole('button', { name: /发布/i })[0]);
 
     const calls = vi.mocked(fetch).mock.calls;
     const saveCall = calls
@@ -3739,6 +3769,49 @@ describe('Agent Callable Workbench editable UI', () => {
     expect(within(workbench).getByRole('button', { name: '任务蓝图' })).toHaveClass('active');
   });
 
+  test('Task overview hides node-level inspector and restores it on blueprint return', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await openNavIndex(user, 0);
+    await loadWorkspaceDemo(user);
+
+    const node = await screen.findByTestId(`agent-tool-node-${demoInternalFlowNodeId}`);
+    fireEvent.click(node);
+    await waitFor(() => expect(document.querySelector('.canvas-drawer-right')).toBeTruthy());
+
+    const switcher = await screen.findByLabelText('Task workspace view');
+    const [overviewButton, blueprintButton] = within(switcher).getAllByRole('button');
+    await user.click(overviewButton);
+    expect(document.querySelector('.task-overview-list')).toBeTruthy();
+    expect(document.querySelector('.canvas-drawer-right')).toBeFalsy();
+    expect(document.querySelector('.selection-details-dock')).toBeFalsy();
+
+    await user.click(blueprintButton);
+    await waitFor(() => expect(document.querySelector('.canvas-drawer-right')).toBeTruthy());
+  });
+
+  test('Task overview topbar details action returns to blueprint instead of opening hidden dock state', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await openNavIndex(user, 0);
+    await loadWorkspaceDemo(user);
+
+    const switcher = await screen.findByLabelText('Task workspace view');
+    const [overviewButton] = within(switcher).getAllByRole('button');
+    await user.click(overviewButton);
+    expect(document.querySelector('.task-overview-list')).toBeTruthy();
+    expect(document.querySelector('.selection-details-dock')).toBeFalsy();
+
+    const detailsButton = document.querySelector('.toolbar-actions .toggle-action');
+    expect(detailsButton).toBeTruthy();
+    fireEvent.click(detailsButton as HTMLElement);
+
+    await waitFor(() => expect(document.querySelector('.workspace-canvas-surface')).toBeTruthy());
+    expect(document.querySelector('.selection-details-dock.open')).toBeTruthy();
+  });
+
   test('Workbench resource rail stays visible on task view and hides on resource management view', async () => {
     const user = userEvent.setup();
     render(<App />);
@@ -3772,7 +3845,7 @@ describe('Agent Callable Workbench editable UI', () => {
             : '',
       },
     });
-    await user.click(screen.getAllByRole('button', { name: /保存/ })[0]);
+    await user.click(screen.getAllByRole('button', { name: /发布/ })[0]);
 
     const calls = vi.mocked(fetch).mock.calls;
     const saveCall = calls
@@ -3812,7 +3885,7 @@ describe('Agent Callable Workbench editable UI', () => {
             : '',
       },
     });
-    await user.click(screen.getAllByRole('button', { name: /\u4fdd\u5b58/i })[0]);
+    await user.click(screen.getAllByRole('button', { name: /发布/i })[0]);
 
     const calls = vi.mocked(fetch).mock.calls;
     const saveCall = calls
@@ -3860,7 +3933,7 @@ describe('Agent Callable Workbench editable UI', () => {
             : '',
       },
     });
-    await user.click(screen.getAllByRole('button', { name: /保存/ })[0]);
+    await user.click(screen.getAllByRole('button', { name: /发布/ })[0]);
 
     const calls = vi.mocked(fetch).mock.calls;
     const saveCall = calls
@@ -3889,7 +3962,7 @@ describe('Agent Callable Workbench editable UI', () => {
     const navigation = await screen.findByLabelText('Workbench navigation');
     await user.click(within(navigation).getAllByRole('button')[0]);
     await loadWorkspaceDemo(user);
-    await user.click(screen.getAllByRole('button', { name: /保存/ })[0]);
+    await user.click(screen.getAllByRole('button', { name: /发布/ })[0]);
 
     const calls = vi.mocked(fetch).mock.calls;
     const saveCall = calls
@@ -3939,7 +4012,12 @@ describe('Agent Callable Workbench editable UI', () => {
     expect(resourceRail).toHaveTextContent('file-source.local');
     const workspaceCanvas = await screen.findByLabelText('任务画布');
     expect(workspaceCanvas).toBeInTheDocument();
-    expect(await screen.findByLabelText('Canvas Toolbar')).toBeInTheDocument();
+    const canvasToolbar = await screen.findByLabelText('Canvas Toolbar');
+    expect(canvasToolbar).toBeInTheDocument();
+    const edgeDisplayControls = canvasToolbar.querySelectorAll('.segmented-control.compact')[1];
+    const edgeDisplayButtons = edgeDisplayControls.querySelectorAll('button');
+    expect(edgeDisplayButtons[0]).toHaveClass('active');
+    expect(edgeDisplayButtons[2]).not.toHaveClass('active');
     expect(screen.getByRole('button', { name: '任务总览' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '任务蓝图' })).toBeInTheDocument();
     const toolbar = await screen.findByLabelText('工作流工具栏');
@@ -3949,7 +4027,7 @@ describe('Agent Callable Workbench editable UI', () => {
     expect(detailsDock).not.toHaveTextContent('输入 / 输出');
     expect(detailsDock).not.toHaveTextContent('节点属性');
     expect(screen.queryByRole('button', { name: /Connect Last Two/i })).not.toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: /\u4fdd\u5b58/i }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: /发布/i }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole('button', { name: /校验/i }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole('button', { name: /运行/i }).length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: /自动布局/i })).toBeInTheDocument();
@@ -4075,6 +4153,7 @@ describe('Agent Callable Workbench editable UI', () => {
     await waitFor(() => {
       expect(window.localStorage.getItem('acc.workbench.tasks.v2') || '').toContain('tmp_agent_');
     });
+    expect(window.localStorage.getItem('acc.workbench.tasks.v1')).toBeNull();
 
     view.unmount();
     vi.mocked(fetch).mockClear();
@@ -4082,7 +4161,7 @@ describe('Agent Callable Workbench editable UI', () => {
     const toolbar = await screen.findByLabelText('工作流工具栏');
     vi.mocked(fetch).mockClear();
 
-    await user.click(within(toolbar).getByRole('button', { name: /保存/i }));
+    await user.click(within(toolbar).getByRole('button', { name: /发布/i }));
     await user.click(within(toolbar).getByRole('button', { name: /^校验$/i }));
     await user.click(within(toolbar).getByRole('button', { name: /^运行$/i }));
 
@@ -4169,7 +4248,7 @@ describe('Agent Callable Workbench editable UI', () => {
     await loadWorkspaceDemo(user);
 
     const toolbar = await screen.findByLabelText('工作流工具栏');
-    await user.click(within(toolbar).getByRole('button', { name: /\u4fdd\u5b58/i }));
+    await user.click(within(toolbar).getByRole('button', { name: /发布/i }));
     await user.click(within(toolbar).getByRole('button', { name: /^校验$/i }));
     await user.click(within(toolbar).getByRole('button', { name: /^运行$/i }));
 

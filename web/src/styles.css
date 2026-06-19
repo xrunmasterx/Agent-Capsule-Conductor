@@ -3033,6 +3033,12 @@ small {
   box-shadow: 0 8px 22px rgb(24 32 38 / 8%);
 }
 
+.toolbar-group-label {
+  color: #697782;
+  font-size: 11px;
+  font-weight: 800;
+}
+
 .canvas-toolbar button {
   min-height: 28px;
   padding: 4px 8px;
@@ -3249,7 +3255,7 @@ small {
 }
 
 .workflow-container > .workflow-control-handle.workflow-shell-inner-input {
-  left: 14px;
+  left: -11px;
   right: auto;
   top: 50%;
   --handle-fill: #0f766e;
@@ -3259,13 +3265,13 @@ small {
 }
 
 .workflow-container > .acc-connect-hitbox.workflow-shell-inner-input {
-  left: 25px;
+  left: 11px;
   top: 50%;
 }
 
 .workflow-container > .workflow-control-handle.workflow-shell-inner-output {
   left: auto;
-  right: 14px;
+  right: -11px;
   top: 50%;
   --handle-fill: #0f766e;
   --handle-border: #9ff5e6;
@@ -3274,7 +3280,7 @@ small {
 }
 
 .workflow-container > .acc-connect-hitbox.workflow-shell-inner-output {
-  right: 25px;
+  right: 11px;
   top: 50%;
   transform: translate(50%, -50%);
 }
@@ -3388,6 +3394,29 @@ small {
   line-height: 1.25;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflow-stage-meta {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
+  max-width: 100%;
+}
+
+.workflow-stage-meta span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  padding: 2px 6px;
+  border: 1px solid #d6dee5;
+  border-radius: 999px;
+  background: #f4f7fa;
+  color: #60707d;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
   white-space: nowrap;
 }
 
@@ -4066,11 +4095,20 @@ small {
 
 .node-settings-help,
 .template-description,
+.template-governance-hint,
 .template-readonly-block p {
   margin: 0;
   color: #a6adb7;
   font-size: 12px;
   line-height: 1.45;
+}
+
+.template-governance-hint {
+  padding: 8px 10px;
+  border: 1px solid rgb(126 221 236 / 16%);
+  border-radius: 7px;
+  background: rgb(126 221 236 / 6%);
+  color: #c7d1dc;
 }
 
 .node-settings-facts {
@@ -4992,6 +5030,10 @@ small {
   backdrop-filter: blur(8px);
 }
 
+.graph-workbench-v2 .toolbar-group-label {
+  color: #6f7b88;
+}
+
 .graph-workbench-v2 .mode-pill.data,
 .graph-workbench-v2 .mode-pill.control,
 .graph-workbench-v2 .canvas-toolbar .segmented-control.compact {
@@ -5007,6 +5049,41 @@ small {
   background: #14243a;
   color: #dceaff;
   box-shadow: none;
+}
+
+.graph-workbench-v2 .modal-panel {
+  color: #1f2d38;
+}
+
+.graph-workbench-v2 .modal-title-row h3 {
+  color: #111827;
+}
+
+.graph-workbench-v2 .modal-title-row button,
+.graph-workbench-v2 .modal-actions button {
+  border-color: #cfd8df;
+  background: #ffffff;
+  color: #243443;
+}
+
+.graph-workbench-v2 .modal-title-row button:hover,
+.graph-workbench-v2 .modal-actions button:hover {
+  border-color: #aebcc8;
+  background: #f3f6f9;
+}
+
+.graph-workbench-v2 .modal-actions .primary-action {
+  border-color: #b7d8d1;
+  background: #e8f6f3;
+  color: #0f5b4f;
+}
+
+.graph-workbench-v2 .form-help {
+  color: #53616d;
+}
+
+.graph-workbench-v2 .form-help code {
+  color: #0f5b4f;
 }
 
 .graph-workbench-v2 .canvas-drawer {
@@ -5191,6 +5268,12 @@ small {
   color: var(--wb-text);
 }
 
+.graph-workbench-v2 .workflow-stage-meta span {
+  border-color: #26303a;
+  background: #111820;
+  color: #9aa6b2;
+}
+
 .graph-workbench-v2 .workflow-directory-line button {
   color: var(--wb-text-muted);
 }
@@ -5363,6 +5446,20 @@ small {
   color: var(--wb-muted);
   font-size: 11px;
   font-weight: 700;
+  white-space: nowrap;
+}
+
+.graph-workbench-v2 .execution-scope-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid #26303a;
+  border-radius: 999px;
+  background: #101419;
+  color: #c9d3dc;
+  font-size: 11px;
+  font-weight: 800;
   white-space: nowrap;
 }
 
@@ -6799,6 +6896,39 @@ small {
   color: #9aa6b2;
   font-size: 12px;
   line-height: 1.5;
+}
+
+.graph-workbench-v2 .evidence-identity-line {
+  color: #c7d1dc;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+}
+
+.graph-workbench-v2 .evidence-entry-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.graph-workbench-v2 .evidence-entry-list span,
+.graph-workbench-v2 .evidence-entry-list button {
+  padding: 4px 8px;
+  border: 1px solid #27313b;
+  border-radius: 999px;
+  background: #10161c;
+  color: #c9d3dc;
+}
+
+.graph-workbench-v2 .evidence-entry-list button {
+  cursor: pointer;
+  font: inherit;
+}
+
+.graph-workbench-v2 .evidence-entry-list button:hover,
+.graph-workbench-v2 .evidence-entry-list button:focus-visible {
+  border-color: #2f91c8;
+  color: #e7f5ff;
 }
 
 .graph-workbench-v2 .json-summary-conclusion {

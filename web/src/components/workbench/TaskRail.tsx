@@ -46,7 +46,7 @@ export function TaskRail({
         >
           <button type="button" className="task-rail-select" onClick={() => onSelectTask(task.taskId)}>
             <strong>{task.title}</strong>
-            <small>{task.activeRunId || task.latestRunId || 'Not run'}</small>
+            <small>{task.activeRunId || task.latestRunId || '未运行'}</small>
           </button>
           <button
             type="button"

@@ -12,13 +12,13 @@ function TaskArtifactsPane({ task }: { task?: WorkbenchTaskSummary }) {
   return (
     <section className="task-artifacts-pane" aria-label="任务产物">
       <header>
-        <span>ARTIFACT CHANNEL</span>
-        <strong>{task?.title || 'No task selected'}</strong>
+        <span>产物通道</span>
+        <strong>{task?.title || '未选择任务'}</strong>
       </header>
       <div className="task-artifacts-empty">
         <FileText aria-hidden="true" size={28} />
-        <p>Artifacts view is pending.</p>
-        <small>Current task outputs, reports, and audit files will appear here.</small>
+        <p>当前任务还没有可展示的产物。</p>
+        <small>运行输出、报告和审计文件会在这里归档展示。</small>
       </div>
     </section>
   );
@@ -48,7 +48,7 @@ export function TaskOverviewPage({
     <section className="task-overview-page" aria-label="任务总览">
       <aside className="task-overview-list" aria-label="任务列表">
         <div className="task-overview-header">
-          <span>MISSION QUEUE</span>
+          <span>任务队列</span>
           <button type="button" onClick={onNewTask}>
             新建任务
           </button>
@@ -77,7 +77,7 @@ export function TaskOverviewPage({
                 }}
               >
                 <strong>{task.title}</strong>
-                <small>{task.activeRunId || task.latestRunId || 'Not run'}</small>
+                <small>{task.activeRunId || task.latestRunId || '未运行'}</small>
               </button>
               <button
                 type="button"

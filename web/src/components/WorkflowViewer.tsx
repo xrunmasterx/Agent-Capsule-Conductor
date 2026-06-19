@@ -81,6 +81,7 @@ import type {
   RuntimeConfig,
   RunSummary,
   WorkbenchLiveEvent,
+  BoundaryTransferPreview,
   WorkflowDataEdge,
   WorkflowBindingView,
   WorkflowDirectorySelection,
@@ -92,7 +93,87 @@ import type {
   WorkflowRunResult,
   WorkflowSummary,
 } from '../types';
+import {
+  AGENT_CONTROL_HANDLE_FALLBACK_TOP,
+  AGENT_CONTROL_HANDLE_TOP,
+  AGENT_DATA_PORT_GAP,
+  AGENT_MAX_DATA_PORTS,
+  AGENT_PORT_VERTICAL_PADDING,
+  AGENT_TOOL_NODE_SIZE,
+  BOUNDARY_NODE_SIZE,
+  CONTROL_SLOT_LIMIT,
+  DEFAULT_CONTAINER_SIZE,
+  DEFAULT_TASK_ID,
+  DEFAULT_WORKFLOW_MAX_CONCURRENCY,
+  INSPECTOR_DEFAULT_WIDTH,
+  INSPECTOR_MAX_WIDTH,
+  INSPECTOR_MIN_WIDTH,
+  INTERNAL_AGENT_TOOL_NODE_SIZE,
+  MAX_LOG_PREVIEW_LINES,
+  ROOT_LAYOUT_GAP,
+  TASK_STORE_KEY,
+  TEMPORARY_CALLABLE_ID_PREFIX,
+  WORKFLOW_CHILD_PADDING,
+  WORKFLOW_CHILD_START_PADDING,
+  WORKFLOW_CONTAINER_Z_INDEX,
+  WORKFLOW_INNER_HANDLE_X,
+  WORKFLOW_INTERNAL_EDGE_Z_INDEX,
+  WORKFLOW_INTERNAL_LAYOUT_GAP,
+  WORKFLOW_INTERNAL_NODE_Z_INDEX,
+  WORKFLOW_INTERNAL_SELECTED_EDGE_Z_INDEX,
+  WORKFLOW_INTERNAL_SELECTED_NODE_Z_INDEX,
+  WORKFLOW_LAYOUT_SAFE_AREA,
+  agentDataPortMaxOffset,
+  agentDataPortTop,
+} from '../workbench/constants';
+import type {
+  AgentNodeSettingsModel,
+  AssistantApplyUndoToken,
+  AssistantChatMessage,
+  AssistantGraphOpsReview,
+  AssistantTurnReason,
+  AuthoringContextSnapshot,
+  BoundaryTransfer,
+  BoundaryTransferMapping,
+  BottomDockMode,
+  CanvasAuthoringApplyResult,
+  CanvasAuthoringOperation,
+  CanvasAuthoringProposal,
+  CanvasAuthoringTarget,
+  CanvasAuthoringValidationResult,
+  CanvasSelection,
+  CodexExecutionMode,
+  ConnectionMode,
+  EdgeViewMode,
+  EmptyInputPolicy,
+  InternalNodeView,
+  NodeLiveLogs,
+  PortDirection,
+  RunProjection,
+  SelectedDetailsEvidenceAction,
+  SelectedDetailsPropertyGroup,
+  SelectedEntityDetailsModel,
+  TaskWorkspaceView,
+  TemporaryResourceDraft,
+  TemporaryResourceDraftStatus,
+  WorkbenchAuthoringState,
+  WorkbenchChromeState,
+  WorkbenchTask,
+  WorkbenchTaskStorePayload,
+  WorkflowCanvasEdge,
+  WorkflowContainerModel,
+  WorkflowMainInputBindingState,
+  WorkflowPortView,
+  WorkflowStatus,
+  WorkspaceCanvasModel,
+} from '../types/workbench';
 import { CodeBlock } from './CodeBlock';
+import {
+  boundaryTransferFromGraphEdge,
+  boundaryTransferPreviewHasErrors,
+  boundaryTransferToGraphMetadata,
+  unavailableBoundaryTransferPreview,
+} from './canvas/boundaryTransfer';
 import {
   buildAccTranscript,
   type AccTranscriptEntry,
@@ -104,8 +185,6 @@ import {
   parsePaletteItem,
   workflowPortsFromPortContracts,
   type PaletteItem,
-  type PortDirection,
-  type WorkflowPortView,
 } from './workflow-viewer/palette';
 import {
   effectiveOutputPortsForNode,
@@ -137,7 +216,6 @@ import {
   stripRuntimeStateFromWorkflow,
   workflowRunFailureText,
   type RunOverlayState,
-  type WorkflowStatus,
 } from './workflow-viewer/runState';
 
 // --- Extracted modules (Feature 01b) ---
@@ -158,7 +236,7 @@ import {
 } from './inspector/NodeDetailOverlay';
 import {
   SelectionDetailsDock as SelectionDetailsDockExtracted,
-  evidenceContentForCurrentSelection as evidenceContentForCurrentSelectionExtracted,
+  evidenceContentForCurrentSelection,
 } from './inspector/SelectionDetailsDock';
 import { useAssistantTurnStream } from '../hooks/useAssistantStream';
 import { useRunStream } from '../hooks/useRunStream';
@@ -175,96 +253,11 @@ type Props = {
   onChanged?: () => void;
 };
 
-type ConnectionMode = 'data' | 'control';
-type CodexExecutionMode = 'default' | 'local_readonly_no_sandbox' | 'danger_full_access';
-type EmptyInputPolicy = 'allow' | 'block';
-const CONTROL_SLOT_LIMIT = 10;
-const DEFAULT_WORKFLOW_MAX_CONCURRENCY = 8;
 const DEMO_ANALYST_AGENT_ID = 'stock-research-analyst.codex';
 const DEMO_SYNTHESIS_AGENT_ID = 'stock-research-synthesis.codex';
 const DEMO_REPORT_AGENT_ID = 'stock-report-writer.codex';
 const DEMO_REVIEW_AGENT_ID = 'stock-publication-reviewer.codex';
 const DEMO_DATA_AGENT_ID = 'stock-data-collector.codex';
-
-type InternalNodeView = {
-  id: string;
-  name: string;
-  invocationLabel?: string;
-  task: string;
-  kind: 'Agent' | 'Tool';
-  status: WorkflowStatus;
-  callableId?: string;
-  runtime?: string;
-  codexExecutionMode?: CodexExecutionMode;
-  input?: Record<string, unknown>;
-  inputPorts?: WorkflowPortView[];
-  outputPorts?: WorkflowPortView[];
-  control?: WorkflowGraphNode['control'];
-  outputSchema?: Record<string, unknown>;
-  forwardMainOutputOnControl?: boolean | null;
-  emptyInputPolicy?: EmptyInputPolicy;
-  temporaryResourceId?: string;
-  position?: { x: number; y: number };
-};
-
-type WorkflowContainerModel = {
-  id: string;
-  title: string;
-  invocationLabel?: string;
-  boundaryKind?: 'workflow_input' | 'workflow_output';
-  sourceKind?: WorkflowGraphNode['kind'];
-  workflowBodyKind?: 'inline_container' | 'external_ref';
-  callableId?: string;
-  codexExecutionMode?: CodexExecutionMode;
-  sourceInput?: Record<string, unknown>;
-  sourceInputMapping?: Record<string, unknown>;
-  control?: WorkflowGraphNode['control'];
-  outputSchema?: Record<string, unknown>;
-  forwardMainOutputOnControl?: boolean | null;
-  emptyInputPolicy?: EmptyInputPolicy;
-  temporaryResourceId?: string;
-  workflowRef?: string;
-  directory: string;
-  bindingPath?: string;
-  relativeCwd?: string;
-  status: WorkflowStatus;
-  inputPorts: WorkflowPortView[];
-  outputPorts: WorkflowPortView[];
-  internalNodes: InternalNodeView[];
-  internalEdges: WorkflowCanvasEdge[];
-  position: { x: number; y: number };
-  size: { width: number; height: number };
-  warnings: string[];
-};
-
-type WorkflowCanvasEdge =
-  | {
-      id: string;
-      kind: 'data';
-      source: { workflowId: string; portId: string };
-      target: { workflowId: string; portId: string };
-      materialization: 'copy' | 'reference';
-    }
-  | {
-      id: string;
-      kind: 'control';
-      source: { workflowId: string };
-      target: { workflowId: string };
-      condition?: string | null;
-      context?: 'upstream_output' | 'none';
-    };
-
-type WorkspaceCanvasModel = {
-  id: string;
-  name: string;
-  layout?: 'workspace-canvas' | 'workflow-focus';
-  focusedWorkflowId?: string;
-  rootWorkflowId: string;
-  exposedOutputs?: WorkflowPortView[];
-  workflowOutputBindings?: NonNullable<WorkflowGraph['workflow_output_bindings']>;
-  workflows: WorkflowContainerModel[];
-  edges: WorkflowCanvasEdge[];
-};
 
 type PaletteDropTarget =
   | { kind: 'root_canvas'; position: { x: number; y: number } }
@@ -307,13 +300,6 @@ type ConnectionHandles = {
   sourceHandle: string | null | undefined;
   targetHandle: string | null | undefined;
 };
-
-type CanvasSelection =
-  | { type: 'task_canvas'; taskId: string }
-  | { type: 'workflow'; id: string }
-  | { type: 'port'; workflowId: string; portId: string; direction: PortDirection }
-  | { type: 'edge'; id: string; scopeWorkflowId?: string | null }
-  | { type: 'internal'; workflowId: string; nodeId: string };
 
 type SelectionIntent =
   | { kind: 'react-flow-node'; flowNodeId: string }
@@ -492,193 +478,10 @@ type WorkbenchLiveStreamState = {
   error: string;
 };
 
-type SelectedDetailsKind = 'canvas' | 'node' | 'workflow' | 'internal-node' | 'edge' | 'port' | 'empty';
-
-type SelectedDetailsPropertyGroup = {
-  title: string;
-  rows: Array<{ label: string; value: ReactNode }>;
-};
-
-type SelectedDetailsEvidenceAction = {
-  label: string;
-  title: string;
-  path?: string | null;
-};
-
-type SelectedEntityDetailsModel = {
-  key: string;
-  kind: SelectedDetailsKind;
-  title: string;
-  subtitle?: string;
-  status: WorkflowStatus | string;
-  scopeLabel?: string;
-  nodeRun?: NodeRunSummary;
-  logs?: NodeLiveLogs;
-  log: {
-    stdout: string;
-    stderr: string;
-    excerpt: string;
-    stdoutPath?: string | null;
-    stderrPath?: string | null;
-  };
-  properties: SelectedDetailsPropertyGroup[];
-  evidenceActions: SelectedDetailsEvidenceAction[];
-  events: RunEvent[];
-  nodeSettings?: AgentNodeSettingsModel;
-};
-
 type SaveWorkflowDialogState = {
   name: string;
   saving: boolean;
   error: string | null;
-};
-
-type TemporaryResourceDraftStatus = 'draft' | 'approved_for_canvas' | 'discarded';
-
-type TemporaryResourceDraft = {
-  draft_id: string;
-  kind: 'agent_template';
-  status: TemporaryResourceDraftStatus;
-  agent_draft: AgentClassDraft;
-  referenced_by: string[];
-};
-
-type WorkbenchAuthoringState = {
-  temporaryResources: Record<string, TemporaryResourceDraft>;
-};
-
-type CanvasAuthoringTarget =
-  | { kind: 'task_canvas'; task_id: string }
-  | { kind: 'workflow'; workflow_id: string }
-  | { kind: 'internal_node'; workflow_id: string; node_id: string }
-  | { kind: 'edge'; edge_id: string; scope_workflow_id: string | null }
-  | { kind: 'port'; workflow_id: string; port_id: string; direction: PortDirection };
-
-type AuthoringContextSnapshot = {
-  snapshot_id: string;
-  task_id: string;
-  target: CanvasAuthoringTarget;
-  canvas: WorkspaceCanvasModel;
-  canonical_graph: WorkflowGraph;
-  selection: CanvasSelection;
-  callable_catalog: CallableSummary[];
-  workflow_catalog: WorkflowSummary[];
-};
-
-type CanvasAuthoringOperation =
-  | {
-      op: 'add_existing_callable_node';
-      scope_workflow_id: string | null;
-      node_id: string;
-      callable_id: string;
-      callable_kind: 'agent_class' | 'tool_class';
-      label: string;
-      position: { x: number; y: number };
-      input?: Record<string, unknown>;
-      input_ports?: WorkflowPortView[];
-      output_ports?: WorkflowPortView[];
-      output_schema?: Record<string, unknown>;
-    }
-  | {
-      op: 'add_workflow_container';
-      scope_workflow_id: null;
-      node_id: string;
-      label: string;
-      workflow_ref?: string;
-      position: { x: number; y: number };
-    }
-  | {
-      op: 'update_invocation_input';
-      scope_workflow_id: string | null;
-      node_id: string;
-      input: Record<string, unknown>;
-    }
-  | {
-      op: 'update_invocation_label';
-      scope_workflow_id: string | null;
-      node_id: string;
-      label: string;
-    }
-  | {
-      op: 'update_output_schema';
-      scope_workflow_id: string | null;
-      node_id: string;
-      output_schema: Record<string, unknown>;
-    }
-  | {
-      op: 'set_ports';
-      scope_workflow_id: string | null;
-      node_id: string;
-      input_ports?: WorkflowPortView[];
-      output_ports?: WorkflowPortView[];
-    }
-  | {
-      op: 'add_control_edge';
-      scope_workflow_id: string | null;
-      from: string;
-      to: string;
-    }
-  | {
-      op: 'add_data_edge';
-      scope_workflow_id: string | null;
-      from: { node: string; port: string };
-      to: { node: string; port: string };
-      materialization: 'copy' | 'reference';
-      replace_existing?: boolean;
-    }
-  | {
-      op: 'remove_edge';
-      scope_workflow_id: string | null;
-      edge_id: string;
-    }
-  | {
-      op: 'create_temporary_agent_template';
-      scope_workflow_id: string | null;
-      draft_id: string;
-      node_id: string;
-      label: string;
-      position: { x: number; y: number };
-      agent_draft: AgentClassDraft;
-      input?: Record<string, unknown>;
-      output_schema?: Record<string, unknown>;
-    }
-  | {
-      op: 'replace_temporary_template_with_existing_callable';
-      scope_workflow_id: string | null;
-      node_id: string;
-      temporary_resource_id: string;
-      callable_id: string;
-      callable_kind: 'agent_class' | 'tool_class';
-    };
-
-type CanvasAuthoringProposal = {
-  proposal_id: string;
-  base_task_id: string;
-  base_canvas_hash: string;
-  target: CanvasAuthoringTarget;
-  rationale: string;
-  operations: CanvasAuthoringOperation[];
-};
-
-type CanvasAuthoringValidationResult = {
-  status: 'valid' | 'invalid';
-  errors: string[];
-  warnings: string[];
-};
-
-type CanvasAuthoringApplyResult = {
-  canvas: WorkspaceCanvasModel;
-  temporaryResources: Record<string, TemporaryResourceDraft>;
-  selection: CanvasSelection;
-  messages: string[];
-};
-
-type AssistantChatMessage = {
-  id: string;
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-  turnId?: string;
-  createdAt?: string;
 };
 
 type AssistantProcessEvent = {
@@ -717,79 +520,10 @@ type AssistantDisplayStatus = {
   submissionBlocked: boolean;
 };
 
-type AssistantGraphOpsReview = {
-  resourceDraftId: string;
-  callableId: string;
-  proposal: GraphOpsTransactionProposal;
-  validation: Record<string, unknown>;
-  dryRun: GraphOpsDryRunPayload;
-};
-
-type AssistantTurnReason = 'workbench_chat' | 'canvas_revision' | 'selected_node_revision';
-type BottomDockMode = 'evidence' | 'assistant';
-
-type WorkbenchTask = {
-  taskId: string;
-  title: string;
-  canvas: WorkspaceCanvasModel;
-  authoring?: WorkbenchAuthoringState;
-  savedWorkflowRef?: string;
-  status: Extract<
-    WorkflowStatus,
-    'not_run' | 'queued' | 'running' | 'success' | 'failed' | 'cancel_requested' | 'cancelled' | 'crashed'
-  >;
-  activeRunId?: string;
-  latestRunId?: string;
-};
-
-type WorkbenchTaskStorePayload = {
-  version: 1;
-  activeTaskId: string;
-  tasks: WorkbenchTask[];
-};
-
-type AssistantApplyUndoToken = {
-  proposalId: string;
-  taskId: string;
-  beforeCanvas: WorkspaceCanvasModel;
-  beforeTemporaryResources: Record<string, TemporaryResourceDraft>;
-  beforeSelection: CanvasSelection;
-  afterCanvasHash: string;
-  affectedSelection: CanvasSelection;
-};
-
 type ResourceTemplate =
   | { kind: 'workflow_class'; workflowId: string; path: string; name: string }
   | { kind: 'agent_class'; callableId: string; name: string }
   | { kind: 'tool_class'; callableId: string; name: string };
-
-type WorkbenchChromeState = {
-  leftPanel: 'none' | 'tasks' | 'resources';
-  rightPanel: 'none' | 'inspector' | 'resourceDetail' | 'runEvidence' | 'assistant';
-  inspectorWidth: number;
-};
-
-type RunProjection = {
-  runId: string;
-  taskId: string;
-  status: WorkflowStatus;
-  scope: RunOverlayState['scope'];
-  targetId: string;
-  graph: WorkflowGraph;
-  runDir: string;
-  summary?: RunSummary;
-  run: WorkflowRunResult | null;
-  events: RunEvent[];
-  overlay: RunOverlayState | null;
-  pollState: 'idle' | 'polling' | 'error';
-};
-
-type NodeLiveLogs = {
-  stdout: string;
-  stderr: string;
-  stdoutOffset: number;
-  stderrOffset: number;
-};
 
 type NodeRunLookupContext = {
   scope?: RunOverlayState['scope'];
@@ -797,8 +531,14 @@ type NodeRunLookupContext = {
   parentWorkflowId?: string;
 };
 
-type EdgeViewMode = 'all' | 'control' | 'data';
-type TaskWorkspaceView = 'overview' | 'blueprint';
+type WorkbenchViewProjection = {
+  blueprintActive: boolean;
+  rightPanelVisible: boolean;
+  resourceDetailOpen: boolean;
+  inspectorOpen: boolean;
+  assistantOpen: boolean;
+  detailsOpen: boolean;
+};
 
 type WorkflowNodeData = {
   workflow: WorkflowContainerModel;
@@ -864,29 +604,6 @@ type CanvasFlowNode = WorkflowFlowNode | AgentToolFlowNode;
 const FlowNodeLayoutContext = createContext<CanvasFlowNode[]>([]);
 
 const nodeTypes = { workflowContainer: memo(WorkflowContainer), agentToolNode: memo(AgentToolNode) };
-const DEFAULT_CONTAINER_SIZE = { width: 430, height: 328 };
-const BOUNDARY_NODE_SIZE = { width: 270, height: 240 };
-const AGENT_TOOL_NODE_SIZE = { width: 276, height: 132 };
-const INTERNAL_AGENT_TOOL_NODE_SIZE = { width: 276, height: 158 };
-const AGENT_CONTROL_HANDLE_TOP = '50%';
-const AGENT_CONTROL_HANDLE_FALLBACK_TOP = AGENT_TOOL_NODE_SIZE.height / 2;
-const AGENT_MAX_DATA_PORTS = 10;
-const AGENT_DATA_PORT_GAP = 28;
-const AGENT_PORT_VERTICAL_PADDING = 42;
-const WORKFLOW_INNER_HANDLE_X = 25;
-const WORKFLOW_CHILD_PADDING = 24;
-const WORKFLOW_CHILD_START_PADDING = 8;
-const WORKFLOW_LAYOUT_SAFE_AREA = { left: 64, top: 146, right: 64, bottom: 56 };
-const WORKFLOW_INTERNAL_LAYOUT_GAP = { rank: 72, node: 28 };
-const ROOT_LAYOUT_GAP = { rank: 96, node: 88 };
-const WORKFLOW_CONTAINER_Z_INDEX = 0;
-const WORKFLOW_INTERNAL_EDGE_Z_INDEX = 2;
-const WORKFLOW_INTERNAL_SELECTED_EDGE_Z_INDEX = 6;
-const WORKFLOW_INTERNAL_NODE_Z_INDEX = 4;
-const WORKFLOW_INTERNAL_SELECTED_NODE_Z_INDEX = 8;
-const INSPECTOR_DEFAULT_WIDTH = 390;
-const INSPECTOR_MIN_WIDTH = 320;
-const INSPECTOR_MAX_WIDTH = 640;
 
 type CanvasPointerEvent =
   | PointerEvent
@@ -895,37 +612,9 @@ type CanvasPointerEvent =
   | ReactPointerEvent<Element>
   | ReactMouseEvent<Element>
   | ReactTouchEvent<Element>;
-const MAX_LOG_PREVIEW_LINES = 180;
-const TASK_STORE_KEY = 'acc.workbench.tasks.v2';
-const DEFAULT_TASK_ID = 'task_canvas_default';
-const TEMPORARY_CALLABLE_ID_PREFIX = 'tmp_agent_';
 
 function visibleAgentDataPorts(ports: WorkflowPortView[]): WorkflowPortView[] {
   return ports.slice(0, AGENT_MAX_DATA_PORTS);
-}
-
-function agentDataPortSlot(index: number, count: number): number {
-  if (count <= 0) {
-    return 0;
-  }
-  const aboveCount = Math.floor(count / 2);
-  if (index < aboveCount) {
-    return index - aboveCount;
-  }
-  return index - aboveCount + 1;
-}
-
-function agentDataPortTop(index: number, count: number, nodeHeight: number): number {
-  return nodeHeight / 2 + agentDataPortSlot(index, count) * AGENT_DATA_PORT_GAP;
-}
-
-function agentDataPortMaxOffset(count: number): number {
-  if (count <= 0) {
-    return 0;
-  }
-  const aboveCount = Math.floor(count / 2);
-  const belowCount = count - aboveCount;
-  return Math.max(aboveCount, belowCount) * AGENT_DATA_PORT_GAP;
 }
 
 function trimLiveLog(value: string): string {
@@ -1021,6 +710,14 @@ function captureAuthoringSnapshot({
     selection,
     callable_catalog: callables,
     workflow_catalog: workflows,
+  };
+}
+
+function boundaryTransferPreviewSnapshot(canvas: WorkspaceCanvasModel): Record<string, unknown> {
+  const strippedCanvas = stripRuntimeStateFromCanvas(canvas);
+  return {
+    ...strippedCanvas,
+    canonical_graph: canvasToWorkflowGraph(strippedCanvas),
   };
 }
 
@@ -2402,7 +2099,7 @@ export function WorkflowViewer({
     rightPanel: 'none',
     inspectorWidth: INSPECTOR_DEFAULT_WIDTH,
   });
-  const [edgeViewMode, setEdgeViewMode] = useState<EdgeViewMode>('all');
+  const [edgeViewMode, setEdgeViewMode] = useState<EdgeViewMode>('control');
   const [taskWorkspaceView, setTaskWorkspaceView] = useState<TaskWorkspaceView>('blueprint');
 
   useEffect(() => {
@@ -2461,9 +2158,16 @@ export function WorkflowViewer({
   const workflowEvents = selectedRunProjection?.events || [];
   const runOverlay = selectedRunProjection?.overlay || null;
   const isRunning = currentTask ? isActiveTaskStatus(currentTask.status) : false;
-  const resourceDetailOpen = chrome.rightPanel === 'resourceDetail';
-  const inspectorOpen = chrome.rightPanel === 'inspector';
-  const assistantOpen = bottomDockMode === 'assistant' && evidenceDock.open;
+  const viewProjection = workbenchViewProjection({
+    taskWorkspaceView,
+    chrome,
+    bottomDockMode,
+    evidenceDockOpen: evidenceDock.open,
+  });
+  const blueprintViewActive = viewProjection.blueprintActive;
+  const resourceDetailOpen = viewProjection.resourceDetailOpen;
+  const inspectorOpen = viewProjection.inspectorOpen;
+  const assistantOpen = viewProjection.assistantOpen;
   const inspectorWidth = chrome.inspectorWidth;
   const workflowBindingKey = useMemo(
     () => [canvas.id, ...canvas.workflows.map((item) => item.id)].sort().join('|'),
@@ -3206,6 +2910,7 @@ export function WorkflowViewer({
   const selectedNodeSettings = useMemo(
     () =>
       selectedNodeSettingsModel({
+        canvas: displayCanvas,
         selection,
         selectedWorkflow,
         selectedInternalNode,
@@ -3220,6 +2925,7 @@ export function WorkflowViewer({
       enrichedWorkflowRun,
       selectedLiveLogs,
       selectedNodeRunLookup,
+      displayCanvas,
     ],
   );
   const selectedCallableLookupId =
@@ -3724,6 +3430,25 @@ export function WorkflowViewer({
     return temporaryResourceIssueForCanvas(stripRuntimeStateFromCanvas(canvas), currentTask?.authoring);
   }
 
+  async function ensureBoundaryTransfersValid() {
+    let preview: BoundaryTransferPreview;
+    try {
+      preview = await api.boundaryTransferPreview({
+        canvas_snapshot: boundaryTransferPreviewSnapshot(canvas),
+      });
+    } catch (error) {
+      const text = error instanceof Error ? error.message : String(error);
+      throw new Error(`边界控制线 preview 暂不可用: ${text}`);
+    }
+    if (!boundaryTransferPreviewHasErrors(preview)) {
+      return;
+    }
+    const messages = preview.diagnostics
+      .filter((diagnostic) => diagnostic.severity === 'error')
+      .map((diagnostic) => `${diagnostic.code}: ${diagnostic.message}`);
+    throw new Error(messages.join('；') || '边界控制线存在无法运行的配置错误。');
+  }
+
   function reportTemporaryResourceIssue(issue: string) {
     setMessage(issue);
     setEvidenceDock({
@@ -3791,6 +3516,7 @@ export function WorkflowViewer({
     if (issue) {
       throw new Error(issue);
     }
+    await ensureBoundaryTransfersValid();
     const { selectSavedWorkflow = true, refreshIndex = true, requestedName = null } = options;
     const baseGraph = reusableWorkflowClassGraph(
       graphForCurrentView(stripRuntimeStateFromCanvas(canvas), focusedWorkflowId),
@@ -3859,6 +3585,13 @@ export function WorkflowViewer({
     if (!selectedWorkflow || isExecutableNodeWorkflow(selectedWorkflow)) {
       return;
     }
+    try {
+      await ensureBoundaryTransfersValid();
+    } catch (error) {
+      const text = error instanceof Error ? error.message : String(error);
+      setMessage(`运行失败: ${text}`);
+      return;
+    }
     await runWorkflowGraph(internalWorkflowToGraph(stripRuntimeStateFromWorkflow(selectedWorkflow)), 'workflow', selectedWorkflow.id);
   }
 
@@ -3884,6 +3617,15 @@ export function WorkflowViewer({
     if (graphIssue) {
       reportTemporaryResourceIssue(graphIssue);
       return;
+    }
+    if (scope === 'task') {
+      try {
+        await ensureBoundaryTransfersValid();
+      } catch (error) {
+        const text = error instanceof Error ? error.message : String(error);
+        setMessage(`运行失败: ${text}`);
+        return;
+      }
     }
     const runId = `ui_workflow_${graph.id}_${Date.now()}`;
     const runDir = `runs/${runId}`;
@@ -4760,12 +4502,24 @@ export function WorkflowViewer({
         onAutoLayout={autoLayout}
         assistantOpen={assistantOpen}
         onToggleAssistant={() => {
+          if (!viewProjection.blueprintActive) {
+            setTaskWorkspaceView('blueprint');
+            setBottomDockMode('assistant');
+            setEvidenceDock((current) => ({ ...current, open: true }));
+            return;
+          }
           const nextOpen = !(bottomDockMode === 'assistant' && evidenceDock.open);
           setBottomDockMode('assistant');
           setEvidenceDock((current) => ({ ...current, open: nextOpen }));
         }}
-        detailsOpen={bottomDockMode === 'evidence' && evidenceDock.open}
+        detailsOpen={viewProjection.detailsOpen}
         onToggleDetails={() => {
+          if (!viewProjection.blueprintActive) {
+            setTaskWorkspaceView('blueprint');
+            setBottomDockMode('evidence');
+            setEvidenceDock((current) => ({ ...current, open: true }));
+            return;
+          }
           const nextOpen = !(bottomDockMode === 'evidence' && evidenceDock.open);
           setBottomDockMode('evidence');
           setEvidenceDock((current) => ({ ...current, open: nextOpen }));
@@ -4774,7 +4528,7 @@ export function WorkflowViewer({
       <div
         className={[
           'workspace-canvas-layout',
-          chrome.rightPanel !== 'none' && chrome.rightPanel !== 'assistant' ? 'inspector-open' : '',
+          viewProjection.rightPanelVisible ? 'inspector-open' : '',
         ]
           .filter(Boolean)
           .join(' ')}
@@ -4907,7 +4661,7 @@ export function WorkflowViewer({
             />
           </div>
         ) : null}
-        {nodeDetailOpen && isNodeDetailModel(selectedDetailsModelWithAgentEvents) ? (
+        {blueprintViewActive && nodeDetailOpen && isNodeDetailModel(selectedDetailsModelWithAgentEvents) ? (
           <NodeDetailOverlay
             model={selectedDetailsModelWithAgentEvents}
             callableState={selectedCallableDetailState}
@@ -4988,15 +4742,17 @@ export function WorkflowViewer({
           onConfirm={confirmSaveWorkflow}
         />
       ) : null}
-      <SelectionDetailsDock
-        state={evidenceDock}
-        mode={bottomDockMode}
-        message={message}
-        model={selectedDetailsModelWithAgentEvents}
-        currentTaskId={currentTask?.taskId}
-        selectedRunId={selectedRunId}
-        onToggle={() => setEvidenceDock((current) => ({ ...current, open: !current.open }))}
-        assistantContent={
+      {blueprintViewActive ? (
+        <SelectionDetailsDock
+          state={evidenceDock}
+          mode={bottomDockMode}
+          message={message}
+          model={selectedDetailsModelWithAgentEvents}
+          currentTaskId={currentTask?.taskId}
+          selectedRunId={selectedRunId}
+          onToggle={() => setEvidenceDock((current) => ({ ...current, open: !current.open }))}
+          onReadEvidence={readEvidence}
+          assistantContent={
           <AssistantDockContent
             input={assistantInput}
             messages={assistantMessages}
@@ -5037,8 +4793,9 @@ export function WorkflowViewer({
             onApplyGraphOpsReview={applyGraphOpsPersistenceReview}
             onDiscardGraphOpsReview={() => setAssistantGraphOpsReview(null)}
           />
-        }
-      />
+          }
+        />
+      ) : null}
     </WorkbenchShell>
   );
 }
@@ -5059,6 +4816,28 @@ function WorkbenchShell({
       {children}
     </section>
   );
+}
+
+function workbenchViewProjection({
+  taskWorkspaceView,
+  chrome,
+  bottomDockMode,
+  evidenceDockOpen,
+}: {
+  taskWorkspaceView: TaskWorkspaceView;
+  chrome: WorkbenchChromeState;
+  bottomDockMode: BottomDockMode;
+  evidenceDockOpen: boolean;
+}): WorkbenchViewProjection {
+  const blueprintActive = taskWorkspaceView === 'blueprint';
+  return {
+    blueprintActive,
+    rightPanelVisible: blueprintActive && chrome.rightPanel !== 'none' && chrome.rightPanel !== 'assistant',
+    resourceDetailOpen: blueprintActive && chrome.rightPanel === 'resourceDetail',
+    inspectorOpen: blueprintActive && chrome.rightPanel === 'inspector',
+    assistantOpen: blueprintActive && bottomDockMode === 'assistant' && evidenceDockOpen,
+    detailsOpen: blueprintActive && bottomDockMode === 'evidence' && evidenceDockOpen,
+  };
 }
 
 function SaveWorkflowDialog({
@@ -5083,13 +4862,13 @@ function SaveWorkflowDialog({
         }}
       >
         <div className="modal-title-row">
-          <h3>保存任务为 Workflow</h3>
+          <h3>发布为可复用 Workflow</h3>
           <button type="button" onClick={onCancel} disabled={state.saving}>
-            鍏抽棴
+            关闭
           </button>
         </div>
         <label className="form-field">
-          <span>Workflow 鍚嶇О</span>
+          <span>Workflow 名称</span>
           <input
             value={state.name}
             onChange={(event) => onName(event.target.value)}
@@ -5097,13 +4876,16 @@ function SaveWorkflowDialog({
             autoFocus
           />
         </label>
+        <p className="form-help">
+          发布会写入 canonical <code>.accflow.json</code>，使当前任务蓝图成为可复用的 WorkflowFunctionTemplate。
+        </p>
         {state.error ? <p className="form-error">{state.error}</p> : null}
         <div className="modal-actions">
           <button type="button" onClick={onCancel} disabled={state.saving}>
-            鍙栨秷
+            取消
           </button>
           <button type="submit" className="primary-action" disabled={state.saving}>
-            {state.saving ? 'Saving...' : 'Save'}
+            {state.saving ? '发布中...' : '发布到 canonical .accflow.json'}
           </button>
         </div>
       </form>
@@ -5129,13 +4911,14 @@ function ExecutionDock({
   onRunNode: () => void;
 }) {
   const modeLabel = runtimeConfig?.real_external_agents_enabled
-    ? 'Production: real external agents'
+    ? '生产模式：将调用真实外部 Agent'
     : runtimeConfig?.run_mode === 'production'
-      ? 'Production gate disabled'
-      : 'Hermetic: no external agents';
+      ? '生产模式：真实外部 Agent 未启用'
+      : '隔离模式：不调用外部 Agent';
   return (
     <div className="execution-dock" aria-label="执行控制">
       <span className="runtime-mode-pill">{modeLabel}</span>
+      <span className="execution-scope-pill">运行范围：当前任务</span>
       <button type="button" className="primary-action run-task-action" onClick={onRunTask} disabled={isRunning}>
         <Play aria-hidden="true" size={18} />
         {isRunning ? '运行中...' : '运行当前任务'}
@@ -5207,7 +4990,7 @@ function TaskOverviewPage({
     <section className="task-overview-page" aria-label="任务总览">
       <aside className="task-overview-list" aria-label="任务列表">
         <div className="task-overview-header">
-          <span>MISSION QUEUE</span>
+          <span>任务队列</span>
           <button type="button" onClick={onNewTask}>
             新建任务
           </button>
@@ -5236,7 +5019,7 @@ function TaskOverviewPage({
                 }}
               >
                 <strong>{task.title}</strong>
-                <small>{task.activeRunId || task.latestRunId || 'Not run'}</small>
+                <small>{task.activeRunId || task.latestRunId || '未运行'}</small>
               </button>
               <button
                 type="button"
@@ -5263,13 +5046,13 @@ function TaskArtifactsPane({ task }: { task?: WorkbenchTask }) {
   return (
     <section className="task-artifacts-pane" aria-label="任务产物">
       <header>
-        <span>ARTIFACT CHANNEL</span>
+        <span>产物通道</span>
         <strong>{task?.title || '未选择任务'}</strong>
       </header>
       <div className="task-artifacts-empty">
         <FileText aria-hidden="true" size={28} />
-        <p>Artifacts view is pending.</p>
-        <small>Current task outputs, reports, and audit files will appear here.</small>
+        <p>当前任务还没有可展示的产物。</p>
+        <small>运行输出、报告和审计文件会在这里归档展示。</small>
       </div>
     </section>
   );
@@ -5306,7 +5089,7 @@ function TaskRail({
         >
           <button type="button" className="task-rail-select" onClick={() => onSelectTask(task.taskId)}>
             <strong>{task.title}</strong>
-            <small>{task.activeRunId || task.latestRunId || 'Not run'}</small>
+            <small>{task.activeRunId || task.latestRunId || '未运行'}</small>
           </button>
           <button
             type="button"
@@ -5389,7 +5172,7 @@ function TopBar({
         </button>
         <button type="button" onClick={onSave} disabled={isRunning}>
           <Save aria-hidden="true" size={16} />
-          保存任务为 Workflow
+          发布为可复用 Workflow
         </button>
         <button type="button" onClick={onValidate} disabled={isRunning}>
           <TestTube aria-hidden="true" size={16} />
@@ -8230,28 +8013,38 @@ function CanvasToolbar({
 }) {
   return (
     <div className="canvas-toolbar" aria-label="Canvas Toolbar">
-      <span className={`mode-pill ${connectionMode === 'data' ? 'data' : 'control'}`}>
-        {connectionMode === 'data' ? 'Data Edge: 浅灰虚线' : 'Control Edge: 灰黑实线'}
+      <span className="toolbar-group-label">边语义</span>
+      <span className="mode-pill control">控制边 = 调度顺序</span>
+      <span className="mode-pill data">数据边 = 端口/Artifact 传递</span>
+      <span
+        className={`mode-pill ${connectionMode === 'data' ? 'data' : 'control'}`}
+        title={connectionMode === 'data' ? '当前正在创建数据边' : '当前正在创建控制边'}
+      >
+        当前连线：{connectionMode === 'data' ? '数据' : '控制'}
       </span>
-        <span>Status: {workflowRun ? statusLabel(workflowRun.status) : 'not_run'}</span>
+      <span title={workflowRun ? `runtime status: ${workflowRun.status}` : 'runtime status: not_run'}>
+        状态：{workflowRun ? statusLabel(workflowRun.status) : '未运行'}
+      </span>
       <div className="segmented-control compact" aria-label="连接模式">
         <button
           type="button"
           className={connectionMode === 'control' ? 'active' : ''}
+          aria-label="连接模式：控制"
           onClick={() => onConnectionMode('control')}
         >
-          控制
+          连控制
         </button>
         <button
           type="button"
           className={connectionMode === 'data' ? 'active' : ''}
+          aria-label="连接模式：数据"
           onClick={() => onConnectionMode('data')}
         >
-          数据
+          连数据
         </button>
       </div>
-      <div className="segmented-control compact" aria-label="Edge display mode">
-        {(['all', 'control', 'data'] as const).map((mode) => (
+      <div className="segmented-control compact" aria-label="边显示模式">
+        {(['control', 'data', 'all'] as const).map((mode) => (
           <button
             key={mode}
             type="button"
@@ -8259,7 +8052,7 @@ function CanvasToolbar({
             aria-label={mode === 'all' ? '显示全部边' : mode === 'control' ? '显示控制边' : '显示数据边'}
             onClick={() => onEdgeViewMode(mode)}
           >
-            {mode === 'all' ? '全部' : mode === 'control' ? '控制' : '数据'}
+            {mode === 'all' ? '显全部' : mode === 'control' ? '显控制' : '显数据'}
           </button>
         ))}
       </div>
@@ -9053,7 +8846,9 @@ function AgentToolNode({
       </div>
       <div className="agent-node-main">
         <strong title={data.title}>{data.title}</strong>
-        <p title={data.subtitle || data.callableId || ''}>{data.subtitle || data.callableId || 'Unbound template'}</p>
+        {data.subtitle || !data.callableId ? (
+          <p title={data.subtitle || ''}>{data.subtitle || '未绑定模板'}</p>
+        ) : null}
         {data.scopeLabel ? <span className="node-scope-badge">{data.scopeLabel}</span> : null}
       </div>
       {data.dataDropHint ? <div className="data-drop-hint">{data.dataDropHint}</div> : null}
@@ -9061,7 +8856,7 @@ function AgentToolNode({
           <span className={data.kind === 'Tool' ? 'node-badge tool' : 'node-badge agent'}>
             {data.kind === 'Tool' ? 'Tool' : 'Agent'}
           </span>
-          <small>{data.callableId ? 'Template bound' : 'Template missing'}</small>
+          {!data.callableId ? <small>模板缺失</small> : null}
         </div>
     </div>
   );
@@ -9080,10 +8875,21 @@ function WorkflowHeader({
   onOpenFocus: () => void;
   onConfigure: () => void;
 }) {
+  const inputCount = visibleAgentDataPorts(workflow.inputPorts).length;
+  const outputCount = visibleAgentDataPorts(workflow.outputPorts).length;
+  const nodeCount = workflow.internalNodes.length;
   return (
     <header className="workflow-container-header">
       <span className={`workflow-status-marker ${workflow.status}`} aria-label={statusLabel(workflow.status)} />
       <h3>{workflowInvocationLabel(workflow)}</h3>
+      <div
+        className="workflow-stage-meta"
+        title={`阶段包含 ${nodeCount} 个节点，${inputCount} 个输入端口，${outputCount} 个输出端口`}
+      >
+        <span>{nodeCount} 节点</span>
+        <span>{inputCount} 输入</span>
+        <span>{outputCount} 输出</span>
+      </div>
       <div className={`workflow-directory-line ${status}`}>
         <span>{directory}</span>
         {!workflow.boundaryKind ? (
@@ -9223,28 +9029,6 @@ type CallableDetailLoadState = {
   status: 'idle' | 'loading' | 'loaded' | 'error';
   detail: CallableDetail | null;
   error: string;
-};
-
-type AgentNodeSettingsModel = {
-  scopeLabel: string;
-  nodeId: string;
-  label: string;
-  task: string;
-  kind: 'Agent' | 'Tool';
-  status: WorkflowStatus;
-  callableId: string;
-  codexExecutionMode?: CodexExecutionMode;
-  temporaryResourceId?: string;
-  input: Record<string, unknown>;
-  inputPorts: WorkflowPortView[];
-  outputPorts: WorkflowPortView[];
-  outputSchema?: Record<string, unknown>;
-  forwardMainOutputOnControl?: boolean | null;
-  emptyInputPolicy?: EmptyInputPolicy;
-  run?: NodeRunSummary;
-  logs?: NodeLiveLogs;
-  preview: Record<string, unknown>;
-  raw: unknown;
 };
 
 type AgentNodeConnectionEditor = {
@@ -9466,6 +9250,9 @@ function AgentNodeSettings({
         {callableState.status === 'error' ? (
           <p className="notice compact-notice">模板信息暂时不可用: {callableState.error}</p>
         ) : null}
+        <p className="template-governance-hint">
+          模板是 class-level 资源；修改会影响所有引用，持久化发布需通过 GraphOps 或等效治理路径。
+        </p>
         <div className="template-summary-grid">
           <div>
             <span>Agent</span>
@@ -9544,6 +9331,7 @@ function AgentNodeSettings({
             <h4>{node.run ? '运行证据' : '尚未运行'}</h4>
           </div>
         </div>
+        <WorkflowMainInputBindingNotice binding={node.workflowMainInputBinding} nodeRun={node.run} />
         <RunEvidenceCard
           nodeRun={node.run}
           liveLogs={node.logs}
@@ -9796,6 +9584,26 @@ function SelectionOutputPane({
   );
 }
 
+function evidenceIdentityLabel(
+  owner: EvidenceDockState['owner'],
+  currentTaskId?: string,
+  selectedRunId?: string | null,
+): string {
+  const parts: string[] = [];
+  const taskId = owner?.taskId || currentTaskId;
+  const runId = owner?.runId || selectedRunId || undefined;
+  if (taskId) {
+    parts.push(`task_id: ${taskId}`);
+  }
+  if (runId) {
+    parts.push(`run_id: ${runId}`);
+  }
+  if (owner?.nodeId) {
+    parts.push(`node_id: ${owner.nodeId}`);
+  }
+  return parts.join(' / ');
+}
+
 function SelectionDetailsDock({
   state,
   mode,
@@ -9804,6 +9612,7 @@ function SelectionDetailsDock({
   currentTaskId,
   selectedRunId,
   onToggle,
+  onReadEvidence,
   assistantContent,
 }: {
   state: EvidenceDockState;
@@ -9813,14 +9622,27 @@ function SelectionDetailsDock({
   currentTaskId?: string;
   selectedRunId?: string | null;
   onToggle: () => void;
+  onReadEvidence: (path: string | null | undefined, title?: string) => void;
   assistantContent: ReactNode;
 }) {
   const openedArtifact = evidenceContentForCurrentSelection(state, {
     currentTaskId,
     selectedRunId,
   });
+  const evidenceActions = mode === 'assistant' ? [] : model.evidenceActions.filter((action) => action.path);
+  const hasEvidenceActions = evidenceActions.length > 0;
+  const evidenceIdentity = mode === 'assistant' ? '' : evidenceIdentityLabel(state.owner, currentTaskId, selectedRunId);
   const currentEvidenceTitle =
-    mode === 'assistant' ? 'AI Console' : openedArtifact?.name || state.title || '未打开证据';
+    mode === 'assistant'
+      ? 'AI Console'
+      : openedArtifact
+        ? openedArtifact.name || state.title || 'Run evidence'
+        : hasEvidenceActions
+          ? '运行证据可用'
+          : '没有 run evidence';
+  const currentEvidenceLabel = evidenceIdentity
+    ? `${currentEvidenceTitle} · ${evidenceIdentity}`
+    : currentEvidenceTitle;
   const bodyClassName =
     mode === 'assistant' ? 'selection-details-body assistant-console-body' : 'selection-details-body';
   return (
@@ -9834,7 +9656,9 @@ function SelectionDetailsDock({
           <small>{mode === 'assistant' ? model.title : model.subtitle || model.scopeLabel}</small>
         </span>
         <span className="evidence-dock-message">{mode === 'assistant' ? 'AI Console' : message}</span>
-        <span className="evidence-dock-current">{currentEvidenceTitle}</span>
+        <span className="evidence-dock-current" title={evidenceIdentity || currentEvidenceTitle}>
+          {currentEvidenceLabel}
+        </span>
         {state.open ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
       </button>
       {state.open ? (
@@ -9842,7 +9666,13 @@ function SelectionDetailsDock({
           {mode === 'assistant' ? (
             assistantContent
           ) : (
-            <EvidenceDockArtifactContent artifact={openedArtifact} fallbackTitle={state.title || currentEvidenceTitle} />
+            <EvidenceDockArtifactContent
+              artifact={openedArtifact}
+              fallbackTitle={currentEvidenceTitle}
+              identity={evidenceIdentity}
+              evidenceActions={evidenceActions}
+              onReadEvidence={onReadEvidence}
+            />
           )}
         </div>
       ) : null}
@@ -9853,16 +9683,51 @@ function SelectionDetailsDock({
 function EvidenceDockArtifactContent({
   artifact,
   fallbackTitle,
+  identity,
+  evidenceActions = [],
+  onReadEvidence,
 }: {
   artifact: ArtifactContent | null;
   fallbackTitle: string;
+  identity?: string;
+  evidenceActions?: SelectedDetailsEvidenceAction[];
+  onReadEvidence?: (path: string | null | undefined, title?: string) => void;
 }) {
   if (!artifact) {
+    const hasEvidenceActions = evidenceActions.some((action) => action.path);
     return (
       <section className="selection-details-empty" aria-label="证据摘要">
-        <span>证据</span>
-        <h3>{fallbackTitle}</h3>
-        <p>当前没有打开的单文件证据。节点输入、输出和属性请双击节点在浮层中查看。</p>
+        <span>Run evidence</span>
+        <h3>{fallbackTitle || '没有 run evidence'}</h3>
+        {identity ? <small className="evidence-identity-line">{identity}</small> : null}
+        <p>
+          {hasEvidenceActions
+            ? '已找到当前选中对象的运行证据。打开下面的入口查看真实输入、输出、日志或 run summary。'
+            : '没有 run evidence。Workbench 当前选择只是编辑投影，不代表已经产生运行事实。'}
+        </p>
+        <div className="evidence-entry-list" aria-label="运行证据入口">
+          {hasEvidenceActions ? (
+            evidenceActions.map((action) => (
+              <button
+                key={`${action.label}:${action.path || ''}`}
+                type="button"
+                className="evidence-path-button"
+                disabled={!action.path}
+                onClick={() => onReadEvidence?.(action.path, action.title)}
+              >
+                {action.label}
+              </button>
+            ))
+          ) : (
+            <>
+              <span>Run summary</span>
+              <span>Node input/output</span>
+              <span>Logs</span>
+              <span>Events</span>
+              <span>Artifacts</span>
+            </>
+          )}
+        </div>
       </section>
     );
   }
@@ -10339,6 +10204,18 @@ function SelectionNodeProperties({
         onChange={onUpdateInput}
       />
 
+      {node.workflowMainInputBinding ? (
+        <section className="node-settings-card">
+          <div className="node-settings-section-header">
+            <div>
+              <span className="panel-kicker">Workflow 输入</span>
+              <h4>当前画布绑定</h4>
+            </div>
+          </div>
+          <WorkflowMainInputBindingNotice binding={node.workflowMainInputBinding} nodeRun={node.run} />
+        </section>
+      ) : null}
+
       <AgentSessionPanel
         node={node}
         state={agentSessionState}
@@ -10369,6 +10246,9 @@ function SelectionNodeProperties({
         {callableState.status === 'error' ? (
           <p className="notice compact-notice">模板信息暂时不可用：{callableState.error}</p>
         ) : null}
+        <p className="template-governance-hint">
+          模板是 class-level 资源；修改会影响所有引用，持久化发布需通过 GraphOps 或等效治理路径。
+        </p>
         <div className="template-summary-grid">
           <div>
             <span>Agent</span>
@@ -11736,6 +11616,11 @@ function RightInspector({
             emptyInputPolicy: selectedInternalNode.emptyInputPolicy,
             run: nodeRun,
             logs: nodeLiveLogsFor(liveLogs, nodeRun),
+            workflowMainInputBinding: workflowMainInputBindingState(
+              canvas,
+              selectedWorkflow.id,
+              selectedInternalNode.id,
+            ),
             preview: internalNodeInvocationPreview(selectedInternalNode),
             raw: { workflow: selectedWorkflow.id, node: selectedInternalNode },
           }}
@@ -12588,6 +12473,19 @@ function controlEdgeMainTransferMode(
   if (edge.kind !== 'control') {
     return { label: '不适用', reason: 'Data Edge 显式传递指定端口。' };
   }
+  const boundaryWorkflowId = workflowIdForBoundaryMainBinding(edge);
+  if (boundaryWorkflowId && isWorkflowInputBoundaryControlBinding(boundaryWorkflowId, edge)) {
+    return {
+      label: 'Workflow main 输入绑定',
+      reason: '这条线是 Workbench 边界绑定，会编译为 workflow_input_bindings，不进入 runtime control_edges。',
+    };
+  }
+  if (boundaryWorkflowId && isWorkflowOutputBoundaryControlBinding(boundaryWorkflowId, edge)) {
+    return {
+      label: 'Workflow main 输出绑定',
+      reason: '这条线是 Workbench 边界绑定，会编译为 workflow_output_bindings，不进入 runtime control_edges。',
+    };
+  }
   const samePairHasDataEdge = dataConnectEdges(canvas, scopeWorkflowId).some(
     (candidate) =>
       candidate.kind === 'data' &&
@@ -12626,6 +12524,86 @@ function sourceNodeForwardsMainByDefault(
   return node?.forwardMainOutputOnControl !== false;
 }
 
+function boundaryMainBindingLabel(edge: WorkflowCanvasEdge): string | null {
+  const workflowId = workflowIdForBoundaryMainBinding(edge);
+  if (!workflowId) {
+    return null;
+  }
+  if (isWorkflowInputBoundaryControlBinding(workflowId, edge)) {
+    return 'Workflow main 输入绑定';
+  }
+  if (isWorkflowOutputBoundaryControlBinding(workflowId, edge)) {
+    return 'Workflow main 输出绑定';
+  }
+  return null;
+}
+
+function isEmptyInspectableValue(value: unknown): boolean {
+  if (value === null || value === undefined) {
+    return true;
+  }
+  if (typeof value === 'string') {
+    return value.trim().length === 0;
+  }
+  if (Array.isArray(value)) {
+    return value.length === 0;
+  }
+  if (typeof value === 'object') {
+    return Object.keys(value).length === 0;
+  }
+  return false;
+}
+
+function boundaryInputMainConflictMessage(
+  canvas: WorkspaceCanvasModel,
+  scopeWorkflowId: string | null,
+  edge: WorkflowCanvasEdge,
+): string | null {
+  const workflowId = workflowIdForBoundaryMainBinding(edge);
+  if (!workflowId || !isWorkflowInputBoundaryControlBinding(workflowId, edge)) {
+    return null;
+  }
+  const targetNodeId = edge.target.workflowId;
+  const scopedEdges = dataConnectEdges(canvas, scopeWorkflowId);
+  const hasExplicitMainDataEdge = scopedEdges.some(
+    (candidate) =>
+      candidate.kind === 'data' &&
+      candidate.target.workflowId === targetNodeId &&
+      (candidate.target.portId || 'main') === 'main',
+  );
+  const duplicateBoundaryBinding = scopedEdges.some(
+    (candidate) =>
+      candidate.id !== edge.id &&
+      candidate.source.workflowId === edge.source.workflowId &&
+      candidate.target.workflowId === targetNodeId &&
+      candidate.kind === edge.kind,
+  );
+  const targetInput = scopedNodeInput(canvas, scopeWorkflowId, targetNodeId);
+  const staticMainValue = targetInput?.main;
+  const hasStaticMainInput =
+    targetInput !== undefined &&
+    Object.prototype.hasOwnProperty.call(targetInput, 'main') &&
+    !isEmptyInspectableValue(staticMainValue);
+  if (!hasExplicitMainDataEdge && !duplicateBoundaryBinding && !hasStaticMainInput) {
+    return null;
+  }
+  return '目标 main 存在多个输入来源；runtime 覆盖顺序保持为 static_input -> workflow_input_bindings -> node.input_bindings -> data_edges -> control-main fallback。';
+}
+
+function scopedNodeInput(
+  canvas: WorkspaceCanvasModel,
+  scopeWorkflowId: string | null,
+  nodeId: string,
+): Record<string, unknown> | undefined {
+  if (scopeWorkflowId) {
+    const node = canvas.workflows
+      .find((workflow) => workflow.id === scopeWorkflowId)
+      ?.internalNodes.find((item) => item.id === nodeId);
+    return node?.input;
+  }
+  return canvas.workflows.find((workflow) => workflow.id === nodeId)?.sourceInput;
+}
+
 function EdgeInspector({
   edge,
   tab,
@@ -12641,6 +12619,9 @@ function EdgeInspector({
 }) {
   const sourceWorkflow = canvas.workflows.find((workflow) => workflow.id === edge.source.workflowId);
   const targetWorkflow = canvas.workflows.find((workflow) => workflow.id === edge.target.workflowId);
+  const boundaryWorkflowId = workflowIdForBoundaryMainBinding(edge);
+  const isBoundaryControlEdge = edge.kind === 'control' && Boolean(boundaryWorkflowId);
+  const [boundaryPreview, setBoundaryPreview] = useState<BoundaryTransferPreview | null>(null);
   const diagnostics = edgeDiagnosticsForCanvasEdge(canvas, scopeWorkflowId, edge);
   const targetNodeExists =
     edge.kind === 'data' &&
@@ -12649,14 +12630,58 @@ function EdgeInspector({
     ? diagnostics.find((diagnostic) => diagnostic.code === 'dangling_data_edge_target')
     : undefined;
   const transferMode = controlEdgeMainTransferMode(canvas, scopeWorkflowId, edge);
+  const boundaryLabel = boundaryMainBindingLabel(edge);
+  const conflictMessage = boundaryInputMainConflictMessage(canvas, scopeWorkflowId, edge);
+  useEffect(() => {
+    if (!isBoundaryControlEdge) {
+      setBoundaryPreview(null);
+      return;
+    }
+    let cancelled = false;
+    setBoundaryPreview({
+      status: 'loading',
+      bindings: {
+        workflow_input_bindings: [],
+        workflow_output_bindings: [],
+      },
+      diagnostics: [],
+      canonical_preview: {
+        workbench_projection: 'boundary_control_port_binding',
+        runtime_control_edge: false,
+        preview_source: 'server',
+        status: 'loading',
+      },
+    });
+    void api
+      .boundaryTransferPreview({
+        canvas_snapshot: boundaryTransferPreviewSnapshot(canvas),
+        edge_id: edge.id,
+      })
+      .then((preview) => {
+        if (!cancelled) {
+          setBoundaryPreview(preview);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setBoundaryPreview(unavailableBoundaryTransferPreview());
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [canvas, edge.id, isBoundaryControlEdge]);
   if (tab === 'raw') {
     return <CodeBlock title="edge.json" content={JSON.stringify(edge, null, 2)} variant="json" />;
   }
   if (tab === 'mapping') {
+    const preview = isBoundaryControlEdge
+      ? boundaryPreview || unavailableBoundaryTransferPreview()
+      : edgeCanonicalPreview(edge, canvas);
     return (
       <CodeBlock
         title="core-v2-edge-preview.json"
-        content={JSON.stringify(edgeCanonicalPreview(edge, canvas), null, 2)}
+        content={JSON.stringify(preview, null, 2)}
         variant="json"
       />
     );
@@ -12664,7 +12689,7 @@ function EdgeInspector({
   return (
     <dl className="definition-grid compact">
       <dt>绫诲瀷</dt>
-      <dd>{edge.kind === 'data' ? 'Data Edge' : 'Control Edge'}</dd>
+      <dd>{boundaryLabel || (edge.kind === 'data' ? 'Data Edge' : 'Control Edge')}</dd>
       <dt>上游</dt>
       <dd>
         {sourceWorkflow?.title || edge.source.workflowId}
@@ -12676,13 +12701,29 @@ function EdgeInspector({
         {'portId' in edge.target ? `.${edge.target.portId}` : ''}
       </dd>
       <dt>样式</dt>
-      <dd>{edge.kind === 'data' ? '浅灰虚线' : '灰黑实线'}</dd>
+      <dd>{edge.kind === 'data' ? '浅灰虚线' : '控制线'}</dd>
       {edge.kind === 'control' ? (
         <>
           <dt>数据传递</dt>
           <dd>{transferMode.label}</dd>
           <dt>传递规则</dt>
           <dd>{transferMode.reason}</dd>
+        </>
+      ) : null}
+      {conflictMessage ? (
+        <>
+          <dt>输入覆盖</dt>
+          <dd>{conflictMessage}</dd>
+        </>
+      ) : null}
+      {boundaryPreview?.diagnostics.length ? (
+        <>
+          <dt>边界传输</dt>
+          <dd>
+            {boundaryTransferPreviewHasErrors(boundaryPreview) ? '配置错误' : '可预览'}
+          </dd>
+          <dt>边界诊断</dt>
+          <dd>{boundaryPreview.diagnostics.map((diagnostic) => diagnostic.message).join('；')}</dd>
         </>
       ) : null}
       {diagnostics.length > 0 ? (
@@ -13281,6 +13322,89 @@ function RunEvidenceCard({
   );
 }
 
+function WorkflowMainInputBindingNotice({
+  binding,
+  nodeRun,
+}: {
+  binding?: WorkflowMainInputBindingState;
+  nodeRun?: NodeRunSummary;
+}) {
+  if (!binding) {
+    return null;
+  }
+  if (binding.status === 'unbound') {
+    return <p className="muted workflow-binding-notice">当前节点没有 Workflow main 输入绑定。</p>;
+  }
+  const bindingLabel = `${binding.workflowId}.main -> ${binding.nodeId}.${binding.targetPort}`;
+  const runHasWorkflowInput = nodeRunHasWorkflowInputBinding(nodeRun);
+  if (!nodeRun) {
+    return (
+      <p className="muted workflow-binding-notice">
+        当前画布绑定：{bindingLabel}。尚未运行，运行后会在 binding_manifest.json 中记录 workflow_input。
+      </p>
+    );
+  }
+  if (runHasWorkflowInput) {
+    return (
+      <p className="muted workflow-binding-notice">
+        当前画布绑定：{bindingLabel}；本次运行证据已记录 workflow_input。
+      </p>
+    );
+  }
+  return (
+    <p className="notice compact-notice workflow-binding-notice">
+      当前画布已连接 Workflow main 输入，但本次运行没有对应 workflow_input 证据，可能发生在连接保存/发布前。请重新运行以生成新的运行证据。
+    </p>
+  );
+}
+
+function workflowMainInputBindingState(
+  canvas: WorkspaceCanvasModel,
+  workflowId: string,
+  nodeId: string,
+): WorkflowMainInputBindingState | undefined {
+  const workflow = canvas.workflows.find((item) => item.id === workflowId);
+  if (!workflow) {
+    return undefined;
+  }
+  const inputBoundaryId = workflowInputBoundaryId(workflowId);
+  const bindingEdge = workflow.internalEdges.find((edge) => {
+    if (edge.kind === 'control') {
+      return isWorkflowInputBoundaryControlBinding(workflowId, edge) && edge.target.workflowId === nodeId;
+    }
+    return (
+      edge.source.workflowId === inputBoundaryId &&
+      edge.target.workflowId === nodeId &&
+      (edge.source.portId || 'main') === 'main' &&
+      (edge.target.portId || 'main') === 'main'
+    );
+  });
+  if (!bindingEdge) {
+    return {
+      status: 'unbound',
+      workflowId,
+      nodeId,
+      sourcePort: 'main',
+      targetPort: 'main',
+    };
+  }
+  return {
+    status: 'bound',
+    workflowId,
+    nodeId,
+    edgeId: bindingEdge.id,
+    sourcePort: 'main',
+    targetPort: bindingEdge.kind === 'data' ? bindingEdge.target.portId || 'main' : 'main',
+  };
+}
+
+function nodeRunHasWorkflowInputBinding(nodeRun?: NodeRunSummary): boolean {
+  return bindingRecordsFromRun(nodeRun).some((binding) => {
+    const bindingKind = stringValue(binding.binding_kind) || stringValue(binding.kind);
+    return bindingKind === 'workflow_input';
+  });
+}
+
 function EvidenceFact({ label, value, tone }: { label: string; value: string; tone?: string }) {
   return (
     <div className={tone ? `evidence-fact tone-${tone}` : 'evidence-fact'}>
@@ -13376,10 +13500,14 @@ function outputSummaryFromRun(nodeRun?: NodeRunSummary): string {
     const status = stringValue(preview.status);
     const summary = stringValue(preview.summary);
     const outputKeys = isRecordValue(preview.outputs) ? Object.keys(preview.outputs) : [];
+    const topLevelKeys = Object.keys(preview).filter(
+      (key) => key !== 'status' && key !== 'summary' && key !== 'outputs',
+    );
     const parts = [
       status ? `status=${status}` : '',
       summary ? `summary=${summary}` : '',
-      outputKeys.length ? `outputs=${outputKeys.join(', ')}` : 'outputs=空',
+      outputKeys.length ? `outputs=${outputKeys.join(', ')}` : '',
+      !outputKeys.length && topLevelKeys.length ? `fields=${topLevelKeys.join(', ')}` : '',
     ].filter(Boolean);
     if (parts.length > 0) {
       return parts.join(' / ');
@@ -13997,6 +14125,12 @@ function canvasEdgeToFlowEdge(
     if (shellBoundaryEdge) {
       return [shellBoundaryEdge];
     }
+    const focusedBoundaryEdge = !parentWorkflowId
+      ? focusedBoundaryControlFlowEdge(edge, address, isSelected, connectionMode)
+      : null;
+    if (focusedBoundaryEdge) {
+      return [focusedBoundaryEdge];
+    }
     const sourceId = parentWorkflowId
       ? internalEdgeEndpointToFlowId(parentWorkflowId, edge.source.workflowId)
       : edge.source.workflowId;
@@ -14039,12 +14173,13 @@ function canvasEdgeToFlowEdge(
             )
           : portHandleId(targetId, 'input', edge.target.portId),
         selected: isSelected,
-        markerEnd: { type: MarkerType.ArrowClosed, color: broken ? '#ef4444' : isSelected ? '#16b89e' : '#38bdf8' },
+        markerEnd: { type: MarkerType.ArrowClosed, color: broken ? '#ef4444' : isSelected ? '#16b89e' : '#256f91' },
         className: ['workflow-edge-data', broken ? 'workflow-edge-broken' : ''].filter(Boolean).join(' '),
         style: {
-          stroke: broken ? '#ef4444' : isSelected ? '#16b89e' : '#38bdf8',
-          strokeWidth: isSelected ? 4 : 3,
+          stroke: broken ? '#ef4444' : isSelected ? '#16b89e' : '#256f91',
+          strokeWidth: isSelected ? 4 : 1.8,
           strokeDasharray: broken ? '3 5' : isSelected ? '14 8' : '8 6',
+          opacity: isSelected || broken ? 1 : 0.42,
         },
       }];
     }
@@ -14061,12 +14196,17 @@ function canvasEdgeToFlowEdge(
       sourceHandle: controlSourceHandleForFlowNode(sourceId, canvasWorkflowId(sourceId, parentWorkflowId), workflowContainerIds, parentWorkflowId),
       targetHandle: controlTargetHandleForFlowNode(targetId, canvasWorkflowId(targetId, parentWorkflowId), workflowContainerIds, parentWorkflowId),
       selected: isSelected,
+      markerEnd: controlEdgeMarkerEnd(isSelected, connectionMode === 'control' ? '#f8fafc' : '#94a3b8'),
       className: 'workflow-edge-control',
       style: {
         stroke: isSelected ? '#16b89e' : connectionMode === 'control' ? '#f8fafc' : '#94a3b8',
         strokeWidth: isSelected ? 4 : 2.6,
       },
     }];
+}
+
+function controlEdgeMarkerEnd(isSelected: boolean, color: string): Edge['markerEnd'] {
+  return { type: MarkerType.ArrowClosed, color: isSelected ? '#16b89e' : color };
 }
 
 function canvasWorkflowId(flowId: string, parentWorkflowId?: string): string {
@@ -14101,20 +14241,64 @@ function controlTargetHandleForFlowNode(
   return controlTargetHandleId(flowNodeId);
 }
 
+function workflowIdForBoundaryMainBinding(edge: WorkflowCanvasEdge): string | null {
+  const sourceWorkflowId = workflowIdFromBoundaryId(edge.source.workflowId);
+  if (sourceWorkflowId && workflowBoundaryKind(edge.source.workflowId) === 'workflow_input') {
+    return sourceWorkflowId;
+  }
+  const targetWorkflowId = workflowIdFromBoundaryId(edge.target.workflowId);
+  if (targetWorkflowId && workflowBoundaryKind(edge.target.workflowId) === 'workflow_output') {
+    return targetWorkflowId;
+  }
+  return null;
+}
+
+function isWorkflowInputBoundaryControlBinding(
+  workflowId: string,
+  edge: WorkflowCanvasEdge,
+): edge is Extract<WorkflowCanvasEdge, { kind: 'control' }> {
+  return (
+    edge.kind === 'control' &&
+    edge.source.workflowId === workflowInputBoundaryId(workflowId) &&
+    !isWorkflowBoundaryId(edge.target.workflowId)
+  );
+}
+
+function isWorkflowOutputBoundaryControlBinding(
+  workflowId: string,
+  edge: WorkflowCanvasEdge,
+): edge is Extract<WorkflowCanvasEdge, { kind: 'control' }> {
+  return (
+    edge.kind === 'control' &&
+    !isWorkflowBoundaryId(edge.source.workflowId) &&
+    edge.target.workflowId === workflowOutputBoundaryId(workflowId)
+  );
+}
+
+function isWorkflowBoundaryMainBinding(
+  workflowId: string,
+  edge: WorkflowCanvasEdge,
+): edge is Extract<WorkflowCanvasEdge, { kind: 'control' }> {
+  return (
+    isWorkflowInputBoundaryControlBinding(workflowId, edge) ||
+    isWorkflowOutputBoundaryControlBinding(workflowId, edge)
+  );
+}
+
 function shellBoundaryFlowEdge(
   edge: WorkflowCanvasEdge,
   workflowId: string,
   address: EdgeAddress,
   isSelected: boolean,
 ): Edge | null {
-  if (edge.kind !== 'data') {
-    return null;
-  }
   const inputBoundaryId = workflowInputBoundaryId(workflowId);
   const outputBoundaryId = workflowOutputBoundaryId(workflowId);
   const sourceIsWorkflowInput = edge.source.workflowId === inputBoundaryId;
   const targetIsWorkflowOutput = edge.target.workflowId === outputBoundaryId;
   if (!sourceIsWorkflowInput && !targetIsWorkflowOutput) {
+    return null;
+  }
+  if (edge.kind !== 'data' && edge.kind !== 'control') {
     return null;
   }
   const sourceId = sourceIsWorkflowInput
@@ -14123,6 +14307,23 @@ function shellBoundaryFlowEdge(
   const targetId = targetIsWorkflowOutput
     ? workflowId
     : internalEdgeEndpointToFlowId(workflowId, edge.target.workflowId);
+  if (edge.kind === 'control') {
+    return {
+      id: flowEdgeId(address),
+      data: flowEdgeData(address),
+      source: sourceId,
+      target: targetId,
+      sourceHandle: sourceIsWorkflowInput ? workflowInputInnerSourceHandleId(workflowId) : controlSourceHandleId(sourceId),
+      targetHandle: targetIsWorkflowOutput ? workflowOutputInnerTargetHandleId(workflowId) : controlTargetHandleId(targetId),
+      selected: isSelected,
+      markerEnd: controlEdgeMarkerEnd(isSelected, '#f8fafc'),
+      className: 'workflow-edge-control workflow-edge-boundary-main',
+      style: {
+        stroke: isSelected ? '#16b89e' : '#f8fafc',
+        strokeWidth: isSelected ? 4 : 3,
+      },
+    };
+  }
   return {
     id: flowEdgeId(address),
     type: 'step',
@@ -14142,13 +14343,45 @@ function shellBoundaryFlowEdge(
   };
 }
 
+function focusedBoundaryControlFlowEdge(
+  edge: WorkflowCanvasEdge,
+  address: EdgeAddress,
+  isSelected: boolean,
+  connectionMode: ConnectionMode,
+): Edge | null {
+  if (edge.kind !== 'control') {
+    return null;
+  }
+  const workflowId = workflowIdForBoundaryMainBinding(edge);
+  if (!workflowId || !isWorkflowBoundaryMainBinding(workflowId, edge)) {
+    return null;
+  }
+  const sourceIsWorkflowInput = edge.source.workflowId === workflowInputBoundaryId(workflowId);
+  const targetIsWorkflowOutput = edge.target.workflowId === workflowOutputBoundaryId(workflowId);
+  return {
+    id: flowEdgeId(address),
+    data: flowEdgeData(address),
+    source: edge.source.workflowId,
+    target: edge.target.workflowId,
+    sourceHandle: sourceIsWorkflowInput
+      ? workflowInputInnerSourceHandleId(edge.source.workflowId)
+      : controlSourceHandleId(edge.source.workflowId),
+    targetHandle: targetIsWorkflowOutput
+      ? workflowOutputInnerTargetHandleId(edge.target.workflowId)
+      : controlTargetHandleId(edge.target.workflowId),
+    selected: isSelected,
+    markerEnd: controlEdgeMarkerEnd(isSelected, connectionMode === 'control' ? '#f8fafc' : '#94a3b8'),
+    className: 'workflow-edge-control workflow-edge-boundary-main',
+    style: {
+      stroke: isSelected ? '#16b89e' : connectionMode === 'control' ? '#f8fafc' : '#94a3b8',
+      strokeWidth: isSelected ? 4 : 2.8,
+    },
+  };
+}
+
 function isImplicitMainDataEdge(edge: WorkflowCanvasEdge): boolean {
-  return (
-    edge.kind === 'data' &&
-    !isWorkflowBoundaryEdge(edge) &&
-    (edge.source.portId || 'main') === 'main' &&
-    (edge.target.portId || 'main') === 'main'
-  );
+  const projectionOnlyEdge = edge as WorkflowCanvasEdge & { implicitMainDataEdge?: boolean };
+  return edge.kind === 'data' && projectionOnlyEdge.implicitMainDataEdge === true;
 }
 
 function resolveScopedConnection(
@@ -14278,10 +14511,18 @@ function resolveControlConnection(canvas: WorkspaceCanvasModel, connection: Conn
   if (!transition || !transition.accepted) {
     return { accepted: false, reason: controlConnectionRejectionReason(source, target) };
   }
-  if (transition.edge.kind === 'control' && wouldCreateControlCycle(canvas, transition.scopeWorkflowId, transition.edge)) {
+  const boundaryMainBinding =
+    transition.edge.kind === 'control' &&
+    transition.scopeWorkflowId !== null &&
+    isWorkflowBoundaryMainBinding(transition.scopeWorkflowId, transition.edge);
+  if (
+    transition.edge.kind === 'control' &&
+    !boundaryMainBinding &&
+    wouldCreateControlCycle(canvas, transition.scopeWorkflowId, transition.edge)
+  ) {
     return { accepted: false, reason: '这条控制线会形成循环' };
   }
-  if (transition.edge.kind === 'control') {
+  if (transition.edge.kind === 'control' && !boundaryMainBinding) {
     const slotIssue = controlSlotLimitIssue(canvas, transition.scopeWorkflowId, transition.edge);
     if (slotIssue) {
       return { accepted: false, reason: slotIssue };
@@ -14652,18 +14893,19 @@ function controlTransitionForEndpoints(
     target.role === 'internal_executable_input' &&
     source.nodeId === target.workflowId
   ) {
+    if ((source.portId || 'main') !== 'main' || (target.portId || 'main') !== 'main') {
+      return null;
+    }
     const boundaryId = workflowInputBoundaryId(source.nodeId);
     return {
       accepted: true,
       scopeWorkflowId: source.nodeId,
       semantic: 'workflow_input_main_binding',
       sourceHandle: workflowInputInnerSourceHandleId(source.nodeId),
-      edge: dataEdgeWithId(
-        uniqueEdgeIdForScope(canvas, source.nodeId, 'data', boundaryId, target.nodeId),
+      edge: controlEdgeWithId(
+        uniqueEdgeIdForScope(canvas, source.nodeId, 'control', boundaryId, target.nodeId),
         boundaryId,
-        source.portId,
         target.nodeId,
-        target.portId,
       ),
     };
   }
@@ -14672,18 +14914,19 @@ function controlTransitionForEndpoints(
     target.role === 'workflow_inner_output' &&
     source.workflowId === target.nodeId
   ) {
+    if ((source.portId || 'main') !== 'main' || (target.portId || 'main') !== 'main') {
+      return null;
+    }
     const boundaryId = workflowOutputBoundaryId(target.nodeId);
     return {
       accepted: true,
       scopeWorkflowId: target.nodeId,
       semantic: 'workflow_output_main_binding',
       targetHandle: workflowOutputInnerTargetHandleId(target.nodeId),
-      edge: dataEdgeWithId(
-        uniqueEdgeIdForScope(canvas, target.nodeId, 'data', source.nodeId, boundaryId),
+      edge: controlEdgeWithId(
+        uniqueEdgeIdForScope(canvas, target.nodeId, 'control', source.nodeId, boundaryId),
         source.nodeId,
-        source.portId,
         boundaryId,
-        target.portId,
       ),
     };
   }
@@ -14709,17 +14952,18 @@ function controlTransitionForEndpoints(
     if (!workflowId || workflowId !== target.workflowId) {
       return null;
     }
+    if ((source.portId || 'main') !== 'main' || (target.portId || 'main') !== 'main') {
+      return null;
+    }
     const boundaryId = workflowInputBoundaryId(workflowId);
     return {
       accepted: true,
       scopeWorkflowId: workflowId,
       semantic: 'workflow_input_main_binding',
-      edge: dataEdgeWithId(
-        uniqueEdgeIdForScope(canvas, workflowId, 'data', boundaryId, target.nodeId),
+      edge: controlEdgeWithId(
+        uniqueEdgeIdForScope(canvas, workflowId, 'control', boundaryId, target.nodeId),
         boundaryId,
-        source.portId,
         target.nodeId,
-        target.portId,
       ),
     };
   }
@@ -14728,17 +14972,18 @@ function controlTransitionForEndpoints(
     if (!workflowId || workflowId !== source.workflowId) {
       return null;
     }
+    if ((source.portId || 'main') !== 'main' || (target.portId || 'main') !== 'main') {
+      return null;
+    }
     const boundaryId = workflowOutputBoundaryId(workflowId);
     return {
       accepted: true,
       scopeWorkflowId: workflowId,
       semantic: 'workflow_output_main_binding',
-      edge: dataEdgeWithId(
-        uniqueEdgeIdForScope(canvas, workflowId, 'data', source.nodeId, boundaryId),
+      edge: controlEdgeWithId(
+        uniqueEdgeIdForScope(canvas, workflowId, 'control', source.nodeId, boundaryId),
         source.nodeId,
-        source.portId,
         boundaryId,
-        target.portId,
       ),
     };
   }
@@ -15186,6 +15431,7 @@ function workflowFromGraphNode(
 function canvasToWorkflowGraph(canvas: WorkspaceCanvasModel): WorkflowGraph {
   const executableEdges = runtimeCanvasEdges(canvas.edges);
   const boundaryEdges = workflowBoundaryEdges(canvas.edges);
+  const focusBoundaryContext = workflowBoundaryContextForFocusCanvas(canvas);
   const runtimeWorkflows = canvas.workflows.filter((workflow) => !workflow.boundaryKind);
   const controlEdges = executableEdges
     .filter((edge): edge is Extract<WorkflowCanvasEdge, { kind: 'control' }> => edge.kind === 'control')
@@ -15232,7 +15478,11 @@ function canvasToWorkflowGraph(canvas: WorkspaceCanvasModel): WorkflowGraph {
         : {}),
     },
     ...(canvas.layout === 'workflow-focus'
-      ? focusBoundaryPortsForGraph(canvas)
+      ? {
+          ...focusBoundaryPortsForGraph(canvas),
+          workflow_input_bindings: workflowInputBindingsFromBoundaryEdges(focusBoundaryContext, boundaryEdges),
+          workflow_output_bindings: workflowOutputBindingsFromBoundaryEdges(focusBoundaryContext, boundaryEdges),
+        }
       : canvas.exposedOutputs || canvas.workflowOutputBindings
         ? {
             exposed_outputs: (canvas.exposedOutputs || []).map(portViewToGraphPort),
@@ -15341,6 +15591,7 @@ function omitEmptyRecord<T extends Record<string, unknown>>(record: T): T | unde
 function internalWorkflowToGraph(workflow: WorkflowContainerModel): WorkflowGraph {
   const executableEdges = runtimeCanvasEdges(workflow.internalEdges);
   const boundaryEdges = workflowBoundaryEdges(workflow.internalEdges);
+  const boundaryContext = workflowBoundaryContextForContainer(workflow);
   const controlEdges = executableEdges
     .filter((edge): edge is Extract<WorkflowCanvasEdge, { kind: 'control' }> => edge.kind === 'control')
     .map((edge) => ({
@@ -15372,8 +15623,8 @@ function internalWorkflowToGraph(workflow: WorkflowContainerModel): WorkflowGrap
     data_edges: dataEdges,
     exposed_inputs: workflow.inputPorts.map(portViewToGraphPort),
     exposed_outputs: workflow.outputPorts.map(portViewToGraphPort),
-    workflow_input_bindings: workflowInputBindingsFromBoundaryEdges(workflow.id, boundaryEdges),
-    workflow_output_bindings: workflowOutputBindingsFromBoundaryEdges(workflow.id, boundaryEdges),
+    workflow_input_bindings: workflowInputBindingsFromBoundaryEdges(boundaryContext, boundaryEdges),
+    workflow_output_bindings: workflowOutputBindingsFromBoundaryEdges(boundaryContext, boundaryEdges),
     workspace_policy: {
       save_mode: 'local_binding',
       default_state_mode: 'stateful',
@@ -15387,60 +15638,185 @@ function internalWorkflowToGraph(workflow: WorkflowContainerModel): WorkflowGrap
   };
 }
 
+type BoundaryBindingNodeContext = {
+  id: string;
+  inputPorts: WorkflowPortView[];
+  outputPorts: WorkflowPortView[];
+};
+
+type WorkflowBoundaryBindingContext = {
+  id: string;
+  inputPorts: WorkflowPortView[];
+  outputPorts: WorkflowPortView[];
+  nodes: BoundaryBindingNodeContext[];
+};
+
+function workflowBoundaryContextForContainer(workflow: WorkflowContainerModel): WorkflowBoundaryBindingContext {
+  return {
+    id: workflow.id,
+    inputPorts: workflow.inputPorts,
+    outputPorts: workflow.outputPorts,
+    nodes: workflow.internalNodes.map((node) => ({
+      id: node.id,
+      inputPorts: internalNodeInputPorts(node),
+      outputPorts: internalNodeOutputPorts(node),
+    })),
+  };
+}
+
+function workflowBoundaryContextForFocusCanvas(canvas: WorkspaceCanvasModel): WorkflowBoundaryBindingContext {
+  const inputBoundary = canvas.workflows.find((workflow) => workflow.boundaryKind === 'workflow_input');
+  const outputBoundary = canvas.workflows.find((workflow) => workflow.boundaryKind === 'workflow_output');
+  return {
+    id: canvas.id,
+    inputPorts: inputBoundary?.outputPorts || [port('main', 'input', 'input')],
+    outputPorts: outputBoundary?.inputPorts || [port('main', 'output', 'output')],
+    nodes: canvas.workflows
+      .filter((workflow) => !workflow.boundaryKind)
+      .map((workflow) => ({
+        id: workflow.id,
+        inputPorts: workflow.inputPorts,
+        outputPorts: workflowOutputPorts(workflow),
+      })),
+  };
+}
+
 function workflowInputBindingsFromBoundaryEdges(
-  workflowId: string,
+  context: WorkflowBoundaryBindingContext,
   edges: WorkflowCanvasEdge[],
 ): NonNullable<WorkflowGraph['workflow_input_bindings']> {
-  const inputBoundaryId = workflowInputBoundaryId(workflowId);
+  const inputBoundaryId = workflowInputBoundaryId(context.id);
   const bindings: NonNullable<WorkflowGraph['workflow_input_bindings']> = [];
   const seen = new Set<string>();
   edges.forEach((edge) => {
-    if (edge.kind !== 'data' || edge.source.workflowId !== inputBoundaryId) {
+    if (edge.kind === 'data' && edge.source.workflowId === inputBoundaryId) {
+      const sourcePort = edge.source.portId || 'main';
+      const targetPort = edge.target.portId || 'main';
+      const key = `${sourcePort}->${edge.target.workflowId}.${targetPort}`;
+      if (seen.has(key)) {
+        return;
+      }
+      seen.add(key);
+      bindings.push({
+        source_port: sourcePort,
+        target: { node: edge.target.workflowId, port: targetPort },
+        materialization: edge.materialization || 'copy',
+        required: false,
+      });
       return;
     }
-    const sourcePort = edge.source.portId || 'main';
-    const targetPort = edge.target.portId || 'main';
-    const key = `${sourcePort}->${edge.target.workflowId}.${targetPort}`;
-    if (seen.has(key)) {
-      return;
+    if (edge.kind === 'control') {
+      if (!isWorkflowInputBoundaryControlBinding(context.id, edge)) {
+        return;
+      }
+      const targetNode = context.nodes.find((node) => node.id === edge.target.workflowId);
+      const pairs = boundaryTransferPairs(edge).length
+        ? boundaryTransferPairs(edge)
+        : inferBoundaryPortPairs(context.inputPorts, targetNode?.inputPorts || [port('main', 'input', 'input')]);
+      pairs.forEach(({ sourcePort, targetPort }) => {
+        const targetAlreadyBound = bindings.some(
+          (binding) => binding.target.node === edge.target.workflowId && binding.target.port === targetPort,
+        );
+        const key = `${sourcePort}->${edge.target.workflowId}.${targetPort}`;
+        if (targetAlreadyBound || seen.has(key)) {
+          return;
+        }
+        seen.add(key);
+        bindings.push({
+          source_port: sourcePort,
+          target: { node: edge.target.workflowId, port: targetPort },
+          materialization: edge.boundaryTransfer?.materialization || 'copy',
+          required: false,
+        });
+      });
     }
-    seen.add(key);
-    bindings.push({
-      source_port: sourcePort,
-      target: { node: edge.target.workflowId, port: targetPort },
-      materialization: edge.materialization || 'copy',
-      required: false,
-    });
   });
   return bindings;
 }
 
 function workflowOutputBindingsFromBoundaryEdges(
-  workflowId: string,
+  context: WorkflowBoundaryBindingContext,
   edges: WorkflowCanvasEdge[],
 ): NonNullable<WorkflowGraph['workflow_output_bindings']> {
-  const outputBoundaryId = workflowOutputBoundaryId(workflowId);
+  const outputBoundaryId = workflowOutputBoundaryId(context.id);
   const bindings: NonNullable<WorkflowGraph['workflow_output_bindings']> = [];
   const seen = new Set<string>();
   edges.forEach((edge) => {
-    if (edge.kind !== 'data' || edge.target.workflowId !== outputBoundaryId) {
+    if (edge.kind === 'data' && edge.target.workflowId === outputBoundaryId) {
+      const sourcePort = edge.source.portId || 'main';
+      const targetPort = edge.target.portId || 'main';
+      const key = `${edge.source.workflowId}.${sourcePort}->${targetPort}`;
+      if (seen.has(key)) {
+        return;
+      }
+      seen.add(key);
+      bindings.push({
+        source: { node: edge.source.workflowId, port: sourcePort },
+        target_port: targetPort,
+        materialization: edge.materialization || 'copy',
+        required: true,
+      });
       return;
     }
-    const sourcePort = edge.source.portId || 'main';
-    const targetPort = edge.target.portId || 'main';
-    const key = `${edge.source.workflowId}.${sourcePort}->${targetPort}`;
-    if (seen.has(key)) {
-      return;
+    if (edge.kind === 'control') {
+      if (!isWorkflowOutputBoundaryControlBinding(context.id, edge)) {
+        return;
+      }
+      const sourceNode = context.nodes.find((node) => node.id === edge.source.workflowId);
+      const pairs = boundaryTransferPairs(edge).length
+        ? boundaryTransferPairs(edge)
+        : inferBoundaryPortPairs(sourceNode?.outputPorts || [port('main', 'output', 'output')], context.outputPorts);
+      pairs.forEach(({ sourcePort, targetPort }) => {
+        const sourceAlreadyBound = bindings.some(
+          (binding) => binding.source.node === edge.source.workflowId && binding.source.port === sourcePort,
+        );
+        const key = `${edge.source.workflowId}.${sourcePort}->${targetPort}`;
+        if (sourceAlreadyBound || seen.has(key)) {
+          return;
+        }
+        seen.add(key);
+        bindings.push({
+          source: { node: edge.source.workflowId, port: sourcePort },
+          target_port: targetPort,
+          materialization: edge.boundaryTransfer?.materialization || 'copy',
+          required: true,
+        });
+      });
     }
-    seen.add(key);
-    bindings.push({
-      source: { node: edge.source.workflowId, port: sourcePort },
-      target_port: targetPort,
-      materialization: edge.materialization || 'copy',
-      required: true,
-    });
   });
   return bindings;
+}
+
+function boundaryTransferPairs(edge: WorkflowCanvasEdge): BoundaryTransferMapping[] {
+  if (edge.kind !== 'control') {
+    return [];
+  }
+  return edge.boundaryTransfer?.mappings || [];
+}
+
+function inferBoundaryPortPairs(
+  sourcePorts: WorkflowPortView[],
+  targetPorts: WorkflowPortView[],
+): BoundaryTransferMapping[] {
+  const sourceIds = uniquePortIds(sourcePorts);
+  const targetIds = uniquePortIds(targetPorts);
+  const sameName = sourceIds.filter((portId) => targetIds.includes(portId));
+  const specific = sameName.filter((portId) => portId !== 'main');
+  if (specific.length > 0) {
+    return specific.map((portId) => ({ sourcePort: portId, targetPort: portId }));
+  }
+  if (sameName.includes('main')) {
+    return [{ sourcePort: 'main', targetPort: 'main' }];
+  }
+  if (sourceIds.length === 1 && targetIds.length === 1) {
+    return [{ sourcePort: sourceIds[0], targetPort: targetIds[0] }];
+  }
+  return [];
+}
+
+function uniquePortIds(ports: WorkflowPortView[]): string[] {
+  const ids = ports.map((portValue) => portValue.id || 'main');
+  return [...new Set(ids.length > 0 ? ids : ['main'])];
 }
 
 function internalNodeToGraphNode(node: InternalNodeView): WorkflowGraphNode {
@@ -17199,6 +17575,7 @@ function dataEdgeToCanvasEdge(edge: WorkflowDataEdge): WorkflowCanvasEdge {
 }
 
 function controlEdgeToCanvasEdge(edge: WorkflowGraphEdge): WorkflowCanvasEdge {
+  const boundaryTransfer = boundaryTransferFromGraphEdge(edge);
   return {
     id: edge.id || `control_${edge.from}_${edge.to}`,
     kind: 'control',
@@ -17206,6 +17583,7 @@ function controlEdgeToCanvasEdge(edge: WorkflowGraphEdge): WorkflowCanvasEdge {
     target: { workflowId: edge.to },
     condition: edge.condition || null,
     context: 'none',
+    ...(boundaryTransfer ? { boundaryTransfer } : {}),
   };
 }
 
@@ -17227,6 +17605,7 @@ function canvasEdgeToGraphMetadataEdge(edge: WorkflowCanvasEdge): WorkflowDataEd
     condition: edge.condition || null,
     context: 'none',
     mapping: {},
+    ...(edge.boundaryTransfer ? { boundary_transfer: boundaryTransferToGraphMetadata(edge.boundaryTransfer) } : {}),
   };
 }
 
@@ -17249,6 +17628,25 @@ function edgeCanonicalPreview(edge: WorkflowCanvasEdge, canvas?: WorkspaceCanvas
       auto_added_control_edge: !isWorkflowBoundaryEdge(edge) && !hasControlDependency,
     };
   }
+  const boundaryWorkflowId = workflowIdForBoundaryMainBinding(edge);
+  if (boundaryWorkflowId && isWorkflowInputBoundaryControlBinding(boundaryWorkflowId, edge)) {
+    const context = canvas ? workflowBoundaryContextForEdge(canvas, boundaryWorkflowId) : null;
+    const bindings = context ? workflowInputBindingsFromBoundaryEdges(context, [edge]) : [];
+    return {
+      workflow_input_bindings: bindings,
+      workbench_projection: 'boundary_control_port_binding',
+      runtime_control_edge: false,
+    };
+  }
+  if (boundaryWorkflowId && isWorkflowOutputBoundaryControlBinding(boundaryWorkflowId, edge)) {
+    const context = canvas ? workflowBoundaryContextForEdge(canvas, boundaryWorkflowId) : null;
+    const bindings = context ? workflowOutputBindingsFromBoundaryEdges(context, [edge]) : [];
+    return {
+      workflow_output_bindings: bindings,
+      workbench_projection: 'boundary_control_port_binding',
+      runtime_control_edge: false,
+    };
+  }
   return {
     control_edge: {
       from: edge.source.workflowId,
@@ -17256,6 +17654,17 @@ function edgeCanonicalPreview(edge: WorkflowCanvasEdge, canvas?: WorkspaceCanvas
       context: 'none',
     },
   };
+}
+
+function workflowBoundaryContextForEdge(
+  canvas: WorkspaceCanvasModel,
+  workflowId: string,
+): WorkflowBoundaryBindingContext | null {
+  if (canvas.layout === 'workflow-focus' && canvas.id === workflowId) {
+    return workflowBoundaryContextForFocusCanvas(canvas);
+  }
+  const workflow = canvas.workflows.find((item) => item.id === workflowId);
+  return workflow ? workflowBoundaryContextForContainer(workflow) : null;
 }
 
 function allCanvasEdges(canvas: WorkspaceCanvasModel): WorkflowCanvasEdge[] {
@@ -19818,6 +20227,7 @@ function isJsdomRuntime(): boolean {
 }
 
 function selectedNodeSettingsModel({
+  canvas,
   selection,
   selectedWorkflow,
   selectedInternalNode,
@@ -19825,6 +20235,7 @@ function selectedNodeSettingsModel({
   liveLogs,
   nodeRunLookup,
 }: {
+  canvas: WorkspaceCanvasModel;
   selection: CanvasSelection;
   selectedWorkflow?: WorkflowContainerModel;
   selectedInternalNode?: InternalNodeView;
@@ -19881,6 +20292,11 @@ function selectedNodeSettingsModel({
       emptyInputPolicy: selectedInternalNode.emptyInputPolicy,
       run: nodeRun,
       logs: nodeLiveLogsFor(liveLogs, nodeRun),
+      workflowMainInputBinding: workflowMainInputBindingState(
+        canvas,
+        selectedWorkflow.id,
+        selectedInternalNode.id,
+      ),
       preview: internalNodeInvocationPreview(selectedInternalNode),
       raw: { workflow: selectedWorkflow.id, node: selectedInternalNode },
     };
@@ -20166,9 +20582,11 @@ function edgePropertyGroups(
   const target = edge.kind === 'control' ? edge.target.workflowId : `${edge.target.workflowId}.${edge.target.portId}`;
   const diagnostics = edgeDiagnosticsForCanvasEdge(canvas, scopeWorkflowId, edge);
   const transferMode = controlEdgeMainTransferMode(canvas, scopeWorkflowId, edge);
+  const boundaryLabel = boundaryMainBindingLabel(edge);
+  const conflictMessage = boundaryInputMainConflictMessage(canvas, scopeWorkflowId, edge);
   return [
     {
-      title: edge.kind === 'control' ? '控制边' : '数据边',
+      title: boundaryLabel || (edge.kind === 'control' ? '控制边' : '数据边'),
       rows: [
         { label: 'id', value: edge.id },
         { label: 'scope', value: scopeWorkflowId || 'Root canvas' },
@@ -20182,6 +20600,7 @@ function edgePropertyGroups(
               { label: '传递规则', value: transferMode.reason },
             ]
           : []),
+        ...(conflictMessage ? [{ label: '输入覆盖', value: conflictMessage }] : []),
         ...(diagnostics.length
           ? [
               { label: 'diagnostics', value: diagnostics.map((diagnostic) => diagnostic.message).join('；') },
@@ -20233,26 +20652,6 @@ function canvasPropertyGroups(
       ],
     },
   ];
-}
-
-function evidenceContentForCurrentSelection(
-  state: EvidenceDockState,
-  context: { currentTaskId?: string; selectedRunId?: string | null },
-): ArtifactContent | null {
-  if (!state.content) {
-    return null;
-  }
-  const owner = state.owner;
-  if (!owner) {
-    return state.content;
-  }
-  if (owner.taskId && context.currentTaskId && owner.taskId !== context.currentTaskId) {
-    return null;
-  }
-  if ((owner.kind === 'run' || owner.kind === 'node' || owner.kind === 'artifact') && owner.runId) {
-    return owner.runId === context.selectedRunId ? state.content : null;
-  }
-  return state.content;
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -20500,6 +20899,7 @@ export {
   expandWorkflowToFitChildren,
   expandWorkflowToFitChildrenCenterLocked,
   graphToWorkspaceCanvas,
+  edgeCanonicalPreview,
   internalInvocationLabel,
   isExecutableNodeWorkflow,
   layoutCanvasForSelection,
@@ -20508,7 +20908,9 @@ export {
   workspaceDemoCanvas,
   nextRootPalettePosition,
   nodeRunForInternalNode,
+  nodeRunHasWorkflowInputBinding,
   nodeLiveLogsFor,
+  workflowMainInputBindingState,
   nodeLogDeltaKeys,
   normalizeSelectionIntent,
   normalizeWorkbenchSelection,

@@ -6,17 +6,9 @@
  * across AssistantDrawer (right panel) and AssistantDockContent (bottom dock).
  */
 
-import type { ReactNode } from 'react';
+import type { AssistantChatMessage } from '../../types/workbench';
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-export type AssistantChatMessage = {
-  id: string;
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-};
+export type { AssistantChatMessage };
 
 // ---------------------------------------------------------------------------
 // Component

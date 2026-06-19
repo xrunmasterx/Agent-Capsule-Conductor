@@ -70,7 +70,7 @@ export function TopBar({
         </button>
         <button type="button" onClick={onSave} disabled={isRunning}>
           <Save aria-hidden="true" size={16} />
-          保存任务为 Workflow
+          发布为可复用 Workflow
         </button>
         <button type="button" onClick={onValidate} disabled={isRunning}>
           <TestTube aria-hidden="true" size={16} />

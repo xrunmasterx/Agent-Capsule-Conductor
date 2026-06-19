@@ -23,6 +23,9 @@ import {
   isConnectionHandleForMode as _isConnectionHandleForMode,
   outputPortsFromSchema as _outputPortsFromSchema,
   addPortToDataConnectNode as _addPortToDataConnectNode,
+  workflowMainInputBindingState as _workflowMainInputBindingState,
+  nodeRunHasWorkflowInputBinding as _nodeRunHasWorkflowInputBinding,
+  edgeCanonicalPreview as _edgeCanonicalPreview,
 } from './WorkflowViewer';
 import {
   applyRunOverlayToCanvas,
@@ -148,6 +151,18 @@ const addPortToDataConnectNode = _addPortToDataConnectNode as unknown as (
   direction: string,
   requestedPortId: string,
 ) => ReturnType<typeof canvasFixture>;
+const workflowMainInputBindingState = _workflowMainInputBindingState as unknown as (
+  canvas: ReturnType<typeof canvasFixture>,
+  workflowId: string,
+  nodeId: string,
+) => Record<string, unknown> | undefined;
+const nodeRunHasWorkflowInputBinding = _nodeRunHasWorkflowInputBinding as unknown as (
+  nodeRun?: Record<string, unknown>,
+) => boolean;
+const edgeCanonicalPreview = _edgeCanonicalPreview as unknown as (
+  edge: Record<string, unknown>,
+  canvas?: Record<string, unknown>,
+) => Record<string, unknown>;
 
 function workflow(id: string, x: number, y: number, internalNodes: unknown[] = []) {
   return {
@@ -196,6 +211,48 @@ function canvasFixture() {
       agentWorkflow('source_agent', 120, 450),
     ],
     edges: [],
+  };
+}
+
+function focusedWorkflowCanvasFixture(internalEdges: unknown[] = []) {
+  return {
+    id: 'source_flow',
+    name: 'Source Flow',
+    layout: 'workflow-focus',
+    focusedWorkflowId: 'source_flow',
+    rootWorkflowId: 'source_flow',
+    workflows: [
+      {
+        id: 'source_flow__workflow_inputs',
+        title: 'Workflow Inputs',
+        boundaryKind: 'workflow_input',
+        directory: 'Workflow boundary',
+        status: 'not_run',
+        inputPorts: [],
+        outputPorts: [{ id: 'main', label: 'input', direction: 'output' }],
+        internalNodes: [],
+        internalEdges: [],
+        position: { x: 40, y: 250 },
+        size: { width: 120, height: 140 },
+        warnings: [],
+      },
+      agentWorkflow('codex', 260, 250),
+      {
+        id: 'source_flow__workflow_outputs',
+        title: 'Workflow Outputs',
+        boundaryKind: 'workflow_output',
+        directory: 'Workflow boundary',
+        status: 'not_run',
+        inputPorts: [{ id: 'main', label: 'output', direction: 'input' }],
+        outputPorts: [],
+        internalNodes: [],
+        internalEdges: [],
+        position: { x: 560, y: 250 },
+        size: { width: 120, height: 140 },
+        warnings: [],
+      },
+    ],
+    edges: internalEdges,
   };
 }
 
@@ -2013,9 +2070,9 @@ describe('WorkspaceCanvas data edges', () => {
     const sourceFlow = nextCanvas.workflows.find((item) => item.id === 'source_flow');
     expect(sourceFlow?.internalEdges).toEqual([
       expect.objectContaining({
-        kind: 'data',
-        source: { workflowId: 'source_flow__workflow_inputs', portId: 'main' },
-        target: { workflowId: 'codex', portId: 'main' },
+        kind: 'control',
+        source: { workflowId: 'source_flow__workflow_inputs' },
+        target: { workflowId: 'codex' },
       }),
     ]);
   });
@@ -2058,9 +2115,9 @@ describe('WorkspaceCanvas data edges', () => {
     const sourceFlow = nextCanvas.workflows.find((item) => item.id === 'source_flow');
     expect(sourceFlow?.internalEdges).toEqual([
       expect.objectContaining({
-        kind: 'data',
-        source: { workflowId: 'source_flow__workflow_inputs', portId: 'main' },
-        target: { workflowId: 'codex', portId: 'main' },
+        kind: 'control',
+        source: { workflowId: 'source_flow__workflow_inputs' },
+        target: { workflowId: 'codex' },
       }),
     ]);
   });
@@ -2103,9 +2160,9 @@ describe('WorkspaceCanvas data edges', () => {
     const sourceFlow = nextCanvas.workflows.find((item) => item.id === 'source_flow');
     expect(sourceFlow?.internalEdges).toEqual([
       expect.objectContaining({
-        kind: 'data',
-        source: { workflowId: 'source_flow__workflow_inputs', portId: 'main' },
-        target: { workflowId: 'codex', portId: 'main' },
+        kind: 'control',
+        source: { workflowId: 'source_flow__workflow_inputs' },
+        target: { workflowId: 'codex' },
       }),
     ]);
   });
@@ -2158,9 +2215,9 @@ describe('WorkspaceCanvas data edges', () => {
     const sourceFlow = nextCanvas.workflows.find((item) => item.id === 'source_flow');
     expect(sourceFlow?.internalEdges).toEqual([
       expect.objectContaining({
-        kind: 'data',
-        source: { workflowId: 'source_flow__workflow_inputs', portId: 'main' },
-        target: { workflowId: 'codex', portId: 'main' },
+        kind: 'control',
+        source: { workflowId: 'source_flow__workflow_inputs' },
+        target: { workflowId: 'codex' },
       }),
     ]);
     expect(nextCanvas.edges).toEqual([]);
@@ -2184,12 +2241,260 @@ describe('WorkspaceCanvas data edges', () => {
         semantic: 'workflow_input_main_binding',
         scopeWorkflowId: 'source_flow',
         edge: expect.objectContaining({
-          kind: 'data',
-          source: { workflowId: 'source_flow__workflow_inputs', portId: 'main' },
-          target: { workflowId: 'codex', portId: 'main' },
+          kind: 'control',
+          source: { workflowId: 'source_flow__workflow_inputs' },
+          target: { workflowId: 'codex' },
         }),
       }),
     );
+  });
+
+  test('focused workflow graph compiles boundary control main bindings without runtime edges', () => {
+    const graph = canvasToWorkflowGraph(
+      focusedWorkflowCanvasFixture([
+        {
+          id: 'control_source_flow_workflow_inputs_codex',
+          kind: 'control',
+          source: { workflowId: 'source_flow__workflow_inputs' },
+          target: { workflowId: 'codex' },
+        },
+        {
+          id: 'control_codex_source_flow_workflow_outputs',
+          kind: 'control',
+          source: { workflowId: 'codex' },
+          target: { workflowId: 'source_flow__workflow_outputs' },
+        },
+      ]) as unknown as ReturnType<typeof canvasFixture>,
+    );
+
+    expect(graph.workflow_input_bindings).toEqual([
+      {
+        source_port: 'main',
+        target: { node: 'codex', port: 'main' },
+        materialization: 'copy',
+        required: false,
+      },
+    ]);
+    expect(graph.workflow_output_bindings).toEqual([
+      {
+        source: { node: 'codex', port: 'main' },
+        target_port: 'main',
+        materialization: 'copy',
+        required: true,
+      },
+    ]);
+    expect(graph.control_edges).toEqual([]);
+    expect(graph.data_edges).toEqual([]);
+  });
+
+  test('focused workflow graph expands boundary input control bindings by matching ports', () => {
+    const canvas = focusedWorkflowCanvasFixture([
+      {
+        id: 'control_source_flow_workflow_inputs_codex',
+        kind: 'control',
+        source: { workflowId: 'source_flow__workflow_inputs' },
+        target: { workflowId: 'codex' },
+      },
+    ]) as unknown as ReturnType<typeof canvasFixture>;
+    canvas.workflows = canvas.workflows.map((workflowValue) => {
+      if (workflowValue.id === 'source_flow__workflow_inputs') {
+        return {
+          ...workflowValue,
+          outputPorts: [
+            { id: 'target', label: 'target', direction: 'output' },
+            { id: 'verified_data', label: 'verified data', direction: 'output' },
+          ],
+        };
+      }
+      if (workflowValue.id === 'codex') {
+        return {
+          ...workflowValue,
+          inputPorts: [
+            { id: 'target', label: 'target', direction: 'input' },
+            { id: 'verified_data', label: 'verified data', direction: 'input' },
+          ],
+        };
+      }
+      return workflowValue;
+    });
+
+    const graph = canvasToWorkflowGraph(canvas);
+
+    expect(graph.workflow_input_bindings).toEqual([
+      {
+        source_port: 'target',
+        target: { node: 'codex', port: 'target' },
+        materialization: 'copy',
+        required: false,
+      },
+      {
+        source_port: 'verified_data',
+        target: { node: 'codex', port: 'verified_data' },
+        materialization: 'copy',
+        required: false,
+      },
+    ]);
+    expect(graph.control_edges).toEqual([]);
+  });
+
+  test('focused workflow graph uses explicit boundary output control mapping', () => {
+    const graph = canvasToWorkflowGraph(
+      focusedWorkflowCanvasFixture([
+        {
+          id: 'control_codex_source_flow_workflow_outputs',
+          kind: 'control',
+          source: { workflowId: 'codex' },
+          target: { workflowId: 'source_flow__workflow_outputs' },
+          boundaryTransfer: {
+            direction: 'workflow_output',
+            materialization: 'copy',
+            inference: 'explicit',
+            mappings: [{ sourcePort: 'main', targetPort: 'evidence_pack' }],
+          },
+        },
+      ]) as unknown as ReturnType<typeof canvasFixture>,
+    );
+
+    expect(graph.workflow_output_bindings).toEqual([
+      {
+        source: { node: 'codex', port: 'main' },
+        target_port: 'evidence_pack',
+        materialization: 'copy',
+        required: true,
+      },
+    ]);
+    expect(graph.control_edges).toEqual([]);
+  });
+
+  test('edge canonical preview shows expanded boundary input bindings', () => {
+    const canvas = canvasFixture();
+    canvas.workflows = canvas.workflows.map((workflowValue) =>
+      workflowValue.id === 'source_flow'
+        ? {
+            ...workflowValue,
+            inputPorts: [
+              { id: 'target', label: 'target', direction: 'input' },
+              { id: 'verified_data', label: 'verified data', direction: 'input' },
+            ],
+            internalNodes: (workflowValue.internalNodes as Array<Record<string, unknown>>).map((node) =>
+              node.id === 'codex'
+                ? {
+                    ...node,
+                    inputPorts: [
+                      { id: 'target', label: 'target', direction: 'input' },
+                      { id: 'verified_data', label: 'verified data', direction: 'input' },
+                    ],
+                  }
+                : node,
+            ),
+          }
+        : workflowValue,
+    );
+    const edge = {
+      id: 'control_source_flow_workflow_inputs_codex',
+      kind: 'control',
+      source: { workflowId: 'source_flow__workflow_inputs' },
+      target: { workflowId: 'codex' },
+    };
+
+    expect(edgeCanonicalPreview(edge, canvas)).toEqual(
+      expect.objectContaining({
+        workflow_input_bindings: [
+          {
+            source_port: 'target',
+            target: { node: 'codex', port: 'target' },
+            materialization: 'copy',
+            required: false,
+          },
+          {
+            source_port: 'verified_data',
+            target: { node: 'codex', port: 'verified_data' },
+            materialization: 'copy',
+            required: false,
+          },
+        ],
+        workbench_projection: 'boundary_control_port_binding',
+        runtime_control_edge: false,
+      }),
+    );
+  });
+
+  test('focused workflow graph dedupes legacy data and new boundary control bindings', () => {
+    const graph = canvasToWorkflowGraph(
+      focusedWorkflowCanvasFixture([
+        {
+          id: 'data_source_flow_workflow_inputs_codex',
+          kind: 'data',
+          source: { workflowId: 'source_flow__workflow_inputs', portId: 'main' },
+          target: { workflowId: 'codex', portId: 'main' },
+          materialization: 'copy',
+        },
+        {
+          id: 'control_source_flow_workflow_inputs_codex',
+          kind: 'control',
+          source: { workflowId: 'source_flow__workflow_inputs' },
+          target: { workflowId: 'codex' },
+        },
+      ]) as unknown as ReturnType<typeof canvasFixture>,
+    );
+
+    const inputBindings = graph.workflow_input_bindings as Array<Record<string, unknown>>;
+    expect(inputBindings).toHaveLength(1);
+    expect(inputBindings[0]).toEqual({
+      source_port: 'main',
+      target: { node: 'codex', port: 'main' },
+      materialization: 'copy',
+      required: false,
+    });
+    expect(graph.control_edges).toEqual([]);
+    expect(graph.data_edges).toEqual([]);
+  });
+
+  test('selected internal node derives current Workflow main input binding from canvas', () => {
+    const canvas = canvasFixture();
+    (canvas.workflows[0] as { internalEdges: Array<Record<string, unknown>> }).internalEdges = [
+      {
+        id: 'control_source_flow_workflow_inputs_codex',
+        kind: 'control',
+        source: { workflowId: 'source_flow__workflow_inputs' },
+        target: { workflowId: 'codex' },
+      },
+    ];
+
+    expect(workflowMainInputBindingState(canvas, 'source_flow', 'codex')).toEqual(
+      expect.objectContaining({
+        status: 'bound',
+        workflowId: 'source_flow',
+        nodeId: 'codex',
+        edgeId: 'control_source_flow_workflow_inputs_codex',
+        sourcePort: 'main',
+        targetPort: 'main',
+      }),
+    );
+    expect(workflowMainInputBindingState(canvasFixture(), 'source_flow', 'codex')).toEqual(
+      expect.objectContaining({
+        status: 'unbound',
+        workflowId: 'source_flow',
+        nodeId: 'codex',
+      }),
+    );
+  });
+
+  test('node run evidence distinguishes workflow input binding from control fallback', () => {
+    expect(
+      nodeRunHasWorkflowInputBinding({
+        binding_manifest: {
+          bindings: [{ binding_kind: 'workflow_input', target_port: 'main' }],
+        },
+      }),
+    ).toBe(true);
+    expect(
+      nodeRunHasWorkflowInputBinding({
+        binding_manifest: {
+          bindings: [{ binding_kind: 'control_main_default', target_port: 'main' }],
+        },
+      }),
+    ).toBe(false);
   });
 
   test('connect-end fallback builds the same connection from pending source and release target', () => {
@@ -2289,9 +2594,9 @@ describe('WorkspaceCanvas data edges', () => {
     expect(sourceFlow?.internalEdges).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          kind: 'data',
-          source: { workflowId: 'codex', portId: 'main' },
-          target: { workflowId: 'source_flow__workflow_outputs', portId: 'main' },
+          kind: 'control',
+          source: { workflowId: 'codex' },
+          target: { workflowId: 'source_flow__workflow_outputs' },
         }),
       ]),
     );
@@ -2423,6 +2728,57 @@ describe('WorkspaceCanvas data edges', () => {
         sourceHandle: 'source_agent:output:main',
         targetHandle: 'target_flow:input:news_research',
         className: 'workflow-edge-data',
+        markerEnd: expect.objectContaining({ type: 'arrowclosed' }),
+      }),
+    );
+  });
+
+  test('explicit main to main data edge projection is not hidden as implicit control transfer', () => {
+    const edge = {
+      id: 'data_source_agent_main_target_agent_main',
+      kind: 'data',
+      source: { workflowId: 'source_agent', portId: 'main' },
+      target: { workflowId: 'target_agent', portId: 'main' },
+      materialization: 'copy',
+    };
+
+    const [flowEdge] = canvasEdgeToFlowEdge(edge, null, { type: 'task_canvas', taskId: 'acc_workspace_canvas' }, 'data');
+
+    expect(flowEdge).toEqual(
+      expect.objectContaining({
+        source: 'source_agent',
+        target: 'target_agent',
+        type: 'step',
+        sourceHandle: 'source_agent:output:main',
+        targetHandle: 'target_agent:input:main',
+        className: 'workflow-edge-data',
+        markerEnd: expect.objectContaining({ type: 'arrowclosed' }),
+      }),
+    );
+  });
+
+  test('control edge projection renders an arrow marker', () => {
+    const edge = {
+      id: 'control_source_agent_target_agent',
+      kind: 'control',
+      source: { workflowId: 'source_agent' },
+      target: { workflowId: 'target_agent' },
+    };
+
+    const [flowEdge] = canvasEdgeToFlowEdge(
+      edge,
+      null,
+      { type: 'task_canvas', taskId: 'acc_workspace_canvas' },
+      'control',
+    );
+
+    expect(flowEdge).toEqual(
+      expect.objectContaining({
+        source: 'source_agent',
+        target: 'target_agent',
+        sourceHandle: 'source_agent:control:source',
+        targetHandle: 'target_agent:control:target',
+        className: 'workflow-edge-control',
         markerEnd: expect.objectContaining({ type: 'arrowclosed' }),
       }),
     );
@@ -2714,6 +3070,44 @@ describe('WorkspaceCanvas data edges', () => {
     );
   });
 
+  test('boundary main control binding projection maps to visible workflow shell handles', () => {
+    const edge = {
+      id: 'control_source_flow_workflow_inputs_codex',
+      kind: 'control',
+      source: { workflowId: 'source_flow__workflow_inputs' },
+      target: { workflowId: 'codex' },
+    };
+
+    const [flowEdge] = canvasEdgeToFlowEdge(
+      edge,
+      'source_flow',
+      { type: 'task_canvas', taskId: 'acc_workspace_canvas' },
+      'control',
+      'source_flow',
+    );
+
+    expect(flowEdge).toEqual(
+      expect.objectContaining({
+        source: 'source_flow',
+        target: 'source_flow__internal__codex',
+        sourceHandle: 'source_flow:workflow-input-inner-source',
+        targetHandle: 'source_flow__internal__codex:control:target',
+        className: 'workflow-edge-control workflow-edge-boundary-main',
+      }),
+    );
+
+    expect(
+      canvasEdgeToFlowEdge(
+        edge,
+        'source_flow',
+        { type: 'task_canvas', taskId: 'acc_workspace_canvas' },
+        'data',
+        'source_flow',
+        'data',
+      ),
+    ).toEqual([]);
+  });
+
   test('workflow shell inner handles point into the container', async () => {
     renderCanvas(canvasFixture(), { type: 'workflow', id: 'source_flow' }, 'control');
     await waitForFlowNodes();
@@ -2761,6 +3155,32 @@ describe('WorkspaceCanvas data edges', () => {
     );
   });
 
+  test('boundary main control binding projection stays on focused boundary nodes', () => {
+    const edge = {
+      id: 'control_source_flow_workflow_inputs_codex',
+      kind: 'control',
+      source: { workflowId: 'source_flow__workflow_inputs' },
+      target: { workflowId: 'codex' },
+    };
+
+    const [flowEdge] = canvasEdgeToFlowEdge(
+      edge,
+      'source_flow',
+      { type: 'task_canvas', taskId: 'acc_workspace_canvas' },
+      'control',
+    );
+
+    expect(flowEdge).toEqual(
+      expect.objectContaining({
+        source: 'source_flow__workflow_inputs',
+        target: 'codex',
+        sourceHandle: 'source_flow__workflow_inputs:workflow-input-inner-source',
+        targetHandle: 'codex:control:target',
+        className: 'workflow-edge-control workflow-edge-boundary-main',
+      }),
+    );
+  });
+
   test('workflow shell output boundary projection maps to visible output handle', () => {
     const edge = {
       id: 'data_codex_source_flow_workflow_outputs',
@@ -2786,6 +3206,33 @@ describe('WorkspaceCanvas data edges', () => {
         sourceHandle: 'source_flow__internal__codex:control:source',
         targetHandle: 'source_flow:workflow-output-inner-target',
         className: 'workflow-edge-data workflow-edge-boundary-main',
+      }),
+    );
+  });
+
+  test('workflow shell output boundary control binding maps to visible output handle', () => {
+    const edge = {
+      id: 'control_codex_source_flow_workflow_outputs',
+      kind: 'control',
+      source: { workflowId: 'codex' },
+      target: { workflowId: 'source_flow__workflow_outputs' },
+    };
+
+    const [flowEdge] = canvasEdgeToFlowEdge(
+      edge,
+      'source_flow',
+      { type: 'task_canvas', taskId: 'acc_workspace_canvas' },
+      'control',
+      'source_flow',
+    );
+
+    expect(flowEdge).toEqual(
+      expect.objectContaining({
+        source: 'source_flow__internal__codex',
+        target: 'source_flow',
+        sourceHandle: 'source_flow__internal__codex:control:source',
+        targetHandle: 'source_flow:workflow-output-inner-target',
+        className: 'workflow-edge-control workflow-edge-boundary-main',
       }),
     );
   });
@@ -2818,7 +3265,7 @@ describe('WorkspaceCanvas data edges', () => {
         targetHandle: 'target_flow:workflow-input-outer-target',
       }),
     );
-    expect(flowEdge.markerEnd).toBeUndefined();
+    expect(flowEdge.markerEnd).toEqual(expect.objectContaining({ type: 'arrowclosed' }));
   });
 
   test('workspace canvas passes root workflow control projection to React Flow', async () => {

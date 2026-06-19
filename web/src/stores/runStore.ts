@@ -7,35 +7,9 @@
 
 import { create } from 'zustand';
 import type { RuntimeConfig, WorkflowBindingView } from '../types';
+import type { NodeLiveLogs, RunProjectionSlim, WorkflowStatus } from '../types/workbench';
 
-// ---------------------------------------------------------------------------
-// Local type mirrors (will unify with types/workbench.ts in a later step)
-// ---------------------------------------------------------------------------
-
-export type WorkflowStatus =
-  | 'not_run'
-  | 'queued'
-  | 'running'
-  | 'success'
-  | 'failed'
-  | 'cancel_requested'
-  | 'cancelled'
-  | 'crashed'
-  | 'scheduled';
-
-export type NodeLiveLogs = {
-  stdout: string;
-  stderr: string;
-  stdoutOffset: number;
-  stderrOffset: number;
-};
-
-export type RunProjectionSlim = {
-  runId: string;
-  taskId: string;
-  status: WorkflowStatus;
-  pollState: 'idle' | 'polling' | 'error';
-};
+export type { NodeLiveLogs, RunProjectionSlim, WorkflowStatus };
 
 export interface RunStoreState {
   // --- data ---

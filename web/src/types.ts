@@ -496,8 +496,41 @@ export type WorkflowGraphEdge = {
   to: string;
   label?: string;
   mapping?: Record<string, unknown>;
+  boundary_transfer?: {
+    schema?: string;
+    direction?: 'workflow_input' | 'workflow_output' | string;
+    materialization?: 'copy' | 'reference' | string;
+    mappings?: Array<{
+      sourcePort?: string;
+      targetPort?: string;
+      source_port?: string;
+      target_port?: string;
+    }>;
+    inference?: 'explicit' | 'same_name' | 'main_compat' | 'single_port' | string;
+  };
   condition?: string | null;
   context?: 'upstream_output' | 'none' | string;
+};
+
+export type BoundaryTransferDiagnostic = {
+  code: string;
+  severity: 'error' | 'warning' | string;
+  edge_id?: string | null;
+  source_node?: string | null;
+  target_node?: string | null;
+  source_ports?: string[];
+  target_ports?: string[];
+  message: string;
+};
+
+export type BoundaryTransferPreview = {
+  status: 'valid' | 'invalid' | string;
+  bindings: {
+    workflow_input_bindings: Array<Record<string, unknown>>;
+    workflow_output_bindings: Array<Record<string, unknown>>;
+  };
+  diagnostics: BoundaryTransferDiagnostic[];
+  canonical_preview: Record<string, unknown>;
 };
 
 export type WorkflowPort = {

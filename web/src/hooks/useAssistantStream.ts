@@ -9,23 +9,20 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import type { AgentSessionRecord, AgentTurnRecord, RunEvent } from '../types';
+import type {
+  AssistantChatMessage,
+  AssistantTurnReason,
+  CanvasAuthoringValidationResult,
+} from '../types/workbench';
 
 // ---------------------------------------------------------------------------
 // Re-exported local types consumed by the assistant components.
 // ---------------------------------------------------------------------------
 
-export type AssistantChatMessage = {
-  id: string;
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-};
-
-export type AssistantTurnReason = 'workbench_chat' | 'canvas_revision' | 'selected_node_revision';
-
-export type CanvasAuthoringValidationResult = {
-  status: 'valid' | 'invalid';
-  errors: string[];
-  warnings: string[];
+export type {
+  AssistantChatMessage,
+  AssistantTurnReason,
+  CanvasAuthoringValidationResult,
 };
 
 // ---------------------------------------------------------------------------

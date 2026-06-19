@@ -1,0 +1,133 @@
+{
+  "expansion_cases": [
+    {
+      "name": "same_name_input_fanout",
+      "workflow_id": "Research_Workflow",
+      "exposed_inputs": [{"id": "target"}, {"id": "context"}],
+      "exposed_outputs": [{"id": "main"}],
+      "internal_nodes": [
+        {
+          "id": "business_model_agent",
+          "inputPorts": [{"id": "target"}, {"id": "context"}],
+          "outputPorts": [{"id": "main"}]
+        }
+      ],
+      "edges": [
+        {
+          "id": "control_input_business_model",
+          "kind": "control",
+          "from": "Research_Workflow__workflow_inputs",
+          "to": "business_model_agent"
+        }
+      ],
+      "expected_status": "valid",
+      "expected_input_bindings": [
+        {
+          "source_port": "target",
+          "target": {"node": "business_model_agent", "port": "target"},
+          "materialization": "copy",
+          "required": false
+        },
+        {
+          "source_port": "context",
+          "target": {"node": "business_model_agent", "port": "context"},
+          "materialization": "copy",
+          "required": false
+        }
+      ],
+      "expected_output_bindings": [],
+      "expected_diagnostic_codes": []
+    },
+    {
+      "name": "explicit_output_mapping",
+      "workflow_id": "Research_Workflow",
+      "exposed_inputs": [{"id": "main"}],
+      "exposed_outputs": [{"id": "main"}, {"id": "evidence_pack"}],
+      "internal_nodes": [
+        {
+          "id": "evidence_agent",
+          "inputPorts": [{"id": "main"}],
+          "outputPorts": [{"id": "main"}]
+        }
+      ],
+      "edges": [
+        {
+          "id": "control_evidence_output",
+          "kind": "control",
+          "from": "evidence_agent",
+          "to": "Research_Workflow__workflow_outputs",
+          "boundary_transfer": {
+            "direction": "workflow_output",
+            "materialization": "copy",
+            "mappings": [{"source_port": "main", "target_port": "evidence_pack"}]
+          }
+        }
+      ],
+      "expected_status": "valid",
+      "expected_input_bindings": [],
+      "expected_output_bindings": [
+        {
+          "source": {"node": "evidence_agent", "port": "main"},
+          "target_port": "evidence_pack",
+          "materialization": "copy",
+          "required": true
+        }
+      ],
+      "expected_diagnostic_codes": []
+    },
+    {
+      "name": "ambiguous_output",
+      "workflow_id": "Research_Workflow",
+      "exposed_inputs": [{"id": "main"}],
+      "exposed_outputs": [{"id": "report"}, {"id": "evidence_pack"}],
+      "internal_nodes": [
+        {
+          "id": "writer",
+          "inputPorts": [{"id": "main"}],
+          "outputPorts": [{"id": "main"}]
+        }
+      ],
+      "edges": [
+        {
+          "id": "control_writer_output",
+          "kind": "control",
+          "from": "writer",
+          "to": "Research_Workflow__workflow_outputs"
+        }
+      ],
+      "expected_status": "invalid",
+      "expected_input_bindings": [],
+      "expected_output_bindings": [],
+      "expected_diagnostic_codes": ["ambiguous_workflow_output_boundary_control"]
+    }
+  ],
+  "inference_cases": [
+    {
+      "name": "same_name",
+      "source_ports": ["target", "context"],
+      "target_ports": ["main", "target", "context"],
+      "expected_pairs": [
+        {"sourcePort": "target", "targetPort": "target"},
+        {"sourcePort": "context", "targetPort": "context"}
+      ]
+    },
+    {
+      "name": "main_compat",
+      "source_ports": ["main"],
+      "target_ports": ["main"],
+      "expected_pairs": [{"sourcePort": "main", "targetPort": "main"}]
+    },
+    {
+      "name": "single_port",
+      "source_ports": ["artifact"],
+      "target_ports": ["evidence_pack"],
+      "expected_pairs": [{"sourcePort": "artifact", "targetPort": "evidence_pack"}]
+    },
+    {
+      "name": "ambiguous",
+      "source_ports": ["main"],
+      "target_ports": ["report", "evidence_pack"],
+      "expected_pairs": []
+    }
+  ]
+}

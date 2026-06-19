@@ -6,22 +6,21 @@
  */
 
 import { create } from 'zustand';
+import { DEFAULT_TASK_ID, INSPECTOR_DEFAULT_WIDTH } from '../workbench/constants';
+import type {
+  BottomDockMode,
+  ConnectionMode,
+  EdgeViewMode,
+  TaskWorkspaceView,
+  WorkbenchChromeState,
+} from '../types/workbench';
 
-// ---------------------------------------------------------------------------
-// Re-export locally-used subset of types that originate in WorkflowViewer.
-// These will be migrated to a shared types module in a later step; for now
-// they are duplicated here as lightweight mirrors so the store can be
-// consumed independently.
-// ---------------------------------------------------------------------------
-
-export type ConnectionMode = 'data' | 'control';
-export type EdgeViewMode = 'all' | 'control' | 'data';
-export type TaskWorkspaceView = 'overview' | 'blueprint';
-
-export type WorkbenchChromeState = {
-  leftPanel: 'none' | 'tasks' | 'resources';
-  rightPanel: 'none' | 'inspector' | 'resourceDetail' | 'runEvidence' | 'assistant';
-  inspectorWidth: number;
+export type {
+  BottomDockMode,
+  ConnectionMode,
+  EdgeViewMode,
+  TaskWorkspaceView,
+  WorkbenchChromeState,
 };
 
 /**
@@ -46,7 +45,7 @@ export interface WorkbenchStoreState {
 
   // --- ui transient ---
   nodeDetailOpen: boolean;
-  bottomDockMode: 'evidence' | 'assistant';
+  bottomDockMode: BottomDockMode;
 
   // --- actions ---
   setActiveTaskId: (id: string) => void;
@@ -56,17 +55,15 @@ export interface WorkbenchStoreState {
   setTaskWorkspaceView: (view: TaskWorkspaceView) => void;
   setChrome: (updater: WorkbenchChromeState | ((prev: WorkbenchChromeState) => WorkbenchChromeState)) => void;
   setNodeDetailOpen: (open: boolean) => void;
-  setBottomDockMode: (mode: 'evidence' | 'assistant') => void;
+  setBottomDockMode: (mode: BottomDockMode) => void;
 }
 
-const INSPECTOR_DEFAULT_WIDTH = 390;
-
 export const useWorkbenchStore = create<WorkbenchStoreState>((set) => ({
-  activeTaskId: 'task_canvas_default',
-  taskIds: ['task_canvas_default'],
+  activeTaskId: DEFAULT_TASK_ID,
+  taskIds: [DEFAULT_TASK_ID],
 
   connectionMode: 'control',
-  edgeViewMode: 'all',
+  edgeViewMode: 'control',
   taskWorkspaceView: 'blueprint',
 
   chrome: {
