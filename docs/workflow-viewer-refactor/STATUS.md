@@ -1047,6 +1047,10 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npm run test -- --run src/hooks/useAssistantTaskStoreBindings.test.tsx src/stores/assistantStore.test.ts src/hooks/useAssistantAuthoringSessionActions.test.tsx src/components/WorkflowViewer.drag.test.tsx` | Passed | 4 files, 117 tests passed. |
 | `npm run test -- --run` | Passed | 111 files, 608 tests passed. |
 | `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
+| `npx tsc --noEmit` | Passed | Workbench task store binding hook extraction compiles. |
+| `npm run test -- --run src/hooks/useWorkbenchTaskStoreBindings.test.tsx src/stores/workbenchStore.types.test.ts src/hooks/useCanvasGraphStateActions.test.tsx src/components/WorkflowViewer.drag.test.tsx` | Passed | 4 files, 116 tests passed. |
+| `npm run test -- --run` | Passed | 112 files, 612 tests passed. |
+| `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
 
 ### Static Gates So Far
 
@@ -1109,5 +1113,6 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `WorkflowViewer.tsx` no longer defines selected task run restoration callbacks; ownership moved to `useRunRestorationActions(...)`.
 - `WorkflowViewer.tsx` no longer defines durable task bootstrap loader/persist/state callbacks; ownership moved to `useWorkbenchDurableTaskBootstrapActions(...)`.
 - `WorkflowViewer.tsx` no longer defines assistant store `SetStateAction` facade callbacks; ownership moved to `useAssistantTaskStoreBindings(...)`.
-- `WorkflowViewer.tsx` is now 58,317 bytes / 1,593 lines after assistant task store binding extraction.
+- `WorkflowViewer.tsx` no longer defines workbench store `SetStateAction` facade callbacks for tasks, canvas, selection, or focused workflow; ownership moved to `useWorkbenchTaskStoreBindings(...)`.
+- `WorkflowViewer.tsx` is now 55,160 bytes / 1,551 lines after workbench task store binding extraction.
 - `WorkflowViewer.tsx` no longer ends with local helper definitions; the file now ends at the `WorkflowViewer` component close.
