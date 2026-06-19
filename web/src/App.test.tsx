@@ -7,17 +7,23 @@ import {
   addCallableNodeFromPalette,
   addInternalNodeFromPalette,
   addWorkflowFromPalette,
+} from './workbench/model/paletteCanvasOps';
+import {
   assistantDisplayStatus,
   buildAssistantTranscriptItems,
+} from './components/assistant/assistantTranscript';
+import {
   boundedLiveEvents,
-  controlEdgeMainTransferMode,
   filterLiveEvents,
   liveStateForNodeRun,
+} from './hooks/useWorkbenchLiveStream';
+import {
+  controlEdgeMainTransferMode,
   nodeLiveLogsFor,
   nodeLogDeltaKeys,
   nodeRunForInternalNode,
-  workspaceDemoCanvas,
-} from './components/WorkflowViewer';
+} from './workbench/model/selectedNodeModel';
+import { workspaceDemoCanvas } from './workbench/model/workspaceDemoCanvas';
 import { graphToWorkspaceCanvas } from './workbench/model/canvasProjection';
 import {
   addPortToDataConnectNode,

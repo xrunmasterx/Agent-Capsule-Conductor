@@ -5,6 +5,7 @@ import {
   controlEdgeMainTransferMode,
   effectiveNodeRunDir,
   nodeLiveLogsFor,
+  nodeLogDeltaKeys,
   nodeRunForInternalNode,
   nodeRunForWorkflow,
   sameRunDir,
@@ -94,6 +95,16 @@ function inlineWorkflow(id: string, edges: WorkflowCanvasEdge[] = []): WorkflowC
 }
 
 describe('selectedNodeModel', () => {
+  test('normalizes node log delta keys without duplicates', () => {
+    expect(
+      nodeLogDeltaKeys({
+        ui_node_id: 'flow__internal__codex',
+        node_run_dir: 'Runs\\Root\\Codex\\',
+        node_id: 'codex',
+      }),
+    ).toEqual(['flow__internal__codex', 'runs/root/codex', 'Runs\\Root\\Codex\\', 'codex']);
+  });
+
   test('matches root and internal node runs deterministically', () => {
     const root = rootAgent('source_agent');
     const run = workflowRun([

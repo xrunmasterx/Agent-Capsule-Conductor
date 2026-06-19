@@ -74,6 +74,15 @@ export function uniqueStrings(values: Array<string | null | undefined>): string[
   return result;
 }
 
+export function nodeLogDeltaKeys(delta: { ui_node_id?: string; node_run_dir?: string; node_id?: string }): string[] {
+  return uniqueStrings([
+    delta.ui_node_id,
+    normalizeRunDirKey(delta.node_run_dir),
+    delta.node_run_dir,
+    delta.node_id,
+  ]);
+}
+
 export function nodeRunForWorkflow(
   workflowRun: WorkflowRunResult | null,
   workflow: WorkflowContainerModel,
@@ -195,6 +204,34 @@ export function workflowMainInputBindingState(
     sourcePort: 'main',
     targetPort: bindingEdge.kind === 'data' ? bindingEdge.target.portId || 'main' : 'main',
   };
+}
+
+export function nodeRunHasWorkflowInputBinding(nodeRun?: NodeRunSummary): boolean {
+  return bindingRecordsFromNodeRun(nodeRun).some((binding) => {
+    const bindingKind = stringValueFromRecord(binding.binding_kind) || stringValueFromRecord(binding.kind);
+    return bindingKind === 'workflow_input';
+  });
+}
+
+function bindingRecordsFromNodeRun(nodeRun?: NodeRunSummary): Array<Record<string, unknown>> {
+  const manifestBindings = arrayOfRecordValues(nodeRun?.binding_manifest?.bindings);
+  if (manifestBindings.length > 0) {
+    return manifestBindings;
+  }
+  return arrayOfRecordValues(nodeRun?.binding_resolved);
+}
+
+function arrayOfRecordValues(value: unknown): Array<Record<string, unknown>> {
+  return Array.isArray(value)
+    ? value.filter(
+        (item): item is Record<string, unknown> =>
+          Boolean(item) && typeof item === 'object' && !Array.isArray(item),
+      )
+    : [];
+}
+
+function stringValueFromRecord(value: unknown): string {
+  return typeof value === 'string' ? value : '';
 }
 
 export function selectedNodeSettingsModel({

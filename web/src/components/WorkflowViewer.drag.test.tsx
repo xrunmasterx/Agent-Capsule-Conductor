@@ -2,29 +2,33 @@ import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import type { ComponentType, ReactNode } from 'react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
-import {
-  AgentToolNode as _AgentToolNode,
-  WorkspaceCanvas as _WorkspaceCanvas,
-  createDataEdgeCommand as _createDataEdgeCommand,
-  temporaryResourceIssueForCanvas as _temporaryResourceIssueForCanvas,
-  temporaryResourceIssueForGraph as _temporaryResourceIssueForGraph,
-  deleteSelectionFromCanvas as _deleteSelectionFromCanvas,
-  normalizeSelectionIntent as _normalizeSelectionIntent,
-  isConnectionHandleForMode as _isConnectionHandleForMode,
-  outputPortsFromSchema as _outputPortsFromSchema,
-  addPortToDataConnectNode as _addPortToDataConnectNode,
-  workflowMainInputBindingState as _workflowMainInputBindingState,
-  nodeRunHasWorkflowInputBinding as _nodeRunHasWorkflowInputBinding,
-  edgeCanonicalPreview as _edgeCanonicalPreview,
-} from './WorkflowViewer';
+import { AgentToolNode as _AgentToolNode } from './canvas/NodeRenderer';
+import { WorkspaceCanvas as _WorkspaceCanvas } from './canvas/WorkspaceCanvas';
 import { canvasEdgeToFlowEdge as _canvasEdgeToFlowEdge } from './canvas/flowProjection';
 import { canvasToWorkflowGraph as _canvasToWorkflowGraph } from '../workbench/model/workflowGraphProjection';
+import { edgeCanonicalPreview as _edgeCanonicalPreview } from '../workbench/model/workflowGraphProjection';
 import {
+  addPortToDataConnectNode as _addPortToDataConnectNode,
   connectionCandidatesFromPendingEndpoint as _connectionCandidatesFromPendingEndpoint,
   connectionFromPendingEndpoint as _connectionFromPendingEndpoint,
+  createDataEdgeCommand as _createDataEdgeCommand,
   resolveScopedConnection as _resolveScopedConnection,
   reverseConnection as _reverseConnection,
 } from '../workbench/model/canvasEdgeOps';
+import { isConnectionHandleForMode as _isConnectionHandleForMode } from './canvas/connectionDom';
+import { outputPortsFromSchema as _outputPortsFromSchema } from '../workbench/model/schemaPorts';
+import {
+  deleteSelectionFromCanvas as _deleteSelectionFromCanvas,
+  normalizeSelectionIntent as _normalizeSelectionIntent,
+} from '../workbench/model/selectionModel';
+import {
+  nodeRunHasWorkflowInputBinding as _nodeRunHasWorkflowInputBinding,
+  workflowMainInputBindingState as _workflowMainInputBindingState,
+} from '../workbench/model/selectedNodeModel';
+import {
+  temporaryResourceIssueForCanvas as _temporaryResourceIssueForCanvas,
+  temporaryResourceIssueForGraph as _temporaryResourceIssueForGraph,
+} from '../workbench/model/authoringProposal';
 import {
   applyRunOverlayToCanvas,
   liveWorkflowRunFromEvents,

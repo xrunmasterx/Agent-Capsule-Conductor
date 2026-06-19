@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import { api } from '../api';
 import type { NodeRunSummary, RunEvent, WorkbenchLiveEvent } from '../types';
+import { buildAccTranscript, type LiveOutputFilter } from '../lib/runTranscript';
 import { effectiveNodeRunDir, sameRunDir } from '../workbench/model/selectedNodeModel';
 
 export type WorkbenchLiveStreamScope =
@@ -193,6 +194,22 @@ export function boundedLiveEvents(
     bounded.push(event);
   }
   return bounded.reverse();
+}
+
+export function filterLiveEvents(
+  events: WorkbenchLiveEvent[],
+  filter: LiveOutputFilter,
+): WorkbenchLiveEvent[] {
+  if (filter === 'stdout' || filter === 'stderr') {
+    return events.filter((event) => event.stream === filter);
+  }
+  if (filter === 'errors') {
+    return events.filter((event) =>
+      `${event.type} ${event.text || ''} ${stringValue(event.payload?.error)}`.toLowerCase().includes('error') ||
+      String(event.type).includes('failed'),
+    );
+  }
+  return buildAccTranscript(events, filter).map((entry) => entry.sourceEvent);
 }
 
 function liveEventMatchesRunScope(

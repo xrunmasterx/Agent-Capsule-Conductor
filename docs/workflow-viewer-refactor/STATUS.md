@@ -747,3 +747,40 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `rg -n "const \[assistantInput|const \[assistantMessages|const \[assistantProposal|const \[authoringAgents|const \[selectedAuthoringAgentId|const \[assistantSessionId|const \[assistantAgentSession|const \[assistantPendingTurn|const \[assistantEvents|const \[assistantTurnReason|const \[assistantSessionStatus|const \[assistantBackendValidation|const \[assistantRequiredActions|const \[assistantGraphOpsReview|const \[assistantBusy|const \[assistantApplyUndo" web/src/components/WorkflowViewer.tsx` reports no matches.
 - `rg -n "const \[runsById|const \[runLogsById|const \[runLiveEventsById|const \[runtimeConfig" web/src/components/WorkflowViewer.tsx` reports no matches.
 - Remaining `WorkflowViewer.tsx` `useState` instances are local UI/transient controls or nested component state, not global Workbench owner state.
+
+## PLAN_09 Final Cleanup
+
+Status: in progress
+
+### Cleanup Slice Completed
+
+- Removed the compatibility helper export block from `web/src/components/WorkflowViewer.tsx`; the component no longer acts as a test helper barrel.
+- Migrated `web/src/components/WorkflowViewer.drag.test.tsx` imports to the real owner modules for canvas, graph projection, edge ops, selection, selected-node, schema-port, and authoring helpers.
+- Migrated `web/src/App.test.tsx` imports to the real owner modules for palette ops, assistant transcript projection, live-event helpers, selected-node helpers, canvas projection, selection, graph projection, and the demo canvas fixture.
+- Added `web/src/workbench/model/workspaceDemoCanvas.ts` as the owner for the stock research demo canvas fixture and its local schema/edge helpers.
+- Moved `nodeRunHasWorkflowInputBinding(...)` and `nodeLogDeltaKeys(...)` into `web/src/workbench/model/selectedNodeModel.ts`.
+- Moved `filterLiveEvents(...)` into `web/src/hooks/useWorkbenchLiveStream.ts`, next to the live-event bounding and node-run live-state helpers.
+- `web/src/components/WorkflowViewer.tsx` is now 226,439 bytes / 6,010 lines after removing the compatibility export barrel and demo fixture.
+
+### Added/Updated Tests
+
+- Extended `web/src/workbench/model/selectedNodeModel.test.ts` with `nodeLogDeltaKeys(...)` normalization and de-duplication coverage.
+- Existing `web/src/App.test.tsx` and `web/src/components/WorkflowViewer.drag.test.tsx` now validate against the real owner imports instead of `WorkflowViewer.tsx` compatibility exports.
+
+### Validation So Far
+
+Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `npx tsc --noEmit` | Passed | Helper-owner migration compiles. |
+| `npm run test -- --run src/App.test.tsx src/components/WorkflowViewer.drag.test.tsx src/workbench/model/selectedNodeModel.test.ts` | Passed | 3 files, 192 tests passed. |
+| `npm run test -- --run` | Passed | 67 files, 442 tests passed. |
+| `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
+
+### Static Gates So Far
+
+- `web/src/components/WorkflowViewer.tsx` no longer contains a bottom-level compatibility `export { ... }` block.
+- `web/src/App.test.tsx` and `web/src/components/WorkflowViewer.drag.test.tsx` no longer import test helpers from `WorkflowViewer.tsx`.
+- `components/assistant`, `components/authoring`, `components/canvas`, `components/inspector`, `hooks`, `stores`, and `workbench` do not import from `WorkflowViewer.tsx`.
+- `workspaceDemoCanvas()` no longer lives in `WorkflowViewer.tsx`.
