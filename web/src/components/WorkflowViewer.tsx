@@ -31,9 +31,6 @@ import {
   isExecutableNodeWorkflow,
   normalizeWorkbenchSelection,
 } from '../workbench/model/selectionModel';
-import {
-  workbenchViewProjection,
-} from '../workbench/model/workbenchViewProjection';
 import { selectionKey, truncateLargeLog } from '../workbench/model/workflowViewerShell';
 import type {
   CanvasAuthoringProposal,
@@ -111,6 +108,7 @@ import { WorkflowViewerDock } from './workflow-viewer/WorkflowViewerDock';
 import { WorkflowViewerMainStage } from './workflow-viewer/WorkflowViewerMainStage';
 import { WorkflowViewerNodeDetailOverlay } from './workflow-viewer/WorkflowViewerNodeDetailOverlay';
 import { WorkflowViewerRightPanel } from './workflow-viewer/WorkflowViewerRightPanel';
+import { useWorkflowViewerChromeState } from './workflow-viewer/useWorkflowViewerChromeState';
 import { useWorkflowViewerGraphState } from './workflow-viewer/useWorkflowViewerGraphState';
 import { useWorkflowViewerSelectionState } from './workflow-viewer/useWorkflowViewerSelectionState';
 import { useWorkflowViewerTaskPersistence } from './workflow-viewer/useWorkflowViewerTaskPersistence';
@@ -268,17 +266,24 @@ export function WorkflowViewer({
   const workflowEvents = selectedRunProjection?.events || [];
   const runOverlay = selectedRunProjection?.overlay || null;
   const isRunning = currentTask ? isActiveTaskStatus(currentTask.status) : false;
-  const viewProjection = workbenchViewProjection({
+  const {
+    viewProjection,
+    blueprintViewActive,
+    resourceDetailOpen,
+    inspectorOpen,
+    assistantOpen,
+    inspectorWidth,
+    toggleAssistantDock,
+    toggleDetailsDock,
+  } = useWorkflowViewerChromeState({
     taskWorkspaceView,
+    setTaskWorkspaceView,
     chrome,
     bottomDockMode,
-    evidenceDockOpen: evidenceDock.open,
+    setBottomDockMode,
+    evidenceDock,
+    setEvidenceDock,
   });
-  const blueprintViewActive = viewProjection.blueprintActive;
-  const resourceDetailOpen = viewProjection.resourceDetailOpen;
-  const inspectorOpen = viewProjection.inspectorOpen;
-  const assistantOpen = viewProjection.assistantOpen;
-  const inspectorWidth = chrome.inspectorWidth;
 
   const {
     resetAssistantConversationState,
@@ -835,29 +840,9 @@ export function WorkflowViewer({
         onRun={runGraph}
         onAutoLayout={autoLayout}
         assistantOpen={assistantOpen}
-        onToggleAssistant={() => {
-          if (!viewProjection.blueprintActive) {
-            setTaskWorkspaceView('blueprint');
-            setBottomDockMode('assistant');
-            setEvidenceDock((current) => ({ ...current, open: true }));
-            return;
-          }
-          const nextOpen = !(bottomDockMode === 'assistant' && evidenceDock.open);
-          setBottomDockMode('assistant');
-          setEvidenceDock((current) => ({ ...current, open: nextOpen }));
-        }}
+        onToggleAssistant={toggleAssistantDock}
         detailsOpen={viewProjection.detailsOpen}
-        onToggleDetails={() => {
-          if (!viewProjection.blueprintActive) {
-            setTaskWorkspaceView('blueprint');
-            setBottomDockMode('evidence');
-            setEvidenceDock((current) => ({ ...current, open: true }));
-            return;
-          }
-          const nextOpen = !(bottomDockMode === 'evidence' && evidenceDock.open);
-          setBottomDockMode('evidence');
-          setEvidenceDock((current) => ({ ...current, open: nextOpen }));
-        }}
+        onToggleDetails={toggleDetailsDock}
       />
       <div
         className={[
