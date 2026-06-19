@@ -1,10 +1,8 @@
 /**
- * AuthoringSession — canvas authoring session logic.
+ * AuthoringSession - canvas authoring session logic.
  *
- * This module encapsulates the AI assistant authoring session lifecycle:
- * snapshot capture, proposal generation, validation, and application.
- *
- * Functions extracted from WorkflowViewer.tsx.
+ * This barrel exposes the authoring runtime functions and keeps authoring
+ * domain types anchored in `types/workbench`.
  */
 
 export {
@@ -19,20 +17,14 @@ export {
   temporaryResourceIssueForGraph,
 } from '../../workbench/model/authoringProposal';
 
-/**
- * Re-exported authoring type references.
- *
- * Authoring domain types are owned by `types/workbench`.
- */
 export type {
-  // - AuthoringContextSnapshot
-  // - CanvasAuthoringOperation
-  // - CanvasAuthoringProposal
-  // - CanvasAuthoringValidationResult
-  // - CanvasAuthoringApplyResult
-  // - TemporaryResourceDraft
-  // - TemporaryResourceDraftStatus
-  // - WorkbenchAuthoringState
-  // - CanvasAuthoringTarget
-  // (currently defined inline in WorkflowViewer.tsx)
-};
+  AuthoringContextSnapshot,
+  CanvasAuthoringOperation,
+  CanvasAuthoringProposal,
+  CanvasAuthoringValidationResult,
+  CanvasAuthoringApplyResult,
+  TemporaryResourceDraft,
+  TemporaryResourceDraftStatus,
+  WorkbenchAuthoringState,
+  CanvasAuthoringTarget,
+} from '../../types/workbench';

@@ -1,8 +1,6 @@
 /**
  * SSE streaming hook for workflow run events.
- *
- * Extracted from WorkflowViewer.tsx lines 2631-2677.
- * Manages the EventSource connection to the run stream, dispatching
+ * * Manages the EventSource connection to the run stream, dispatching
  * node_log_delta, live_event, summary, and agent_event frames to the appropriate
  * state updaters.
  */

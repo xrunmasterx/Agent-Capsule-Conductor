@@ -1,8 +1,6 @@
 /**
  * NodeDetailOverlay - full node inspection floating panel.
- *
- * Extracted from WorkflowViewer.tsx lines 8175-8262.
- * The overlay is shown when a user double-clicks a node on the canvas.
+ * * The overlay is shown when a user double-clicks a node on the canvas.
  * It delegates to selected-detail panes extracted across the refactor.
  *
  * This file re-exports the NodeDetailOverlay as a thin wrapper so that

@@ -1196,3 +1196,36 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npm run test -- --run src/components/workflow-viewer/WorkflowViewerLayout.test.tsx src/components/workflow-viewer/WorkflowViewerMainStage.test.tsx src/components/workflow-viewer/WorkflowViewerRightPanel.test.tsx src/components/workflow-viewer/WorkflowViewerDock.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 6 files, 191 tests passed. |
 | `npm run test -- --run` | Passed | 125 files, 641 tests passed. |
 | `npm run build` | Passed | Same expected Vite production chunk-size warning remains; no WorkflowViewer Babel deopt warning. |
+
+### Controller Shell Extraction
+
+Moved the remaining route-level Workbench wiring from `web/src/components/WorkflowViewer.tsx` into `web/src/components/workflow-viewer/WorkflowViewerController.tsx`. `WorkflowViewer.tsx` is now a thin entry shell that only delegates props into the controller.
+
+Cleaned stale migration comments and static-gate noise in authoring, assistant, inspector, stream hook, and store-boundary files. Also fixed the assistant empty-state/aria text and the controller subtitle from mojibake to correct Chinese text.
+
+Current ownership split:
+
+| Symbol / Responsibility | Owner |
+| --- | --- |
+| `WorkflowViewer` route entry | `web/src/components/WorkflowViewer.tsx` |
+| Route-level Workbench controller wiring | `web/src/components/workflow-viewer/WorkflowViewerController.tsx` |
+| Page shell composition | `web/src/components/workflow-viewer/WorkflowViewerLayout.tsx` |
+| Shared authoring runtime barrel | `web/src/components/authoring/AuthoringSession.tsx` |
+| Assistant message list | `web/src/components/assistant/AssistantTurnList.tsx` |
+
+Static gates:
+
+- `WorkflowViewer.tsx` is now 272 bytes / 8 lines.
+- `WorkflowViewer.tsx` exports only `WorkflowViewer`.
+- `WorkflowViewer.tsx` contains no direct API, EventSource, ReactFlow, graph/canvas conversion, or demo factory references.
+- `rg -n "from '../WorkflowViewer'|from './WorkflowViewer'|components/WorkflowViewer" web/src/components web/src/hooks web/src/stores` returns no matches.
+- `rg -n "__workflowViewerTestables|Extracted from WorkflowViewer|remain.*WorkflowViewer|re-export.*WorkflowViewer|migration period|currently defined inline" web/src` returns no matches.
+
+Latest validation after controller extraction:
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `npx tsc --noEmit` | Passed | Thin shell and controller extraction compile. |
+| `npm run test -- --run src/components/workflow-viewer/WorkflowViewerLayout.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 3 files, 185 tests passed. |
+| `npm run test -- --run` | Passed | 125 files, 641 tests passed. |
+| `npm run build` | Passed | Same expected Vite production chunk-size warning remains. |

@@ -1,8 +1,6 @@
 /**
  * SSE streaming hook for AI assistant agent turns.
- *
- * Extracted from WorkflowViewer.tsx lines 2490-2602.
- * Manages the EventSource connection to the assistant turn stream, polling
+ * * Manages the EventSource connection to the assistant turn stream, polling
  * fallback, and canonical state refresh on terminal events.
  */
 

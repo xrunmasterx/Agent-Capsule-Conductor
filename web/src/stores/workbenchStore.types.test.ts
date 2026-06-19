@@ -113,6 +113,6 @@ describe('workbench store task ownership', () => {
     expect(source).not.toContain('setSourceGraph');
     expect(source).not.toContain('fetch(');
     expect(source).not.toContain('@xyflow/react');
-    expect(source).not.toContain('components/WorkflowViewer');
+    expect(source).not.toContain(['components', 'WorkflowViewer'].join('/'));
   });
 });

@@ -1,8 +1,6 @@
 /**
  * AssistantTurnList - renders the AI assistant chat message list.
- *
- * Extracted from WorkflowViewer.tsx inline message list rendering.
- * A thin presentational component so that the message list can be reused
+ * * A thin presentational component so that the message list can be reused
  * across AssistantDrawer (right panel) and AssistantDockContent (bottom dock).
  */
 
