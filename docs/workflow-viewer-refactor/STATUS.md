@@ -828,6 +828,10 @@ Status: in progress
 - Removed the corresponding local task action functions and now-dead `resetCanvas(...)` helper from `WorkflowViewer.tsx`.
 - Restored readable UTF-8 Chinese user messages for the extracted task action paths.
 - `web/src/components/WorkflowViewer.tsx` is now 110,190 bytes / 2,941 lines after moving task actions.
+- Added `web/src/hooks/useDataConnectionActions.ts` as the owner for data connection draft actions, data-edge completion, new input-port connection, and data-connect port add/rename/delete actions.
+- Removed the corresponding local data connection action functions from `WorkflowViewer.tsx`.
+- Restored readable UTF-8 Chinese user messages for the extracted data connection paths.
+- `web/src/components/WorkflowViewer.tsx` is now 105,432 bytes / 2,813 lines after moving data connection actions.
 
 ### Added/Updated Tests
 
@@ -861,6 +865,7 @@ Status: in progress
 - Extended `web/src/workbench/model/workflowRuntimeProjection.test.ts` with node-run detail cache key and merge coverage.
 - Added `web/src/workbench/model/workflowViewerShell.test.ts` for selection keys, drawer titles, node detail detection, text artifact projection, artifact path names, and large-log truncation.
 - Added `web/src/hooks/useWorkbenchTaskActions.test.tsx` for external workflow open intent, task switching cleanup, durable task creation, running-task delete guard, delete fallback task creation, demo loading, and auto-layout graph refresh.
+- Added `web/src/hooks/useDataConnectionActions.test.tsx` for data connection draft lifecycle, missing-source guard, data-edge creation, new input-port connection, and port add/rename/delete actions.
 - Existing `web/src/App.test.tsx` and `web/src/components/WorkflowViewer.drag.test.tsx` now validate against the real owner imports instead of `WorkflowViewer.tsx` compatibility exports.
 
 ### Validation So Far
@@ -940,6 +945,10 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npm run test -- --run src/hooks/useWorkbenchTaskActions.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 3 files, 190 tests passed. |
 | `npm run test -- --run` | Passed | 93 files, 524 tests passed. |
 | `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
+| `npx tsc --noEmit` | Passed | Data connection action hook extraction compiles. |
+| `npm run test -- --run src/hooks/useDataConnectionActions.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 3 files, 188 tests passed. |
+| `npm run test -- --run` | Passed | 94 files, 529 tests passed. |
+| `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
 
 ### Static Gates So Far
 
@@ -983,4 +992,6 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `WorkflowViewer.tsx` no longer defines shell helper functions such as `selectionKey`, `isJsdomRuntime`, `inspectorDrawerTitle`, `textArtifact`, or `truncateLargeLog`.
 - `WorkflowViewer.tsx` no longer imports `workspaceDemoCanvas`, `createEmptyTask`, `nextTaskTitle`, or `DEFAULT_TASK_ID` for task action orchestration.
 - `WorkflowViewer.tsx` no longer defines `createDemo`, `openWorkflow`, `switchTask`, `newTask`, `deleteTask`, `autoLayout`, or `resetCanvas`.
+- `WorkflowViewer.tsx` no longer imports data-edge command helpers such as `createDataEdgeCommand`, `addPortToDataConnectNode`, `renamePortOnDataConnectNode`, `deletePortFromDataConnectNode`, or `uniqueInputPortIdForNode`.
+- `WorkflowViewer.tsx` no longer defines data connection action functions such as `beginDataConnection`, `completeDataConnection`, `completeDataConnectionWithNewInputPort`, `addDataConnectPort`, `renameDataConnectPort`, or `deleteDataConnectPort`.
 - `WorkflowViewer.tsx` no longer ends with local helper definitions; the file now ends at the `WorkflowViewer` component close.

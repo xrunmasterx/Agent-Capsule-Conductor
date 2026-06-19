@@ -102,17 +102,14 @@ import {
   uniqueId,
 } from '../workbench/model/paletteCanvasOps';
 import {
-  addPortToDataConnectNode,
   connectionCandidatesFromPendingEndpoint,
   connectionFromPendingEndpoint,
   controlSlotLimitIssue,
   controlSourceTokenId,
   controlTargetTokenId,
-  createDataEdgeCommand,
   dataConnectEdges,
   dataConnectNodes,
   describeEndpoint,
-  deletePortFromDataConnectNode,
   edgeDiagnosticsForCanvasEdge,
   edgeDiagnosticsForWorkflowEdge,
   findDataConnectNode,
@@ -121,12 +118,10 @@ import {
   isWorkflowOutputBoundaryControlBinding,
   normalizeCanvasEdges,
   portTokenId,
-  renamePortOnDataConnectNode,
   resolveScopedConnection,
   reverseConnection,
   tryCommitResolvedConnection,
   uniqueCanvasEdges,
-  uniqueInputPortIdForNode,
   workflowInputInnerSourceTokenId,
   workflowInputOuterTargetTokenId,
   workflowIdForBoundaryMainBinding,
@@ -149,7 +144,6 @@ import {
 } from '../workbench/model/canvasLayout';
 import {
   deleteSelectionFromCanvas,
-  edgeAddressForScope,
   edgeTouchesNode,
   findCanvasEdgeByAddress,
   isActiveCanvasObjectStatus,
@@ -158,7 +152,6 @@ import {
   normalizeWorkbenchSelection,
   selectionCanBeDeleted,
   selectionEdgeAddress,
-  selectionForEdgeAddress,
   selectionMatchesEdge,
   shouldDisconnectEdgeOnClick,
   type SelectionIntent,
@@ -348,9 +341,6 @@ import {
 import {
   internalNodeFromExecutableWorkflow,
 } from './canvas/canvasMutation';
-import {
-  addInputPortToDataConnectNode,
-} from './canvas/canvasDataDrop';
 import { WorkspaceCanvas } from './canvas/WorkspaceCanvas';
 import {
   applyRunOverlayToCanvas,
@@ -440,6 +430,7 @@ import {
 } from '../hooks/useWorkflowBindings';
 import { useWorkflowPersistence } from '../hooks/useWorkflowPersistence';
 import { useWorkbenchTaskActions } from '../hooks/useWorkbenchTaskActions';
+import { useDataConnectionActions } from '../hooks/useDataConnectionActions';
 
 type Props = {
   workflows: WorkflowSummary[];
@@ -1544,6 +1535,26 @@ export function WorkflowViewer({
     }
   }, [dataConnectionDraft, displayCanvas]);
 
+  const {
+    beginDataConnection,
+    cancelDataConnection,
+    updateDataConnectionMaterialization,
+    completeDataConnection,
+    completeDataConnectionWithNewInputPort,
+    addDataConnectPort,
+    renameDataConnectPort,
+    deleteDataConnectPort,
+  } = useDataConnectionActions({
+    canvas,
+    dataConnectionDraft,
+    setConnectionMode,
+    setDataConnectionDraft,
+    setChrome,
+    setMessage,
+    setSelection,
+    updateCanvasAndGraph,
+  });
+
 
   const startInspectorResize = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -2117,145 +2128,6 @@ export function WorkflowViewer({
     }));
   }
 
-  function beginDataConnection(draft: Exclude<DataConnectionDraft, null>) {
-    setConnectionMode('data');
-    setDataConnectionDraft(draft);
-    setChrome((current) => ({ ...current, rightPanel: 'inspector' }));
-    setMessage(`正在连接: ${draft.sourceNodeLabel}.${draft.sourcePortId} -> 请选择目标输入`);
-  }
-
-  function cancelDataConnection() {
-    setDataConnectionDraft(null);
-    setMessage('已取消 Data Edge 连接');
-  }
-
-  function updateDataConnectionMaterialization(materialization: 'copy' | 'reference') {
-    setDataConnectionDraft((current) => (current ? { ...current, materialization } : current));
-  }
-
-  function completeDataConnection(
-    targetNodeId: string,
-    targetPortId: string,
-    options: { replaceExisting?: boolean } = {},
-  ) {
-    if (!dataConnectionDraft) {
-      setMessage('请先选择一个 output port 作为 Data Edge 来源');
-      return;
-    }
-    try {
-      const result = createDataEdgeCommand(canvas, {
-        ...dataConnectionDraft,
-        targetNodeId,
-        targetPortId,
-        replaceExisting: options.replaceExisting,
-      });
-      updateCanvasAndGraph(result.canvas);
-      setDataConnectionDraft(null);
-      setSelection(selectionForEdgeAddress(edgeAddressForScope(dataConnectionDraft.scopeWorkflowId, result.edge.id)));
-      setChrome((current) => ({ ...current, rightPanel: 'inspector' }));
-      setMessage(
-        `已创建 Data Edge: ${dataConnectionDraft.sourceNodeLabel}.${dataConnectionDraft.sourcePortId} -> ${targetNodeId}.${targetPortId}` +
-          (result.autoAddedControlEdge ? '；已自动补控制依赖' : ''),
-      );
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : '创建 Data Edge 失败');
-    }
-  }
-
-  function completeDataConnectionWithNewInputPort(targetNodeId: string, requestedPortId: string) {
-    if (!dataConnectionDraft) {
-      setMessage('请先选择一个 output port 作为 Data Edge 来源');
-      return;
-    }
-    try {
-      const portId = uniqueInputPortIdForNode(
-        canvas,
-        dataConnectionDraft.scopeWorkflowId,
-        targetNodeId,
-        requestedPortId,
-      );
-      const currentWithPort = addInputPortToDataConnectNode(
-        canvas,
-        dataConnectionDraft.scopeWorkflowId,
-        targetNodeId,
-        portId,
-      );
-      const result = createDataEdgeCommand(currentWithPort, {
-        ...dataConnectionDraft,
-        targetNodeId,
-        targetPortId: portId,
-      });
-      updateCanvasAndGraph(result.canvas);
-      setDataConnectionDraft(null);
-      setSelection(selectionForEdgeAddress(edgeAddressForScope(dataConnectionDraft.scopeWorkflowId, result.edge.id)));
-      setChrome((current) => ({ ...current, rightPanel: 'inspector' }));
-      setMessage(
-        `已创建输入端口 ${targetNodeId}.${portId} 并连接 Data Edge` +
-          (result.autoAddedControlEdge ? '；已自动补控制依赖' : ''),
-      );
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : '创建 Data Edge 失败');
-    }
-  }
-
-  function addDataConnectPort(
-    scopeWorkflowId: string | null,
-    nodeId: string,
-    direction: PortDirection,
-    requestedPortId: string,
-  ) {
-    const normalizedPortId = slugId(requestedPortId || `${direction}_${Date.now()}`);
-    if (!normalizedPortId) {
-      setMessage('端口 id 不能为空');
-      return;
-    }
-    try {
-      updateCanvasAndGraph((current) =>
-        addPortToDataConnectNode(current, scopeWorkflowId, nodeId, direction, normalizedPortId),
-      );
-      setMessage(`已添加 ${direction} port: ${nodeId}.${normalizedPortId}`);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : '添加端口失败');
-    }
-  }
-
-  function renameDataConnectPort(
-    scopeWorkflowId: string | null,
-    nodeId: string,
-    direction: PortDirection,
-    portId: string,
-    requestedPortId: string,
-  ) {
-    const normalizedPortId = slugId(requestedPortId);
-    if (!normalizedPortId) {
-      setMessage('端口 id 不能为空');
-      return;
-    }
-    try {
-      updateCanvasAndGraph((current) =>
-        renamePortOnDataConnectNode(current, scopeWorkflowId, nodeId, direction, portId, normalizedPortId),
-      );
-      setMessage(`已重命名 ${direction} port: ${nodeId}.${portId} -> ${normalizedPortId}`);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : '重命名端口失败');
-    }
-  }
-
-  function deleteDataConnectPort(
-    scopeWorkflowId: string | null,
-    nodeId: string,
-    direction: PortDirection,
-    portId: string,
-  ) {
-    try {
-      updateCanvasAndGraph((current) =>
-        deletePortFromDataConnectNode(current, scopeWorkflowId, nodeId, direction, portId),
-      );
-      setMessage(`已删除 ${direction} port: ${nodeId}.${portId}`);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : '删除端口失败');
-    }
-  }
 
   async function generateAssistantProposal(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
