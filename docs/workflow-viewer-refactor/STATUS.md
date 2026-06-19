@@ -633,3 +633,32 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `components/authoring`, `components/assistant`, `hooks`, and `workbench` no longer import from `WorkflowViewer.tsx`.
 - `WorkflowViewer.tsx` no longer defines local `AssistantDrawer`, `AssistantDockContent`, `AssistantControlRail`, or `AssistantProposalSummary`.
 - `WorkflowViewer.tsx` no longer directly calls assistant/GraphOps API endpoints; assistant session, turn stream, and GraphOps persistence remain hook-owned.
+
+## PLAN_07 ReactFlow Canvas
+
+Status: in progress
+
+### Scope Completed So Far
+
+- Replaced the `web/src/components/canvas/NodeRenderer.tsx` re-export shim with the real `WorkflowContainer`, `AgentToolNode`, stable `nodeTypes`, `FlowNodeLayoutContext`, and ReactFlow node data types.
+- Removed local `WorkflowContainer`, `AgentToolNode`, node-renderer data types, and local `nodeTypes` ownership from `WorkflowViewer.tsx`; `WorkspaceCanvas` now consumes them from `NodeRenderer.tsx`.
+- Kept `WorkspaceCanvas` and ReactFlow connect/drag lifecycle in `WorkflowViewer.tsx` for the next PLAN_07 slice.
+
+### Added/Updated Tests
+
+- Existing `web/src/components/WorkflowViewer.drag.test.tsx` now exercises node renderer through the extracted `NodeRenderer.tsx` implementation.
+
+### Validation So Far
+
+Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `npx tsc --noEmit` | Passed | NodeRenderer extraction compiles. |
+| `npm run test -- --run src/components/WorkflowViewer.drag.test.tsx` | Passed | 1 file, 101 tests passed. |
+
+### Static Gates So Far
+
+- `WorkflowViewer.tsx` no longer defines local `AgentToolNode`, `WorkflowContainer`, or local `nodeTypes`.
+- `web/src/components/canvas/NodeRenderer.tsx` no longer re-exports from `WorkflowViewer.tsx`.
+- `web/src/components/canvas/WorkspaceCanvas.tsx` is still a re-export shim and remains the next PLAN_07 target.
