@@ -293,6 +293,7 @@ import {
   type WorkbenchLiveStreamScope,
   type WorkbenchLiveStreamState,
 } from '../hooks/useWorkbenchLiveStream';
+import { useBoundaryTransferPreview } from '../hooks/useBoundaryTransferPreview';
 import {
   outputSchemaFromArtifactContract,
   paletteItemFromCallable,
@@ -12200,7 +12201,15 @@ function EdgeInspector({
   const targetWorkflow = canvas.workflows.find((workflow) => workflow.id === edge.target.workflowId);
   const boundaryWorkflowId = workflowIdForBoundaryMainBinding(edge);
   const isBoundaryControlEdge = edge.kind === 'control' && Boolean(boundaryWorkflowId);
-  const [boundaryPreview, setBoundaryPreview] = useState<BoundaryTransferPreview | null>(null);
+  const boundaryPreviewSnapshot = useMemo(
+    () => (isBoundaryControlEdge ? boundaryTransferPreviewSnapshot(canvas) : null),
+    [canvas, isBoundaryControlEdge],
+  );
+  const boundaryPreview = useBoundaryTransferPreview({
+    enabled: isBoundaryControlEdge,
+    canvasSnapshot: boundaryPreviewSnapshot,
+    edgeId: edge.id,
+  });
   const diagnostics = edgeDiagnosticsForCanvasEdge(canvas, scopeWorkflowId, edge);
   const targetNodeExists =
     edge.kind === 'data' &&
@@ -12211,45 +12220,6 @@ function EdgeInspector({
   const transferMode = controlEdgeMainTransferMode(canvas, scopeWorkflowId, edge);
   const boundaryLabel = boundaryMainBindingLabel(edge);
   const conflictMessage = boundaryInputMainConflictMessage(canvas, scopeWorkflowId, edge);
-  useEffect(() => {
-    if (!isBoundaryControlEdge) {
-      setBoundaryPreview(null);
-      return;
-    }
-    let cancelled = false;
-    setBoundaryPreview({
-      status: 'loading',
-      bindings: {
-        workflow_input_bindings: [],
-        workflow_output_bindings: [],
-      },
-      diagnostics: [],
-      canonical_preview: {
-        workbench_projection: 'boundary_control_port_binding',
-        runtime_control_edge: false,
-        preview_source: 'server',
-        status: 'loading',
-      },
-    });
-    void api
-      .boundaryTransferPreview({
-        canvas_snapshot: boundaryTransferPreviewSnapshot(canvas),
-        edge_id: edge.id,
-      })
-      .then((preview) => {
-        if (!cancelled) {
-          setBoundaryPreview(preview);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setBoundaryPreview(unavailableBoundaryTransferPreview());
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [canvas, edge.id, isBoundaryControlEdge]);
   if (tab === 'raw') {
     return <CodeBlock title="edge.json" content={JSON.stringify(edge, null, 2)} variant="json" />;
   }
