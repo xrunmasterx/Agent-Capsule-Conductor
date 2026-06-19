@@ -761,10 +761,13 @@ Status: in progress
 - Moved `nodeRunHasWorkflowInputBinding(...)` and `nodeLogDeltaKeys(...)` into `web/src/workbench/model/selectedNodeModel.ts`.
 - Moved `filterLiveEvents(...)` into `web/src/hooks/useWorkbenchLiveStream.ts`, next to the live-event bounding and node-run live-state helpers.
 - `web/src/components/WorkflowViewer.tsx` is now 226,439 bytes / 6,010 lines after removing the compatibility export barrel and demo fixture.
+- Added `web/src/workbench/model/workflowRuntimeProjection.ts` as the pure owner for reusable workflow-class projection, run-summary/state-snapshot projection, node-run projection keys, legacy workflow graph adaptation, graph normalization, and single-node graph construction.
+- `web/src/components/WorkflowViewer.tsx` is now 214,959 bytes / 5,834 lines after moving runtime graph/run projection helpers.
 
 ### Added/Updated Tests
 
 - Extended `web/src/workbench/model/selectedNodeModel.test.ts` with `nodeLogDeltaKeys(...)` normalization and de-duplication coverage.
+- Added `web/src/workbench/model/workflowRuntimeProjection.test.ts` for stateless workflow-class projection, legacy workflow conversion, run projection, single-node graph creation, and node-run projection keys.
 - Existing `web/src/App.test.tsx` and `web/src/components/WorkflowViewer.drag.test.tsx` now validate against the real owner imports instead of `WorkflowViewer.tsx` compatibility exports.
 
 ### Validation So Far
@@ -775,7 +778,8 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | --- | --- | --- |
 | `npx tsc --noEmit` | Passed | Helper-owner migration compiles. |
 | `npm run test -- --run src/App.test.tsx src/components/WorkflowViewer.drag.test.tsx src/workbench/model/selectedNodeModel.test.ts` | Passed | 3 files, 192 tests passed. |
-| `npm run test -- --run` | Passed | 67 files, 442 tests passed. |
+| `npm run test -- --run src/workbench/model/workflowRuntimeProjection.test.ts src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 3 files, 187 tests passed. |
+| `npm run test -- --run` | Passed | 68 files, 446 tests passed. |
 | `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
 
 ### Static Gates So Far
@@ -784,3 +788,4 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `web/src/App.test.tsx` and `web/src/components/WorkflowViewer.drag.test.tsx` no longer import test helpers from `WorkflowViewer.tsx`.
 - `components/assistant`, `components/authoring`, `components/canvas`, `components/inspector`, `hooks`, `stores`, and `workbench` do not import from `WorkflowViewer.tsx`.
 - `workspaceDemoCanvas()` no longer lives in `WorkflowViewer.tsx`.
+- `WorkflowViewer.tsx` no longer defines `reusableWorkflowClassGraph`, `workflowRunFromRunSummary`, `workflowRunFromRunStateSnapshot`, `nodeRunProjectionKey`, `normalizeWorkflowGraph`, `graphFromLegacyWorkflow`, `singleNodeWorkflowGraph`, or `findCallableId`.

@@ -52,8 +52,6 @@ import type {
   WorkflowDetail,
   WorkflowGraph,
   WorkflowGraphEdge,
-  WorkflowGraphNode,
-  WorkflowPort,
   WorkflowRunResult,
   WorkflowSummary,
 } from '../types';
@@ -310,7 +308,6 @@ import {
   internalNodeInputPorts,
   internalNodeInvocationPreview,
   internalNodeOutputPorts,
-  internalNodeToGraphNode,
   internalWorkflowToGraph,
   isInlineWorkflowContainer,
   port,
@@ -318,6 +315,15 @@ import {
   workflowOutputPorts,
   workflowOutputPortsReadonly,
 } from '../workbench/model/workflowGraphProjection';
+import {
+  graphFromLegacyWorkflow,
+  nodeRunProjectionKey,
+  normalizeWorkflowGraph,
+  reusableWorkflowClassGraph,
+  singleNodeWorkflowGraph,
+  workflowRunFromRunStateSnapshot,
+  workflowRunFromRunSummary,
+} from '../workbench/model/workflowRuntimeProjection';
 import {
   type EdgeAddress,
 } from './workflow-viewer/workflowConnectionState';
@@ -5612,66 +5618,8 @@ function EventTimeline({ events, title }: { events: RunEvent[]; title: string })
     </section>
   );
 }
-function reusableWorkflowClassGraph(graph: WorkflowGraph): WorkflowGraph {
-  const metadata = omitEmptyRecord(
-    omitKeys(
-      {
-        canonical_format: 'accflow',
-        ...(graph.metadata || {}),
-      },
-      ['binding_ref'],
-    ),
-  );
-  return {
-    ...graph,
-    nodes: graph.nodes.map(reusableWorkflowClassNode),
-    workspace_policy: {
-      ...(graph.workspace_policy || {}),
-      save_mode: 'stateless_template',
-      default_state_mode: 'stateless',
-    },
-    metadata,
-  };
-}
-
-function reusableWorkflowClassNode(node: WorkflowGraphNode): WorkflowGraphNode {
-  const ui = node.ui
-    ? omitEmptyRecord(sanitizeWorkflowClassNodeUi(omitKeys(node.ui, ['binding_ref'])))
-    : undefined;
-  const nextNode: WorkflowGraphNode = {
-    ...node,
-    cwd_policy: 'inherit_environment',
-    relative_cwd: undefined,
-    ui,
-  };
-  if (!nextNode.ui) {
-    delete nextNode.ui;
-  }
-  delete nextNode.relative_cwd;
-  return nextNode;
-}
-
-function sanitizeWorkflowClassNodeUi(ui: Record<string, unknown>): Record<string, unknown> {
-  const nextUi = { ...ui };
-  if (Array.isArray(nextUi.internal_nodes)) {
-    nextUi.internal_nodes = nextUi.internal_nodes.map((node) =>
-      isRecord(node) ? omitKeys(node, ['status', 'runId', 'sessionId', 'event_log', 'output_path']) : node,
-    );
-  }
-  return nextUi;
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function omitKeys<T extends Record<string, unknown>>(record: T, keys: string[]): Record<string, unknown> {
-  const blocked = new Set(keys);
-  return Object.fromEntries(Object.entries(record).filter(([key]) => !blocked.has(key)));
-}
-
-function omitEmptyRecord<T extends Record<string, unknown>>(record: T): T | undefined {
-  return Object.keys(record).length ? record : undefined;
 }
 
 async function loadWorkbenchTaskFromBackend(
@@ -5777,124 +5725,6 @@ function saveTaskStore(payload: WorkbenchTaskStorePayload): void {
     return;
   }
   window.localStorage.setItem(TASK_STORE_KEY, JSON.stringify(payload));
-}
-
-function workflowRunFromRunSummary(summary: RunSummary, graph: WorkflowGraph): WorkflowRunResult {
-  return {
-    workflow_id: summary.workflow_id || graph.id,
-    status: summary.status,
-    run_dir: summary.run_dir,
-    started_at: summary.started_at || undefined,
-    ended_at: summary.ended_at || undefined,
-    nodes: summary.nodes,
-    edges: graph.edges,
-    errors: [],
-  };
-}
-
-function workflowRunFromRunStateSnapshot(snapshot: WorkflowRunResult, graph: WorkflowGraph): WorkflowRunResult {
-  return {
-    ...snapshot,
-    workflow_id: snapshot.workflow_id || graph.id,
-    run_dir: snapshot.run_dir,
-    nodes: snapshot.nodes || [],
-    edges: graph.edges,
-    errors: snapshot.errors || [],
-  };
-}
-
-function nodeRunProjectionKey(node: NodeRunSummary): string {
-  if (node.ui_node_id) {
-    return node.ui_node_id;
-  }
-  if (node.parent_node_id) {
-    return internalFlowNodeId(node.parent_node_id, node.node_id);
-  }
-  return node.node_id;
-}
-
-
-function normalizeWorkflowGraph(graph: WorkflowGraph): WorkflowGraph {
-  const controlEdges = graph.control_edges || graph.edges || [];
-  const dataEdges = graph.data_edges || [];
-  return {
-    ...graph,
-    edges: controlEdges,
-    control_edges: controlEdges,
-    data_edges: dataEdges,
-  };
-}
-
-function graphFromLegacyWorkflow(workflow: WorkflowDetail): WorkflowGraph {
-  if (workflow.graph) {
-    return workflow.graph;
-  }
-  const tasks = workflow.workflow.tasks || [];
-  return {
-    id: workflow.workflow_id,
-    version: workflow.workflow.version || '0.2.0',
-    name: workflow.workflow.name || workflow.workflow_id,
-    description: workflow.workflow.description,
-    nodes: tasks.map((task, index) => ({
-      id: task.name,
-      callable_ref: {
-        kind: 'agent_class',
-        id: findCallableId(task.command) || 'fake-agent.generic',
-      },
-      kind: 'agent_session',
-      label: task.name,
-      input: { topic: task.name },
-      input_mapping: {},
-      position: { x: index * 500, y: 220 },
-    })),
-    edges: tasks.flatMap((task) =>
-      (task.depends_on || []).map((dependency) => ({
-        id: `edge_${dependency}_${task.name}`,
-        from: dependency,
-        to: task.name,
-        label: '依赖',
-        mapping: {},
-        condition: null,
-      })),
-    ),
-    metadata: { source: 'legacy-yaml' },
-  };
-}
-
-function singleNodeWorkflowGraph(node: InternalNodeView, ownerId: string): WorkflowGraph {
-  return {
-    id: `${ownerId}_${node.id}_single_node`,
-    version: '0.4.0',
-    name: `${node.name} single node run`,
-    description: 'Single-node graph generated by ACC Workbench.',
-    nodes: [internalNodeToGraphNode(stripRuntimeStateFromNode(node))],
-    edges: [],
-    control_edges: [],
-    data_edges: [],
-    workspace_policy: {
-      save_mode: 'local_binding',
-      default_state_mode: 'stateful',
-    },
-    policy: { failure_mode: 'fail_fast', max_concurrency: 1 },
-    metadata: {
-      layout: 'single-node-run',
-      parent_workflow_id: ownerId,
-    },
-  };
-}
-
-function stripRuntimeStateFromNode(node: InternalNodeView): InternalNodeView {
-  return { ...node, status: 'not_run' };
-}
-
-function portViewToGraphPort(portView: WorkflowPortView): WorkflowPort {
-  return {
-    id: portView.id,
-    direction: portView.direction,
-    required: portView.required,
-    cardinality: portView.cardinality || 'one',
-    artifact_types: portView.artifactTypes || ['artifact'],
-  };
 }
 
 function uniqueEdgeId(
@@ -6322,13 +6152,3 @@ function truncateLargeLog(content: ArtifactContent): ArtifactContent {
     ].join('\n'),
   };
 }
-
-function findCallableId(command: unknown): string {
-  if (!Array.isArray(command)) {
-    return '';
-  }
-  const runIndex = command.lastIndexOf('run');
-  const candidate = command[runIndex + 1];
-  return typeof candidate === 'string' && candidate.includes('.') ? candidate : '';
-}
-
