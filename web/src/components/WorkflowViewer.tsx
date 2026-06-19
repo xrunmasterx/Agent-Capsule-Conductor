@@ -189,6 +189,10 @@ import {
   workflowInvocationLabel,
 } from '../workbench/model/selectionModel';
 import {
+  authoringSelectionLabel,
+  workbenchViewProjection,
+} from '../workbench/model/workbenchViewProjection';
+import {
   bindingDirectory,
   boundaryInputMainConflictMessage,
   boundaryMainBindingLabel,
@@ -476,15 +480,6 @@ type ResourceTemplate =
   | { kind: 'workflow_class'; workflowId: string; path: string; name: string }
   | { kind: 'agent_class'; callableId: string; name: string }
   | { kind: 'tool_class'; callableId: string; name: string };
-
-type WorkbenchViewProjection = {
-  blueprintActive: boolean;
-  rightPanelVisible: boolean;
-  resourceDetailOpen: boolean;
-  inspectorOpen: boolean;
-  assistantOpen: boolean;
-  detailsOpen: boolean;
-};
 
 function trimLiveLog(value: string): string {
   const lines = value.split(/\r?\n/);
@@ -3022,57 +3017,6 @@ export function WorkflowViewer({
       ) : null}
     </WorkbenchShell>
   );
-}
-
-function workbenchViewProjection({
-  taskWorkspaceView,
-  chrome,
-  bottomDockMode,
-  evidenceDockOpen,
-}: {
-  taskWorkspaceView: TaskWorkspaceView;
-  chrome: WorkbenchChromeState;
-  bottomDockMode: BottomDockMode;
-  evidenceDockOpen: boolean;
-}): WorkbenchViewProjection {
-  const blueprintActive = taskWorkspaceView === 'blueprint';
-  return {
-    blueprintActive,
-    rightPanelVisible: blueprintActive && chrome.rightPanel !== 'none' && chrome.rightPanel !== 'assistant',
-    resourceDetailOpen: blueprintActive && chrome.rightPanel === 'resourceDetail',
-    inspectorOpen: blueprintActive && chrome.rightPanel === 'inspector',
-    assistantOpen: blueprintActive && bottomDockMode === 'assistant' && evidenceDockOpen,
-    detailsOpen: blueprintActive && bottomDockMode === 'evidence' && evidenceDockOpen,
-  };
-}
-
-
-
-
-
-
-
-
-function authoringSelectionLabel(
-  selection: CanvasSelection,
-  selectedWorkflow?: WorkflowContainerModel,
-  selectedInternalNode?: InternalNodeView,
-): string {
-  if (selection.type === 'workflow' && selectedWorkflow) {
-    return isExecutableNodeWorkflow(selectedWorkflow)
-      ? `节点: ${workflowInvocationLabel(selectedWorkflow)}`
-      : `Workflow: ${workflowInvocationLabel(selectedWorkflow)}`;
-  }
-  if (selection.type === 'internal' && selectedWorkflow && selectedInternalNode) {
-    return `内部节点: ${workflowInvocationLabel(selectedWorkflow)} / ${internalInvocationLabel(selectedInternalNode)}`;
-  }
-  if (selection.type === 'edge') {
-    return `连线: ${selection.scopeWorkflowId || 'root'} / ${selection.id}`;
-  }
-  if (selection.type === 'port') {
-    return `端口: ${selection.workflowId}.${selection.portId}`;
-  }
-  return '当前任务画布';
 }
 
 function SelectedNodeRuntimePane({ model }: { model: SelectedEntityDetailsModel }) {
