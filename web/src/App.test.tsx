@@ -10,16 +10,15 @@ import {
   assistantDisplayStatus,
   buildAssistantTranscriptItems,
   boundedLiveEvents,
-  canvasToWorkflowGraph,
   controlEdgeMainTransferMode,
   filterLiveEvents,
-  graphToWorkspaceCanvas,
   liveStateForNodeRun,
   nodeLiveLogsFor,
   nodeLogDeltaKeys,
   nodeRunForInternalNode,
   workspaceDemoCanvas,
 } from './components/WorkflowViewer';
+import { graphToWorkspaceCanvas } from './workbench/model/canvasProjection';
 import {
   addPortToDataConnectNode,
   createDataEdgeCommand,
@@ -44,6 +43,7 @@ import {
   staticInputFromInvocationInput,
   workflowInvocationLabel,
 } from './workbench/model/selectionModel';
+import { canvasToWorkflowGraph } from './workbench/model/workflowGraphProjection';
 
 // Alias object so that existing `helpers.xxx` test patterns keep working.
 const helpers: Record<string, any> = {
