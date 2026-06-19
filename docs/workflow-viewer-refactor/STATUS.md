@@ -226,7 +226,9 @@ Status: in progress
 - Preserved GraphOps/proposal ownership in `WorkflowViewer.tsx` and later PLAN_06. `useAssistantSession` is callback-driven so it does not take ownership of global assistant proposal state.
 - Added `web/src/hooks/useArtifactContentCache.ts` as the owner for artifact cache state, run evidence priority reads, artifact fallback reads, load failure cleanup, and same-path in-flight request de-dupe.
 - Replaced the local artifact cache `useState`, local `ensureArtifactContent(...)`, and local `readEvidenceContent(...)` helper in `WorkflowViewer.tsx` with `useArtifactContentCache(...)`; the component keeps evidence dock presentation.
-- `web/src/components/WorkflowViewer.tsx` is now 583,044 bytes / 16,140 lines after the latest slice.
+- Added `web/src/hooks/useWorkflowBindings.ts` as the owner for workflow binding loading, unbound fallback projection, save/validate/open/select API actions, binding ref normalization, and local binding state updates.
+- Replaced the local workflow binding state/effect/action functions and local binding normalization helpers in `WorkflowViewer.tsx` with `useWorkflowBindings(...)`; the component keeps only canvas metadata and notice callbacks.
+- `web/src/components/WorkflowViewer.tsx` is now 564,501 bytes / 16,047 lines after the latest slice.
 
 ### Added Tests
 
@@ -239,6 +241,7 @@ Status: in progress
 - `web/src/hooks/useSelectedAgentSession.test.tsx`
 - `web/src/hooks/useAssistantSession.test.tsx`
 - `web/src/hooks/useArtifactContentCache.test.tsx`
+- `web/src/hooks/useWorkflowBindings.test.tsx`
 - Extended `web/src/hooks/streamTypes.test.ts`
 
 ### Validation So Far
@@ -290,6 +293,11 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npm run test -- --run src/App.test.tsx src/components/WorkflowViewer.drag.test.tsx` | Passed | 2 files, 183 tests passed. |
 | `npm run test -- --run` | Passed | 29 files, 306 tests passed. |
 | `npm run build` | Passed | Same expected chunk-size warning remains. |
+| `npm run test -- --run src/hooks/useWorkflowBindings.test.tsx` | Passed | 1 file, 6 tests passed. |
+| `npx tsc --noEmit` | Passed | Workflow binding hook wiring compiles. |
+| `npm run test -- --run src/App.test.tsx src/components/WorkflowViewer.drag.test.tsx` | Passed | 2 files, 183 tests passed. |
+| `npm run test -- --run` | Passed | 30 files, 312 tests passed. |
+| `npm run build` | Passed | Same expected chunk-size warning remains. |
 
 ### Static Gates So Far
 
@@ -308,4 +316,6 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `useAssistantSession.test.tsx` covers existing-session reuse, default authoring agent selection, explicit agent preservation, message projection, busy cleanup, and create-error reporting.
 - `WorkflowViewer.tsx` no longer owns artifact cache state, run-evidence artifact fallback reads, or same-path artifact request de-dupe; this ownership lives in `useArtifactContentCache`.
 - `useArtifactContentCache.test.tsx` covers run evidence priority, artifact fallback, normalized cache writes, same-path in-flight de-dupe, failure cleanup, and retry eligibility.
-- `WorkflowViewer.tsx` still has direct `api.*`, `runnerApi.*`, and timer usage for run submit, submit-time boundary preview, binding actions, selected-agent action APIs, GraphOps/publish actions, and UI-only defer timers. These are remaining PLAN_03 or later PLAN_06 slices.
+- `WorkflowViewer.tsx` no longer owns workflow binding load effects, save/validate/open/select actions, unbound fallback projection, or binding path/ref normalization; this ownership lives in `useWorkflowBindings`.
+- `useWorkflowBindings.test.tsx` covers legacy/camel-case normalization, unique binding load with unbound fallback, stable-id no-reload behavior, save state/callback updates, validate/open/select actions, and runner binding ref normalization.
+- `WorkflowViewer.tsx` still has direct `api.*`, `runnerApi.*`, and timer usage for run submit, submit-time boundary preview, selected-agent action APIs, GraphOps/publish actions, task create/delete, opened workflow loading, run restoration, and UI-only defer timers. These are remaining PLAN_03 or later PLAN_06 slices.

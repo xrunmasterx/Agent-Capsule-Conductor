@@ -382,6 +382,11 @@ import { useRunStream } from '../hooks/useRunStream';
 import { useSelectedAgentSession, type AgentSessionUiState } from '../hooks/useSelectedAgentSession';
 import { useTaskPersistence } from '../hooks/useTaskPersistence';
 import { useWorkbenchBootstrap } from '../hooks/useWorkbenchBootstrap';
+import {
+  bindingPathOf,
+  bindingRefOfPath,
+  useWorkflowBindings,
+} from '../hooks/useWorkflowBindings';
 
 type Props = {
   workflows: WorkflowSummary[];
@@ -2085,7 +2090,6 @@ export function WorkflowViewer({
     workflowsRef.current = workflows;
   }, [workflows]);
   const [selectedResource, setSelectedResource] = useState<ResourceTemplate | null>(null);
-  const [workflowBindings, setWorkflowBindings] = useState<Record<string, WorkflowBindingView>>({});
   const [bindingEditorWorkflowId, setBindingEditorWorkflowId] = useState<string | null>(null);
   const [evidenceDock, setEvidenceDock] = useState<EvidenceDockState>({
     open: false,
@@ -2140,11 +2144,6 @@ export function WorkflowViewer({
   const inspectorOpen = viewProjection.inspectorOpen;
   const assistantOpen = viewProjection.assistantOpen;
   const inspectorWidth = chrome.inspectorWidth;
-  const workflowBindingKey = useMemo(
-    () => [canvas.id, ...canvas.workflows.map((item) => item.id)].sort().join('|'),
-    [canvas.id, canvas.workflows],
-  );
-
   function closeEvidenceDock() {
     setEvidenceDock({ open: false, title: '运行证据', content: null });
   }
@@ -2365,6 +2364,43 @@ export function WorkflowViewer({
     });
   }, [activeTaskId]);
 
+  const workflowBindingIds = useMemo(
+    () => [canvas.id, ...canvas.workflows.map((item) => item.id)],
+    [canvas.id, canvas.workflows],
+  );
+  const handleWorkflowBindingSaved = useCallback(
+    (workflowId: string, normalized: WorkflowBindingView) => {
+      updateCanvas((current) => ({
+        ...current,
+        workflows: current.workflows.map((workflow) =>
+          workflow.id === workflowId
+            ? {
+                ...workflow,
+                bindingPath: bindingPathOf(normalized),
+                directory: workspaceRootOf(normalized),
+              }
+            : workflow,
+        ),
+      }));
+      setMessage(`已保存 ${workflowId} workspace binding`);
+    },
+    [updateCanvas],
+  );
+  const handleWorkflowBindingFolderOpened = useCallback((workflowId: string) => {
+    setMessage(`已打开 ${workflowId} 的 bindings 目录`);
+  }, []);
+  const {
+    workflowBindings,
+    saveBinding,
+    validateBinding,
+    openBindingsFolder,
+    selectBindingDirectory,
+  } = useWorkflowBindings({
+    workflowIds: workflowBindingIds,
+    onSaved: handleWorkflowBindingSaved,
+    onOpenedFolder: handleWorkflowBindingFolderOpened,
+  });
+
   function resetCanvas(nextCanvas: WorkspaceCanvasModel) {
     const normalizedCanvas = normalizeCanvasEdges(nextCanvas);
     const nextGraph = canvasToWorkflowGraph(normalizedCanvas);
@@ -2493,39 +2529,6 @@ export function WorkflowViewer({
       ignore = true;
     };
   }, [currentTask?.activeRunId, currentTask?.latestRunId, currentTask?.taskId, runsById]);
-
-  useEffect(() => {
-    let ignore = false;
-    const workflowIds = Array.from(new Set([canvas.id, ...canvas.workflows.map((item) => item.id)]));
-    Promise.all(
-      workflowIds.map((workflowId) =>
-        api
-          .workflowBinding(workflowId)
-          .then((binding) => [workflowId, normalizeBinding(binding, workflowId)] as const)
-          .catch(
-            () =>
-              [
-                workflowId,
-                {
-                  workflowId,
-                  bindingPath: `bindings/${workflowId}.binding.local.json`,
-                  workspaceRoot: null,
-                  exists: false,
-                  status: 'unbound',
-                },
-              ] as const,
-          ),
-      ),
-    ).then((entries) => {
-      if (ignore) {
-        return;
-      }
-      setWorkflowBindings(Object.fromEntries(entries));
-    });
-    return () => {
-      ignore = true;
-    };
-  }, [workflowBindingKey]);
 
   useEffect(() => {
     if (!openedExternalWorkflow || !selectedWorkflowId) {
@@ -3443,39 +3446,6 @@ export function WorkflowViewer({
         createdAt: new Date().toISOString(),
       },
     });
-  }
-
-  async function saveBinding(workflowId: string, workspaceRoot: string) {
-    const result = await api.saveWorkflowBinding(workflowId, workspaceRoot);
-    const normalized = normalizeBinding(result, workflowId);
-    setWorkflowBindings((current) => ({ ...current, [workflowId]: normalized }));
-    updateCanvas((current) => ({
-      ...current,
-      workflows: current.workflows.map((workflow) =>
-        workflow.id === workflowId
-          ? { ...workflow, bindingPath: bindingPathOf(normalized), directory: workspaceRootOf(normalized) }
-          : workflow,
-      ),
-    }));
-    setMessage(`已保存 ${workflowId} workspace binding`);
-    return normalized;
-  }
-
-  async function validateBinding(workflowId: string, workspaceRoot: string) {
-    const result = await api.validateWorkflowBinding(workflowId, workspaceRoot);
-    return normalizeBinding(result, workflowId);
-  }
-
-  async function openBindingsFolder(workflowId: string) {
-    await api.openWorkflowBindingFolder(workflowId);
-    setMessage(`已打开 ${workflowId} 的 bindings 目录`);
-  }
-
-  async function selectBindingDirectory(
-    workflowId: string,
-    initialDir: string,
-  ): Promise<WorkflowDirectorySelection> {
-    return api.selectWorkflowBindingDirectory(workflowId, { initialDir });
   }
 
   function updateWorkflowInvocationInput(workflowId: string, input: Record<string, unknown>) {
@@ -14889,43 +14859,6 @@ function nodeRunDetailCacheKey(runId: string, nodeRun: NodeRunSummary): string {
     .filter(Boolean)
     .join('|');
 }
-
-function normalizeBinding(
-  binding: WorkflowBindingView | null | undefined,
-  workflowId: string,
-): WorkflowBindingView {
-  return {
-    workflow_id: binding?.workflow_id || binding?.workflowId || workflowId,
-    workflowId: binding?.workflowId || binding?.workflow_id || workflowId,
-    binding_path:
-      binding?.binding_path || binding?.bindingPath || `bindings/${workflowId}.binding.local.json`,
-    bindingPath:
-      binding?.bindingPath || binding?.binding_path || `bindings/${workflowId}.binding.local.json`,
-    workspace_root: binding?.workspace_root ?? binding?.workspaceRoot ?? null,
-    workspaceRoot: binding?.workspaceRoot ?? binding?.workspace_root ?? null,
-    exists: Boolean(binding?.exists),
-    status: binding?.status || 'unbound',
-    valid: binding?.valid,
-    error: binding?.error ?? null,
-  };
-}
-
-
-function bindingPathOf(binding: WorkflowBindingView | null | undefined): string {
-  return binding?.bindingPath || binding?.binding_path || '';
-}
-
-function bindingRefOfPath(bindingPath: string): string {
-  const normalized = bindingPath.replace(/\\/g, '/');
-  if (normalized.startsWith('binding:')) {
-    return normalized;
-  }
-  if (normalized.startsWith('bindings/')) {
-    return `binding:${normalized.slice('bindings/'.length)}`;
-  }
-  return `binding:${normalized}`;
-}
-
 
 function edgeConnectsRemainingNodes(edge: WorkflowCanvasEdge, remainingIds: Set<string>): boolean {
   return (
