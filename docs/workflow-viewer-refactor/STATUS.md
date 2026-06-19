@@ -849,6 +849,9 @@ Status: in progress
 - Added `web/src/hooks/useWorkflowSaveValidationActions.ts` as the owner for save workflow, confirm save dialog behavior, workflow validation, boundary-transfer validation guards, temporary-resource blocker evidence, and boundary preview snapshot construction.
 - Removed local save/validate/temporary-resource guard functions from `WorkflowViewer.tsx`; run submit now reuses the extracted guard callbacks.
 - `web/src/components/WorkflowViewer.tsx` is now 88,516 bytes / 2,376 lines after moving workflow save and validation actions.
+- Added `web/src/hooks/useSelectedAgentTurnActions.ts` as the owner for selected node agent turn submission, output publishing, pending interaction answers, provider-session guard propagation, and post-action refreshes.
+- Removed local selected-agent turn action functions from `WorkflowViewer.tsx`.
+- `web/src/components/WorkflowViewer.tsx` is now 87,494 bytes / 2,354 lines after moving selected agent turn actions.
 
 ### Added/Updated Tests
 
@@ -888,6 +891,7 @@ Status: in progress
 - Added `web/src/hooks/useEvidenceDockActions.test.tsx` for close-state reset, missing-path no-op reads, artifact owner metadata, and large-log truncation coverage.
 - Added `web/src/hooks/useWorkflowRunSubmitActions.test.tsx` for runner submit options, queued projection initialization, terminal polling snapshots, boundary-transfer validation failure, and temporary callable blocking.
 - Added `web/src/hooks/useWorkflowSaveValidationActions.test.tsx` for save graph options, dialog validation, validation-error evidence, and boundary preview snapshot projection.
+- Added `web/src/hooks/useSelectedAgentTurnActions.test.tsx` for selected agent turn submit, output publish, pending interaction answers, and missing-session/run error guards.
 - Existing `web/src/App.test.tsx` and `web/src/components/WorkflowViewer.drag.test.tsx` now validate against the real owner imports instead of `WorkflowViewer.tsx` compatibility exports.
 
 ### Validation So Far
@@ -991,6 +995,10 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npm run test -- --run src/hooks/useWorkflowSaveValidationActions.test.tsx src/hooks/useWorkflowRunSubmitActions.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 4 files, 191 tests passed. |
 | `npm run test -- --run` | Passed | 99 files, 548 tests passed. |
 | `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
+| `npx tsc --noEmit` | Passed | Selected agent turn action hook extraction compiles. |
+| `npm run test -- --run src/hooks/useSelectedAgentTurnActions.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 3 files, 187 tests passed. |
+| `npm run test -- --run` | Passed | 100 files, 552 tests passed. |
+| `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
 
 ### Static Gates So Far
 
@@ -1041,4 +1049,5 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `WorkflowViewer.tsx` no longer defines `readEvidence(...)` or `closeEvidenceDock(...)`; evidence dock action ownership moved to `useEvidenceDockActions(...)`.
 - `WorkflowViewer.tsx` no longer defines `runWorkflowGraph(...)`; runner submit, queued projection, polling snapshot merge, and run-error evidence ownership moved to `useWorkflowRunSubmitActions(...)`.
 - `WorkflowViewer.tsx` no longer defines `requestSaveWorkflow(...)`, `confirmSaveWorkflow(...)`, `saveGraph(...)`, `validateGraph(...)`, `currentTemporaryResourceIssue(...)`, `ensureBoundaryTransfersValid(...)`, or `reportTemporaryResourceIssue(...)`.
+- `WorkflowViewer.tsx` no longer defines `submitSelectedAgentTurn(...)`, `publishSelectedAgentOutput(...)`, or `answerSelectedAgentInteraction(...)`.
 - `WorkflowViewer.tsx` no longer ends with local helper definitions; the file now ends at the `WorkflowViewer` component close.

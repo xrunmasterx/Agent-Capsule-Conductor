@@ -383,6 +383,7 @@ import { useRunRestorationLoader } from '../hooks/useRunRestorationLoader';
 import { useRunRefreshLoader } from '../hooks/useRunRefreshLoader';
 import { useRunnerSubmit } from '../hooks/useRunnerSubmit';
 import { useSelectedAgentActions } from '../hooks/useSelectedAgentActions';
+import { useSelectedAgentTurnActions } from '../hooks/useSelectedAgentTurnActions';
 import { useSubmittedRunPolling } from '../hooks/useSubmittedRunPolling';
 import {
   loadTaskStore,
@@ -1341,6 +1342,23 @@ export function WorkflowViewer({
     },
     [loadRunRefresh, runsById],
   );
+  const {
+    submitSelectedAgentTurn,
+    publishSelectedAgentOutput,
+    answerSelectedAgentInteraction,
+  } = useSelectedAgentTurnActions({
+    agentSessionState,
+    selectedAgentSessionContext,
+    selectedRunId,
+    submitSelectedAgentTurnRequest,
+    publishSelectedAgentOutputRequest,
+    answerSelectedAgentInteractionRequest,
+    setAgentSessionPendingTurn,
+    setMessage,
+    refreshAgentSession,
+    refreshRunProjection,
+    onChanged,
+  });
 
   const normalizedSelection = useMemo(
     () => normalizeWorkbenchSelection(displayCanvas, selection, focusedWorkflowId),
@@ -1980,45 +1998,6 @@ export function WorkflowViewer({
       ...current,
       { id: authoringId('assistant_msg'), role: 'system', content: '已丢弃当前 proposal。' },
     ]);
-  }
-
-  async function submitSelectedAgentTurn(messageText: string, reason: 'node_chat' | 'output_revision') {
-    const session = agentSessionState.session;
-    if (!session) {
-      throw new Error('当前节点还没有可用的 Agent Session');
-    }
-    const turn = await submitSelectedAgentTurnRequest(session.session_id, {
-      message: messageText,
-      reason,
-      expected_provider_session_id:
-        typeof session.provider_session_id === 'string' ? session.provider_session_id : undefined,
-    });
-    setAgentSessionPendingTurn(turn);
-    setMessage(`Agent turn ${turn.turn_id}: ${turn.status || 'queued'}`);
-    await refreshAgentSession();
-  }
-
-  async function publishSelectedAgentOutput(expectedTurnId: string) {
-    const session = agentSessionState.session;
-    if (!session) {
-      throw new Error('当前节点还没有可用的 Agent Session');
-    }
-    await publishSelectedAgentOutputRequest(session.session_id, expectedTurnId);
-    if (selectedRunId) {
-      await refreshRunProjection(selectedRunId);
-    }
-    await refreshAgentSession();
-    setMessage(`已发布 ${expectedTurnId} 为当前节点 output.json`);
-    onChanged?.();
-  }
-
-  async function answerSelectedAgentInteraction(interactionId: string, answer: Record<string, unknown>) {
-    const runId = selectedAgentSessionContext?.runId;
-    if (!runId) {
-      throw new Error('当前节点没有绑定 run，无法处理审批');
-    }
-    await answerSelectedAgentInteractionRequest(runId, interactionId, answer);
-    await refreshAgentSession();
   }
 
   function openCallableResourceFromNode(callableId: string, name: string, kind: 'agent_class' | 'tool_class') {
