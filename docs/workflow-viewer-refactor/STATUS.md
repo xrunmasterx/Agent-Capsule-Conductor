@@ -224,7 +224,9 @@ Status: in progress
 - Added `web/src/hooks/useAssistantSession.ts` as the owner for assistant authoring-agent discovery, session creation/reuse, initial session message loading, session status transitions, busy cleanup, and creation error reporting.
 - Replaced the local `ensureAssistantSession(...)` backend API logic in `WorkflowViewer.tsx` with `useAssistantSession(...)`; the component retains only the snapshot-to-payload wrapper.
 - Preserved GraphOps/proposal ownership in `WorkflowViewer.tsx` and later PLAN_06. `useAssistantSession` is callback-driven so it does not take ownership of global assistant proposal state.
-- `web/src/components/WorkflowViewer.tsx` is now 583,757 bytes / 16,164 lines after the latest slice.
+- Added `web/src/hooks/useArtifactContentCache.ts` as the owner for artifact cache state, run evidence priority reads, artifact fallback reads, load failure cleanup, and same-path in-flight request de-dupe.
+- Replaced the local artifact cache `useState`, local `ensureArtifactContent(...)`, and local `readEvidenceContent(...)` helper in `WorkflowViewer.tsx` with `useArtifactContentCache(...)`; the component keeps evidence dock presentation.
+- `web/src/components/WorkflowViewer.tsx` is now 583,044 bytes / 16,140 lines after the latest slice.
 
 ### Added Tests
 
@@ -236,6 +238,7 @@ Status: in progress
 - `web/src/hooks/useWorkbenchBootstrap.test.tsx`
 - `web/src/hooks/useSelectedAgentSession.test.tsx`
 - `web/src/hooks/useAssistantSession.test.tsx`
+- `web/src/hooks/useArtifactContentCache.test.tsx`
 - Extended `web/src/hooks/streamTypes.test.ts`
 
 ### Validation So Far
@@ -282,6 +285,11 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npx tsc --noEmit` | Passed | Assistant session hook wiring compiles. |
 | `npm run test -- --run` | Passed | 28 files, 301 tests passed. |
 | `npm run build` | Passed | Same expected chunk-size warning remains. |
+| `npm run test -- --run src/hooks/useArtifactContentCache.test.tsx` | Passed | 1 file, 5 tests passed. |
+| `npx tsc --noEmit` | Passed | Artifact cache hook wiring compiles. |
+| `npm run test -- --run src/App.test.tsx src/components/WorkflowViewer.drag.test.tsx` | Passed | 2 files, 183 tests passed. |
+| `npm run test -- --run` | Passed | 29 files, 306 tests passed. |
+| `npm run build` | Passed | Same expected chunk-size warning remains. |
 
 ### Static Gates So Far
 
@@ -298,4 +306,6 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `useSelectedAgentSession.test.tsx` covers no-context reset, selected run-node session loading, pending interaction filtering, load errors, pending turn polling terminal cleanup, event merge, and explicit refresh.
 - `WorkflowViewer.tsx` no longer owns assistant authoring-agent discovery, workbench assistant session creation, or initial assistant session message loading; this ownership lives in `useAssistantSession`.
 - `useAssistantSession.test.tsx` covers existing-session reuse, default authoring agent selection, explicit agent preservation, message projection, busy cleanup, and create-error reporting.
-- `WorkflowViewer.tsx` still has direct `api.*`, `runnerApi.*`, and timer usage for run submit, submit-time boundary preview, binding actions, artifact loading, selected-agent action APIs, GraphOps/publish actions, and UI-only defer timers. These are remaining PLAN_03 or later PLAN_06 slices.
+- `WorkflowViewer.tsx` no longer owns artifact cache state, run-evidence artifact fallback reads, or same-path artifact request de-dupe; this ownership lives in `useArtifactContentCache`.
+- `useArtifactContentCache.test.tsx` covers run evidence priority, artifact fallback, normalized cache writes, same-path in-flight de-dupe, failure cleanup, and retry eligibility.
+- `WorkflowViewer.tsx` still has direct `api.*`, `runnerApi.*`, and timer usage for run submit, submit-time boundary preview, binding actions, selected-agent action APIs, GraphOps/publish actions, and UI-only defer timers. These are remaining PLAN_03 or later PLAN_06 slices.

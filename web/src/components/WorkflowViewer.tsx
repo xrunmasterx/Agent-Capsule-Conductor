@@ -376,6 +376,7 @@ import {
   evidenceContentForCurrentSelection,
 } from './inspector/SelectionDetailsDock';
 import { useAssistantTurnStream } from '../hooks/useAssistantStream';
+import { useArtifactContentCache } from '../hooks/useArtifactContentCache';
 import { useAssistantSession } from '../hooks/useAssistantSession';
 import { useRunStream } from '../hooks/useRunStream';
 import { useSelectedAgentSession, type AgentSessionUiState } from '../hooks/useSelectedAgentSession';
@@ -2093,7 +2094,6 @@ export function WorkflowViewer({
   });
   const [bottomDockMode, setBottomDockMode] = useState<BottomDockMode>('evidence');
   const [nodeDetailOpen, setNodeDetailOpen] = useState(false);
-  const [artifactCacheByPath, setArtifactCacheByPath] = useState<Record<string, ArtifactContent>>({});
   const [saveWorkflowDialog, setSaveWorkflowDialog] = useState<SaveWorkflowDialogState | null>(
     null,
   );
@@ -2118,6 +2118,11 @@ export function WorkflowViewer({
   const graphRef = useRef(sourceGraph);
   const selectedRunId = currentTask?.activeRunId || currentTask?.latestRunId || null;
   const selectedRunProjection = selectedRunId ? runsById[selectedRunId] : undefined;
+  const { artifactCacheByPath, ensureArtifactContent, readArtifactContent } =
+    useArtifactContentCache({
+      runId: selectedRunId,
+      normalizeContent: truncateLargeLog,
+    });
   const assistantTurnSessionId = assistantSessionId || assistantPendingTurn?.session_id || null;
   const currentAuthoringState = currentTask?.authoring || emptyWorkbenchAuthoringState();
   const workflowRun = selectedRunProjection?.run || null;
@@ -3426,7 +3431,7 @@ export function WorkflowViewer({
     if (!path) {
       return;
     }
-    const content = await readEvidenceContent(path, selectedRunId);
+    const content = await readArtifactContent(path);
     setEvidenceDock({
       open: true,
       title,
@@ -3438,23 +3443,6 @@ export function WorkflowViewer({
         createdAt: new Date().toISOString(),
       },
     });
-  }
-
-  async function ensureArtifactContent(path: string | null | undefined) {
-    if (!path || artifactCacheByPath[path]) {
-      return;
-    }
-    try {
-      const content = await readEvidenceContent(path, selectedRunId);
-      setArtifactCacheByPath((current) => ({
-        ...current,
-        [path]: truncateLargeLog(content),
-      }));
-    } catch {
-      setArtifactCacheByPath((current) => ({
-        ...Object.fromEntries(Object.entries(current).filter(([key]) => key !== path)),
-      }));
-    }
   }
 
   async function saveBinding(workflowId: string, workspaceRoot: string) {
@@ -15816,18 +15804,6 @@ function evidenceActionByLabel(
 ): SelectedDetailsEvidenceAction | undefined {
   return actions.find((action) => action.label === label);
 }
-
-async function readEvidenceContent(path: string, runId?: string | null): Promise<ArtifactContent> {
-  if (runId) {
-    try {
-      return await api.runEvidence(runId, path);
-    } catch {
-      // Non-run artifacts still use the registered artifact boundary.
-    }
-  }
-  return api.artifact(path);
-}
-
 
 function agentEventsLiveText(events: RunEvent[]): string {
   const lines = events
