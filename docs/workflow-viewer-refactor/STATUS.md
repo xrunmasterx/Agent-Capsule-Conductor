@@ -100,6 +100,7 @@ Status: in progress
 - Added `web/src/workbench/model/selectionModel.ts` for pure invocation-input projection, workflow/internal node labels, executable-node checks, and edge-disconnect click intent.
 - Added `web/src/workbench/model/schemaPorts.ts` as the pure owner for schema-derived output-port projection.
 - Added `web/src/workbench/model/canvasEdgeOps.ts` for explicit data-edge creation, data connect node views, data-edge diagnostics, data edge equivalence, and data-port add/rename/delete commands.
+- Added `web/src/workbench/model/canvasLayout.ts` for dagre workspace/internal layout, workflow fit/expand helpers, palette placement, and finite numeric helpers.
 - Removed the corresponding local function definitions from `web/src/components/WorkflowViewer.tsx`; existing exports remain as migration compatibility for older tests and callers.
 
 ### Added Tests
@@ -110,6 +111,7 @@ Status: in progress
 - `web/src/workbench/model/selectionModel.test.ts`
 - `web/src/workbench/model/schemaPorts.test.ts`
 - `web/src/workbench/model/canvasEdgeOps.test.ts`
+- `web/src/workbench/model/canvasLayout.test.ts`
 
 ### Validation So Far
 
@@ -119,9 +121,10 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | --- | --- | --- |
 | `npx tsc --noEmit` | Passed | Pure model imports compile. |
 | `npm run test -- --run src/workbench/model/boundaryTransferProjection.test.ts src/components/canvas/boundaryTransfer.test.ts src/workbench/model/taskModel.test.ts src/workbench/model/selectionModel.test.ts` | Passed | 4 files, 17 tests passed. |
-| `npm run test -- --run` | Passed | 15 files, 228 tests passed. |
+| `npm run test -- --run` | Passed | 16 files, 235 tests passed. |
 | `npm run build` | Passed | Same expected chunk-size warning remains. |
 | `npm run test -- --run src/workbench/model/canvasEdgeOps.test.ts src/workbench/model/schemaPorts.test.ts src/App.test.tsx` | Passed | 3 files, 94 tests passed. |
+| `npm run test -- --run src/workbench/model/canvasLayout.test.ts src/App.test.tsx` | Passed | 2 files, 89 tests passed. |
 
 ### Static Gates So Far
 
@@ -129,11 +132,12 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - Boundary-transfer metadata keeps snake_case durable output while preserving camelCase load compatibility.
 - Task-store persistence side effects remain in `WorkflowViewer.tsx`; only pure migration/default logic moved.
 - `App.test.tsx` now imports migrated data-edge and port-command helpers from their real model owner instead of `WorkflowViewer.tsx`.
+- `WorkflowViewer.tsx` no longer imports `dagre`; layout tests import the real `canvasLayout` owner.
 
 ### Remaining PLAN_02 Work
 
 - Extract the remaining pure graph/canvas projection helpers.
 - Extract the remaining deterministic control-edge command and scoped connection helpers.
-- Extract layout-data preparation that can be tested without ReactFlow rendering.
+- Extract remaining flow projection helpers and ReactFlow DTO construction that can be tested without component rendering.
 - Move additional pure selection deletion/detail helpers once their dependency graph is isolated.
 - Keep React components, hooks, API calls, EventSource, localStorage IO, and ReactFlow rendering in later plans.

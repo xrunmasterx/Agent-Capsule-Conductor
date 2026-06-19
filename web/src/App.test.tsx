@@ -13,16 +13,11 @@ import {
   canvasToWorkflowGraph,
   controlEdgeMainTransferMode,
   deleteSelectionFromCanvas,
-  expandWorkflowToFitChildren,
-  expandWorkflowToFitChildrenCenterLocked,
   filterLiveEvents,
   graphToWorkspaceCanvas,
   internalInvocationLabel,
   isExecutableNodeWorkflow,
-  layoutCanvasForSelection,
-  layoutWorkspaceCanvas,
   liveStateForNodeRun,
-  nextRootPalettePosition,
   nodeLiveLogsFor,
   nodeLogDeltaKeys,
   nodeRunForInternalNode,
@@ -40,6 +35,13 @@ import {
   deletePortFromDataConnectNode,
   renamePortOnDataConnectNode,
 } from './workbench/model/canvasEdgeOps';
+import {
+  expandWorkflowToFitChildren,
+  expandWorkflowToFitChildrenCenterLocked,
+  layoutCanvasForSelection,
+  layoutWorkspaceCanvas,
+  nextRootPalettePosition,
+} from './workbench/model/canvasLayout';
 
 // Alias object so that existing `helpers.xxx` test patterns keep working.
 const helpers: Record<string, any> = {
