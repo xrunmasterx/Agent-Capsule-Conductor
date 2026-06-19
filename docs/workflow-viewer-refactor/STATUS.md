@@ -90,7 +90,7 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 
 ## PLAN_02 Pure Model Extraction
 
-Status: in progress
+Status: complete
 
 ### Scope Completed So Far
 
@@ -184,7 +184,12 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `WorkflowViewer.tsx` no longer owns selected entity detail projection, selected detail property groups, log excerpt projection, evidence action projection, status labels, binding directory projection, or control-edge transfer explanation helpers.
 - `web/src/workbench/model` has no direct `ReactFlow`, `Handle`, `NodeResizer`, React hook, `localStorage`, API, store, or `WorkflowViewer` dependency.
 
-### Remaining PLAN_02 Work
+### PLAN_02 Handoff Notes
 
-- Extract remaining pure authoring snapshot/proposal helpers once their temporary-resource dependencies are isolated.
-- Keep React components, hooks, API calls, EventSource, localStorage IO, and ReactFlow rendering in later plans.
+- Authoring snapshot/proposal/apply helpers still live in `WorkflowViewer.tsx` because they cross assistant state, temporary resources, GraphOps proposal review, and API-backed validation. They are intentionally handed to PLAN_06 instead of being forced into `taskModel.ts`.
+- `workspaceDemoCanvas()` still lives in `WorkflowViewer.tsx`. Moving it cleanly requires a dedicated demo/fixture owner because the factory currently shares demo schema, internal-node, and data-edge helper code with canvas interaction helpers. Treat this as PLAN_09 cleanup unless an earlier plan creates the demo fixture boundary.
+- React components, hooks, API calls, EventSource, localStorage IO, and ReactFlow rendering remain in later plans.
+
+## Next Plan
+
+PLAN_03 may start. It must migrate effect/hooks ownership without changing the pure model contracts established in PLAN_01 and PLAN_02.
