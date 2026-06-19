@@ -13,13 +13,10 @@ import {
 } from 'react';
 
 import { api } from '../api';
-import { emptyAssistantTaskState, useAssistantStore } from '../stores/assistantStore';
+import { useAssistantStore } from '../stores/assistantStore';
 import { useRunStore } from '../stores/runStore';
 import { useWorkbenchStore } from '../stores/workbenchStore';
 import type {
-  AgentSessionRecord,
-  AgentTurnRecord,
-  AuthoringAgentSummary,
   AuthoringRequiredAction,
   CallableSummary,
   GraphOpsDryRunPayload,
@@ -158,16 +155,11 @@ import {
   type NodeRunLookupContext,
 } from '../workbench/model/selectedNodeModel';
 import type {
-  AssistantApplyUndoToken,
-  AssistantChatMessage,
-  AssistantGraphOpsReview,
-  AssistantTurnReason,
   BoundaryTransfer,
   BoundaryTransferMapping,
   BottomDockMode,
   CanvasAuthoringOperation,
   CanvasAuthoringProposal,
-  CanvasAuthoringValidationResult,
   CanvasSelection,
   CodexExecutionMode,
   ConnectionMode,
@@ -383,6 +375,7 @@ import { useAssistantAuthoringSessionActions } from '../hooks/useAssistantAuthor
 import { useRunProjectionActions } from '../hooks/useRunProjectionActions';
 import { useCanvasGraphStateActions } from '../hooks/useCanvasGraphStateActions';
 import { useRunRestorationActions } from '../hooks/useRunRestorationActions';
+import { useAssistantTaskStoreBindings } from '../hooks/useAssistantTaskStoreBindings';
 
 type Props = {
   workflows: WorkflowSummary[];
@@ -395,10 +388,6 @@ type Props = {
   onSelect: (workflowId: string) => void;
   onChanged?: () => void;
 };
-
-function resolveSetState<T>(current: T, next: SetStateAction<T>): T {
-  return typeof next === 'function' ? (next as (value: T) => T)(current) : next;
-}
 
 export function WorkflowViewer({
   workflows,
@@ -526,9 +515,26 @@ export function WorkflowViewer({
   const [saveWorkflowDialog, setSaveWorkflowDialog] = useState<SaveWorkflowDialogState | null>(
     null,
   );
-  const assistantTaskState =
-    useAssistantStore((state) => state.assistantByTaskId[activeTaskId]) || emptyAssistantTaskState();
-  const authoringAgents = useAssistantStore((state) => state.authoringAgents);
+  const {
+    assistantTaskState,
+    authoringAgents,
+    setAuthoringAgents,
+    setAssistantInput,
+    setAssistantMessages,
+    setAssistantProposal,
+    setSelectedAuthoringAgentId,
+    setAssistantSessionId,
+    setAssistantAgentSession,
+    setAssistantPendingTurn,
+    setAssistantEvents,
+    setAssistantTurnReason,
+    setAssistantSessionStatus,
+    setAssistantBackendValidation,
+    setAssistantRequiredActions,
+    setAssistantGraphOpsReview,
+    setAssistantBusy,
+    setAssistantApplyUndo,
+  } = useAssistantTaskStoreBindings(activeTaskId);
   const {
     assistantInput,
     assistantMessages,
@@ -546,106 +552,6 @@ export function WorkflowViewer({
     assistantBusy,
     assistantApplyUndo,
   } = assistantTaskState;
-  const setAuthoringAgents = useCallback((next: SetStateAction<AuthoringAgentSummary[]>) => {
-    const store = useAssistantStore.getState();
-    store.setAuthoringAgents(resolveSetState(store.authoringAgents, next));
-  }, []);
-  const setAssistantInput = useCallback((next: SetStateAction<string>) => {
-    const current = useAssistantStore.getState().assistantByTaskId[activeTaskId] || emptyAssistantTaskState();
-    useAssistantStore.getState().setAssistantInput(activeTaskId, resolveSetState(current.assistantInput, next));
-  }, [activeTaskId]);
-  const setAssistantMessages = useCallback((next: SetStateAction<AssistantChatMessage[]>) => {
-    const current = useAssistantStore.getState().assistantByTaskId[activeTaskId] || emptyAssistantTaskState();
-    useAssistantStore.getState().setAssistantMessages(
-      activeTaskId,
-      resolveSetState(current.assistantMessages, next),
-    );
-  }, [activeTaskId]);
-  const setAssistantProposal = useCallback((next: SetStateAction<CanvasAuthoringProposal | null>) => {
-    const current = useAssistantStore.getState().assistantByTaskId[activeTaskId] || emptyAssistantTaskState();
-    useAssistantStore.getState().setAssistantProposal(
-      activeTaskId,
-      resolveSetState(current.assistantProposal, next),
-    );
-  }, [activeTaskId]);
-  const setSelectedAuthoringAgentId = useCallback((next: SetStateAction<string>) => {
-    const current = useAssistantStore.getState().assistantByTaskId[activeTaskId] || emptyAssistantTaskState();
-    useAssistantStore.getState().setSelectedAuthoringAgentId(
-      activeTaskId,
-      resolveSetState(current.selectedAuthoringAgentId, next),
-    );
-  }, [activeTaskId]);
-  const setAssistantSessionId = useCallback((next: SetStateAction<string | null>) => {
-    const current = useAssistantStore.getState().assistantByTaskId[activeTaskId] || emptyAssistantTaskState();
-    useAssistantStore.getState().setAssistantSessionId(
-      activeTaskId,
-      resolveSetState(current.assistantSessionId, next),
-    );
-  }, [activeTaskId]);
-  const setAssistantAgentSession = useCallback((next: SetStateAction<AgentSessionRecord | null>) => {
-    const current = useAssistantStore.getState().assistantByTaskId[activeTaskId] || emptyAssistantTaskState();
-    useAssistantStore.getState().setAssistantAgentSession(
-      activeTaskId,
-      resolveSetState(current.assistantAgentSession, next),
-    );
-  }, [activeTaskId]);
-  const setAssistantPendingTurn = useCallback((next: SetStateAction<AgentTurnRecord | null>) => {
-    const current = useAssistantStore.getState().assistantByTaskId[activeTaskId] || emptyAssistantTaskState();
-    useAssistantStore.getState().setAssistantPendingTurn(
-      activeTaskId,
-      resolveSetState(current.assistantPendingTurn, next),
-    );
-  }, [activeTaskId]);
-  const setAssistantEvents = useCallback((next: SetStateAction<RunEvent[]>) => {
-    const current = useAssistantStore.getState().assistantByTaskId[activeTaskId] || emptyAssistantTaskState();
-    useAssistantStore.getState().setAssistantEvents(activeTaskId, resolveSetState(current.assistantEvents, next));
-  }, [activeTaskId]);
-  const setAssistantTurnReason = useCallback((next: SetStateAction<AssistantTurnReason>) => {
-    const current = useAssistantStore.getState().assistantByTaskId[activeTaskId] || emptyAssistantTaskState();
-    useAssistantStore.getState().setAssistantTurnReason(
-      activeTaskId,
-      resolveSetState(current.assistantTurnReason, next),
-    );
-  }, [activeTaskId]);
-  const setAssistantSessionStatus = useCallback((next: SetStateAction<string>) => {
-    const current = useAssistantStore.getState().assistantByTaskId[activeTaskId] || emptyAssistantTaskState();
-    useAssistantStore.getState().setAssistantSessionStatus(
-      activeTaskId,
-      resolveSetState(current.assistantSessionStatus, next),
-    );
-  }, [activeTaskId]);
-  const setAssistantBackendValidation = useCallback((next: SetStateAction<CanvasAuthoringValidationResult | null>) => {
-    const current = useAssistantStore.getState().assistantByTaskId[activeTaskId] || emptyAssistantTaskState();
-    useAssistantStore.getState().setAssistantBackendValidation(
-      activeTaskId,
-      resolveSetState(current.assistantBackendValidation, next),
-    );
-  }, [activeTaskId]);
-  const setAssistantRequiredActions = useCallback((next: SetStateAction<AuthoringRequiredAction[]>) => {
-    const current = useAssistantStore.getState().assistantByTaskId[activeTaskId] || emptyAssistantTaskState();
-    useAssistantStore.getState().setAssistantRequiredActions(
-      activeTaskId,
-      resolveSetState(current.assistantRequiredActions, next),
-    );
-  }, [activeTaskId]);
-  const setAssistantGraphOpsReview = useCallback((next: SetStateAction<AssistantGraphOpsReview | null>) => {
-    const current = useAssistantStore.getState().assistantByTaskId[activeTaskId] || emptyAssistantTaskState();
-    useAssistantStore.getState().setAssistantGraphOpsReview(
-      activeTaskId,
-      resolveSetState(current.assistantGraphOpsReview, next),
-    );
-  }, [activeTaskId]);
-  const setAssistantBusy = useCallback((next: SetStateAction<boolean>) => {
-    const current = useAssistantStore.getState().assistantByTaskId[activeTaskId] || emptyAssistantTaskState();
-    useAssistantStore.getState().setAssistantBusy(activeTaskId, resolveSetState(current.assistantBusy, next));
-  }, [activeTaskId]);
-  const setAssistantApplyUndo = useCallback((next: SetStateAction<AssistantApplyUndoToken | null>) => {
-    const current = useAssistantStore.getState().assistantByTaskId[activeTaskId] || emptyAssistantTaskState();
-    useAssistantStore.getState().setAssistantApplyUndo(
-      activeTaskId,
-      resolveSetState(current.assistantApplyUndo, next),
-    );
-  }, [activeTaskId]);
   const graphRef = useRef(sourceGraph);
   const selectedRunId = currentTask?.activeRunId || currentTask?.latestRunId || null;
   const selectedRunProjection = selectedRunId ? runsById[selectedRunId] : undefined;
