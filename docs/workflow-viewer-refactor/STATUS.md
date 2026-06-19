@@ -767,6 +767,8 @@ Status: in progress
 - `web/src/components/WorkflowViewer.tsx` is now 211,393 bytes / 5,732 lines after moving task persistence helpers.
 - Added `web/src/workbench/model/workbenchViewProjection.ts` as the owner for blueprint panel visibility projection and authoring selection labels.
 - `web/src/components/WorkflowViewer.tsx` is now 209,605 bytes / 5,686 lines after moving Workbench view projection helpers.
+- Removed the unused legacy `InternalNodeCard` component and its now-unused layout/label imports.
+- `web/src/components/WorkflowViewer.tsx` is now 207,411 bytes / 5,618 lines after deleting the dead internal-node card renderer.
 
 ### Added/Updated Tests
 
@@ -787,6 +789,7 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npm run test -- --run src/workbench/model/workflowRuntimeProjection.test.ts src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 3 files, 187 tests passed. |
 | `npm run test -- --run src/hooks/useTaskPersistence.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 3 files, 192 tests passed. |
 | `npm run test -- --run src/workbench/model/workbenchViewProjection.test.ts src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 3 files, 186 tests passed. |
+| `npm run test -- --run src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 2 files, 183 tests passed after removing unused `InternalNodeCard`. |
 | `npm run test -- --run` | Passed | 69 files, 452 tests passed. |
 | `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
 
@@ -799,3 +802,4 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `WorkflowViewer.tsx` no longer defines `reusableWorkflowClassGraph`, `workflowRunFromRunSummary`, `workflowRunFromRunStateSnapshot`, `nodeRunProjectionKey`, `normalizeWorkflowGraph`, `graphFromLegacyWorkflow`, `singleNodeWorkflowGraph`, or `findCallableId`.
 - `WorkflowViewer.tsx` no longer defines `loadWorkbenchTaskFromBackend`, `persistWorkbenchTaskToBackend`, `canvasFromBackendSnapshot`, `loadTaskStore`, or `saveTaskStore`.
 - `WorkflowViewer.tsx` no longer defines `workbenchViewProjection`, `authoringSelectionLabel`, or the local `WorkbenchViewProjection` type.
+- `WorkflowViewer.tsx` no longer defines or references the unused legacy `InternalNodeCard` renderer.

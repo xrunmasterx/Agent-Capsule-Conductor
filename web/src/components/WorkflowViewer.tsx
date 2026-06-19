@@ -159,10 +159,8 @@ import {
 } from '../workbench/model/canvasEdgeOps';
 import {
   clamp,
-  defaultInternalNodePosition,
   expandWorkflowToFitChildren,
   expandWorkflowToFitChildrenCenterLocked,
-  finiteNumber,
   layoutCanvasForSelection,
   layoutWorkflowInternalNodes,
   layoutWorkspaceCanvas,
@@ -173,7 +171,6 @@ import {
   edgeAddressForScope,
   edgeTouchesNode,
   findCanvasEdgeByAddress,
-  internalInvocationLabel,
   isActiveCanvasObjectStatus,
   isExecutableNodeWorkflow,
   normalizeSelectionIntent,
@@ -3110,72 +3107,6 @@ function NodeErrorPane({ model }: { model: SelectedEntityDetailsModel }) {
 
 
 
-
-function InternalNodeCard({
-  workflowId,
-  node,
-  index,
-  onClick,
-  onMove,
-}: {
-  workflowId: string;
-  node: InternalNodeView;
-  index: number;
-  onClick: () => void;
-  onMove: (workflowId: string, nodeId: string, position: { x: number; y: number }) => void;
-}) {
-  function startDrag(event: ReactMouseEvent<HTMLButtonElement>) {
-    if (event.button !== 0) {
-      return;
-    }
-    event.preventDefault();
-    event.stopPropagation();
-    const card = event.currentTarget;
-    const container = card.closest('.internal-node-grid');
-    if (!(container instanceof HTMLElement)) {
-      return;
-    }
-    const startX = event.clientX;
-    const startY = event.clientY;
-    const startPosition = node.position || defaultInternalNodePosition(index);
-    const maxX = Math.max(0, container.clientWidth - card.offsetWidth - 8);
-    const maxY = Math.max(0, container.clientHeight - card.offsetHeight - 8);
-    const move = (nextEvent: MouseEvent) => {
-      const nextPosition = {
-        x: clamp(startPosition.x + nextEvent.clientX - startX, 8, maxX),
-        y: clamp(startPosition.y + nextEvent.clientY - startY, 8, maxY),
-      };
-      onMove(workflowId, node.id, nextPosition);
-    };
-    const stop = () => {
-      window.removeEventListener('mousemove', move);
-      window.removeEventListener('mouseup', stop);
-    };
-    window.addEventListener('mousemove', move);
-    window.addEventListener('mouseup', stop, { once: true });
-  }
-  return (
-    <button
-      type="button"
-      className={`internal-node-card nodrag nopan status-${node.status}`}
-      onClick={onClick}
-      onMouseDown={startDrag}
-      style={{
-        left: finiteNumber(node.position?.x, defaultInternalNodePosition(index).x),
-        top: finiteNumber(node.position?.y, defaultInternalNodePosition(index).y),
-      }}
-    >
-      <span className={`status-dot ${node.status}`} />
-      <div>
-        <strong>{internalInvocationLabel(node)}</strong>
-        <p>{node.task}</p>
-      </div>
-      <span className={node.kind === 'Agent' ? 'node-badge agent' : 'node-badge tool'}>
-        {node.kind}
-      </span>
-    </button>
-  );
-}
 
 function ResourceInspector({ resource }: { resource: ResourceTemplate }) {
   const title =
