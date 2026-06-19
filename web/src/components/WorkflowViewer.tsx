@@ -377,6 +377,7 @@ import {
 } from './inspector/SelectionDetailsDock';
 import { useAssistantTurnStream } from '../hooks/useAssistantStream';
 import { useRunStream } from '../hooks/useRunStream';
+import { useSelectedAgentSession, type AgentSessionUiState } from '../hooks/useSelectedAgentSession';
 import { useTaskPersistence } from '../hooks/useTaskPersistence';
 import { useWorkbenchBootstrap } from '../hooks/useWorkbenchBootstrap';
 
@@ -461,16 +462,6 @@ type EvidenceDockState = {
     nodeId?: string;
     createdAt?: string;
   };
-};
-
-type AgentSessionUiState = {
-  status: 'idle' | 'loading' | 'ready' | 'error';
-  session: AgentSessionRecord | null;
-  messages: AgentMessage[];
-  events: RunEvent[];
-  pendingTurn: AgentTurnRecord | null;
-  interactions: InteractionRequest[];
-  error: string;
 };
 
 type SaveWorkflowDialogState = {
@@ -2123,15 +2114,6 @@ export function WorkflowViewer({
     useState<AssistantGraphOpsReview | null>(null);
   const [assistantBusy, setAssistantBusy] = useState(false);
   const [assistantApplyUndo, setAssistantApplyUndo] = useState<AssistantApplyUndoToken | null>(null);
-  const [agentSessionState, setAgentSessionState] = useState<AgentSessionUiState>({
-    status: 'idle',
-    session: null,
-    messages: [],
-    events: [],
-    pendingTurn: null,
-    interactions: [],
-    error: '',
-  });
   const graphRef = useRef(sourceGraph);
   const selectedRunId = currentTask?.activeRunId || currentTask?.latestRunId || null;
   const selectedRunProjection = selectedRunId ? runsById[selectedRunId] : undefined;
@@ -2270,8 +2252,7 @@ export function WorkflowViewer({
     });
   }, []);
 
-  const appendRunAgentEvent = useCallback((runId: string, event: RunEvent) => {
-    const eventNodeId = typeof event.node_id === 'string' ? event.node_id : '';
+  const appendRunAgentEventToProjection = useCallback((runId: string, event: RunEvent) => {
     setRunsById((current) => {
       const projection = current[runId];
       if (!projection) {
@@ -2283,23 +2264,6 @@ export function WorkflowViewer({
           ...projection,
           events: mergeAgentEvents(projection.events, [event]),
         },
-      };
-    });
-    setAgentSessionState((current) => {
-      const session = current.session;
-      if (!session) {
-        return current;
-      }
-      const matchesSession = event.session_id && event.session_id === session.session_id;
-      const matchesBoundNode =
-        session.bound_run_id === runId &&
-        (!eventNodeId || session.bound_node_id === eventNodeId);
-      if (!matchesSession && !matchesBoundNode) {
-        return current;
-      }
-      return {
-        ...current,
-        events: mergeAgentEvents(current.events, [event]),
       };
     });
   }, []);
@@ -2385,13 +2349,6 @@ export function WorkflowViewer({
           content,
         },
       ]),
-  });
-
-  useRunStream(selectedRunId, {
-    appendNodeLogDelta,
-    appendRunAgentEvent,
-    appendRunLiveEvent,
-    updateRunProjection,
   });
 
   const updateCanvas = useCallback((next: SetStateAction<WorkspaceCanvasModel>) => {
@@ -2750,6 +2707,26 @@ export function WorkflowViewer({
         : null,
     [selectedAgentNodeRun, selectedRunId],
   );
+  const {
+    state: agentSessionState,
+    refresh: refreshAgentSession,
+    setPendingTurn: setAgentSessionPendingTurn,
+    appendEvent: appendSelectedAgentSessionEvent,
+  } = useSelectedAgentSession(selectedAgentSessionContext);
+  const appendRunAgentEvent = useCallback(
+    (runId: string, event: RunEvent) => {
+      appendRunAgentEventToProjection(runId, event);
+      appendSelectedAgentSessionEvent(runId, event);
+    },
+    [appendRunAgentEventToProjection, appendSelectedAgentSessionEvent],
+  );
+
+  useRunStream(selectedRunId, {
+    appendNodeLogDelta,
+    appendRunAgentEvent,
+    appendRunLiveEvent,
+    updateRunProjection,
+  });
   const selectedAgentLiveState = useMemo(
     () => liveStateForNodeRun(selectedRunLiveEvents, selectedAgentNodeRun),
     [selectedAgentNodeRun, selectedRunLiveEvents],
@@ -2830,106 +2807,6 @@ export function WorkflowViewer({
     },
     [runsById],
   );
-
-  const refreshAgentSession = useCallback(async () => {
-    if (!selectedAgentSessionContext) {
-      setAgentSessionState({
-        status: 'idle',
-        session: null,
-        messages: [],
-        events: [],
-        pendingTurn: null,
-        interactions: [],
-        error: '',
-      });
-      return;
-    }
-    const { runId, nodeId, nodeRunDir, uiNodeId, parentNodeId } = selectedAgentSessionContext;
-    setAgentSessionState((current) => ({
-      ...current,
-      status: current.session ? 'ready' : 'loading',
-      error: '',
-    }));
-    try {
-      const session = await api.createAgentSessionFromRunNode(runId, nodeId, {
-        nodeRunDir,
-        uiNodeId,
-        parentNodeId,
-      });
-      const [messages, nodeEvents, interactions] = await Promise.all([
-        api.getAgentSessionMessages(session.session_id).catch(() => ({ messages: [] as AgentMessage[] })),
-        api.nodeEvents(runId, nodeId, 200, { nodeRunDir }).catch(() => ({ events: [] as RunEvent[] })),
-        api.runInteractions(runId).catch(() => ({ interactions: [] as InteractionRequest[] })),
-      ]);
-      setAgentSessionState((current) => {
-        const pendingTurn =
-          current.pendingTurn &&
-          current.pendingTurn.turn_id === session.last_turn_id &&
-          ['queued', 'running'].includes(String(session.status || ''))
-            ? current.pendingTurn
-            : null;
-        return {
-          status: 'ready',
-          session,
-          messages: messages.messages || [],
-          events: nodeEvents.events || [],
-          pendingTurn,
-          interactions: (interactions.interactions || []).filter(
-            (item) => item.status === 'pending' && (!item.node_id || item.node_id === nodeId),
-          ),
-          error: '',
-        };
-      });
-    } catch (error) {
-      setAgentSessionState({
-        status: 'error',
-        session: null,
-        messages: [],
-        events: [],
-        pendingTurn: null,
-        interactions: [],
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }, [selectedAgentSessionContext]);
-
-  useEffect(() => {
-    void refreshAgentSession();
-  }, [refreshAgentSession]);
-
-  useEffect(() => {
-    const pendingTurn = agentSessionState.pendingTurn;
-    const session = agentSessionState.session;
-    if (!pendingTurn || !session) {
-      return;
-    }
-    const timeout = window.setTimeout(() => {
-      void Promise.all([
-        api.getAgentSession(session.session_id),
-        api.getAgentSessionMessages(session.session_id).catch(() => ({ messages: [] as AgentMessage[] })),
-        api.getAgentTurnEvents(session.session_id, pendingTurn.turn_id).catch(() => ({ events: [] as RunEvent[] })),
-      ])
-        .then(([nextSession, messages, turnEvents]) => {
-          setAgentSessionState((current) => ({
-            ...current,
-            status: 'ready',
-            session: nextSession,
-            messages: messages.messages || [],
-            events: mergeAgentEvents(current.events, turnEvents.events || []),
-            pendingTurn: ['queued', 'running'].includes(String(nextSession.status || ''))
-              ? pendingTurn
-              : null,
-            error: '',
-          }));
-        })
-        .catch(() => {
-          void refreshAgentSession();
-        });
-    }, 1000);
-    return () => {
-      window.clearTimeout(timeout);
-    };
-  }, [agentSessionState.pendingTurn, agentSessionState.session, refreshAgentSession]);
 
   const normalizedSelection = useMemo(
     () => normalizeWorkbenchSelection(displayCanvas, selection, focusedWorkflowId),
@@ -4227,7 +4104,7 @@ export function WorkflowViewer({
       expected_provider_session_id:
         typeof session.provider_session_id === 'string' ? session.provider_session_id : undefined,
     });
-    setAgentSessionState((current) => ({ ...current, pendingTurn: turn }));
+    setAgentSessionPendingTurn(turn);
     setMessage(`Agent turn ${turn.turn_id}: ${turn.status || 'queued'}`);
     await refreshAgentSession();
   }

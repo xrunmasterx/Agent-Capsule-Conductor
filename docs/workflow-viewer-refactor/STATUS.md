@@ -218,7 +218,10 @@ Status: in progress
 - Added `web/src/hooks/useWorkbenchBootstrap.ts` as the owner for runtime config loading, one-shot durable task bootstrap, backend task record loading, initial browser-task migration, cancellation protection, and durable-ready finalization.
 - Replaced the runtime config and durable task bootstrap effects in `WorkflowViewer.tsx` with `useWorkbenchBootstrap(...)`.
 - `WorkflowViewer.tsx` now keeps only the state projection callbacks for loaded durable tasks; the async startup sequencing lives in the hook.
-- `web/src/components/WorkflowViewer.tsx` is now 588,329 bytes / 16,295 lines after the latest slice.
+- Added `web/src/hooks/useSelectedAgentSession.ts` as the owner for selected run-node agent session creation, session message loading, node event loading, pending interaction filtering, pending turn polling, and live run-agent event merging into the selected session.
+- Replaced the local selected-agent `AgentSessionUiState`, refresh callback, initial refresh effect, and pending-turn polling effect in `WorkflowViewer.tsx` with `useSelectedAgentSession(...)`.
+- `WorkflowViewer.tsx` now composes run projection event updates with selected-agent session event updates through hook callbacks, avoiding direct session-state mutation in the component.
+- `web/src/components/WorkflowViewer.tsx` is now 584,164 bytes / 16,172 lines after the latest slice.
 
 ### Added Tests
 
@@ -228,6 +231,7 @@ Status: in progress
 - `web/src/hooks/useAssistantStream.test.tsx`
 - `web/src/hooks/useTaskPersistence.test.tsx`
 - `web/src/hooks/useWorkbenchBootstrap.test.tsx`
+- `web/src/hooks/useSelectedAgentSession.test.tsx`
 - Extended `web/src/hooks/streamTypes.test.ts`
 
 ### Validation So Far
@@ -264,6 +268,11 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npx tsc --noEmit` | Passed | Workbench bootstrap hook wiring compiles. |
 | `npm run test -- --run` | Passed | 26 files, 292 tests passed. |
 | `npm run build` | Passed | Same expected chunk-size warning remains. |
+| `npm run test -- --run src/hooks/useSelectedAgentSession.test.tsx` | Passed | 1 file, 5 tests passed. |
+| `npm run test -- --run src/App.test.tsx src/components/WorkflowViewer.drag.test.tsx` | Passed | 2 files, 183 tests passed. |
+| `npx tsc --noEmit` | Passed | Selected-agent session hook wiring compiles. |
+| `npm run test -- --run` | Passed | 27 files, 297 tests passed. |
+| `npm run build` | Passed | Same expected chunk-size warning remains. |
 
 ### Static Gates So Far
 
@@ -276,4 +285,6 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `useTaskPersistence.test.tsx` covers not-ready suppression, local save, latest snapshot wins, backend de-dupe, failure retry reset, and cleanup clearing pending timers.
 - `WorkflowViewer.tsx` no longer owns runtime config loading or durable task bootstrap effects; one-shot startup, cancellation, migration, and ready finalization live in `useWorkbenchBootstrap`.
 - `useWorkbenchBootstrap.test.tsx` covers runtime config success/failure, durable task load and active-task selection, initial task migration, bootstrap error handling, and cleanup suppression.
-- `WorkflowViewer.tsx` still has direct `api.*`, `runnerApi.*`, and timer usage for run submit, submit-time boundary preview, binding actions, artifact loading, selected-agent polling, and UI-only defer timers. These are remaining PLAN_03 slices.
+- `WorkflowViewer.tsx` no longer owns selected-agent session creation, selected node event loading, interaction filtering, or selected-agent pending-turn polling; this ownership lives in `useSelectedAgentSession`.
+- `useSelectedAgentSession.test.tsx` covers no-context reset, selected run-node session loading, pending interaction filtering, load errors, pending turn polling terminal cleanup, event merge, and explicit refresh.
+- `WorkflowViewer.tsx` still has direct `api.*`, `runnerApi.*`, and timer usage for run submit, submit-time boundary preview, binding actions, artifact loading, assistant session creation, and UI-only defer timers. These are remaining PLAN_03 slices.
