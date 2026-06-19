@@ -573,12 +573,16 @@ Status: in progress
 - Removed the corresponding local palette canvas creation helpers from `WorkflowViewer.tsx`; the ReactFlow-specific pending-connection helper remains local and calls the pure node factory.
 - Added `web/src/workbench/model/authoringProposal.ts` as the pure owner for authoring canvas hash, target projection, assistant turn reason fallback, validation merge, backend validation conversion, authoring API payload projection, temporary-resource replacement, temporary-resource run/save blockers, and operation summaries.
 - Removed those local support functions from `WorkflowViewer.tsx`; the remaining local authoring functions are the larger proposal build/validate/apply body that will move next.
+- Added `web/src/components/assistant/assistantTranscript.ts` as the owner for assistant transcript item projection, live-event merging, GraphOps list filtering, and assistant display-status derivation.
+- Removed the corresponding transcript projection helpers and local assistant transcript/status types from `WorkflowViewer.tsx`; the component now keeps only transcript rendering components and imports the projection model.
+- `WorkflowViewer.tsx` is now 454,062 bytes / 12,238 lines, below the previous Babel 500KB deopt threshold.
 
 ### Added Tests
 
 - `web/src/workbench/model/graphOpsProposal.test.ts`
 - `web/src/workbench/model/paletteCanvasOps.test.ts`
 - `web/src/workbench/model/authoringProposal.test.ts`
+- `web/src/components/assistant/assistantTranscript.test.ts`
 
 ### Validation So Far
 
@@ -594,6 +598,10 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npx tsc --noEmit` | Passed | Authoring support model extraction compiles. |
 | `npm run test -- --run src/workbench/model/authoringProposal.test.ts` | Passed | 1 file, 5 tests passed. |
 | `npm run test -- --run src/workbench/model/authoringProposal.test.ts src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx -t "CanvasAuthoringProposal|temporary agent|Workbench AI temporary|chat completion does not validate"` | Passed | 2 files plus selected App/drag tests passed; direct authoring model tests are covered by the previous command because the `-t` filter intentionally selects integration cases. |
+| `npx tsc --noEmit` | Passed | Assistant transcript projection extraction compiles. |
+| `npm run test -- --run src/components/assistant/assistantTranscript.test.ts` | Passed | 1 file, 5 tests passed. |
+| `npm run test -- --run src/components/assistant/assistantTranscript.test.ts src/App.test.tsx -t "Workbench AI chat completion does not validate previous authoring draft\|Workbench AI temporary agent blocks save validate and run after task reload\|Workbench AI temporary agent persists through GraphOps proposal approval\|Workbench AI assistant generates and applies a canvas-local proposal\|assistantTranscript"` | Passed | 2 files, 9 selected tests passed. |
+| `npm run test -- --run src/components/WorkflowViewer.drag.test.tsx` | Passed | 1 file, 101 tests passed. |
 
 ### Static Gates So Far
 
@@ -603,3 +611,5 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `WorkflowViewer.tsx` no longer defines local `isTemporaryCallableId`.
 - `WorkflowViewer.tsx` no longer defines local `addWorkflowFromPalette`, `addCallableNodeFromPalette`, `addInternalNodeFromPalette`, `internalNodeFromPaletteItem`, `nextPaletteSelection`, `paletteItemBaseId`, `slugId`, `uniqueId`, or `uniqueInvocationLabel`.
 - `WorkflowViewer.tsx` no longer defines local `canvasAuthoringHash`, `stableJsonStringify`, `hashString`, `authoringTargetFromSelection`, `effectiveAssistantTurnReason`, `mergeAuthoringValidation`, `authoringValidationFromBackend`, `authoringBackendCanvasSnapshot`, `authoringSelectionPayload`, `replaceTemporaryResourceWithCallable`, `temporaryResourceIssueForCanvas`, `temporaryResourceIssueForGraph`, `authoringOperationSummary`, or `isInspectableNodeSelection`.
+- `WorkflowViewer.tsx` no longer defines local `AssistantProcessEvent`, `AssistantTranscriptItem`, `AssistantDisplayStatus`, `graphOpsStringList`, `buildAssistantTranscriptItems`, or `assistantDisplayStatus`.
+- `components/assistant/assistantTranscript.ts` has no React import and contains no API, store, localStorage, EventSource, or ReactFlow dependency.
