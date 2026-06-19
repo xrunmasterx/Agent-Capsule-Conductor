@@ -562,7 +562,7 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 
 ## PLAN_06 Assistant GraphOps
 
-Status: in progress
+Status: complete
 
 ### Scope Completed So Far
 
@@ -580,6 +580,10 @@ Status: in progress
 - Removed the local authoring runtime implementation from `WorkflowViewer.tsx`; the component now invokes the authoring runtime through imports.
 - `web/src/components/authoring/AuthoringSession.tsx` and `ProposalReview.tsx` now re-export from the real authoring owner instead of `WorkflowViewer.tsx`.
 - `WorkflowViewer.tsx` is now 412,224 bytes / 11,109 lines after authoring runtime extraction.
+- Added `web/src/components/assistant/AssistantConsole.tsx` as the owner for `AssistantDrawer`, `AssistantDockContent`, assistant transcript rendering, composer controls, proposal summary, and GraphOps review UI.
+- Replaced the stale `web/src/components/assistant/AssistantDrawer.tsx` implementation with a compatibility re-export to the current AssistantConsole owner.
+- Removed local Assistant drawer/dock UI definitions from `WorkflowViewer.tsx`; selected-node runtime output remains a slot passed from the shell so assistant UI does not own schema/evidence details.
+- `WorkflowViewer.tsx` is now 377,999 bytes / 10,127 lines after Assistant UI extraction.
 
 ### Added Tests
 
@@ -588,6 +592,7 @@ Status: in progress
 - `web/src/workbench/model/authoringProposal.test.ts`
 - `web/src/components/assistant/assistantTranscript.test.ts`
 - Existing `web/src/components/WorkflowViewer.drag.test.tsx` authoring assertions now import proposal runtime helpers from `web/src/components/authoring/authoringRuntime.ts`.
+- Existing App assistant integration tests now exercise the extracted AssistantConsole path.
 
 ### Validation So Far
 
@@ -610,6 +615,9 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npx tsc --noEmit` | Passed | Authoring runtime extraction compiles. |
 | `npm run test -- --run src/workbench/model/authoringProposal.test.ts src/components/WorkflowViewer.drag.test.tsx` | Passed | 2 files, 106 tests passed; drag test authoring helpers import the new runtime owner. |
 | `npm run test -- --run src/App.test.tsx -t "Workbench AI assistant generates and applies a canvas-local proposal\|Workbench AI chat completion does not validate previous authoring draft\|Workbench AI temporary agent blocks save validate and run after task reload\|Workbench AI temporary agent persists through GraphOps proposal approval"` | Passed | 4 selected assistant/GraphOps integration tests passed. |
+| `npx tsc --noEmit` | Passed | AssistantConsole extraction compiles. |
+| `npm run test -- --run src/components/assistant/assistantTranscript.test.ts src/components/WorkflowViewer.drag.test.tsx` | Passed | 2 files, 106 tests passed. |
+| `npm run test -- --run src/App.test.tsx -t "Workbench AI assistant generates and applies a canvas-local proposal\|Workbench AI chat completion does not validate previous authoring draft\|Workbench AI temporary agent blocks save validate and run after task reload\|Workbench AI temporary agent persists through GraphOps proposal approval"` | Passed | 4 selected assistant/GraphOps integration tests passed after AssistantConsole extraction. |
 
 ### Static Gates So Far
 
@@ -623,3 +631,5 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `components/assistant/assistantTranscript.ts` has no React import and contains no API, store, localStorage, EventSource, or ReactFlow dependency.
 - `WorkflowViewer.tsx` no longer defines local `authoringId`, `captureAuthoringSnapshot`, `buildDeterministicCanvasAuthoringProposal`, `validateCanvasAuthoringProposal`, or `applyCanvasAuthoringProposal`.
 - `components/authoring`, `components/assistant`, `hooks`, and `workbench` no longer import from `WorkflowViewer.tsx`.
+- `WorkflowViewer.tsx` no longer defines local `AssistantDrawer`, `AssistantDockContent`, `AssistantControlRail`, or `AssistantProposalSummary`.
+- `WorkflowViewer.tsx` no longer directly calls assistant/GraphOps API endpoints; assistant session, turn stream, and GraphOps persistence remain hook-owned.

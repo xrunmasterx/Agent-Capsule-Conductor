@@ -11,12 +11,13 @@ export {
   AssistantDockContent,
   AssistantControlRail,
   AssistantProposalSummary,
-  SelectedNodeRuntimePane,
-  type AssistantTurnReason,
-  type AssistantGraphOpsReview,
-  type CanvasAuthoringValidationResult,
-  type CanvasAuthoringProposal,
-  type TemporaryResourceDraft,
-  type WorkbenchLiveStreamState,
-  type SelectedEntityDetailsModel,
 } from './AssistantDrawer';
+export type { WorkbenchLiveStreamState } from '../../hooks/useWorkbenchLiveStream';
+export type {
+  AssistantGraphOpsReview,
+  AssistantTurnReason,
+  CanvasAuthoringProposal,
+  CanvasAuthoringValidationResult,
+  SelectedEntityDetailsModel,
+  TemporaryResourceDraft,
+} from '../../types/workbench';
