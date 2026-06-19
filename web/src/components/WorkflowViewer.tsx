@@ -57,7 +57,7 @@ import {
   type TouchEvent as ReactTouchEvent,
 } from 'react';
 
-import { api, runnerApi } from '../api';
+import { api } from '../api';
 import { shortPath, statusTone } from '../format';
 import type {
   AgentMessage,
@@ -387,6 +387,7 @@ import { useOpenedWorkflowLoader } from '../hooks/useOpenedWorkflowLoader';
 import { useNodeRunDetails } from '../hooks/useNodeRunDetails';
 import { useRunRestorationLoader } from '../hooks/useRunRestorationLoader';
 import { useRunRefreshLoader } from '../hooks/useRunRefreshLoader';
+import { useRunnerSubmit } from '../hooks/useRunnerSubmit';
 import { useSubmittedRunPolling } from '../hooks/useSubmittedRunPolling';
 import { useTaskPersistence } from '../hooks/useTaskPersistence';
 import { useWorkbenchTaskDurability } from '../hooks/useWorkbenchTaskDurability';
@@ -2289,6 +2290,7 @@ export function WorkflowViewer({
   const { loadWorkbenchTaskCanvas, saveWorkbenchTaskCanvas } = useWorkbenchTaskCanvasPersistence();
   const { validateBoundaryTransfers } = useBoundaryTransferValidation();
   const { pollSubmittedRunUntilTerminal } = useSubmittedRunPolling();
+  const { submitRunnerJob } = useRunnerSubmit();
   const { saveWorkflowGraph, validateWorkflowGraph } = useWorkflowPersistence();
   const loadDurableWorkbenchTask = useCallback(
     (taskRecord: Record<string, unknown>) => loadWorkbenchTaskFromBackend(taskRecord, loadWorkbenchTaskCanvas),
@@ -3295,7 +3297,7 @@ export function WorkflowViewer({
         content: null,
         owner: { kind: 'run', taskId, runId, createdAt: new Date().toISOString() },
       }));
-      const submitted = await runnerApi.submitJob(runnableGraph, {
+      const submitted = await submitRunnerJob(runnableGraph, {
         runId,
         taskId,
         ...(bindingPath ? { bindingRef: bindingRefOfPath(bindingPath) } : {}),

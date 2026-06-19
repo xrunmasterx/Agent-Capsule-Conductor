@@ -358,6 +358,11 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npm run test -- --run src/App.test.tsx src/components/WorkflowViewer.drag.test.tsx` | Passed | 2 files, 183 tests passed. |
 | `npm run test -- --run` | Passed | 38 files, 342 tests passed. |
 | `npm run build` | Passed | Same expected chunk-size warning remains. |
+| `npm run test -- --run src/hooks/useRunnerSubmit.test.tsx` | Passed | 1 file, 1 test passed. |
+| `npx tsc --noEmit` | Passed | Runner submit hook wiring compiles. |
+| `npm run test -- --run src/App.test.tsx src/components/WorkflowViewer.drag.test.tsx` | Passed | 2 files, 183 tests passed. |
+| `npm run test -- --run` | Passed | 39 files, 343 tests passed. |
+| `npm run build` | Passed | Same expected chunk-size warning remains. |
 
 ### Static Gates So Far
 
@@ -396,5 +401,7 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `useSubmittedRunPolling.test.tsx` covers active-to-terminal polling, optional state/events fallback, retry after failed polls, and timer cleanup on unmount.
 - `WorkflowViewer.tsx` no longer owns workflow save/validate endpoint calls; this ownership lives in `useWorkflowPersistence`.
 - `useWorkflowPersistence.test.tsx` covers save force semantics, canonical preview passthrough, and workflow-id validation.
-- `WorkflowViewer.tsx` is now 563,961 bytes / 15,396 lines after the latest slice.
-- `WorkflowViewer.tsx` still has direct `api.*`, `runnerApi.*`, and timer usage for runner submit, selected-agent action APIs, GraphOps/publish actions, and UI-only defer timers. These are remaining PLAN_03 or later PLAN_06 slices.
+- `WorkflowViewer.tsx` no longer owns runner job submission endpoint calls; this ownership lives in `useRunnerSubmit`.
+- `useRunnerSubmit.test.tsx` covers run/task/binding submit option passthrough and queued status propagation.
+- `WorkflowViewer.tsx` is now 564,055 bytes / 15,398 lines after the latest slice.
+- `WorkflowViewer.tsx` still has direct `api.*` and timer usage for selected-agent action APIs, GraphOps/publish actions, and UI-only defer timers. These are remaining PLAN_03 or later PLAN_06 slices.
