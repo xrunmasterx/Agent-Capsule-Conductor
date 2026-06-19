@@ -1007,6 +1007,10 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npm run test -- --run src/hooks/useAssistantProposalGenerateActions.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 3 files, 187 tests passed. |
 | `npm run test -- --run` | Passed | 101 files, 556 tests passed. |
 | `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
+| `npx tsc --noEmit` | Passed | Assistant proposal apply/undo/discard action hook extraction compiles. |
+| `npm run test -- --run src/hooks/useAssistantProposalApplyActions.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 3 files, 187 tests passed. |
+| `npm run test -- --run` | Passed | 102 files, 560 tests passed. |
+| `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
 
 ### Static Gates So Far
 
@@ -1059,4 +1063,6 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `WorkflowViewer.tsx` no longer defines `requestSaveWorkflow(...)`, `confirmSaveWorkflow(...)`, `saveGraph(...)`, `validateGraph(...)`, `currentTemporaryResourceIssue(...)`, `ensureBoundaryTransfersValid(...)`, or `reportTemporaryResourceIssue(...)`.
 - `WorkflowViewer.tsx` no longer defines `submitSelectedAgentTurn(...)`, `publishSelectedAgentOutput(...)`, or `answerSelectedAgentInteraction(...)`.
 - `WorkflowViewer.tsx` no longer defines `generateAssistantProposal(...)`; Workbench assistant turn submission ownership moved to `useAssistantProposalGenerateActions(...)`.
+- `WorkflowViewer.tsx` no longer defines `applyAssistantProposal(...)`, `undoLastAssistantApply(...)`, or `discardAssistantProposal(...)`; assistant proposal apply/undo/discard ownership moved to `useAssistantProposalApplyActions(...)`.
+- `WorkflowViewer.tsx` is now 82,705 bytes / 2,233 lines after assistant proposal apply action extraction.
 - `WorkflowViewer.tsx` no longer ends with local helper definitions; the file now ends at the `WorkflowViewer` component close.

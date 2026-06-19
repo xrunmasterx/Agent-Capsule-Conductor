@@ -79,7 +79,6 @@ import {
   replaceTemporaryResourceWithCallable,
 } from '../workbench/model/authoringProposal';
 import {
-  applyCanvasAuthoringProposal,
   authoringId,
   buildDeterministicCanvasAuthoringProposal,
   captureAuthoringSnapshot,
@@ -192,7 +191,6 @@ import type {
   BoundaryTransfer,
   BoundaryTransferMapping,
   BottomDockMode,
-  CanvasAuthoringApplyResult,
   CanvasAuthoringOperation,
   CanvasAuthoringProposal,
   CanvasAuthoringValidationResult,
@@ -383,6 +381,7 @@ import { useRunnerSubmit } from '../hooks/useRunnerSubmit';
 import { useSelectedAgentActions } from '../hooks/useSelectedAgentActions';
 import { useSelectedAgentTurnActions } from '../hooks/useSelectedAgentTurnActions';
 import { useAssistantProposalGenerateActions } from '../hooks/useAssistantProposalGenerateActions';
+import { useAssistantProposalApplyActions } from '../hooks/useAssistantProposalApplyActions';
 import { useSubmittedRunPolling } from '../hooks/useSubmittedRunPolling';
 import {
   loadTaskStore,
@@ -1493,6 +1492,32 @@ export function WorkflowViewer({
     assistantApplyUndo.afterCanvasHash === currentAuthoringCanvasHash &&
     !isRunning &&
     !assistantPendingTurn;
+  const {
+    applyAssistantProposal,
+    undoLastAssistantApply,
+    discardAssistantProposal,
+  } = useAssistantProposalApplyActions({
+    activeTaskId,
+    canvas,
+    selection,
+    assistantProposal,
+    assistantApplyUndo,
+    canUndoAssistantApply,
+    temporaryResources: currentAuthoringState.temporaryResources,
+    callables,
+    workflows,
+    graphRef,
+    setSourceGraph,
+    setCanvas,
+    setTasks,
+    setSelection,
+    setAssistantApplyUndo,
+    setAssistantProposal,
+    setAssistantBackendValidation,
+    setAssistantRequiredActions,
+    setAssistantMessages,
+    setMessage,
+  });
 
   useTaskPersistence({
     durableTasksReady,
@@ -1729,106 +1754,6 @@ export function WorkflowViewer({
     await runWorkflowGraph(singleNodeWorkflowGraph(node, selectedWorkflow?.id || canvas.id), 'node', node.id);
   }
 
-  function applyAssistantProposal() {
-    if (!assistantProposal) {
-      return;
-    }
-    const beforeCanvas = stripRuntimeStateFromCanvas(canvas);
-    const beforeTemporaryResources = currentAuthoringState.temporaryResources;
-    const beforeSelection = selection;
-    try {
-      const result = applyCanvasAuthoringProposal({
-        canvas,
-        taskId: activeTaskId,
-        proposal: assistantProposal,
-        temporaryResources: currentAuthoringState.temporaryResources,
-        callables,
-        workflows,
-      });
-      const nextGraph = canvasToWorkflowGraph(result.canvas);
-      const afterCanvasHash = canvasAuthoringHash(activeTaskId, stripRuntimeStateFromCanvas(result.canvas));
-      graphRef.current = nextGraph;
-      setSourceGraph(nextGraph);
-      setCanvas(result.canvas);
-      setTasks((currentTasks) =>
-        currentTasks.map((task) =>
-          task.taskId === activeTaskId
-            ? {
-                ...task,
-                title: result.canvas.name,
-                canvas: stripRuntimeStateFromCanvas(result.canvas),
-                authoring: { temporaryResources: result.temporaryResources },
-              }
-            : task,
-        ),
-      );
-      setSelection(result.selection);
-      setAssistantApplyUndo({
-        proposalId: assistantProposal.proposal_id,
-        taskId: activeTaskId,
-        beforeCanvas,
-        beforeTemporaryResources,
-        beforeSelection,
-        afterCanvasHash,
-        affectedSelection: result.selection,
-      });
-      setAssistantProposal(null);
-      setAssistantBackendValidation(null);
-      setAssistantRequiredActions((current) =>
-        current.filter((action) => {
-          if (action.kind !== 'approve_resource_persistence' || !action.resource_draft_id) {
-            return false;
-          }
-          return Boolean(result.temporaryResources[String(action.resource_draft_id)]);
-        }),
-      );
-      const text = result.messages.join('\n') || 'Proposal 已应用到当前 task canvas。';
-      setAssistantMessages((current) => [
-        ...current,
-        { id: authoringId('assistant_msg'), role: 'system', content: text },
-      ]);
-      setMessage(text);
-    } catch (error) {
-      const text = error instanceof Error ? error.message : String(error);
-      setAssistantMessages((current) => [
-        ...current,
-        { id: authoringId('assistant_msg'), role: 'system', content: text },
-      ]);
-      setMessage(text);
-    }
-  }
-
-  function undoLastAssistantApply() {
-    if (!assistantApplyUndo || !canUndoAssistantApply) {
-      return;
-    }
-    const nextCanvas = stripRuntimeStateFromCanvas(assistantApplyUndo.beforeCanvas);
-    const nextGraph = canvasToWorkflowGraph(nextCanvas);
-    graphRef.current = nextGraph;
-    setSourceGraph(nextGraph);
-    setCanvas(nextCanvas);
-    setTasks((currentTasks) =>
-      currentTasks.map((task) =>
-        task.taskId === activeTaskId
-          ? {
-              ...task,
-              title: nextCanvas.name,
-              canvas: nextCanvas,
-              authoring: { temporaryResources: assistantApplyUndo.beforeTemporaryResources },
-            }
-          : task,
-      ),
-    );
-    setSelection(assistantApplyUndo.beforeSelection);
-    setAssistantApplyUndo(null);
-    const text = '已撤回上一次 AI 应用到画布的修改。';
-    setAssistantMessages((current) => [
-      ...current,
-      { id: authoringId('assistant_msg'), role: 'system', content: text },
-    ]);
-    setMessage(text);
-  }
-
   async function persistTemporaryResourceDraft(resourceDraftId: string) {
     const draft = currentAuthoringState.temporaryResources[resourceDraftId];
     if (!draft || draft.status === 'discarded') {
@@ -1952,16 +1877,6 @@ export function WorkflowViewer({
     } finally {
       setAssistantBusy(false);
     }
-  }
-
-  function discardAssistantProposal() {
-    setAssistantProposal(null);
-    setAssistantBackendValidation(null);
-    setAssistantRequiredActions([]);
-    setAssistantMessages((current) => [
-      ...current,
-      { id: authoringId('assistant_msg'), role: 'system', content: '已丢弃当前 proposal。' },
-    ]);
   }
 
   function openCallableResourceFromNode(callableId: string, name: string, kind: 'agent_class' | 'tool_class') {
