@@ -34,7 +34,6 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type SetStateAction,
-  type TouchEvent as ReactTouchEvent,
 } from 'react';
 
 import { api } from '../api';
@@ -394,6 +393,13 @@ import {
   type ConnectPreviewState,
 } from './canvas/CanvasToolbar';
 import {
+  connectionPreviewFromHandle,
+  flowPositionFromEvent,
+  flowPositionFromPoint,
+  pointerPoint,
+  type CanvasPointerEvent,
+} from './canvas/canvasPointer';
+import {
   applyRunOverlayToCanvas,
   liveWorkflowRunFromEvents,
   mergeWorkflowRunWithEvents,
@@ -531,14 +537,6 @@ type WorkbenchViewProjection = {
   assistantOpen: boolean;
   detailsOpen: boolean;
 };
-
-type CanvasPointerEvent =
-  | PointerEvent
-  | MouseEvent
-  | TouchEvent
-  | ReactPointerEvent<Element>
-  | ReactMouseEvent<Element>
-  | ReactTouchEvent<Element>;
 
 function trimLiveLog(value: string): string {
   const lines = value.split(/\r?\n/);
@@ -8740,44 +8738,6 @@ function edgeFromPendingConnection(
     return dataEdge(sourceHandle.workflowId, sourceHandle.portId, newNodeId, 'main');
   }
   return dataEdge(newNodeId, 'main', sourceHandle.workflowId, sourceHandle.portId);
-}
-
-function flowPositionFromEvent(
-  flowInstance: { screenToFlowPosition: (position: { x: number; y: number }) => { x: number; y: number } } | null,
-  event: { clientX: number; clientY: number; currentTarget: HTMLElement },
-): { x: number; y: number } {
-  return flowPositionFromPoint(flowInstance, { x: event.clientX, y: event.clientY }, event.currentTarget);
-}
-
-function flowPositionFromPoint(
-  flowInstance: { screenToFlowPosition: (position: { x: number; y: number }) => { x: number; y: number } } | null,
-  point: { x: number; y: number },
-  fallbackElement?: HTMLElement,
-): { x: number; y: number } {
-  if (flowInstance) {
-    return flowInstance.screenToFlowPosition(point);
-  }
-  if (fallbackElement) {
-    const bounds = fallbackElement.getBoundingClientRect();
-    return { x: point.x - bounds.left, y: point.y - bounds.top };
-  }
-  return point;
-}
-
-function pointerPoint(event: CanvasPointerEvent): { x: number; y: number } {
-  if ('changedTouches' in event && event.changedTouches.length > 0) {
-    return { x: event.changedTouches[0].clientX, y: event.changedTouches[0].clientY };
-  }
-  return { x: (event as MouseEvent | ReactMouseEvent<Element>).clientX, y: (event as MouseEvent | ReactMouseEvent<Element>).clientY };
-}
-
-
-function connectionPreviewFromHandle(handle: HTMLElement, fallback: { x: number; y: number }): ConnectPreviewState {
-  const rect = handle.getBoundingClientRect();
-  const start = rect.width > 0 || rect.height > 0
-    ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
-    : fallback;
-  return { start, end: fallback };
 }
 
 function isJsdomRuntime(): boolean {
