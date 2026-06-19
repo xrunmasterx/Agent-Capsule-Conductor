@@ -842,6 +842,10 @@ Status: in progress
 - Removed local `readEvidence(...)` and `closeEvidenceDock(...)` action ownership from `WorkflowViewer.tsx`.
 - Restored readable UTF-8 Chinese default evidence titles in the extracted evidence dock action hook.
 - `web/src/components/WorkflowViewer.tsx` is now 99,574 bytes / 2,627 lines after moving evidence dock actions.
+- Added `web/src/hooks/useWorkflowRunSubmitActions.ts` as the owner for runner submit, queued run projection, binding-ref submit options, submitted-run polling projection, terminal task status updates, temporary callable blocking, and run-error evidence.
+- Removed local `runWorkflowGraph(...)` submission/polling implementation from `WorkflowViewer.tsx`; the shell now only decides whether to run the task, selected workflow, or selected node.
+- Restored readable UTF-8 Chinese run submit/error messages in the extracted run submit action hook.
+- `web/src/components/WorkflowViewer.tsx` is now 91,939 bytes / 2,483 lines after moving workflow run submit actions.
 
 ### Added/Updated Tests
 
@@ -879,6 +883,7 @@ Status: in progress
 - Added `web/src/hooks/useInvocationSettingsActions.test.tsx` for workflow/internal input, label fallback, control-main forwarding, empty-input policy, and Codex execution mode normalization updates.
 - Added `web/src/hooks/useOpenedWorkflowCanvas.test.tsx` for external workflow detail projection, loader integration, disabled-load guard, and empty focus-graph selection behavior.
 - Added `web/src/hooks/useEvidenceDockActions.test.tsx` for close-state reset, missing-path no-op reads, artifact owner metadata, and large-log truncation coverage.
+- Added `web/src/hooks/useWorkflowRunSubmitActions.test.tsx` for runner submit options, queued projection initialization, terminal polling snapshots, boundary-transfer validation failure, and temporary callable blocking.
 - Existing `web/src/App.test.tsx` and `web/src/components/WorkflowViewer.drag.test.tsx` now validate against the real owner imports instead of `WorkflowViewer.tsx` compatibility exports.
 
 ### Validation So Far
@@ -974,6 +979,10 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npm run test -- --run src/hooks/useEvidenceDockActions.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 3 files, 186 tests passed. |
 | `npm run test -- --run` | Passed | 97 files, 540 tests passed. |
 | `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
+| `npx tsc --noEmit` | Passed | Workflow run submit action hook extraction compiles. |
+| `npm run test -- --run src/hooks/useWorkflowRunSubmitActions.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 3 files, 187 tests passed. |
+| `npm run test -- --run` | Passed | 98 files, 544 tests passed. |
+| `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
 
 ### Static Gates So Far
 
@@ -1022,4 +1031,5 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `WorkflowViewer.tsx` no longer imports `normalizedCodexExecutionMode` or defines invocation settings mutation functions for input, labels, forward-main-output, empty-input policy, or Codex execution mode.
 - `WorkflowViewer.tsx` no longer imports `graphToWorkspaceCanvas`, `graphFromLegacyWorkflow`, `normalizeWorkflowGraph`, or `WorkflowDetail` for opened-workflow loading.
 - `WorkflowViewer.tsx` no longer defines `readEvidence(...)` or `closeEvidenceDock(...)`; evidence dock action ownership moved to `useEvidenceDockActions(...)`.
+- `WorkflowViewer.tsx` no longer defines `runWorkflowGraph(...)`; runner submit, queued projection, polling snapshot merge, and run-error evidence ownership moved to `useWorkflowRunSubmitActions(...)`.
 - `WorkflowViewer.tsx` no longer ends with local helper definitions; the file now ends at the `WorkflowViewer` component close.
