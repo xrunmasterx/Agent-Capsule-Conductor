@@ -338,6 +338,11 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npm run test -- --run src/App.test.tsx src/components/WorkflowViewer.drag.test.tsx` | Passed | 2 files, 183 tests passed. |
 | `npm run test -- --run` | Passed | 35 files, 332 tests passed. |
 | `npm run build` | Passed | Same expected chunk-size warning remains. |
+| `npm run test -- --run src/hooks/useWorkbenchTaskCanvasPersistence.test.tsx` | Passed | 1 file, 2 tests passed. |
+| `npx tsc --noEmit` | Passed | Workbench task canvas persistence hook wiring compiles. |
+| `npm run test -- --run src/App.test.tsx src/components/WorkflowViewer.drag.test.tsx` | Passed | 2 files, 183 tests passed. |
+| `npm run test -- --run` | Passed | 36 files, 334 tests passed. |
+| `npm run build` | Passed | Same expected chunk-size warning remains. |
 
 ### Static Gates So Far
 
@@ -368,4 +373,7 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `useRunRestorationLoader.test.tsx` covers disabled/missing-id suppression, summary/state/events loading, state/events fallback, cleanup suppression of stale responses, and summary-load error reporting.
 - `WorkflowViewer.tsx` no longer owns manual run refresh summary/state/events loading; this ownership lives in `useRunRefreshLoader`.
 - `useRunRefreshLoader.test.tsx` covers full refresh payload loading and state/events fallback.
-- `WorkflowViewer.tsx` still has direct `api.*`, `runnerApi.*`, and timer usage for run submit, submit-time boundary preview, selected-agent action APIs, GraphOps/publish actions, current snapshot publish callbacks, run submit polling, and UI-only defer timers. These are remaining PLAN_03 or later PLAN_06 slices.
+- `WorkflowViewer.tsx` no longer owns Workbench task canvas get/put endpoint calls for durable task loading, initial local task migration, current snapshot publishing, or backend task autosave; this ownership lives in `useWorkbenchTaskCanvasPersistence`.
+- `useWorkbenchTaskCanvasPersistence.test.tsx` covers task-canvas snapshot loading and exact save payload forwarding.
+- `WorkflowViewer.tsx` is now 564,438 bytes / 15,411 lines after the latest slice.
+- `WorkflowViewer.tsx` still has direct `api.*`, `runnerApi.*`, and timer usage for run submit, submit-time boundary preview, selected-agent action APIs, GraphOps/publish actions, run submit polling, and UI-only defer timers. These are remaining PLAN_03 or later PLAN_06 slices.

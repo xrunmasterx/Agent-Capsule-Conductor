@@ -386,6 +386,11 @@ import { useRunRestorationLoader } from '../hooks/useRunRestorationLoader';
 import { useRunRefreshLoader } from '../hooks/useRunRefreshLoader';
 import { useTaskPersistence } from '../hooks/useTaskPersistence';
 import { useWorkbenchTaskDurability } from '../hooks/useWorkbenchTaskDurability';
+import {
+  useWorkbenchTaskCanvasPersistence,
+  type LoadWorkbenchTaskCanvas,
+  type SaveWorkbenchTaskCanvas,
+} from '../hooks/useWorkbenchTaskCanvasPersistence';
 import { useWorkbenchBootstrap } from '../hooks/useWorkbenchBootstrap';
 import {
   bindingPathOf,
@@ -2276,14 +2281,20 @@ export function WorkflowViewer({
 
   const loadRuntimeConfig = useCallback(() => api.runtimeConfig(), []);
   const loadWorkbenchTaskRecords = useCallback(() => api.workbenchTasks(), []);
+  const { loadWorkbenchTaskCanvas, saveWorkbenchTaskCanvas } = useWorkbenchTaskCanvasPersistence();
   const loadDurableWorkbenchTask = useCallback(
-    (taskRecord: Record<string, unknown>) => loadWorkbenchTaskFromBackend(taskRecord),
-    [],
+    (taskRecord: Record<string, unknown>) => loadWorkbenchTaskFromBackend(taskRecord, loadWorkbenchTaskCanvas),
+    [loadWorkbenchTaskCanvas],
   );
   const persistInitialWorkbenchTask = useCallback(
     (task: WorkbenchTask) =>
-      persistWorkbenchTaskToBackend(task, callablesRef.current, workflowsRef.current),
-    [],
+      persistWorkbenchTaskToBackend(
+        task,
+        callablesRef.current,
+        workflowsRef.current,
+        saveWorkbenchTaskCanvas,
+      ),
+    [saveWorkbenchTaskCanvas],
   );
   const handleLoadedDurableTasks = useCallback(
     (loadedTasks: WorkbenchTask[], nextActiveTask: WorkbenchTask) => {
@@ -2809,7 +2820,7 @@ export function WorkflowViewer({
   );
   const publishCurrentTaskSnapshot = useCallback(async () => {
     const snapshot = currentAuthoringSnapshot();
-    await api.putWorkbenchTaskCanvas(snapshot.task_id, {
+    await saveWorkbenchTaskCanvas(snapshot.task_id, {
       canvas_hash: snapshot.snapshot_id,
       canvas_snapshot: authoringBackendCanvasSnapshot(snapshot),
       selection: authoringSelectionPayload(snapshot.selection),
@@ -2822,6 +2833,7 @@ export function WorkflowViewer({
     callables,
     workflows,
     currentAuthoringState.temporaryResources,
+    saveWorkbenchTaskCanvas,
   ]);
   const buildBackendTaskSnapshot = useCallback((): WorkbenchTask | null => {
     if (!currentTask) {
@@ -2834,8 +2846,8 @@ export function WorkflowViewer({
   }, [canvas, currentTask]);
   const persistBackendTaskSnapshot = useCallback(
     (taskSnapshot: WorkbenchTask) =>
-      persistWorkbenchTaskToBackend(taskSnapshot, callables, workflows),
-    [callables, workflows],
+      persistWorkbenchTaskToBackend(taskSnapshot, callables, workflows, saveWorkbenchTaskCanvas),
+    [callables, workflows, saveWorkbenchTaskCanvas],
   );
   const handleBackendAutosaveError = useCallback((error: unknown) => {
     console.warn('Workbench task autosave failed', error);
@@ -13385,14 +13397,17 @@ function omitEmptyRecord<T extends Record<string, unknown>>(record: T): T | unde
   return Object.keys(record).length ? record : undefined;
 }
 
-async function loadWorkbenchTaskFromBackend(taskRecord: Record<string, unknown>): Promise<WorkbenchTask | null> {
+async function loadWorkbenchTaskFromBackend(
+  taskRecord: Record<string, unknown>,
+  loadTaskCanvas: LoadWorkbenchTaskCanvas,
+): Promise<WorkbenchTask | null> {
   const taskId = typeof taskRecord.task_id === 'string' ? taskRecord.task_id : '';
   if (!taskId) {
     return null;
   }
   let canvasRecord: Record<string, unknown> | null = null;
   try {
-    canvasRecord = await api.getWorkbenchTaskCanvas(taskId);
+    canvasRecord = await loadTaskCanvas(taskId);
   } catch {
     canvasRecord = null;
   }
@@ -13454,6 +13469,7 @@ async function persistWorkbenchTaskToBackend(
   task: WorkbenchTask,
   callables: CallableSummary[],
   workflows: WorkflowSummary[],
+  saveTaskCanvas: SaveWorkbenchTaskCanvas,
 ): Promise<void> {
   const canvas = stripRuntimeStateFromCanvas(task.canvas);
   const snapshot = captureAuthoringSnapshot({
@@ -13463,7 +13479,7 @@ async function persistWorkbenchTaskToBackend(
     callables,
     workflows,
   });
-  await api.putWorkbenchTaskCanvas(task.taskId, {
+  await saveTaskCanvas(task.taskId, {
     canvas_hash: snapshot.snapshot_id,
     canvas_snapshot: authoringBackendCanvasSnapshot(snapshot),
     selection: authoringSelectionPayload(snapshot.selection),
