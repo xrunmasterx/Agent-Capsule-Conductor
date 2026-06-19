@@ -376,6 +376,7 @@ import {
   evidenceContentForCurrentSelection,
 } from './inspector/SelectionDetailsDock';
 import { useAssistantTurnStream } from '../hooks/useAssistantStream';
+import { useAssistantSession } from '../hooks/useAssistantSession';
 import { useRunStream } from '../hooks/useRunStream';
 import { useSelectedAgentSession, type AgentSessionUiState } from '../hooks/useSelectedAgentSession';
 import { useTaskPersistence } from '../hooks/useTaskPersistence';
@@ -2170,44 +2171,34 @@ export function WorkflowViewer({
     });
   }
 
-  async function ensureAssistantSession(snapshot = currentAuthoringSnapshot()): Promise<string> {
-    if (assistantSessionId) {
-      return assistantSessionId;
-    }
-    setAssistantBusy(true);
-    setAssistantSessionStatus('connecting');
-    try {
-      const agentsResponse = await api.authoringAgents();
-      setAuthoringAgents(agentsResponse.agents);
-      const agentId = selectedAuthoringAgentId || agentsResponse.agents[0]?.id || '';
-      if (agentId && !selectedAuthoringAgentId) {
-        setSelectedAuthoringAgentId(agentId);
-      }
-      const session = await api.createWorkbenchAssistantSession({
-        ...(agentId ? { agent_id: agentId } : {}),
-        task_id: snapshot.task_id,
-        canvas_hash: snapshot.snapshot_id,
-        canvas_snapshot: authoringBackendCanvasSnapshot(snapshot),
+  const addAssistantSystemMessage = useCallback((content: string) => {
+    setAssistantMessages((current) => [
+      ...current,
+      { id: authoringId('assistant_msg'), role: 'system', content },
+    ]);
+  }, []);
+  const ensureAssistantSessionFromPayload = useAssistantSession({
+    sessionId: assistantSessionId,
+    selectedAuthoringAgentId,
+    setAuthoringAgents,
+    setSelectedAuthoringAgentId,
+    setSessionId: setAssistantSessionId,
+    setAgentSession: setAssistantAgentSession,
+    setSessionStatus: setAssistantSessionStatus,
+    setMessages: setAssistantMessages,
+    setBusy: setAssistantBusy,
+    addSystemMessage: addAssistantSystemMessage,
+  });
+  const ensureAssistantSession = useCallback(
+    (snapshot = currentAuthoringSnapshot()): Promise<string> =>
+      ensureAssistantSessionFromPayload({
+        taskId: snapshot.task_id,
+        canvasHash: snapshot.snapshot_id,
+        canvasSnapshot: authoringBackendCanvasSnapshot(snapshot),
         selection: authoringSelectionPayload(snapshot.selection),
-      });
-      setAssistantSessionId(session.session_id);
-      setAssistantAgentSession(session);
-      setAssistantSessionStatus(session.status || 'ready');
-      const messages = await api.getAgentSessionMessages(session.session_id);
-      setAssistantMessages(agentMessagesToAssistantMessages(messages.messages || []));
-      return session.session_id;
-    } catch (error) {
-      const text = error instanceof Error ? error.message : String(error);
-      setAssistantSessionStatus('error');
-      setAssistantMessages((current) => [
-        ...current,
-        { id: authoringId('assistant_msg'), role: 'system', content: text },
-      ]);
-      throw error;
-    } finally {
-      setAssistantBusy(false);
-    }
-  }
+      }),
+    [activeTaskId, callables, canvas, ensureAssistantSessionFromPayload, selection, workflows],
+  );
 
   const updateRunProjection = useCallback((runId: string, update: (current: RunProjection) => RunProjection) => {
     setRunsById((current) => {
@@ -2327,7 +2318,7 @@ export function WorkflowViewer({
     void ensureAssistantSession().catch(() => {
       // The drawer shows the backend error as a system message.
     });
-  }, [assistantBusy, assistantOpen, assistantSessionId]);
+  }, [assistantBusy, assistantOpen, assistantSessionId, ensureAssistantSession]);
 
   useAssistantTurnStream(assistantTurnSessionId, assistantPendingTurn, assistantTurnReason, {
     setAgentSession: setAssistantAgentSession,

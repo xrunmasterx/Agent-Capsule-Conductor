@@ -221,7 +221,10 @@ Status: in progress
 - Added `web/src/hooks/useSelectedAgentSession.ts` as the owner for selected run-node agent session creation, session message loading, node event loading, pending interaction filtering, pending turn polling, and live run-agent event merging into the selected session.
 - Replaced the local selected-agent `AgentSessionUiState`, refresh callback, initial refresh effect, and pending-turn polling effect in `WorkflowViewer.tsx` with `useSelectedAgentSession(...)`.
 - `WorkflowViewer.tsx` now composes run projection event updates with selected-agent session event updates through hook callbacks, avoiding direct session-state mutation in the component.
-- `web/src/components/WorkflowViewer.tsx` is now 584,164 bytes / 16,172 lines after the latest slice.
+- Added `web/src/hooks/useAssistantSession.ts` as the owner for assistant authoring-agent discovery, session creation/reuse, initial session message loading, session status transitions, busy cleanup, and creation error reporting.
+- Replaced the local `ensureAssistantSession(...)` backend API logic in `WorkflowViewer.tsx` with `useAssistantSession(...)`; the component retains only the snapshot-to-payload wrapper.
+- Preserved GraphOps/proposal ownership in `WorkflowViewer.tsx` and later PLAN_06. `useAssistantSession` is callback-driven so it does not take ownership of global assistant proposal state.
+- `web/src/components/WorkflowViewer.tsx` is now 583,757 bytes / 16,164 lines after the latest slice.
 
 ### Added Tests
 
@@ -232,6 +235,7 @@ Status: in progress
 - `web/src/hooks/useTaskPersistence.test.tsx`
 - `web/src/hooks/useWorkbenchBootstrap.test.tsx`
 - `web/src/hooks/useSelectedAgentSession.test.tsx`
+- `web/src/hooks/useAssistantSession.test.tsx`
 - Extended `web/src/hooks/streamTypes.test.ts`
 
 ### Validation So Far
@@ -273,6 +277,11 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npx tsc --noEmit` | Passed | Selected-agent session hook wiring compiles. |
 | `npm run test -- --run` | Passed | 27 files, 297 tests passed. |
 | `npm run build` | Passed | Same expected chunk-size warning remains. |
+| `npm run test -- --run src/hooks/useAssistantSession.test.tsx` | Passed | 1 file, 4 tests passed. |
+| `npm run test -- --run src/App.test.tsx -t "Workbench AI assistant generates and applies a canvas-local proposal\|Workbench AI chat completion does not validate previous authoring draft\|Workbench AI assistant resets conversation state when switching tasks"` | Passed | 3 selected assistant tests passed. |
+| `npx tsc --noEmit` | Passed | Assistant session hook wiring compiles. |
+| `npm run test -- --run` | Passed | 28 files, 301 tests passed. |
+| `npm run build` | Passed | Same expected chunk-size warning remains. |
 
 ### Static Gates So Far
 
@@ -287,4 +296,6 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `useWorkbenchBootstrap.test.tsx` covers runtime config success/failure, durable task load and active-task selection, initial task migration, bootstrap error handling, and cleanup suppression.
 - `WorkflowViewer.tsx` no longer owns selected-agent session creation, selected node event loading, interaction filtering, or selected-agent pending-turn polling; this ownership lives in `useSelectedAgentSession`.
 - `useSelectedAgentSession.test.tsx` covers no-context reset, selected run-node session loading, pending interaction filtering, load errors, pending turn polling terminal cleanup, event merge, and explicit refresh.
-- `WorkflowViewer.tsx` still has direct `api.*`, `runnerApi.*`, and timer usage for run submit, submit-time boundary preview, binding actions, artifact loading, assistant session creation, and UI-only defer timers. These are remaining PLAN_03 slices.
+- `WorkflowViewer.tsx` no longer owns assistant authoring-agent discovery, workbench assistant session creation, or initial assistant session message loading; this ownership lives in `useAssistantSession`.
+- `useAssistantSession.test.tsx` covers existing-session reuse, default authoring agent selection, explicit agent preservation, message projection, busy cleanup, and create-error reporting.
+- `WorkflowViewer.tsx` still has direct `api.*`, `runnerApi.*`, and timer usage for run submit, submit-time boundary preview, binding actions, artifact loading, selected-agent action APIs, GraphOps/publish actions, and UI-only defer timers. These are remaining PLAN_03 or later PLAN_06 slices.
