@@ -87,3 +87,47 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `AGENT_CONTROL_HANDLE_TOP` authoritative value is `50%`.
 - `agentDataPortTop(index, count, nodeHeight)` keeps centered multi-port layout.
 - Remaining `WorkflowViewer.tsx` wrapper imports are existing migration debt scheduled for PLAN_09.
+
+## PLAN_02 Pure Model Extraction
+
+Status: in progress
+
+### Scope Completed So Far
+
+- Added `web/src/workbench/model/boundaryTransferProjection.ts` as the pure owner for Workbench boundary-transfer metadata normalization, serialization, offline pair inference, preview error detection, and unavailable-preview diagnostics.
+- Converted `web/src/components/canvas/boundaryTransfer.ts` into a compatibility facade that re-exports the pure model module.
+- Added `web/src/workbench/model/taskModel.ts` for task defaults, task-store payload migration, authoring-state normalization, run-status mapping, Codex mode normalization, and empty-input policy normalization.
+- Added `web/src/workbench/model/selectionModel.ts` for pure invocation-input projection, workflow/internal node labels, executable-node checks, and edge-disconnect click intent.
+- Removed the corresponding local function definitions from `web/src/components/WorkflowViewer.tsx`; existing exports remain as migration compatibility for older tests and callers.
+
+### Added Tests
+
+- `web/src/workbench/model/boundaryTransferProjection.test.ts`
+- `web/src/components/canvas/boundaryTransfer.test.ts`
+- `web/src/workbench/model/taskModel.test.ts`
+- `web/src/workbench/model/selectionModel.test.ts`
+
+### Validation So Far
+
+Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `npx tsc --noEmit` | Passed | Pure model imports compile. |
+| `npm run test -- --run src/workbench/model/boundaryTransferProjection.test.ts src/components/canvas/boundaryTransfer.test.ts src/workbench/model/taskModel.test.ts src/workbench/model/selectionModel.test.ts` | Passed | 4 files, 17 tests passed. |
+| `npm run test -- --run` | Passed | 13 files, 216 tests passed. |
+| `npm run build` | Passed | Same expected chunk-size warning remains. |
+
+### Static Gates So Far
+
+- `web/src/workbench/model` has no imports from ReactFlow, React hooks, localStorage, API modules, stores, or `WorkflowViewer`.
+- Boundary-transfer metadata keeps snake_case durable output while preserving camelCase load compatibility.
+- Task-store persistence side effects remain in `WorkflowViewer.tsx`; only pure migration/default logic moved.
+
+### Remaining PLAN_02 Work
+
+- Extract the remaining pure graph/canvas projection helpers.
+- Extract deterministic edge-command and port-command helpers.
+- Extract layout-data preparation that can be tested without ReactFlow rendering.
+- Move additional pure selection deletion/detail helpers once their dependency graph is isolated.
+- Keep React components, hooks, API calls, EventSource, localStorage IO, and ReactFlow rendering in later plans.

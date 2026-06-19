@@ -62,7 +62,6 @@ import {
 import { api, runnerApi } from '../api';
 import { shortPath, statusTone } from '../format';
 import type {
-  AgentClassDraft,
   AgentMessage,
   AgentSessionRecord,
   AgentTurnRecord,
@@ -126,6 +125,29 @@ import {
   agentDataPortMaxOffset,
   agentDataPortTop,
 } from '../workbench/constants';
+import {
+  createEmptyTask,
+  defaultTaskStorePayload,
+  emptyInputPolicyFromMetadata,
+  emptyWorkbenchAuthoringState,
+  emptyWorkspaceCanvas,
+  isActiveRunStatus,
+  isActiveTaskStatus,
+  nextTaskTitle,
+  normalizeTaskRunStatus,
+  normalizeWorkbenchAuthoringState,
+  normalizedCodexExecutionMode,
+  taskStatusFromRunStatus,
+  taskStorePayloadFromSerialized,
+} from '../workbench/model/taskModel';
+import {
+  internalInvocationLabel,
+  isExecutableNodeWorkflow,
+  promptFromInvocationInput,
+  shouldDisconnectEdgeOnClick,
+  staticInputFromInvocationInput,
+  workflowInvocationLabel,
+} from '../workbench/model/selectionModel';
 import type {
   AgentNodeSettingsModel,
   AssistantApplyUndoToken,
@@ -623,10 +645,6 @@ function trimLiveLog(value: string): string {
     return value;
   }
   return lines.slice(-MAX_LOG_PREVIEW_LINES).join('\n');
-}
-
-function emptyWorkbenchAuthoringState(): WorkbenchAuthoringState {
-  return { temporaryResources: {} };
 }
 
 function isTemporaryCallableId(callableId: string | null | undefined): boolean {
@@ -13005,11 +13023,6 @@ function InternalNodeInspector({
   );
 }
 
-function promptFromInvocationInput(input: Record<string, unknown>): string {
-  const prompt = input.user_prompt ?? input.prompt ?? input.topic;
-  return typeof prompt === 'string' ? prompt : '';
-}
-
 function InvocationIdentityCard({
   scope,
   nodeId,
@@ -13058,11 +13071,6 @@ function InvocationIdentityCard({
       ) : null}
     </dl>
   );
-}
-
-function staticInputFromInvocationInput(input: Record<string, unknown>): Record<string, unknown> {
-  const { user_prompt: _userPrompt, prompt: _prompt, topic: _topic, ...staticInput } = input;
-  return staticInput;
 }
 
 function mergeInvocationInput(
@@ -15995,29 +16003,12 @@ function workflowToGraphNode(workflow: WorkflowContainerModel): WorkflowGraphNod
   };
 }
 
-function createEmptyTask(taskId: string, title: string): WorkbenchTask {
-  const canvas = emptyWorkspaceCanvas(taskId, title);
-  return {
-    taskId,
-    title,
-    canvas,
-    authoring: emptyWorkbenchAuthoringState(),
-    status: 'not_run',
-  };
-}
-
-function normalizedCodexExecutionMode(value: unknown): CodexExecutionMode {
-  return value === 'local_readonly_no_sandbox' || value === 'danger_full_access'
-    ? value
-    : 'default';
-}
-
 function codexExecutionModeFromGraphNode(node: WorkflowGraphNode): CodexExecutionMode {
   return normalizedCodexExecutionMode(node.metadata?.codex_execution_mode);
 }
 
 function emptyInputPolicyFromGraphNode(node: WorkflowGraphNode): EmptyInputPolicy {
-  return node.metadata?.empty_input_policy === 'block' ? 'block' : 'allow';
+  return emptyInputPolicyFromMetadata(node.metadata?.empty_input_policy);
 }
 
 function codexInvocationPolicyForMode(
@@ -16044,28 +16035,6 @@ function codexInvocationPolicyForMode(
     };
   }
   return undefined;
-}
-
-function emptyWorkspaceCanvas(taskId = DEFAULT_TASK_ID, title = '任务 1'): WorkspaceCanvasModel {
-  return {
-    id: taskId,
-    name: title,
-    layout: 'workspace-canvas',
-    rootWorkflowId: taskId,
-    workflows: [],
-    edges: [],
-  };
-}
-
-function nextTaskTitle(tasks: WorkbenchTask[]): string {
-  const used = new Set(tasks.map((task) => task.title));
-  let index = tasks.length + 1;
-  let title = `任务 ${index}`;
-  while (used.has(title)) {
-    index += 1;
-    title = `任务 ${index}`;
-  }
-  return title;
 }
 
 async function loadWorkbenchTaskFromBackend(taskRecord: Record<string, unknown>): Promise<WorkbenchTask | null> {
@@ -16155,31 +16124,11 @@ async function persistWorkbenchTaskToBackend(
 }
 
 function loadTaskStore(): WorkbenchTaskStorePayload {
-  const fallbackTask = createEmptyTask(DEFAULT_TASK_ID, '任务 1');
   if (typeof window === 'undefined') {
-    return { version: 1, activeTaskId: fallbackTask.taskId, tasks: [fallbackTask] };
+    return defaultTaskStorePayload();
   }
   const stored = window.localStorage.getItem(TASK_STORE_KEY);
-  if (!stored) {
-    return { version: 1, activeTaskId: fallbackTask.taskId, tasks: [fallbackTask] };
-  }
-  try {
-    const payload = JSON.parse(stored) as Partial<WorkbenchTaskStorePayload>;
-    const tasks = Array.isArray(payload.tasks)
-      ? payload.tasks.filter(isStoredWorkbenchTask).map(migrateStoredWorkbenchTask)
-      : [];
-    if (!tasks.length) {
-      return { version: 1, activeTaskId: fallbackTask.taskId, tasks: [fallbackTask] };
-    }
-    const activeTaskId =
-      typeof payload.activeTaskId === 'string' &&
-      tasks.some((task) => task.taskId === payload.activeTaskId)
-        ? payload.activeTaskId
-        : tasks[0].taskId;
-    return { version: 1, activeTaskId, tasks };
-  } catch {
-    return { version: 1, activeTaskId: fallbackTask.taskId, tasks: [fallbackTask] };
-  }
+  return taskStorePayloadFromSerialized(stored);
 }
 
 function saveTaskStore(payload: WorkbenchTaskStorePayload): void {
@@ -16187,60 +16136,6 @@ function saveTaskStore(payload: WorkbenchTaskStorePayload): void {
     return;
   }
   window.localStorage.setItem(TASK_STORE_KEY, JSON.stringify(payload));
-}
-
-function isStoredWorkbenchTask(value: unknown): value is WorkbenchTask {
-  if (!isRecord(value)) {
-    return false;
-  }
-  return (
-    typeof value.taskId === 'string' &&
-    typeof value.title === 'string' &&
-    isRecord(value.canvas) &&
-    typeof value.canvas.id === 'string' &&
-    Array.isArray(value.canvas.workflows) &&
-    Array.isArray(value.canvas.edges) &&
-    ['not_run', 'queued', 'running', 'success', 'failed', 'cancel_requested', 'cancelled', 'crashed'].includes(
-      String(value.status),
-    )
-  );
-}
-
-function migrateStoredWorkbenchTask(task: WorkbenchTask): WorkbenchTask {
-  const migratedTask = {
-    ...task,
-    authoring: normalizeWorkbenchAuthoringState(task.authoring),
-  };
-  if (task.latestRunId || !task.activeRunId) {
-    return migratedTask;
-  }
-  return { ...migratedTask, latestRunId: task.activeRunId };
-}
-
-function normalizeWorkbenchAuthoringState(value: unknown): WorkbenchAuthoringState {
-  if (!isRecord(value) || !isRecord(value.temporaryResources)) {
-    return emptyWorkbenchAuthoringState();
-  }
-  const temporaryResources: Record<string, TemporaryResourceDraft> = {};
-  Object.entries(value.temporaryResources).forEach(([draftId, rawDraft]) => {
-    if (!isRecord(rawDraft) || !isRecord(rawDraft.agent_draft)) {
-      return;
-    }
-    const status = String(rawDraft.status || 'draft');
-    temporaryResources[draftId] = {
-      draft_id: typeof rawDraft.draft_id === 'string' ? rawDraft.draft_id : draftId,
-      kind: 'agent_template',
-      status:
-        status === 'approved_for_canvas' || status === 'discarded' || status === 'draft'
-          ? status
-          : 'draft',
-      agent_draft: rawDraft.agent_draft as AgentClassDraft,
-      referenced_by: Array.isArray(rawDraft.referenced_by)
-        ? rawDraft.referenced_by.map(String)
-        : [],
-    };
-  });
-  return { temporaryResources };
 }
 
 function workflowRunFromRunSummary(summary: RunSummary, graph: WorkflowGraph): WorkflowRunResult {
@@ -16275,59 +16170,6 @@ function nodeRunProjectionKey(node: NodeRunSummary): string {
     return internalFlowNodeId(node.parent_node_id, node.node_id);
   }
   return node.node_id;
-}
-
-function taskStatusFromRunStatus(status: string): WorkbenchTask['status'] {
-  if (status === 'queued') {
-    return 'queued';
-  }
-  if (status === 'success') {
-    return 'success';
-  }
-  if (status === 'running' || status === 'scheduled') {
-    return 'running';
-  }
-  if (status === 'cancel_requested') {
-    return 'cancel_requested';
-  }
-  if (status === 'cancelled') {
-    return 'cancelled';
-  }
-  if (status === 'crashed') {
-    return 'crashed';
-  }
-  if (status === 'not_run') {
-    return 'not_run';
-  }
-  return 'failed';
-}
-
-function normalizeTaskRunStatus(status: string): WorkflowStatus {
-  if (
-    status === 'queued' ||
-    status === 'running' ||
-    status === 'scheduled' ||
-    status === 'success' ||
-    status === 'failed' ||
-    status === 'cancel_requested' ||
-    status === 'cancelled' ||
-    status === 'crashed' ||
-    status === 'not_run' ||
-    status === 'schema_error' ||
-    status === 'artifact_error' ||
-    status === 'manual_review'
-  ) {
-    return status;
-  }
-  return status ? 'failed' : 'not_run';
-}
-
-function isActiveRunStatus(status: string): boolean {
-  return status === 'queued' || status === 'running' || status === 'scheduled' || status === 'cancel_requested';
-}
-
-function isActiveTaskStatus(status: WorkbenchTask['status']): boolean {
-  return status === 'queued' || status === 'running' || status === 'cancel_requested';
 }
 
 function isActiveCanvasObjectStatus(status: string): boolean {
@@ -18955,19 +18797,6 @@ function workflowBoundaryEdges(edges: WorkflowCanvasEdge[]): WorkflowCanvasEdge[
   return edges.filter(isWorkflowBoundaryEdge);
 }
 
-function isExecutableNodeWorkflow(workflow: WorkflowContainerModel): boolean {
-  if (workflow.boundaryKind) {
-    return false;
-  }
-  if (workflow.sourceKind === 'workflow') {
-    return false;
-  }
-  if (workflow.sourceKind && workflow.sourceKind !== 'workflow') {
-    return true;
-  }
-  return false;
-}
-
 function isWorkflowShellNode(workflow: WorkflowContainerModel): boolean {
   return !workflow.boundaryKind && (workflow.sourceKind || 'workflow') === 'workflow';
 }
@@ -19689,14 +19518,6 @@ function isChildWorkflowSummary(workflow: WorkflowSummary): boolean {
   return /__[^/\\]+\.accflow\.json$/u.test(path) || id.includes('__');
 }
 
-function workflowInvocationLabel(workflow: WorkflowContainerModel): string {
-  return workflow.invocationLabel || workflow.title || workflow.id;
-}
-
-function internalInvocationLabel(node: InternalNodeView): string {
-  return node.invocationLabel || node.name || node.id;
-}
-
 function uniqueInvocationLabel(baseLabel: string, existingLabels: Set<string>): string {
   const normalizedBase = baseLabel.trim() || 'Invocation';
   if (!existingLabels.has(normalizedBase)) {
@@ -19941,10 +19762,6 @@ function isInspectableNodeSelection(selection: CanvasSelection): boolean {
 
 function isNodeDetailModel(model: SelectedEntityDetailsModel): boolean {
   return model.kind === 'node' || model.kind === 'internal-node' || model.kind === 'workflow';
-}
-
-function shouldDisconnectEdgeOnClick(event: { altKey: boolean; button: number }): boolean {
-  return event.altKey && event.button === 0;
 }
 
 function selectionKey(selection: CanvasSelection): string {
