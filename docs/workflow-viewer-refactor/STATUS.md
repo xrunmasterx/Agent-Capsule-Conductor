@@ -811,6 +811,9 @@ Status: in progress
 - Moved Agent Session output/status/debug/timeline rendering into `web/src/components/inspector/AgentSessionPanel.tsx`, including publish actions, pending approval actions, artifact path buttons, message summaries, and agent event timeline display.
 - Restored readable UTF-8 Chinese labels in the extracted Agent Session panel, replacing the damaged legacy strings that were still embedded in `WorkflowViewer.tsx`.
 - `web/src/components/WorkflowViewer.tsx` is now 147,634 bytes / 4,078 lines after moving `AgentSessionPanel`.
+- Moved right-inspector and node-detail overlay node property composition into `web/src/components/inspector/AgentNodeSettingsPanel.tsx`.
+- Restored readable UTF-8 Chinese labels in the extracted node settings/property panels and removed the unused `agentLiveState` prop from the selection properties composition.
+- `web/src/components/WorkflowViewer.tsx` is now 129,309 bytes / 3,622 lines after moving `AgentNodeSettingsPanel` and `SelectionPropertiesPane`.
 
 ### Added/Updated Tests
 
@@ -838,6 +841,7 @@ Status: in progress
 - Added `web/src/components/inspector/RunEvidenceCard.test.tsx` for empty state, run facts, binding/data-flow rows, evidence action callbacks, output summary, and live-log rendering.
 - Added `web/src/components/inspector/EvidencePreview.test.tsx` for empty, loaded artifact, and artifact error rendering.
 - Added `web/src/components/inspector/AgentSessionPanel.test.tsx` for no-render states, publishable session rendering, draft publish, pending approval answers, artifact path actions, session messages, timeline summaries, loading, error, and unbound states.
+- Added `web/src/components/inspector/AgentNodeSettingsPanel.test.tsx` for node basics editing, template summary rendering, property group fallback, and selected-node Agent Session composition.
 - Existing `web/src/App.test.tsx` and `web/src/components/WorkflowViewer.drag.test.tsx` now validate against the real owner imports instead of `WorkflowViewer.tsx` compatibility exports.
 
 ### Validation So Far
@@ -896,6 +900,10 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npm run test -- --run src/components/inspector/AgentSessionPanel.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 3 files, 187 tests passed. |
 | `npm run test -- --run` | Passed | 88 files, 502 tests passed. |
 | `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
+| `npx tsc --noEmit` | Passed | Agent node settings panel extraction compiles. |
+| `npm run test -- --run src/components/inspector/AgentNodeSettingsPanel.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 3 files, 186 tests passed. |
+| `npm run test -- --run` | Passed | 89 files, 505 tests passed. |
+| `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
 
 ### Static Gates So Far
 
@@ -929,3 +937,6 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `WorkflowViewer.tsx` no longer defines `EvidencePreview`.
 - `WorkflowViewer.tsx` no longer defines `AgentSessionPanel`, `AgentSessionDebugDetails`, `AgentEventTimeline`, or `canPublishAgentOutput`.
 - `WorkflowViewer.tsx` no longer imports `FileText`, `RefreshCw`, or `UploadCloud`.
+- `WorkflowViewer.tsx` no longer defines `AgentNodeSettings`, `SelectionPropertiesPane`, or `SelectionNodeProperties`.
+- `WorkflowViewer.tsx` no longer owns callable template display/provider/skills/thinking-label helpers used only by node settings panels.
+- `WorkflowViewer.tsx` no longer imports node-settings-only inspector components such as `DataConnectionsPanel`, `NodePromptEditor`, `RunEvidenceCard`, `TechnicalDetailsDisclosure`, or `WorkflowMainInputBindingNotice`.

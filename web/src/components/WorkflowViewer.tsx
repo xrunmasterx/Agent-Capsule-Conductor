@@ -27,7 +27,6 @@ import type {
   ArtifactContent,
   AuthoringAgentSummary,
   AuthoringRequiredAction,
-  CallableDetail,
   CallableSummary,
   GraphOpsDryRunPayload,
   InteractionRequest,
@@ -203,8 +202,6 @@ import {
   graphToWorkspaceCanvas,
 } from '../workbench/model/canvasProjection';
 import type {
-  AgentNodeSettingsModel,
-  AgentNodeConnectionEditor,
   AssistantApplyUndoToken,
   AssistantChatMessage,
   AssistantGraphOpsReview,
@@ -227,7 +224,6 @@ import type {
   NodeLiveLogs,
   PortDirection,
   RunProjection,
-  SelectedDetailsPropertyGroup,
   SelectedEntityDetailsModel,
   TaskWorkspaceView,
   TemporaryResourceDraft,
@@ -238,7 +234,6 @@ import type {
   WorkflowContainerModel,
   WorkflowMainInputBindingState,
   WorkflowPortView,
-  WorkflowStatus,
   WorkspaceCanvasModel,
 } from '../types/workbench';
 import { CodeBlock } from './CodeBlock';
@@ -275,11 +270,9 @@ import {
 } from './workflow-viewer/palette';
 import {
   effectiveOutputPortsForNode,
-  hasProjectedOutputPorts,
   isSchemaDerivedOutputPort,
   outputPortTooltip,
   outputPortsFromSchema,
-  schemaDerivedOutputFields,
 } from '../workbench/model/schemaPorts';
 import {
   canvasToWorkflowGraph,
@@ -373,28 +366,19 @@ import {
 
 import { ExecutionDock as ExecutionDockComponent } from './execution';
 import { LiveOutputViewer } from './execution/RunOverlay';
-import { CodexExecutionModeSelector } from './inspector/CodexExecutionModeSelector';
-import { DataConnectionsPanel } from './inspector/DataConnectionsPanel';
-import { AgentSessionPanel } from './inspector/AgentSessionPanel';
+import {
+  AgentNodeSettingsPanel,
+  SelectionPropertiesPane,
+} from './inspector/AgentNodeSettingsPanel';
 import { EvidencePreview } from './inspector/EvidencePreview';
 import { InvocationIdentityCard } from './inspector/InvocationIdentityCard';
 import { InvocationInputEditor } from './inspector/InvocationInputEditor';
 import { LiveLogBlocks } from './inspector/LiveLogBlocks';
 import { NodeDetailOverlay } from './inspector/NodeDetailOverlay';
 import { NodeEvidencePaths } from './inspector/NodeEvidencePaths';
-import { NodePromptEditor } from './inspector/NodePromptEditor';
 import { PortList } from './inspector/PortList';
-import { PropertyGroups } from './inspector/PropertyGroups';
 import { RightInspector } from './inspector/RightInspector';
-import { RunEvidenceCard } from './inspector/RunEvidenceCard';
 import { ResourceInspector, type ResourceTemplate } from './inspector/ResourceInspector';
-import {
-  SchemaFieldCards,
-  dedupeSchemaFields,
-  schemaFieldsFromArtifactContract,
-  schemaFieldsFromJsonSchema,
-  schemaFieldsFromPorts,
-} from './inspector/SchemaFieldCards';
 import { SelectedNodeRuntimePane } from './inspector/SelectedNodeRuntimePane';
 import {
   SelectionDetailsDock,
@@ -402,8 +386,6 @@ import {
 } from './inspector/SelectionDetailsDock';
 import { SelectionInputPane } from './inspector/SelectionInputPane';
 import { SelectionOutputPane } from './inspector/SelectionOutputPane';
-import { TechnicalDetailsDisclosure } from './inspector/TechnicalDetailsDisclosure';
-import { WorkflowMainInputBindingNotice } from './inspector/WorkflowMainInputBindingNotice';
 import {
   SaveWorkflowDialog as SaveWorkflowDialogComponent,
   TaskOverviewPage as TaskOverviewPageComponent,
@@ -2839,7 +2821,7 @@ export function WorkflowViewer({
                 portList: (props) => <PortList {...props} />,
                 eventTimeline: (props) => <EventTimeline {...props} />,
               }}
-              renderAgentNodeSettings={(props) => <AgentNodeSettings {...props} />}
+              renderAgentNodeSettings={(props) => <AgentNodeSettingsPanel {...props} />}
               boundaryPreviewSnapshotForCanvas={boundaryTransferPreviewSnapshot}
               onConnectionMode={setConnectionMode}
               onBeginDataConnection={beginDataConnection}
@@ -2881,9 +2863,6 @@ export function WorkflowViewer({
               callableState={selectedCallableDetailState}
               runtimeConfig={runtimeConfig}
               agentSessionState={agentSessionState}
-              agentLiveState={
-                selectedAgentTurnLiveState.events.length ? selectedAgentTurnLiveState : selectedAgentLiveState
-              }
               onReadEvidence={readEvidence}
               onRefreshAgentSession={refreshAgentSession}
               onPublishAgentOutput={publishSelectedAgentOutput}
@@ -3028,226 +3007,6 @@ export function WorkflowViewer({
   );
 }
 
-function AgentNodeSettings({
-  node,
-  connectionEditor,
-  runtimeConfig,
-  callableState,
-  onUpdateInput,
-  onUpdateLabel,
-  onUpdateForwardMainOutput,
-  onUpdateEmptyInputPolicy,
-  onUpdateCodexExecutionMode,
-  onReadEvidence,
-  onOpenCallableResource,
-}: {
-  node: AgentNodeSettingsModel;
-  connectionEditor?: AgentNodeConnectionEditor;
-  runtimeConfig: RuntimeConfig | null;
-  callableState: CallableDetailLoadState;
-  onUpdateInput: (input: Record<string, unknown>) => void;
-  onUpdateLabel: (label: string) => void;
-  onUpdateForwardMainOutput: (value: boolean) => void;
-  onUpdateEmptyInputPolicy: (value: EmptyInputPolicy) => void;
-  onUpdateCodexExecutionMode: (value: CodexExecutionMode) => void;
-  onReadEvidence: (path: string | null | undefined, title?: string) => void;
-  onOpenCallableResource: (callableId: string, name: string, kind: 'agent_class' | 'tool_class') => void;
-}) {
-  const detail = callableState.detail;
-  const templateName = detail ? callableDisplayTitle(detail) : node.callableId || 'Unbound template';
-  const templateDescription = detail ? callableDescription(detail) : '';
-  const inputFields = schemaFieldsFromPorts(detail?.input_ports, node.inputPorts);
-  const outputFields = hasProjectedOutputPorts(node.outputSchema)
-    ? schemaDerivedOutputFields(node.outputSchema)
-    : [
-        ...schemaFieldsFromPorts(detail?.output_ports, node.outputPorts),
-        ...schemaFieldsFromArtifactContract(detail?.artifact_contract),
-      ];
-  const provider = detail ? providerLabelFromCallable(detail) : node.kind === 'Tool' ? 'Tool' : 'Agent';
-  const metadata = detail?.metadata || {};
-  const skills = skillsFromMetadata(metadata);
-  const templateKind = detail?.kind === 'tool_class' ? 'tool_class' : 'agent_class';
-  const showCodexMode = isCodexAgentNode(node, detail);
-
-  return (
-    <div className="node-settings-content">
-      <section className="node-settings-card current-node-card">
-        <div className="node-settings-section-header">
-          <div>
-            <span className="panel-kicker">当前节点</span>
-            <h4>{node.label}</h4>
-          </div>
-          <span className={`node-settings-status status-${node.status}`}>{statusLabel(node.status)}</span>
-        </div>
-        <label className="node-settings-field">
-          <span>节点名称</span>
-          <input
-            value={node.label}
-            onChange={(event) => onUpdateLabel(event.target.value)}
-            aria-label="节点名称"
-          />
-        </label>
-        <dl className="node-settings-facts">
-          <dt>Node type</dt>
-          <dd>{node.kind === 'Tool' ? 'Tool' : 'Agent'}</dd>
-          <dt>Template</dt>
-          <dd>{templateName}</dd>
-        </dl>
-        <label className="node-settings-checkbox">
-          <input
-            type="checkbox"
-            checked={node.forwardMainOutputOnControl !== false}
-            onChange={(event) => onUpdateForwardMainOutput(event.currentTarget.checked)}
-          />
-          <span title="开启时，只有 control-only 下游会默认收到该节点完整 main 输出；如果同一上下游已有 Data Edge，控制线只决定运行顺序。关闭后，所有控制线都只决定运行顺序。">
-            控制线传递完整输出
-          </span>
-        </label>
-        <label className="node-settings-checkbox">
-          <input
-            type="checkbox"
-            checked={node.emptyInputPolicy === 'block'}
-            onChange={(event) =>
-              onUpdateEmptyInputPolicy(event.currentTarget.checked ? 'block' : 'allow')
-            }
-          />
-          <span>空输入时阻止运行</span>
-        </label>
-        {showCodexMode ? (
-          <CodexExecutionModeSelector
-            value={normalizedCodexExecutionMode(node.codexExecutionMode)}
-            onChange={onUpdateCodexExecutionMode}
-          />
-        ) : null}
-      </section>
-
-      <NodePromptEditor
-        nodeKey={node.nodeId}
-        input={node.input}
-        systemPrompt={detail?.default_prompt || ''}
-        onChange={onUpdateInput}
-      />
-
-      <section className="node-settings-card">
-        <div className="node-settings-section-header">
-          <div>
-            <span className="panel-kicker">Agent template</span>
-            <h4>{templateName}</h4>
-          </div>
-          {node.callableId ? (
-            <button
-              type="button"
-              className="secondary-action compact-action"
-              onClick={() => onOpenCallableResource(node.callableId, templateName, templateKind)}
-            >
-              编辑模板
-            </button>
-          ) : null}
-        </div>
-        {callableState.status === 'loading' ? <p className="muted">正在加载模板信息...</p> : null}
-        {callableState.status === 'error' ? (
-          <p className="notice compact-notice">模板信息暂时不可用: {callableState.error}</p>
-        ) : null}
-        <p className="template-governance-hint">
-          模板是 class-level 资源；修改会影响所有引用，持久化发布需通过 GraphOps 或等效治理路径。
-        </p>
-        <div className="template-summary-grid">
-          <div>
-            <span>Agent</span>
-            <strong>{provider}</strong>
-          </div>
-          <div>
-            <span>Model</span>
-            <strong>{String(metadata.model || 'Default model')}</strong>
-          </div>
-          <div>
-            <span>Reasoning</span>
-            <strong>{thinkingLabel(String(metadata.reasoning_effort || 'medium'))}</strong>
-          </div>
-        </div>
-        {templateDescription ? <p className="template-description">{templateDescription}</p> : null}
-        <section className="template-readonly-block">
-          <h5>Skills</h5>
-          {skills.length > 0 ? (
-            <div className="skill-chip-row readonly">
-              {skills.map((skill) => (
-                <span key={skill}>{skill}</span>
-              ))}
-            </div>
-          ) : (
-            <p>No fixed skills configured</p>
-          )}
-        </section>
-      </section>
-
-      <section className="node-settings-card">
-        <div className="node-settings-section-header">
-          <div>
-            <span className="panel-kicker">Input / Output</span>
-            <h4>Node input and output contract</h4>
-          </div>
-        </div>
-        <SchemaFieldCards title="Input" fields={inputFields} emptyText="No input schema fields declared." />
-        <SchemaFieldCards title="Output" fields={dedupeSchemaFields(outputFields)} emptyText="No output schema fields declared." />
-      </section>
-
-      {connectionEditor ? (
-        <section className="node-settings-card">
-          <div className="node-settings-section-header">
-            <div>
-              <span className="panel-kicker">Data edges</span>
-              <h4>连接设置</h4>
-            </div>
-          </div>
-          <DataConnectionsPanel
-            canvasNodeKind={connectionEditor.canvasNodeKind}
-            canvas={connectionEditor.canvas}
-            scopeWorkflowId={connectionEditor.scopeWorkflowId}
-            nodeId={connectionEditor.nodeId}
-            nodeLabel={connectionEditor.nodeLabel}
-            callableId={connectionEditor.callableId}
-            inputPorts={connectionEditor.inputPorts}
-            outputPorts={connectionEditor.outputPorts}
-            outputPortsReadonly={connectionEditor.outputPortsReadonly}
-            dataConnectionDraft={connectionEditor.dataConnectionDraft}
-            onBeginDataConnection={connectionEditor.onBeginDataConnection}
-            onCancelDataConnection={connectionEditor.onCancelDataConnection}
-            onUpdateDataConnectionMaterialization={connectionEditor.onUpdateDataConnectionMaterialization}
-            onCompleteDataConnection={connectionEditor.onCompleteDataConnection}
-            onCompleteDataConnectionWithNewInputPort={connectionEditor.onCompleteDataConnectionWithNewInputPort}
-            onAddPort={connectionEditor.onAddPort}
-            onRenamePort={connectionEditor.onRenamePort}
-            onDeletePort={connectionEditor.onDeletePort}
-          />
-        </section>
-      ) : null}
-
-      <section className="node-settings-card">
-        <div className="node-settings-section-header">
-          <div>
-            <span className="panel-kicker">本次运行</span>
-            <h4>{node.run ? '运行证据' : '尚未运行'}</h4>
-          </div>
-        </div>
-        <WorkflowMainInputBindingNotice binding={node.workflowMainInputBinding} nodeRun={node.run} />
-        <RunEvidenceCard
-          nodeRun={node.run}
-          liveLogs={node.logs}
-          runtimeConfig={runtimeConfig}
-          onReadEvidence={onReadEvidence}
-        />
-      </section>
-
-      <TechnicalDetailsDisclosure
-        node={node}
-        runtimeConfig={runtimeConfig}
-        callableDetail={detail}
-      />
-    </div>
-  );
-}
-
-
 function evidenceIdentityLabel(
   owner: EvidenceDockState['owner'],
   currentTaskId?: string,
@@ -3273,247 +3032,6 @@ function evidenceIdentityLabel(
 function compactText(value: string): string {
   const text = value.replace(/\s+/gu, ' ').trim();
   return text.length > 420 ? `${text.slice(0, 420)}...` : text || 'empty';
-}
-
-function SelectionPropertiesPane({
-  model,
-  callableState,
-  runtimeConfig,
-  agentSessionState,
-  agentLiveState,
-  onReadEvidence,
-  onRefreshAgentSession,
-  onPublishAgentOutput,
-  onAnswerAgentInteraction,
-  onUpdateInput,
-  onUpdateLabel,
-  onUpdateForwardMainOutput,
-  onUpdateEmptyInputPolicy,
-  onUpdateCodexExecutionMode,
-  onOpenCallableResource,
-}: {
-  model: SelectedEntityDetailsModel;
-  callableState: CallableDetailLoadState;
-  runtimeConfig: RuntimeConfig | null;
-  agentSessionState: AgentSessionUiState;
-  agentLiveState: WorkbenchLiveStreamState;
-  onReadEvidence: (path: string | null | undefined, title?: string) => void;
-  onRefreshAgentSession: () => Promise<void>;
-  onPublishAgentOutput: (expectedTurnId: string) => Promise<void>;
-  onAnswerAgentInteraction: (interactionId: string, answer: Record<string, unknown>) => Promise<void>;
-  onUpdateInput: (input: Record<string, unknown>) => void;
-  onUpdateLabel: (label: string) => void;
-  onUpdateForwardMainOutput: (value: boolean) => void;
-  onUpdateEmptyInputPolicy: (value: EmptyInputPolicy) => void;
-  onUpdateCodexExecutionMode: (value: CodexExecutionMode) => void;
-  onOpenCallableResource: (callableId: string, name: string, kind: 'agent_class' | 'tool_class') => void;
-}) {
-  return (
-    <section className="selection-properties-pane" aria-label="节点属性">
-      <header className="selection-pane-header">
-        <div>
-          <span>节点属性</span>
-          <h3>{model.scopeLabel || model.kind}</h3>
-        </div>
-      </header>
-      {model.nodeSettings ? (
-        <SelectionNodeProperties
-          node={model.nodeSettings}
-          callableState={callableState}
-          runtimeConfig={runtimeConfig}
-          agentSessionState={agentSessionState}
-          agentLiveState={agentLiveState}
-          onReadEvidence={onReadEvidence}
-          onRefreshAgentSession={onRefreshAgentSession}
-          onPublishAgentOutput={onPublishAgentOutput}
-          onAnswerAgentInteraction={onAnswerAgentInteraction}
-          onUpdateInput={onUpdateInput}
-          onUpdateLabel={onUpdateLabel}
-          onUpdateForwardMainOutput={onUpdateForwardMainOutput}
-          onUpdateEmptyInputPolicy={onUpdateEmptyInputPolicy}
-          onUpdateCodexExecutionMode={onUpdateCodexExecutionMode}
-          onOpenCallableResource={onOpenCallableResource}
-        />
-      ) : (
-        <PropertyGroups groups={model.properties} />
-      )}
-    </section>
-  );
-}
-
-function SelectionNodeProperties({
-  node,
-  callableState,
-  runtimeConfig,
-  agentSessionState,
-  agentLiveState,
-  onUpdateInput,
-  onUpdateLabel,
-  onUpdateForwardMainOutput,
-  onUpdateEmptyInputPolicy,
-  onUpdateCodexExecutionMode,
-  onReadEvidence,
-  onRefreshAgentSession,
-  onPublishAgentOutput,
-  onAnswerAgentInteraction,
-  onOpenCallableResource,
-}: {
-  node: AgentNodeSettingsModel;
-  callableState: CallableDetailLoadState;
-  runtimeConfig: RuntimeConfig | null;
-  agentSessionState: AgentSessionUiState;
-  agentLiveState: WorkbenchLiveStreamState;
-  onUpdateInput: (input: Record<string, unknown>) => void;
-  onUpdateLabel: (label: string) => void;
-  onUpdateForwardMainOutput: (value: boolean) => void;
-  onUpdateEmptyInputPolicy: (value: EmptyInputPolicy) => void;
-  onUpdateCodexExecutionMode: (value: CodexExecutionMode) => void;
-  onReadEvidence: (path: string | null | undefined, title?: string) => void;
-  onRefreshAgentSession: () => Promise<void>;
-  onPublishAgentOutput: (expectedTurnId: string) => Promise<void>;
-  onAnswerAgentInteraction: (interactionId: string, answer: Record<string, unknown>) => Promise<void>;
-  onOpenCallableResource: (callableId: string, name: string, kind: 'agent_class' | 'tool_class') => void;
-}) {
-  const detail = callableState.detail;
-  const templateName = detail ? callableDisplayTitle(detail) : node.callableId || '未绑定模板';
-  const templateDescription = detail ? callableDescription(detail) : '';
-  const provider = detail ? providerLabelFromCallable(detail) : node.kind === 'Tool' ? '工具' : '智能体';
-  const metadata = detail?.metadata || {};
-  const skills = skillsFromMetadata(metadata);
-  const templateKind = detail?.kind === 'tool_class' ? 'tool_class' : 'agent_class';
-  const showCodexMode = isCodexAgentNode(node, detail);
-  return (
-    <div className="selection-node-properties">
-      <section className="node-settings-card current-node-card">
-        <div className="node-settings-section-header">
-          <div>
-            <span className="panel-kicker">当前节点</span>
-            <h4>{node.label}</h4>
-          </div>
-          <span className={`node-settings-status status-${node.status}`}>{statusLabel(node.status)}</span>
-        </div>
-        <label className="node-settings-field">
-          <span>节点名称</span>
-          <input value={node.label} onChange={(event) => onUpdateLabel(event.target.value)} aria-label="节点名称" />
-        </label>
-        <dl className="node-settings-facts">
-          <dt>节点类型</dt>
-          <dd>{node.kind === 'Tool' ? '工具' : '智能体'}</dd>
-          <dt>使用模板</dt>
-          <dd>{templateName}</dd>
-        </dl>
-        <label className="node-settings-checkbox">
-          <input
-            type="checkbox"
-            checked={node.forwardMainOutputOnControl !== false}
-            onChange={(event) => onUpdateForwardMainOutput(event.currentTarget.checked)}
-          />
-          <span title="开启时，只有 control-only 下游会默认收到该节点完整 main 输出；如果同一上下游已有 Data Edge，控制线只决定运行顺序。关闭后，所有控制线都只决定运行顺序。">
-            控制线传递完整输出
-          </span>
-        </label>
-        <label className="node-settings-checkbox">
-          <input
-            type="checkbox"
-            checked={node.emptyInputPolicy === 'block'}
-            onChange={(event) =>
-              onUpdateEmptyInputPolicy(event.currentTarget.checked ? 'block' : 'allow')
-            }
-          />
-          <span>空输入时阻止运行</span>
-        </label>
-        {showCodexMode ? (
-          <CodexExecutionModeSelector
-            value={normalizedCodexExecutionMode(node.codexExecutionMode)}
-            onChange={onUpdateCodexExecutionMode}
-          />
-        ) : null}
-      </section>
-
-      <NodePromptEditor
-        nodeKey={node.nodeId}
-        input={node.input}
-        systemPrompt={detail?.default_prompt || ''}
-        onChange={onUpdateInput}
-      />
-
-      {node.workflowMainInputBinding ? (
-        <section className="node-settings-card">
-          <div className="node-settings-section-header">
-            <div>
-              <span className="panel-kicker">Workflow 输入</span>
-              <h4>当前画布绑定</h4>
-            </div>
-          </div>
-          <WorkflowMainInputBindingNotice binding={node.workflowMainInputBinding} nodeRun={node.run} />
-        </section>
-      ) : null}
-
-      <AgentSessionPanel
-        node={node}
-        state={agentSessionState}
-        events={agentSessionState.events}
-        onReadEvidence={onReadEvidence}
-        onRefresh={onRefreshAgentSession}
-        onPublish={onPublishAgentOutput}
-        onAnswerInteraction={onAnswerAgentInteraction}
-      />
-
-      <section className="node-settings-card">
-        <div className="node-settings-section-header">
-          <div>
-            <span className="panel-kicker">模板摘要</span>
-            <h4>{templateName}</h4>
-          </div>
-          {node.callableId && !node.temporaryResourceId ? (
-            <button
-              type="button"
-              className="secondary-action compact-action"
-              onClick={() => onOpenCallableResource(node.callableId, templateName, templateKind)}
-            >
-              编辑模板
-            </button>
-          ) : null}
-        </div>
-        {callableState.status === 'loading' ? <p className="muted">正在加载模板信息...</p> : null}
-        {callableState.status === 'error' ? (
-          <p className="notice compact-notice">模板信息暂时不可用：{callableState.error}</p>
-        ) : null}
-        <p className="template-governance-hint">
-          模板是 class-level 资源；修改会影响所有引用，持久化发布需通过 GraphOps 或等效治理路径。
-        </p>
-        <div className="template-summary-grid">
-          <div>
-            <span>Agent</span>
-            <strong>{provider}</strong>
-          </div>
-          <div>
-            <span>模型</span>
-            <strong>{String(metadata.model || '默认模型')}</strong>
-          </div>
-          <div>
-            <span>思考程度</span>
-            <strong>{thinkingLabel(String(metadata.reasoning_effort || 'medium'))}</strong>
-          </div>
-        </div>
-        {templateDescription ? <p className="template-description">{templateDescription}</p> : null}
-        <section className="template-readonly-block">
-          <h5>Skills</h5>
-          {skills.length > 0 ? (
-            <div className="skill-chip-row readonly">
-              {skills.map((skill) => (
-                <span key={skill}>{skill}</span>
-              ))}
-            </div>
-          ) : (
-            <p>未配置固定 skills</p>
-          )}
-        </section>
-      </section>
-
-      <TechnicalDetailsDisclosure node={node} runtimeConfig={runtimeConfig} callableDetail={detail} />
-    </div>
-  );
 }
 
 function agentEventSummary(event: RunEvent): string {
@@ -3690,17 +3208,6 @@ function transcriptEntryLabel(entry: AccTranscriptEntry): string {
 
 function limitText(value: string, maxLength: number): string {
   return value.length > maxLength ? `${value.slice(0, maxLength)}...` : value;
-}
-
-function isCodexAgentNode(node: AgentNodeSettingsModel, detail: CallableDetail | null): boolean {
-  if (node.kind !== 'Agent') {
-    return false;
-  }
-  if (detail?.runtime === 'codex_cli') {
-    return true;
-  }
-  const callableId = node.callableId.toLowerCase();
-  return callableId.includes('codex');
 }
 
 function stringValue(value: unknown): string {
@@ -3995,64 +3502,6 @@ function inspectorDrawerTitle(selection: CanvasSelection): string {
     return '节点设置';
   }
   return '任务设置';
-}
-
-function callableDisplayTitle(detail: Pick<CallableDetail, 'id' | 'name' | 'metadata'>): string {
-  const metadataName = detail.metadata?.name;
-  return detail.name || (typeof metadataName === 'string' ? metadataName : '') || detail.id;
-}
-
-function callableDescription(detail: Pick<CallableDetail, 'description' | 'metadata'>): string {
-  const metadataDescription = detail.metadata?.description;
-  return detail.description || (typeof metadataDescription === 'string' ? metadataDescription : '');
-}
-
-function providerLabelFromCallable(detail: Pick<CallableDetail, 'runtime' | 'runner' | 'metadata'>): string {
-  const provider = detail.metadata?.agent_provider;
-  if (typeof provider === 'string' && provider.trim()) {
-    return providerLabel(provider);
-  }
-  const runtime = detail.runtime || detail.runner || '';
-  if (runtime.includes('codex')) {
-    return 'Codex';
-  }
-  if (runtime.includes('claude')) {
-    return 'Claude';
-  }
-  if (runtime.includes('generic')) {
-    return '自定义 CLI';
-  }
-   return runtime || '默认 Agent';
-}
-
-function providerLabel(provider: string): string {
-  const labels: Record<string, string> = {
-    codex: 'Codex',
-    claude: 'Claude',
-    hermes: 'Hermes',
-    cursor: 'Cursor',
-    gemini: 'Gemini',
-    generic_cli: '自定义 CLI',
-  };
-  return labels[provider] || provider;
-}
-
-function skillsFromMetadata(metadata?: Record<string, unknown>): string[] {
-  const skills = metadata?.skills;
-  if (!Array.isArray(skills)) {
-    return [];
-  }
-  return skills.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
-}
-
-function thinkingLabel(value: string): string {
-  const labels: Record<string, string> = {
-    low: '轻量',
-    medium: '标准',
-    high: '深入',
-    max: '极限',
-  };
-  return labels[value] || value || '标准';
 }
 
 function textArtifact(name: string, content: string, type: ArtifactContent['type']): ArtifactContent {
