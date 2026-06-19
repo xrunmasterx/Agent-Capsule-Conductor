@@ -11,7 +11,6 @@ import type {
   AuthoringRequiredAction,
   CallableSummary,
   RunEvent,
-  WorkflowGraph,
   WorkflowSummary,
 } from '../types';
 import {
@@ -50,9 +49,6 @@ import {
 import {
   useBoundaryTransferValidation,
 } from '../hooks/useBoundaryTransferPreview';
-import {
-  canvasToWorkflowGraph,
-} from '../workbench/model/workflowGraphProjection';
 import {
   applyRunOverlayToCanvas,
   stripRuntimeStateFromCanvas,
@@ -115,6 +111,7 @@ import { WorkflowViewerDock } from './workflow-viewer/WorkflowViewerDock';
 import { WorkflowViewerMainStage } from './workflow-viewer/WorkflowViewerMainStage';
 import { WorkflowViewerNodeDetailOverlay } from './workflow-viewer/WorkflowViewerNodeDetailOverlay';
 import { WorkflowViewerRightPanel } from './workflow-viewer/WorkflowViewerRightPanel';
+import { useWorkflowViewerGraphState } from './workflow-viewer/useWorkflowViewerGraphState';
 import { useWorkflowViewerSelectionState } from './workflow-viewer/useWorkflowViewerSelectionState';
 import { useWorkflowViewerTaskPersistence } from './workflow-viewer/useWorkflowViewerTaskPersistence';
 
@@ -176,10 +173,13 @@ export function WorkflowViewer({
     [activeTaskId, tasks],
   );
   const canvas = currentTask?.canvas || initialTask.canvas;
-  const [layoutSyncVersion, setLayoutSyncVersion] = useState(0);
-  const [sourceGraph, setSourceGraph] = useState<WorkflowGraph>(() =>
-    canvasToWorkflowGraph(initialTask.canvas),
-  );
+  const {
+    sourceGraph,
+    setSourceGraph,
+    graphRef,
+    layoutSyncVersion,
+    setLayoutSyncVersion,
+  } = useWorkflowViewerGraphState(initialTask.canvas);
   const [message, setMessage] = useState('已加载工作台');
   const [durableTasksReady, setDurableTasksReady] = useState(false);
   const {
@@ -249,7 +249,6 @@ export function WorkflowViewer({
     assistantBusy,
     assistantApplyUndo,
   } = assistantTaskState;
-  const graphRef = useRef(sourceGraph);
   const selectedRunId = currentTask?.activeRunId || currentTask?.latestRunId || null;
   const selectedRunProjection = selectedRunId ? runsById[selectedRunId] : undefined;
   const { artifactCacheByPath, ensureArtifactContent, readArtifactContent } =
