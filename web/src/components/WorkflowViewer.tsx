@@ -354,22 +354,11 @@ import {
   type RunOverlayState,
 } from './workflow-viewer/runState';
 
-// --- Extracted modules (Feature 01b) ---
-import {
-  AssistantDrawer as AssistantDrawerExtracted,
-  AssistantDockContent as AssistantDockContentExtracted,
-  AssistantControlRail as AssistantControlRailExtracted,
-  AssistantProposalSummary as AssistantProposalSummaryExtracted,
-  SelectedNodeRuntimePane as SelectedNodeRuntimePaneExtracted,
-} from './assistant';
-import { AssistantTurnList as AssistantTurnListExtracted } from './assistant/AssistantTurnList';
 import { ExecutionDock as ExecutionDockComponent } from './execution';
-import { LiveOutputViewer as LiveOutputViewerExtracted } from './execution/RunOverlay';
+import { LiveOutputViewer } from './execution/RunOverlay';
+import { NodeDetailOverlay } from './inspector/NodeDetailOverlay';
 import {
-  NodeDetailOverlay as NodeDetailOverlayExtracted,
-} from './inspector/NodeDetailOverlay';
-import {
-  SelectionDetailsDock as SelectionDetailsDockExtracted,
+  SelectionDetailsDock,
   evidenceContentForCurrentSelection,
 } from './inspector/SelectionDetailsDock';
 import {
@@ -4242,7 +4231,7 @@ export function WorkflowViewer({
           </div>
         ) : null}
         {blueprintViewActive && nodeDetailOpen && isNodeDetailModel(selectedDetailsModelWithAgentEvents) ? (
-          <NodeDetailOverlayExtracted
+          <NodeDetailOverlay
             model={selectedDetailsModelWithAgentEvents}
             onClose={() => setNodeDetailOpen(false)}
           >
@@ -4313,7 +4302,8 @@ export function WorkflowViewer({
               artifactCacheByPath={artifactCacheByPath}
               onEnsureArtifactContent={ensureArtifactContent}
             />
-          </NodeDetailOverlayExtracted>        ) : null}
+          </NodeDetailOverlay>
+        ) : null}
       </div>
       {bindingEditorWorkflowId ? (
         <WorkflowBindingDialog
@@ -8688,7 +8678,7 @@ function SelectionOutputPane({
       {outputView === 'live' ? (
         <section className="selection-output-content" aria-label="实时输出内容">
           {liveState?.events.length ? (
-            <LiveOutputViewerExtracted events={liveState.events} status={liveState.status} emptyText="当前节点还没有实时输出。" />
+            <LiveOutputViewer events={liveState.events} status={liveState.status} emptyText="当前节点还没有实时输出。" />
           ) : (
             <>
               <div className="selection-log-stream-tabs" role="tablist" aria-label="Live output stream">
@@ -8748,146 +8738,7 @@ function evidenceIdentityLabel(
   return parts.join(' / ');
 }
 
-function SelectionDetailsDock({
-  state,
-  mode,
-  message,
-  model,
-  currentTaskId,
-  selectedRunId,
-  onToggle,
-  onReadEvidence,
-  assistantContent,
-}: {
-  state: EvidenceDockState;
-  mode: BottomDockMode;
-  message: string;
-  model: SelectedEntityDetailsModel;
-  currentTaskId?: string;
-  selectedRunId?: string | null;
-  onToggle: () => void;
-  onReadEvidence: (path: string | null | undefined, title?: string) => void;
-  assistantContent: ReactNode;
-}) {
-  const openedArtifact = evidenceContentForCurrentSelection(state, {
-    currentTaskId,
-    selectedRunId,
-  });
-  const evidenceActions = mode === 'assistant' ? [] : model.evidenceActions.filter((action) => action.path);
-  const hasEvidenceActions = evidenceActions.length > 0;
-  const evidenceIdentity = mode === 'assistant' ? '' : evidenceIdentityLabel(state.owner, currentTaskId, selectedRunId);
-  const currentEvidenceTitle =
-    mode === 'assistant'
-      ? 'AI Console'
-      : openedArtifact
-        ? openedArtifact.name || state.title || 'Run evidence'
-        : hasEvidenceActions
-          ? '运行证据可用'
-          : '没有 run evidence';
-  const currentEvidenceLabel = evidenceIdentity
-    ? `${currentEvidenceTitle} · ${evidenceIdentity}`
-    : currentEvidenceTitle;
-  const bodyClassName =
-    mode === 'assistant' ? 'selection-details-body assistant-console-body' : 'selection-details-body';
-  return (
-    <footer className={state.open ? 'evidence-dock selection-details-dock open' : 'evidence-dock selection-details-dock'} aria-label="选中对象详情">
-      <button type="button" className="evidence-dock-toggle selection-details-toggle" onClick={onToggle}>
-        <span className={`evidence-dock-status status-${model.status || 'not_run'}`}>
-          {statusLabel(model.status || 'not_run')}
-        </span>
-        <span className="selection-details-title">
-          <strong>{mode === 'assistant' ? 'AI 助手' : model.title}</strong>
-          <small>{mode === 'assistant' ? model.title : model.subtitle || model.scopeLabel}</small>
-        </span>
-        <span className="evidence-dock-message">{mode === 'assistant' ? 'AI Console' : message}</span>
-        <span className="evidence-dock-current" title={evidenceIdentity || currentEvidenceTitle}>
-          {currentEvidenceLabel}
-        </span>
-        {state.open ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
-      </button>
-      {state.open ? (
-        <div className={bodyClassName}>
-          {mode === 'assistant' ? (
-            assistantContent
-          ) : (
-            <EvidenceDockArtifactContent
-              artifact={openedArtifact}
-              fallbackTitle={currentEvidenceTitle}
-              identity={evidenceIdentity}
-              evidenceActions={evidenceActions}
-              onReadEvidence={onReadEvidence}
-            />
-          )}
-        </div>
-      ) : null}
-    </footer>
-  );
-}
 
-function EvidenceDockArtifactContent({
-  artifact,
-  fallbackTitle,
-  identity,
-  evidenceActions = [],
-  onReadEvidence,
-}: {
-  artifact: ArtifactContent | null;
-  fallbackTitle: string;
-  identity?: string;
-  evidenceActions?: SelectedDetailsEvidenceAction[];
-  onReadEvidence?: (path: string | null | undefined, title?: string) => void;
-}) {
-  if (!artifact) {
-    const hasEvidenceActions = evidenceActions.some((action) => action.path);
-    return (
-      <section className="selection-details-empty" aria-label="证据摘要">
-        <span>Run evidence</span>
-        <h3>{fallbackTitle || '没有 run evidence'}</h3>
-        {identity ? <small className="evidence-identity-line">{identity}</small> : null}
-        <p>
-          {hasEvidenceActions
-            ? '已找到当前选中对象的运行证据。打开下面的入口查看真实输入、输出、日志或 run summary。'
-            : '没有 run evidence。Workbench 当前选择只是编辑投影，不代表已经产生运行事实。'}
-        </p>
-        <div className="evidence-entry-list" aria-label="运行证据入口">
-          {hasEvidenceActions ? (
-            evidenceActions.map((action) => (
-              <button
-                key={`${action.label}:${action.path || ''}`}
-                type="button"
-                className="evidence-path-button"
-                disabled={!action.path}
-                onClick={() => onReadEvidence?.(action.path, action.title)}
-              >
-                {action.label}
-              </button>
-            ))
-          ) : (
-            <>
-              <span>Run summary</span>
-              <span>Node input/output</span>
-              <span>Logs</span>
-              <span>Events</span>
-              <span>Artifacts</span>
-            </>
-          )}
-        </div>
-      </section>
-    );
-  }
-  return (
-    <section className="evidence-artifact-pane" aria-label="证据内容">
-      <header className="evidence-pane-header">
-        <div>
-          <span>证据</span>
-          <h3>{artifact.name || fallbackTitle}</h3>
-        </div>
-        <small title={artifact.path}>{shortPath(artifact.path)}</small>
-      </header>
-      <CodeBlock title={artifact.path} content={artifact.content} variant={artifact.type} />
-    </section>
-  );
-}
 
 function SelectionInputArtifact({ content }: { content: ArtifactContent }) {
   const blocks = inputBlocksFromArtifact(content);
@@ -15496,13 +15347,4 @@ export {
   liveEventFromAgentRunEvent,
   assistantDisplayStatus,
   buildAssistantTranscriptItems,
-  // Re-export extracted modules for migration period.
-  AssistantDrawerExtracted,
-  AssistantDockContentExtracted,
-  AssistantControlRailExtracted,
-  AssistantProposalSummaryExtracted,
-  SelectedNodeRuntimePaneExtracted,
-  LiveOutputViewerExtracted,
-  NodeDetailOverlayExtracted,
-  SelectionDetailsDockExtracted,
 };

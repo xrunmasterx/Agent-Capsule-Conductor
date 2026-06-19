@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, test, vi } from 'vitest';
 
 import {
@@ -54,10 +54,11 @@ describe('SelectionDetailsDock evidence ownership', () => {
         state={state}
         mode="evidence"
         message="ready"
-        model={{ title: '当前节点', status: 'not_run' }}
+        model={{ title: '当前节点', status: 'not_run', evidenceActions: [] }}
         currentTaskId="task-a"
         selectedRunId="run-new"
         onToggle={vi.fn()}
+        onReadEvidence={vi.fn()}
         assistantContent={null}
       />,
     );
@@ -65,5 +66,53 @@ describe('SelectionDetailsDock evidence ownership', () => {
     expect(screen.getAllByText('没有 run evidence').length).toBeGreaterThan(0);
     expect(screen.queryByText('old-output.json')).not.toBeInTheDocument();
     expect(screen.getByText('未运行')).toBeInTheDocument();
+  });
+
+  test('renders evidence action buttons and forwards read evidence requests', () => {
+    const onReadEvidence = vi.fn();
+    render(
+      <SelectionDetailsDock
+        state={{ open: true, title: '', content: null }}
+        mode="evidence"
+        message="ready"
+        model={{
+          title: '当前节点',
+          status: 'success',
+          evidenceActions: [
+            { label: 'input.json', path: 'runs/run-1/input.json', title: '输入' },
+            { label: 'output.json', path: 'runs/run-1/output.json', title: '输出' },
+          ],
+        }}
+        currentTaskId="task-a"
+        selectedRunId="run-1"
+        onToggle={vi.fn()}
+        onReadEvidence={onReadEvidence}
+        assistantContent={null}
+      />,
+    );
+
+    expect(screen.getByText('运行证据可用')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'input.json' }));
+    expect(onReadEvidence).toHaveBeenCalledWith('runs/run-1/input.json', '输入');
+  });
+
+  test('keeps assistant mode body class for console styling', () => {
+    render(
+      <SelectionDetailsDock
+        state={{ open: true, title: '', content: null }}
+        mode="assistant"
+        message="ready"
+        model={{ title: '当前节点', status: 'running', evidenceActions: [] }}
+        currentTaskId="task-a"
+        selectedRunId="run-1"
+        onToggle={vi.fn()}
+        onReadEvidence={vi.fn()}
+        assistantContent={<div>assistant body</div>}
+      />,
+    );
+
+    expect(screen.getByText('assistant body').closest('.selection-details-body')).toHaveClass(
+      'assistant-console-body',
+    );
   });
 });

@@ -432,7 +432,7 @@ PLAN_04 may start. It must keep the hook ownership boundaries from PLAN_03 intac
 
 ## PLAN_04 Presentational Components
 
-Status: in progress
+Status: complete
 
 ### Scope Completed So Far
 
@@ -445,7 +445,11 @@ Status: in progress
 - Removed the local `WorkflowViewer.tsx` `LiveOutputViewer` function declaration while preserving the exported `filterLiveEvents(...)` helper used by existing tests.
 - Switched node-detail overlay chrome to extracted `NodeDetailOverlay`, keeping the three detail panes local until PLAN_05.
 - Removed the local `WorkflowViewer.tsx` `NodeDetailOverlay` function declaration.
-- `web/src/components/WorkflowViewer.tsx` is now 548,052 bytes / 15,484 lines after the latest slice.
+- Upgraded extracted `SelectionDetailsDock` to match the inline implementation: evidence action buttons, `onReadEvidence(...)`, assistant mode body class, and current evidence title behavior.
+- Switched the bottom details dock main render path to extracted `SelectionDetailsDock`.
+- Removed local `WorkflowViewer.tsx` `SelectionDetailsDock` and `EvidenceDockArtifactContent` declarations.
+- Removed all `*Extracted` migration aliases and the bottom migration re-export from `WorkflowViewer.tsx`.
+- `web/src/components/WorkflowViewer.tsx` is now 541,991 bytes / 15,326 lines after PLAN_04 completion.
 
 ### Added Tests
 
@@ -475,6 +479,10 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npx tsc --noEmit` | Passed | Extracted node-detail overlay wiring compiles. |
 | `npm run test -- --run` | Passed | 47 files, 359 tests passed. |
 | `npm run build` | Passed | Same expected chunk-size warning remains. |
+| `npm run test -- --run src/components/inspector/SelectionDetailsDock.test.tsx src/App.test.tsx src/components/WorkflowViewer.drag.test.tsx` | Passed | 3 files, 187 tests passed. |
+| `npx tsc --noEmit` | Passed | Extracted selection-details dock wiring compiles. |
+| `npm run test -- --run` | Passed | 47 files, 361 tests passed. |
+| `npm run build` | Passed | Same expected chunk-size warning remains. |
 
 ### Static Gates So Far
 
@@ -482,5 +490,9 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - The main render path uses the extracted workbench/execution components for the top-level shell, task overview, save dialog, and run controls.
 - `WorkflowViewer.tsx` no longer defines the local `LiveOutputViewer`; node-detail live output uses `components/execution/RunOverlay.tsx`.
 - `WorkflowViewer.tsx` no longer defines the local `NodeDetailOverlay`; node-detail chrome uses `components/inspector/NodeDetailOverlay.tsx`.
-- `WorkflowViewer.tsx` still contains `Extracted` migration aliases for assistant, live output, node detail, and selection-details components; those remain for later PLAN_04 slices.
-- `SelectionDetailsDock` is not yet switched to extracted modules in the main render path.
+- `WorkflowViewer.tsx` no longer defines local `SelectionDetailsDock` or `EvidenceDockArtifactContent`; bottom details dock rendering uses `components/inspector/SelectionDetailsDock.tsx`.
+- `WorkflowViewer.tsx` no longer contains `Extracted` migration aliases or migration re-exports.
+
+## Next Plan
+
+PLAN_05 may start. It should keep the presentational component ownership from PLAN_04 intact while moving inspector-specific business panes and models out of `WorkflowViewer.tsx`.

@@ -1,14 +1,12 @@
 /**
  * SelectionDetailsDock - bottom evidence/assistant dock.
- *
- * Renders the toggle footer bar and the dock body which switches between
- * evidence artifact display and the AI assistant content.
  */
 
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { shortPath } from '../../format';
 import type { ArtifactContent } from '../../types';
+import type { SelectedDetailsEvidenceAction } from '../../types/workbench';
 import { CodeBlock } from '../CodeBlock';
 
 function statusLabel(status: string) {
@@ -46,6 +44,7 @@ export type SelectionDetailsDockModel = {
   subtitle?: string;
   scopeLabel?: string;
   status: string;
+  evidenceActions?: SelectedDetailsEvidenceAction[];
 };
 
 function evidenceIdentityLabel(
@@ -72,24 +71,49 @@ function EvidenceDockArtifactContent({
   artifact,
   fallbackTitle,
   identity,
+  evidenceActions = [],
+  onReadEvidence,
 }: {
   artifact: ArtifactContent | null;
   fallbackTitle: string;
   identity?: string;
+  evidenceActions?: SelectedDetailsEvidenceAction[];
+  onReadEvidence?: (path: string | null | undefined, title?: string) => void;
 }) {
   if (!artifact) {
+    const hasEvidenceActions = evidenceActions.some((action) => action.path);
     return (
       <section className="selection-details-empty" aria-label="证据摘要">
         <span>Run evidence</span>
         <h3>{fallbackTitle || '没有 run evidence'}</h3>
         {identity ? <small className="evidence-identity-line">{identity}</small> : null}
-        <p>没有 run evidence。Workbench 当前选择只是编辑投影，不代表已经产生运行事实。</p>
+        <p>
+          {hasEvidenceActions
+            ? '已找到当前选中对象的运行证据。打开下面的入口查看真实输入、输出、日志或 run summary。'
+            : '没有 run evidence。Workbench 当前选择只是编辑投影，不代表已经产生运行事实。'}
+        </p>
         <div className="evidence-entry-list" aria-label="运行证据入口">
-          <span>Run summary</span>
-          <span>Node input/output</span>
-          <span>Logs</span>
-          <span>Events</span>
-          <span>Artifacts</span>
+          {hasEvidenceActions ? (
+            evidenceActions.map((action) => (
+              <button
+                key={`${action.label}:${action.path || ''}`}
+                type="button"
+                className="evidence-path-button"
+                disabled={!action.path}
+                onClick={() => onReadEvidence?.(action.path, action.title)}
+              >
+                {action.label}
+              </button>
+            ))
+          ) : (
+            <>
+              <span>Run summary</span>
+              <span>Node input/output</span>
+              <span>Logs</span>
+              <span>Events</span>
+              <span>Artifacts</span>
+            </>
+          )}
         </div>
       </section>
     );
@@ -136,6 +160,7 @@ export function SelectionDetailsDock({
   currentTaskId,
   selectedRunId,
   onToggle,
+  onReadEvidence,
   assistantContent,
 }: {
   state: EvidenceDockState;
@@ -145,22 +170,29 @@ export function SelectionDetailsDock({
   currentTaskId?: string;
   selectedRunId?: string | null;
   onToggle: () => void;
+  onReadEvidence?: (path: string | null | undefined, title?: string) => void;
   assistantContent: ReactNode;
 }) {
   const openedArtifact = evidenceContentForCurrentSelection(state, {
     currentTaskId,
     selectedRunId,
   });
+  const evidenceActions = mode === 'assistant' ? [] : (model.evidenceActions || []).filter((action) => action.path);
+  const hasEvidenceActions = evidenceActions.length > 0;
   const evidenceIdentity = mode === 'assistant' ? '' : evidenceIdentityLabel(state.owner, currentTaskId, selectedRunId);
   const currentEvidenceTitle =
     mode === 'assistant'
-      ? 'AI 助手'
+      ? 'AI Console'
       : openedArtifact
         ? openedArtifact.name || state.title || 'Run evidence'
-        : '没有 run evidence';
+        : hasEvidenceActions
+          ? '运行证据可用'
+          : '没有 run evidence';
   const currentEvidenceLabel = evidenceIdentity
-    ? `${currentEvidenceTitle} · ${evidenceIdentity}`
+    ? `${currentEvidenceTitle} / ${evidenceIdentity}`
     : currentEvidenceTitle;
+  const bodyClassName =
+    mode === 'assistant' ? 'selection-details-body assistant-console-body' : 'selection-details-body';
   return (
     <footer
       className={state.open ? 'evidence-dock selection-details-dock open' : 'evidence-dock selection-details-dock'}
@@ -174,16 +206,14 @@ export function SelectionDetailsDock({
           <strong>{mode === 'assistant' ? 'AI 助手' : model.title}</strong>
           <small>{mode === 'assistant' ? model.title : model.subtitle || model.scopeLabel}</small>
         </span>
-        <span className="evidence-dock-message">
-          {mode === 'assistant' ? '对话、修改与选中节点输出' : message}
-        </span>
+        <span className="evidence-dock-message">{mode === 'assistant' ? 'AI Console' : message}</span>
         <span className="evidence-dock-current" title={evidenceIdentity || currentEvidenceTitle}>
           {currentEvidenceLabel}
         </span>
         {state.open ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
       </button>
       {state.open ? (
-        <div className="selection-details-body">
+        <div className={bodyClassName}>
           {mode === 'assistant' ? (
             assistantContent
           ) : (
@@ -191,6 +221,8 @@ export function SelectionDetailsDock({
               artifact={openedArtifact}
               fallbackTitle={currentEvidenceTitle}
               identity={evidenceIdentity}
+              evidenceActions={evidenceActions}
+              onReadEvidence={onReadEvidence}
             />
           )}
         </div>
