@@ -378,6 +378,7 @@ import {
 import { useAssistantTurnStream } from '../hooks/useAssistantStream';
 import { useRunStream } from '../hooks/useRunStream';
 import { useTaskPersistence } from '../hooks/useTaskPersistence';
+import { useWorkbenchBootstrap } from '../hooks/useWorkbenchBootstrap';
 
 type Props = {
   workflows: WorkflowSummary[];
@@ -2049,7 +2050,6 @@ export function WorkflowViewer({
   );
   const [tasks, setTasks] = useState<WorkbenchTask[]>(() => initialTaskStore.tasks);
   const [activeTaskId, setActiveTaskId] = useState(initialTaskStore.activeTaskId);
-  const durableTaskBootstrapStartedRef = useRef(false);
   const callablesRef = useRef(callables);
   const workflowsRef = useRef(workflows);
   const currentTask = useMemo(
@@ -2311,84 +2311,50 @@ export function WorkflowViewer({
     }));
   }, []);
 
-  useEffect(() => {
-    let ignore = false;
-    api
-      .runtimeConfig()
-      .then((config) => {
-        if (!ignore) {
-          setRuntimeConfig(config);
-        }
-      })
-      .catch(() => {
-        if (!ignore) {
-          setRuntimeConfig(null);
-        }
-      });
-    return () => {
-      ignore = true;
-    };
+  const loadRuntimeConfig = useCallback(() => api.runtimeConfig(), []);
+  const loadWorkbenchTaskRecords = useCallback(() => api.workbenchTasks(), []);
+  const loadDurableWorkbenchTask = useCallback(
+    (taskRecord: Record<string, unknown>) => loadWorkbenchTaskFromBackend(taskRecord),
+    [],
+  );
+  const persistInitialWorkbenchTask = useCallback(
+    (task: WorkbenchTask) =>
+      persistWorkbenchTaskToBackend(task, callablesRef.current, workflowsRef.current),
+    [],
+  );
+  const handleLoadedDurableTasks = useCallback(
+    (loadedTasks: WorkbenchTask[], nextActiveTask: WorkbenchTask) => {
+      const nextCanvas = normalizeCanvasEdges(nextActiveTask.canvas);
+      setTasks(loadedTasks);
+      setActiveTaskId(nextActiveTask.taskId);
+      setCanvas(nextCanvas);
+      const nextGraph = canvasToWorkflowGraph(nextCanvas);
+      graphRef.current = nextGraph;
+      setSourceGraph(nextGraph);
+      setSelection({ type: 'task_canvas', taskId: nextCanvas.id });
+      setMessage('已从本地 runner 加载持久化任务');
+    },
+    [],
+  );
+  const handleMigratedInitialTasks = useCallback(() => {
+    setMessage('已迁移浏览器任务缓存到本地 runner');
+  }, []);
+  const handleWorkbenchBootstrapError = useCallback((error: unknown) => {
+    setMessage(error instanceof Error ? error.message : String(error));
   }, []);
 
-  useEffect(() => {
-    if (durableTaskBootstrapStartedRef.current) {
-      return undefined;
-    }
-    durableTaskBootstrapStartedRef.current = true;
-    let cancelled = false;
-
-    async function bootstrapDurableTasks() {
-      try {
-        const response = await api.workbenchTasks();
-        if (cancelled) {
-          return;
-        }
-        if (response.tasks.length > 0) {
-          const loadedTasks = (
-            await Promise.all(response.tasks.map((task) => loadWorkbenchTaskFromBackend(task)))
-          ).filter((task): task is WorkbenchTask => Boolean(task));
-          if (cancelled || loadedTasks.length === 0) {
-            return;
-          }
-          const nextActiveTask =
-            loadedTasks.find((task) => task.taskId === initialTaskStore.activeTaskId) ||
-            loadedTasks[0];
-          const nextCanvas = normalizeCanvasEdges(nextActiveTask.canvas);
-          setTasks(loadedTasks);
-          setActiveTaskId(nextActiveTask.taskId);
-          setCanvas(nextCanvas);
-          const nextGraph = canvasToWorkflowGraph(nextCanvas);
-          graphRef.current = nextGraph;
-          setSourceGraph(nextGraph);
-          setSelection({ type: 'task_canvas', taskId: nextCanvas.id });
-          setMessage('已从本地 runner 加载持久化任务');
-          return;
-        }
-        await Promise.all(
-          initialTaskStore.tasks.map((task) =>
-            persistWorkbenchTaskToBackend(task, callablesRef.current, workflowsRef.current),
-          ),
-        );
-        if (!cancelled) {
-          setMessage('已迁移浏览器任务缓存到本地 runner');
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setMessage(error instanceof Error ? error.message : String(error));
-        }
-      } finally {
-        if (!cancelled) {
-          setDurableTasksReady(true);
-        }
-      }
-    }
-
-    void bootstrapDurableTasks();
-    return () => {
-      cancelled = true;
-      durableTaskBootstrapStartedRef.current = false;
-    };
-  }, [initialTaskStore]);
+  useWorkbenchBootstrap({
+    initialTaskStore,
+    loadRuntimeConfig,
+    loadWorkbenchTaskRecords,
+    loadWorkbenchTask: loadDurableWorkbenchTask,
+    persistInitialTask: persistInitialWorkbenchTask,
+    onRuntimeConfig: setRuntimeConfig,
+    onLoadedTasks: handleLoadedDurableTasks,
+    onMigratedInitialTasks: handleMigratedInitialTasks,
+    onBootstrapError: handleWorkbenchBootstrapError,
+    setDurableTasksReady,
+  });
 
   useEffect(() => {
     if (!assistantOpen || assistantSessionId || assistantBusy) {

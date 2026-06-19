@@ -215,7 +215,10 @@ Status: in progress
 - Added `web/src/hooks/useTaskPersistence.ts` as the owner for local task-store save, current canvas snapshot publish debounce, backend task autosave debounce, backend autosave de-dupe, timer cleanup, and failure retry reset.
 - Replaced the localStorage save, 400ms snapshot publish, and 700ms backend task autosave effects in `WorkflowViewer.tsx` with `useTaskPersistence(...)`.
 - Kept snapshot construction and backend DTO serialization in the existing authoring helpers for now, so this PLAN_03 slice changes effect ownership without moving authoring/GraphOps semantics.
-- `web/src/components/WorkflowViewer.tsx` is now 572,604 bytes / 16,303 lines after the latest slice.
+- Added `web/src/hooks/useWorkbenchBootstrap.ts` as the owner for runtime config loading, one-shot durable task bootstrap, backend task record loading, initial browser-task migration, cancellation protection, and durable-ready finalization.
+- Replaced the runtime config and durable task bootstrap effects in `WorkflowViewer.tsx` with `useWorkbenchBootstrap(...)`.
+- `WorkflowViewer.tsx` now keeps only the state projection callbacks for loaded durable tasks; the async startup sequencing lives in the hook.
+- `web/src/components/WorkflowViewer.tsx` is now 588,329 bytes / 16,295 lines after the latest slice.
 
 ### Added Tests
 
@@ -224,6 +227,7 @@ Status: in progress
 - `web/src/hooks/useRunStream.test.tsx`
 - `web/src/hooks/useAssistantStream.test.tsx`
 - `web/src/hooks/useTaskPersistence.test.tsx`
+- `web/src/hooks/useWorkbenchBootstrap.test.tsx`
 - Extended `web/src/hooks/streamTypes.test.ts`
 
 ### Validation So Far
@@ -255,6 +259,11 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npx tsc --noEmit` | Passed | Task persistence hook wiring compiles. |
 | `npm run test -- --run` | Passed | 25 files, 287 tests passed. |
 | `npm run build` | Passed | Same expected chunk-size warning remains. |
+| `npm run test -- --run src/hooks/useWorkbenchBootstrap.test.tsx` | Passed | 1 file, 5 tests passed. |
+| `npm run test -- --run src/App.test.tsx src/components/WorkflowViewer.drag.test.tsx` | Passed | 2 files, 183 tests passed. |
+| `npx tsc --noEmit` | Passed | Workbench bootstrap hook wiring compiles. |
+| `npm run test -- --run` | Passed | 26 files, 292 tests passed. |
+| `npm run build` | Passed | Same expected chunk-size warning remains. |
 
 ### Static Gates So Far
 
@@ -265,4 +274,6 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `useAssistantStream.test.tsx` locks ordinary `workbench_chat` turns against accidental `validateAssistantDraft` calls, verifies authoring-turn validation only when the output turn id matches, and covers terminal cleanup.
 - `WorkflowViewer.tsx` no longer owns task persistence timers for localStorage save, current canvas snapshot publish, or backend task autosave; debounce, cleanup, and autosave de-dupe live in `useTaskPersistence`.
 - `useTaskPersistence.test.tsx` covers not-ready suppression, local save, latest snapshot wins, backend de-dupe, failure retry reset, and cleanup clearing pending timers.
-- `WorkflowViewer.tsx` still has direct `api.*`, `runnerApi.*`, and timer usage for run submit, task bootstrap, submit-time boundary preview, binding actions, artifact loading, selected-agent polling, and UI-only defer timers. These are remaining PLAN_03 slices.
+- `WorkflowViewer.tsx` no longer owns runtime config loading or durable task bootstrap effects; one-shot startup, cancellation, migration, and ready finalization live in `useWorkbenchBootstrap`.
+- `useWorkbenchBootstrap.test.tsx` covers runtime config success/failure, durable task load and active-task selection, initial task migration, bootstrap error handling, and cleanup suppression.
+- `WorkflowViewer.tsx` still has direct `api.*`, `runnerApi.*`, and timer usage for run submit, submit-time boundary preview, binding actions, artifact loading, selected-agent polling, and UI-only defer timers. These are remaining PLAN_03 slices.
