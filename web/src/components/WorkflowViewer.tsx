@@ -334,12 +334,12 @@ import {
   workflowOutputPortsReadonly,
 } from '../workbench/model/workflowGraphProjection';
 import {
-  edgeAddressFromFlowEdgeId,
   type EdgeAddress,
 } from './workflow-viewer/workflowConnectionState';
 import {
   canvasEdgeToFlowEdge,
   dragCommitKey,
+  edgeAddressFromFlowEdge,
   flowNodeIdentityKey,
   flowNodeLayoutKey,
   reconcileFlowNodes,
@@ -404,6 +404,10 @@ import {
   resolvePaletteDropTarget,
   selectionForDraggedNodeCommit,
 } from './canvas/canvasMutation';
+import {
+  isNodeDetailDoubleClickIgnored,
+  isTextEditingKeyboardTarget,
+} from './canvas/canvasDomGuards';
 import {
   applyRunOverlayToCanvas,
   liveWorkflowRunFromEvents,
@@ -7816,30 +7820,6 @@ function addEdgeWithControlDependency(
   return { ...canvas, edges: [...edges, control] };
 }
 
-function flowEdgeData(address: EdgeAddress): Record<string, unknown> {
-  return { edgeAddress: address };
-}
-
-function edgeAddressFromFlowEdge(edge: Edge): EdgeAddress | null {
-  const value = edge.data?.edgeAddress;
-  if (value && typeof value === 'object') {
-    const record = value as { edgeId?: unknown; scopeWorkflowId?: unknown };
-    if (
-      typeof record.edgeId !== 'string' ||
-      (record.scopeWorkflowId !== undefined &&
-        record.scopeWorkflowId !== null &&
-        typeof record.scopeWorkflowId !== 'string')
-    ) {
-      return edgeAddressFromFlowEdgeId(edge.id);
-    }
-    return {
-      edgeId: record.edgeId,
-      scopeWorkflowId: typeof record.scopeWorkflowId === 'string' ? record.scopeWorkflowId : null,
-    };
-  }
-  return edgeAddressFromFlowEdgeId(edge.id);
-}
-
 function applyDataEdgeCommandOrKeep(
   canvas: WorkspaceCanvasModel,
   request: DataEdgeCommandRequest,
@@ -8069,27 +8049,6 @@ function isChildWorkflowSummary(workflow: WorkflowSummary): boolean {
   const id = workflow.workflow_id || workflow.file_id || '';
   const path = workflow.path || '';
   return /__[^/\\]+\.accflow\.json$/u.test(path) || id.includes('__');
-}
-
-function isTextEditingKeyboardTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) {
-    return false;
-  }
-  if (target.isContentEditable) {
-    return true;
-  }
-  return Boolean(target.closest('input, textarea, select, [contenteditable="true"], .cm-editor, .monaco-editor'));
-}
-
-function isNodeDetailDoubleClickIgnored(target: EventTarget | null): boolean {
-  if (!(target instanceof Element)) {
-    return false;
-  }
-  return Boolean(
-    target.closest(
-      'button, input, textarea, select, [contenteditable="true"], .workflow-port-click-target, .workflow-port-node, .workflow-control-handle, .react-flow__handle',
-    ),
-  );
 }
 
 function isNodeDetailModel(model: SelectedEntityDetailsModel): boolean {

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
-import { canvasEdgeToFlowEdge, toFlowEdges, toFlowNodes } from './flowProjection';
+import { canvasEdgeToFlowEdge, edgeAddressFromFlowEdge, toFlowEdges, toFlowNodes } from './flowProjection';
 import type {
   CanvasSelection,
   WorkflowCanvasEdge,
@@ -264,6 +264,26 @@ describe('flowProjection', () => {
 
     expect(flowEdges).toHaveLength(1);
     expect(flowEdges[0]).toEqual(expect.objectContaining({ id: 'root::control_source_agent_target_agent' }));
+  });
+
+  test('reads edge addresses from flow edge data with id fallback', () => {
+    expect(
+      edgeAddressFromFlowEdge({
+        id: 'root::control_a_b',
+        source: 'a',
+        target: 'b',
+        data: { edgeAddress: { edgeId: 'control_a_b', scopeWorkflowId: null } },
+      }),
+    ).toEqual({ edgeId: 'control_a_b', scopeWorkflowId: null });
+
+    expect(
+      edgeAddressFromFlowEdge({
+        id: 'workflow:flow_a::control_a_b',
+        source: 'a',
+        target: 'b',
+        data: { edgeAddress: { edgeId: 123 } },
+      }),
+    ).toEqual({ edgeId: 'control_a_b', scopeWorkflowId: 'flow_a' });
   });
 
   test('projects workflow containers and internal nodes for React Flow', () => {

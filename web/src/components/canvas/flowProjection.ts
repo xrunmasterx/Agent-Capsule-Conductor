@@ -27,7 +27,7 @@ import {
   type EndpointSide,
 } from '../../workbench/model/canvasEdgeOps';
 import { defaultInternalNodePosition } from '../../workbench/model/canvasLayout';
-import { flowEdgeId, type EdgeAddress } from '../../workbench/model/edgeAddress';
+import { edgeAddressFromFlowEdgeId, flowEdgeId, type EdgeAddress } from '../../workbench/model/edgeAddress';
 import {
   edgeAddressForScope,
   internalInvocationLabel,
@@ -116,6 +116,26 @@ export function uniqueFlowEdgesById(edges: Edge[]): Edge[] {
     seen.add(edge.id);
     return true;
   });
+}
+
+export function edgeAddressFromFlowEdge(edge: Edge): EdgeAddress | null {
+  const value = edge.data?.edgeAddress;
+  if (value && typeof value === 'object') {
+    const record = value as { edgeId?: unknown; scopeWorkflowId?: unknown };
+    if (
+      typeof record.edgeId !== 'string' ||
+      (record.scopeWorkflowId !== undefined &&
+        record.scopeWorkflowId !== null &&
+        typeof record.scopeWorkflowId !== 'string')
+    ) {
+      return edgeAddressFromFlowEdgeId(edge.id);
+    }
+    return {
+      edgeId: record.edgeId,
+      scopeWorkflowId: typeof record.scopeWorkflowId === 'string' ? record.scopeWorkflowId : null,
+    };
+  }
+  return edgeAddressFromFlowEdgeId(edge.id);
 }
 
 export function canvasEdgeToFlowEdge(
