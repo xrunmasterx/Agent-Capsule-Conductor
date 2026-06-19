@@ -63,7 +63,6 @@ import {
   isActiveRunStatus,
   isActiveTaskStatus,
   normalizeTaskRunStatus,
-  normalizedCodexExecutionMode,
   taskStatusFromRunStatus,
 } from '../workbench/model/taskModel';
 import {
@@ -431,6 +430,7 @@ import {
 import { useWorkflowPersistence } from '../hooks/useWorkflowPersistence';
 import { useWorkbenchTaskActions } from '../hooks/useWorkbenchTaskActions';
 import { useDataConnectionActions } from '../hooks/useDataConnectionActions';
+import { useInvocationSettingsActions } from '../hooks/useInvocationSettingsActions';
 
 type Props = {
   workflows: WorkflowSummary[];
@@ -1554,6 +1554,21 @@ export function WorkflowViewer({
     setSelection,
     updateCanvasAndGraph,
   });
+  const {
+    updateWorkflowInvocationInput,
+    updateInternalInvocationInput,
+    updateWorkflowInvocationLabel,
+    updateInternalInvocationLabel,
+    updateWorkflowForwardMainOutput,
+    updateInternalForwardMainOutput,
+    updateWorkflowEmptyInputPolicy,
+    updateInternalEmptyInputPolicy,
+    updateWorkflowCodexExecutionMode,
+    updateInternalCodexExecutionMode,
+  } = useInvocationSettingsActions({
+    updateCanvas,
+    updateCanvasAndGraph,
+  });
 
 
   const startInspectorResize = useCallback(
@@ -1965,168 +1980,6 @@ export function WorkflowViewer({
     });
   }
 
-  function updateWorkflowInvocationInput(workflowId: string, input: Record<string, unknown>) {
-    updateCanvasAndGraph((current) => ({
-      ...current,
-      workflows: current.workflows.map((workflow) =>
-        workflow.id === workflowId ? { ...workflow, sourceInput: input } : workflow,
-      ),
-    }));
-  }
-
-  function updateInternalInvocationInput(
-    workflowId: string,
-    nodeId: string,
-    input: Record<string, unknown>,
-  ) {
-    updateCanvasAndGraph((current) => ({
-      ...current,
-      workflows: current.workflows.map((workflow) =>
-        workflow.id === workflowId
-          ? {
-              ...workflow,
-              internalNodes: workflow.internalNodes.map((node) =>
-                node.id === nodeId ? { ...node, input } : node,
-              ),
-            }
-          : workflow,
-      ),
-    }));
-  }
-
-  function updateWorkflowInvocationLabel(workflowId: string, label: string) {
-    const nextLabel = label.trim();
-    updateCanvas((current) => ({
-      ...current,
-      workflows: current.workflows.map((workflow) =>
-        workflow.id === workflowId
-          ? {
-              ...workflow,
-              invocationLabel: nextLabel || workflow.id,
-              title: nextLabel || workflow.id,
-            }
-          : workflow,
-      ),
-    }));
-  }
-
-  function updateInternalInvocationLabel(workflowId: string, nodeId: string, label: string) {
-    const nextLabel = label.trim();
-    updateCanvas((current) => ({
-      ...current,
-      workflows: current.workflows.map((workflow) =>
-        workflow.id === workflowId
-          ? {
-              ...workflow,
-              internalNodes: workflow.internalNodes.map((node) =>
-                node.id === nodeId
-                  ? {
-                      ...node,
-                      invocationLabel: nextLabel || node.id,
-                      name: nextLabel || node.id,
-                    }
-                  : node,
-              ),
-            }
-          : workflow,
-      ),
-    }));
-  }
-
-  function updateWorkflowForwardMainOutput(workflowId: string, value: boolean) {
-    updateCanvasAndGraph((current) => ({
-      ...current,
-      workflows: current.workflows.map((workflow) =>
-        workflow.id === workflowId
-          ? { ...workflow, forwardMainOutputOnControl: value }
-          : workflow,
-      ),
-    }));
-  }
-
-  function updateInternalForwardMainOutput(
-    workflowId: string,
-    nodeId: string,
-    value: boolean,
-  ) {
-    updateCanvasAndGraph((current) => ({
-      ...current,
-      workflows: current.workflows.map((workflow) =>
-        workflow.id === workflowId
-          ? {
-              ...workflow,
-              internalNodes: workflow.internalNodes.map((node) =>
-                node.id === nodeId
-                  ? { ...node, forwardMainOutputOnControl: value }
-                  : node,
-              ),
-            }
-          : workflow,
-      ),
-    }));
-  }
-
-  function updateWorkflowEmptyInputPolicy(workflowId: string, value: EmptyInputPolicy) {
-    updateCanvasAndGraph((current) => ({
-      ...current,
-      workflows: current.workflows.map((workflow) =>
-        workflow.id === workflowId ? { ...workflow, emptyInputPolicy: value } : workflow,
-      ),
-    }));
-  }
-
-  function updateInternalEmptyInputPolicy(
-    workflowId: string,
-    nodeId: string,
-    value: EmptyInputPolicy,
-  ) {
-    updateCanvasAndGraph((current) => ({
-      ...current,
-      workflows: current.workflows.map((workflow) =>
-        workflow.id === workflowId
-          ? {
-              ...workflow,
-              internalNodes: workflow.internalNodes.map((node) =>
-                node.id === nodeId ? { ...node, emptyInputPolicy: value } : node,
-              ),
-            }
-          : workflow,
-      ),
-    }));
-  }
-
-  function updateWorkflowCodexExecutionMode(workflowId: string, value: CodexExecutionMode) {
-    updateCanvasAndGraph((current) => ({
-      ...current,
-      workflows: current.workflows.map((workflow) =>
-        workflow.id === workflowId
-          ? { ...workflow, codexExecutionMode: normalizedCodexExecutionMode(value) }
-          : workflow,
-      ),
-    }));
-  }
-
-  function updateInternalCodexExecutionMode(
-    workflowId: string,
-    nodeId: string,
-    value: CodexExecutionMode,
-  ) {
-    updateCanvasAndGraph((current) => ({
-      ...current,
-      workflows: current.workflows.map((workflow) =>
-        workflow.id === workflowId
-          ? {
-              ...workflow,
-              internalNodes: workflow.internalNodes.map((node) =>
-                node.id === nodeId
-                  ? { ...node, codexExecutionMode: normalizedCodexExecutionMode(value) }
-                  : node,
-              ),
-            }
-          : workflow,
-      ),
-    }));
-  }
 
 
   async function generateAssistantProposal(event?: FormEvent<HTMLFormElement>) {
