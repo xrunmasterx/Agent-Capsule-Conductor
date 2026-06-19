@@ -771,6 +771,8 @@ Status: in progress
 - `web/src/components/WorkflowViewer.tsx` is now 207,411 bytes / 5,618 lines after deleting the dead internal-node card renderer.
 - Moved resource detail rendering and the `ResourceTemplate` type into `web/src/components/inspector/ResourceInspector.tsx`.
 - `web/src/components/WorkflowViewer.tsx` is now 206,136 bytes / 5,581 lines after moving `ResourceInspector`.
+- Moved workflow main-input binding evidence notice rendering into `web/src/components/inspector/WorkflowMainInputBindingNotice.tsx`.
+- `web/src/components/WorkflowViewer.tsx` is now 204,969 bytes / 5,549 lines after moving `WorkflowMainInputBindingNotice`.
 
 ### Added/Updated Tests
 
@@ -779,6 +781,7 @@ Status: in progress
 - Extended `web/src/hooks/useTaskPersistence.test.tsx` with task-store localStorage, backend canvas snapshot normalization, and backend task record loading coverage.
 - Added `web/src/workbench/model/workbenchViewProjection.test.ts` for blueprint panel visibility and authoring selection label coverage.
 - Added `web/src/components/inspector/ResourceInspector.test.tsx` for workflow and callable resource detail rendering.
+- Added `web/src/components/inspector/WorkflowMainInputBindingNotice.test.tsx` for absent, unbound, pending, successful-evidence, and missing-evidence states.
 - Existing `web/src/App.test.tsx` and `web/src/components/WorkflowViewer.drag.test.tsx` now validate against the real owner imports instead of `WorkflowViewer.tsx` compatibility exports.
 
 ### Validation So Far
@@ -794,7 +797,8 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npm run test -- --run src/workbench/model/workbenchViewProjection.test.ts src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 3 files, 186 tests passed. |
 | `npm run test -- --run src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 2 files, 183 tests passed after removing unused `InternalNodeCard`. |
 | `npm run test -- --run src/components/inspector/ResourceInspector.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 3 files, 185 tests passed. |
-| `npm run test -- --run` | Passed | 70 files, 454 tests passed. |
+| `npm run test -- --run src/components/inspector/WorkflowMainInputBindingNotice.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 3 files, 188 tests passed. |
+| `npm run test -- --run` | Passed | 71 files, 459 tests passed. |
 | `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
 
 ### Static Gates So Far
@@ -808,3 +812,4 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `WorkflowViewer.tsx` no longer defines `workbenchViewProjection`, `authoringSelectionLabel`, or the local `WorkbenchViewProjection` type.
 - `WorkflowViewer.tsx` no longer defines or references the unused legacy `InternalNodeCard` renderer.
 - `WorkflowViewer.tsx` no longer defines `ResourceInspector` or the local `ResourceTemplate` type.
+- `WorkflowViewer.tsx` no longer defines `WorkflowMainInputBindingNotice` or imports `nodeRunHasWorkflowInputBinding` for UI rendering.
