@@ -53,18 +53,15 @@ import {
   INSPECTOR_MIN_WIDTH,
   INTERNAL_AGENT_TOOL_NODE_SIZE,
   MAX_LOG_PREVIEW_LINES,
-  DEFAULT_TASK_ID,
   TEMPORARY_CALLABLE_ID_PREFIX,
   WORKFLOW_INNER_HANDLE_X,
   agentDataPortTop,
 } from '../workbench/constants';
 import {
-  createEmptyTask,
   emptyInputPolicyFromMetadata,
   emptyWorkbenchAuthoringState,
   isActiveRunStatus,
   isActiveTaskStatus,
-  nextTaskTitle,
   normalizeTaskRunStatus,
   normalizedCodexExecutionMode,
   taskStatusFromRunStatus,
@@ -148,7 +145,6 @@ import {
   expandWorkflowToFitChildrenCenterLocked,
   layoutCanvasForSelection,
   layoutWorkflowInternalNodes,
-  layoutWorkspaceCanvas,
   nextRootPalettePosition,
 } from '../workbench/model/canvasLayout';
 import {
@@ -204,7 +200,6 @@ import {
   workspaceRootOf,
   type NodeRunLookupContext,
 } from '../workbench/model/selectedNodeModel';
-import { workspaceDemoCanvas } from '../workbench/model/workspaceDemoCanvas';
 import {
   graphToWorkspaceCanvas,
 } from '../workbench/model/canvasProjection';
@@ -444,6 +439,7 @@ import {
   useWorkflowBindings,
 } from '../hooks/useWorkflowBindings';
 import { useWorkflowPersistence } from '../hooks/useWorkflowPersistence';
+import { useWorkbenchTaskActions } from '../hooks/useWorkbenchTaskActions';
 
 type Props = {
   workflows: WorkflowSummary[];
@@ -1043,27 +1039,6 @@ export function WorkflowViewer({
     onOpenedFolder: handleWorkflowBindingFolderOpened,
   });
 
-  function resetCanvas(nextCanvas: WorkspaceCanvasModel) {
-    const normalizedCanvas = normalizeCanvasEdges(nextCanvas);
-    const nextGraph = canvasToWorkflowGraph(normalizedCanvas);
-    graphRef.current = nextGraph;
-    setSourceGraph(nextGraph);
-    setCanvas(normalizedCanvas);
-    setTasks((currentTasks) =>
-      currentTasks.map((task) =>
-        task.taskId === activeTaskId
-          ? {
-              ...task,
-              title: normalizedCanvas.name,
-              canvas: stripRuntimeStateFromCanvas(normalizedCanvas),
-              authoring: emptyWorkbenchAuthoringState(),
-            }
-          : task,
-      ),
-    );
-    setAssistantProposal(null);
-  }
-
   function updateCanvasAndGraph(next: SetStateAction<WorkspaceCanvasModel>) {
     setCanvas((current) => {
       const nextCanvas =
@@ -1486,6 +1461,36 @@ export function WorkflowViewer({
     durableTasksReady,
     onDeleteError: handleDurableTaskDeleteError,
   });
+  const clearAssistantProposal = useCallback(() => {
+    setAssistantProposal(null);
+  }, [setAssistantProposal]);
+  const {
+    createDemo,
+    openWorkflow,
+    switchTask,
+    newTask,
+    deleteTask,
+    autoLayout,
+  } = useWorkbenchTaskActions({
+    tasks,
+    activeTaskId,
+    graphRef,
+    setTasks,
+    setActiveTaskId,
+    setSourceGraph,
+    setCanvas,
+    setSelection,
+    setFocusedWorkflowId,
+    setOpenedExternalWorkflow,
+    setMessage,
+    setLayoutSyncVersion,
+    clearAssistantProposal,
+    resetAssistantConversationState,
+    closeEvidenceDock,
+    createDurableTask,
+    deleteDurableTask,
+    onSelect,
+  });
   const canUndoAssistantApply =
     Boolean(assistantApplyUndo) &&
     assistantApplyUndo?.taskId === activeTaskId &&
@@ -1539,83 +1544,6 @@ export function WorkflowViewer({
     }
   }, [dataConnectionDraft, displayCanvas]);
 
-  function createDemo() {
-    const nextCanvas = layoutWorkspaceCanvas(workspaceDemoCanvas());
-    resetCanvas(nextCanvas);
-    setSelection({ type: 'task_canvas', taskId: nextCanvas.id });
-    setOpenedExternalWorkflow(false);
-    setMessage('已加载 Core v2 股市调研示例');
-  }
-
-  function openWorkflow(workflowId: string) {
-    setOpenedExternalWorkflow(true);
-    onSelect(workflowId);
-  }
-
-  function switchTask(taskId: string) {
-    const task = tasks.find((item) => item.taskId === taskId);
-    if (!task) {
-      return;
-    }
-    setActiveTaskId(task.taskId);
-    const nextCanvas = normalizeCanvasEdges(task.canvas);
-    const nextGraph = canvasToWorkflowGraph(nextCanvas);
-    graphRef.current = nextGraph;
-    setSourceGraph(nextGraph);
-    setCanvas(nextCanvas);
-    setSelection({ type: 'task_canvas', taskId: nextCanvas.id });
-    resetAssistantConversationState();
-    setFocusedWorkflowId(null);
-    closeEvidenceDock();
-  }
-
-  function newTask() {
-    const taskId = `task_canvas_${Date.now()}`;
-    const task = createEmptyTask(taskId, nextTaskTitle(tasks));
-    const nextCanvas = normalizeCanvasEdges(task.canvas);
-    setTasks((current) => [...current, { ...task, canvas: nextCanvas }]);
-    setActiveTaskId(task.taskId);
-    const nextGraph = canvasToWorkflowGraph(nextCanvas);
-    graphRef.current = nextGraph;
-    setSourceGraph(nextGraph);
-    setCanvas(nextCanvas);
-    setSelection({ type: 'task_canvas', taskId: nextCanvas.id });
-    setFocusedWorkflowId(null);
-    resetAssistantConversationState();
-    closeEvidenceDock();
-    createDurableTask(task.taskId, task.title);
-  }
-
-  function deleteTask(taskId: string) {
-    const targetTask = tasks.find((task) => task.taskId === taskId);
-    if (targetTask && isActiveTaskStatus(targetTask.status)) {
-      setMessage('任务正在运行，请先停止后再删除。');
-      return;
-    }
-    const remaining = tasks.filter((task) => task.taskId !== taskId);
-    const nextTasks = remaining.length > 0 ? remaining : [createEmptyTask(DEFAULT_TASK_ID, '任务 1')];
-    const nextActiveTask =
-      taskId === activeTaskId
-        ? nextTasks[0]
-        : nextTasks.find((task) => task.taskId === activeTaskId) || nextTasks[0];
-    setTasks(nextTasks);
-    setActiveTaskId(nextActiveTask.taskId);
-    const nextCanvas = normalizeCanvasEdges(nextActiveTask.canvas);
-    const nextGraph = canvasToWorkflowGraph(nextCanvas);
-    graphRef.current = nextGraph;
-    setSourceGraph(nextGraph);
-    setCanvas(nextCanvas);
-    setSelection({ type: 'task_canvas', taskId: nextCanvas.id });
-    resetAssistantConversationState();
-    setMessage(`已删除任务 ${taskId}`);
-    deleteDurableTask(taskId);
-  }
-
-  function autoLayout() {
-    updateCanvasAndGraph((current) => layoutWorkspaceCanvas(current));
-    setLayoutSyncVersion((current) => current + 1);
-    setMessage('已按连接关系重新布局整个任务');
-  }
 
   const startInspectorResize = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
