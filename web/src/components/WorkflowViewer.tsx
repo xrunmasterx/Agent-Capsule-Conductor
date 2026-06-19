@@ -383,6 +383,7 @@ import { useSelectedAgentSession, type AgentSessionUiState } from '../hooks/useS
 import { useOpenedWorkflowLoader } from '../hooks/useOpenedWorkflowLoader';
 import { useNodeRunDetails } from '../hooks/useNodeRunDetails';
 import { useRunRestorationLoader } from '../hooks/useRunRestorationLoader';
+import { useRunRefreshLoader } from '../hooks/useRunRefreshLoader';
 import { useTaskPersistence } from '../hooks/useTaskPersistence';
 import { useWorkbenchTaskDurability } from '../hooks/useWorkbenchTaskDurability';
 import { useWorkbenchBootstrap } from '../hooks/useWorkbenchBootstrap';
@@ -2734,23 +2735,20 @@ export function WorkflowViewer({
     [selectedAgentEvents, selectedDetailsModel],
   );
 
+  const loadRunRefresh = useRunRefreshLoader();
   const refreshRunProjection = useCallback(
     async (runId: string) => {
       const current = runsById[runId];
       if (!current) {
         return;
       }
-      const [summary, stateSnapshot, result] = await Promise.all([
-        api.run(runId),
-        api.runState(runId).catch(() => null),
-        api.runEvents(runId).catch(() => ({ events: [] as RunEvent[] })),
-      ]);
+      const { summary, stateSnapshot, events } = await loadRunRefresh(runId);
       const snapshotRun = stateSnapshot
         ? workflowRunFromRunStateSnapshot(stateSnapshot, current.graph)
         : workflowRunFromRunSummary(summary, current.graph);
       const liveRun = mergeWorkflowRunWithEvents(
         snapshotRun,
-        liveWorkflowRunFromEvents(current.graph, summary.run_dir || current.runDir, result.events),
+        liveWorkflowRunFromEvents(current.graph, summary.run_dir || current.runDir, events),
       );
       const runStatus = normalizeTaskRunStatus(summary.status || liveRun.status);
       const overlay = runOverlayFromRun({ ...liveRun, status: runStatus }, {
@@ -2765,12 +2763,12 @@ export function WorkflowViewer({
           status: runStatus,
           summary,
           run: { ...liveRun, status: runStatus },
-          events: result.events,
+          events,
           overlay,
         },
       }));
     },
-    [runsById],
+    [loadRunRefresh, runsById],
   );
 
   const normalizedSelection = useMemo(

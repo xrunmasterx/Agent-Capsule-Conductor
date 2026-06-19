@@ -236,7 +236,9 @@ Status: in progress
 - Replaced direct `api.createWorkbenchTask(...)` / `api.deleteWorkbenchTask(...)` calls in `WorkflowViewer.tsx` with `useWorkbenchTaskDurability(...)`; the component keeps task list, active task, canvas, and selection projection.
 - Added `web/src/hooks/useRunRestorationLoader.ts` as the owner for run restoration summary/state/events loading, readiness gating, stale-response cancellation, partial state/events fallback, and summary-load error reporting.
 - Replaced the local run restoration effect in `WorkflowViewer.tsx` with `useRunRestorationLoader(...)`; the component keeps summary/state/events projection into `RunProjection` and task status updates.
-- `web/src/components/WorkflowViewer.tsx` is now 563,929 bytes / 16,012 lines after the latest slice.
+- Added `web/src/hooks/useRunRefreshLoader.ts` as the owner for manual run refresh summary/state/events loading and optional state/events fallback.
+- Replaced direct run refresh `api.run(...)` / `api.runState(...)` / `api.runEvents(...)` calls in `WorkflowViewer.tsx` with `useRunRefreshLoader(...)`; the component keeps existing run projection merging.
+- `web/src/components/WorkflowViewer.tsx` is now 563,895 bytes / 16,010 lines after the latest slice.
 
 ### Added Tests
 
@@ -254,6 +256,7 @@ Status: in progress
 - `web/src/hooks/useNodeRunDetails.test.tsx`
 - `web/src/hooks/useWorkbenchTaskDurability.test.tsx`
 - `web/src/hooks/useRunRestorationLoader.test.tsx`
+- `web/src/hooks/useRunRefreshLoader.test.tsx`
 - Extended `web/src/hooks/streamTypes.test.ts`
 
 ### Validation So Far
@@ -330,6 +333,11 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npm run test -- --run src/App.test.tsx src/components/WorkflowViewer.drag.test.tsx` | Passed | 2 files, 183 tests passed. |
 | `npm run test -- --run` | Passed | 34 files, 330 tests passed. |
 | `npm run build` | Passed | Same expected chunk-size warning remains. |
+| `npm run test -- --run src/hooks/useRunRefreshLoader.test.tsx` | Passed | 1 file, 2 tests passed. |
+| `npx tsc --noEmit` | Passed | Run refresh loader hook wiring compiles. |
+| `npm run test -- --run src/App.test.tsx src/components/WorkflowViewer.drag.test.tsx` | Passed | 2 files, 183 tests passed. |
+| `npm run test -- --run` | Passed | 35 files, 332 tests passed. |
+| `npm run build` | Passed | Same expected chunk-size warning remains. |
 
 ### Static Gates So Far
 
@@ -358,4 +366,6 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `useWorkbenchTaskDurability.test.tsx` covers readiness suppression, create request payloads, create-race suppression, delete requests, and delete-error reporting.
 - `WorkflowViewer.tsx` no longer owns run restoration summary/state/events loading, stale-response cancellation, or partial state/events fallback; this ownership lives in `useRunRestorationLoader`.
 - `useRunRestorationLoader.test.tsx` covers disabled/missing-id suppression, summary/state/events loading, state/events fallback, cleanup suppression of stale responses, and summary-load error reporting.
-- `WorkflowViewer.tsx` still has direct `api.*`, `runnerApi.*`, and timer usage for run submit, submit-time boundary preview, selected-agent action APIs, GraphOps/publish actions, current snapshot publish callbacks, run refresh polling, and UI-only defer timers. These are remaining PLAN_03 or later PLAN_06 slices.
+- `WorkflowViewer.tsx` no longer owns manual run refresh summary/state/events loading; this ownership lives in `useRunRefreshLoader`.
+- `useRunRefreshLoader.test.tsx` covers full refresh payload loading and state/events fallback.
+- `WorkflowViewer.tsx` still has direct `api.*`, `runnerApi.*`, and timer usage for run submit, submit-time boundary preview, selected-agent action APIs, GraphOps/publish actions, current snapshot publish callbacks, run submit polling, and UI-only defer timers. These are remaining PLAN_03 or later PLAN_06 slices.
