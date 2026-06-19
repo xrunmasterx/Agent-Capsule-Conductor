@@ -781,6 +781,9 @@ Status: in progress
 - `web/src/components/WorkflowViewer.tsx` is now 202,210 bytes / 5,455 lines after moving `NodeEvidencePaths`.
 - Moved workspace binding dialog rendering and transient select/validate/save UI state into `web/src/components/workbench/WorkflowBindingDialog.tsx`.
 - `web/src/components/WorkflowViewer.tsx` is now 198,711 bytes / 5,353 lines after moving `WorkflowBindingDialog`.
+- Moved selected-node input evidence rendering into `web/src/components/inspector/SelectionInputPane.tsx` and moved recursive structured value rendering into `web/src/components/inspector/StructuredValueView.tsx`.
+- Removed the now-dead local `isControlMainAggregate(...)` and `compactValue(...)` helpers from `WorkflowViewer.tsx`.
+- `web/src/components/WorkflowViewer.tsx` is now 192,743 bytes / 5,170 lines after moving `SelectionInputPane` and `StructuredValueView`.
 
 ### Added/Updated Tests
 
@@ -794,6 +797,7 @@ Status: in progress
 - Added `web/src/components/inspector/PortList.test.tsx` for port label and contract metadata rendering.
 - Added `web/src/components/inspector/NodeEvidencePaths.test.tsx` for evidence path actions, runtime/binding JSON evidence, artifacts state, and live logs.
 - Added `web/src/components/workbench/WorkflowBindingDialog.test.tsx` for current binding rendering, open-folder action, directory selection, validation, and save behavior.
+- Added `web/src/components/inspector/SelectionInputPane.test.tsx` for input artifact loading, named-port rendering, control-main aggregate source expansion, text fallback, and empty evidence states.
 - Existing `web/src/App.test.tsx` and `web/src/components/WorkflowViewer.drag.test.tsx` now validate against the real owner imports instead of `WorkflowViewer.tsx` compatibility exports.
 
 ### Validation So Far
@@ -815,7 +819,9 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npm run test -- --run src/components/inspector/NodeEvidencePaths.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 3 files, 185 tests passed. |
 | `npx tsc --noEmit` | Passed | Workflow binding dialog extraction compiles. |
 | `npm run test -- --run src/components/workbench/WorkflowBindingDialog.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 3 files, 185 tests passed. |
-| `npm run test -- --run` | Passed | 75 files, 466 tests passed. |
+| `npx tsc --noEmit` | Passed | Selection input pane and structured value extraction compile. |
+| `npm run test -- --run src/components/inspector/SelectionInputPane.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 3 files, 186 tests passed. |
+| `npm run test -- --run` | Passed | 76 files, 469 tests passed. |
 | `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
 
 ### Static Gates So Far
@@ -834,3 +840,5 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `WorkflowViewer.tsx` no longer defines `PortList`.
 - `WorkflowViewer.tsx` no longer defines `NodeEvidencePaths`.
 - `WorkflowViewer.tsx` no longer defines `WorkflowBindingDialog`.
+- `WorkflowViewer.tsx` no longer defines `SelectionInputPane` or `StructuredValueView`.
+- `WorkflowViewer.tsx` no longer defines the unused `isControlMainAggregate` or `compactValue` helpers.

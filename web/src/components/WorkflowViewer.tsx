@@ -397,6 +397,8 @@ import {
   SelectionDetailsDock,
   evidenceContentForCurrentSelection,
 } from './inspector/SelectionDetailsDock';
+import { SelectionInputPane } from './inspector/SelectionInputPane';
+import { StructuredValueView } from './inspector/StructuredValueView';
 import { WorkflowMainInputBindingNotice } from './inspector/WorkflowMainInputBindingNotice';
 import {
   SaveWorkflowDialog as SaveWorkflowDialogComponent,
@@ -3335,45 +3337,6 @@ function AgentNodeSettings({
 }
 
 
-function SelectionInputPane({
-  model,
-  artifactCacheByPath,
-  onEnsureArtifactContent,
-}: {
-  model: SelectedEntityDetailsModel;
-  artifactCacheByPath: Record<string, ArtifactContent>;
-  onEnsureArtifactContent: (path: string | null | undefined) => Promise<void>;
-}) {
-  const inputAction = evidenceActionByLabel(model.evidenceActions, 'input.json');
-  const inputPath = inputAction?.path || '';
-  const inputArtifact = inputPath ? artifactCacheByPath[inputPath] || null : null;
-
-  useEffect(() => {
-    void onEnsureArtifactContent(inputPath);
-  }, [inputPath, onEnsureArtifactContent]);
-
-  return (
-    <section className="selection-input-pane" aria-label="输入">
-      <header className="selection-pane-header">
-        <div>
-          <span>输入</span>
-          <h3>{model.nodeRun ? shortPath(model.nodeRun.run_dir) : '尚未运行'}</h3>
-        </div>
-        <small title={inputPath || undefined}>{inputPath ? shortPath(inputPath) : '没有可用证据'}</small>
-      </header>
-      <section className="selection-open-artifact inline" aria-label="输入内容">
-        {inputArtifact ? (
-          <SelectionInputArtifact content={inputArtifact} />
-        ) : (
-          <div className="selection-log-output artifact-empty">
-            <p className="empty-state">当前节点还没有真实 input.json。</p>
-          </div>
-        )}
-      </section>
-    </section>
-  );
-}
-
 function SelectionOutputPane({
   model,
   liveState,
@@ -3503,126 +3466,6 @@ function evidenceIdentityLabel(
 
 
 
-function SelectionInputArtifact({ content }: { content: ArtifactContent }) {
-  const blocks = inputBlocksFromArtifact(content);
-  if (blocks.length === 0) {
-    return (
-      <div className="selection-input-breakdown empty">
-        <p className="empty-state">Current node has no displayable input content.</p>
-      </div>
-    );
-  }
-  return (
-    <div className="selection-input-breakdown" aria-label="Input sources">
-      {blocks.map((block) => (
-        <article key={block.id} className="selection-input-source-card">
-          <header>
-            <span>{block.badge}</span>
-            <strong>{block.title}</strong>
-          </header>
-          <StructuredValueView value={block.value} />
-        </article>
-      ))}
-    </div>
-  );
-}
-
-type InputSourceBlock = {
-  id: string;
-  badge: string;
-  title: string;
-  value: unknown;
-};
-
-function inputBlocksFromArtifact(content: ArtifactContent): InputSourceBlock[] {
-  let payload: unknown;
-  try {
-    payload = JSON.parse(content.content) as unknown;
-  } catch {
-    return [
-      {
-        id: content.path,
-        badge: 'text',
-        title: content.name || 'input',
-        value: content.content,
-      },
-    ];
-  }
-  if (!isPlainRecord(payload)) {
-    return [{ id: 'input', badge: 'value', title: 'input', value: payload }];
-  }
-  const blocks: InputSourceBlock[] = [];
-  for (const [portId, value] of Object.entries(payload)) {
-    if (isEmptyInputValue(value)) {
-      continue;
-    }
-    if (portId === 'main' && isControlMainAggregate(value)) {
-      const order = Array.isArray(value.order) ? value.order.map(String) : Object.keys(value.sources);
-      for (const sourceId of order) {
-        if (!Object.prototype.hasOwnProperty.call(value.sources, sourceId)) {
-          continue;
-        }
-        blocks.push({
-          id: `main:${sourceId}`,
-          badge: 'main',
-          title: sourceId,
-          value: value.sources[sourceId],
-        });
-      }
-      continue;
-    }
-    blocks.push({
-      id: portId,
-      badge: portId,
-      title: portId === 'main' ? 'main 输入' : `${portId} 输入`,
-      value,
-    });
-  }
-  return blocks;
-}
-
-function StructuredValueView({ value }: { value: unknown }) {
-  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-    return <pre className="selection-readable-text">{String(value) || 'empty'}</pre>;
-  }
-  if (value === null || value === undefined) {
-    return <p className="selection-readable-empty">empty</p>;
-  }
-  if (Array.isArray(value)) {
-    if (value.length === 0) {
-      return <p className="selection-readable-empty">empty array</p>;
-    }
-    return (
-      <ol className="selection-readable-list">
-        {value.map((item, index) => (
-          <li key={`item-${index}`}>
-            <StructuredValueView value={item} />
-          </li>
-        ))}
-      </ol>
-    );
-  }
-  if (isPlainRecord(value)) {
-    const entries = Object.entries(value);
-    if (entries.length === 0) {
-      return <p className="selection-readable-empty">empty object</p>;
-    }
-    return (
-      <dl className="selection-readable-fields">
-        {entries.map(([key, item]) => (
-          <div key={key}>
-            <dt>{key}</dt>
-            <dd>
-              <StructuredValueView value={item} />
-            </dd>
-          </div>
-        ))}
-      </dl>
-    );
-  }
-  return <pre className="selection-readable-text">{String(value)}</pre>;
-}
-
 function ReadableOutputResult({ content }: { content: ArtifactContent }) {
   const parsed = parseArtifactPayload(content.content);
   if (!parsed.ok) {
@@ -3750,16 +3593,6 @@ function outputFieldLabel(key: string): string {
   return labels[key] || key.replace(/_/gu, ' ');
 }
 
-function isControlMainAggregate(
-  value: unknown,
-): value is { kind?: unknown; order?: unknown; sources: Record<string, unknown> } {
-  return (
-    isPlainRecord(value) &&
-    value.kind === 'control_main_aggregate' &&
-    isPlainRecord(value.sources)
-  );
-}
-
 function isEmptyInputValue(value: unknown): boolean {
   if (value === null || value === undefined) {
     return true;
@@ -3768,31 +3601,6 @@ function isEmptyInputValue(value: unknown): boolean {
     return value.length === 0;
   }
   return isPlainRecord(value) && Object.keys(value).length === 0;
-}
-
-function compactValue(value: unknown): string {
-  if (typeof value === 'string') {
-    return compactText(value);
-  }
-  if (typeof value === 'number' || typeof value === 'boolean') {
-    return String(value);
-  }
-  if (Array.isArray(value)) {
-    return value.length ? value.map((item) => compactValue(item)).join('; ') : 'empty';
-  }
-  if (isPlainRecord(value)) {
-    const conclusion = value.summary || value.report_markdown;
-    if (typeof conclusion === 'string' || typeof conclusion === 'number' || typeof conclusion === 'boolean') {
-      return compactText(String(conclusion));
-    }
-    const status = value.status || value.kind;
-    if (typeof status === 'string' || typeof status === 'number' || typeof status === 'boolean') {
-      return compactText(String(status));
-    }
-    const entries = Object.entries(value).filter(([, item]) => !isEmptyInputValue(item));
-    return compactText(entries.slice(0, 4).map(([key, item]) => `${key}: ${compactValue(item)}`).join('; '));
-  }
-  return compactText(String(value ?? ''));
 }
 
 function compactText(value: string): string {
