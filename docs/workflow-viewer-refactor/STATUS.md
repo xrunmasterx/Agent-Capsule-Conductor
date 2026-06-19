@@ -777,6 +777,8 @@ Status: in progress
 - `web/src/components/WorkflowViewer.tsx` is now 204,594 bytes / 5,535 lines after moving `LiveLogBlocks`.
 - Moved reusable port-list rendering into `web/src/components/inspector/PortList.tsx`.
 - `web/src/components/WorkflowViewer.tsx` is now 204,146 bytes / 5,520 lines after moving `PortList`.
+- Moved node evidence path buttons, runtime evidence, and binding evidence rendering into `web/src/components/inspector/NodeEvidencePaths.tsx`.
+- `web/src/components/WorkflowViewer.tsx` is now 202,210 bytes / 5,455 lines after moving `NodeEvidencePaths`.
 
 ### Added/Updated Tests
 
@@ -788,6 +790,7 @@ Status: in progress
 - Added `web/src/components/inspector/WorkflowMainInputBindingNotice.test.tsx` for absent, unbound, pending, successful-evidence, and missing-evidence states.
 - Added `web/src/components/inspector/LiveLogBlocks.test.tsx` for empty and stdout/stderr rendering states.
 - Added `web/src/components/inspector/PortList.test.tsx` for port label and contract metadata rendering.
+- Added `web/src/components/inspector/NodeEvidencePaths.test.tsx` for evidence path actions, runtime/binding JSON evidence, artifacts state, and live logs.
 - Existing `web/src/App.test.tsx` and `web/src/components/WorkflowViewer.drag.test.tsx` now validate against the real owner imports instead of `WorkflowViewer.tsx` compatibility exports.
 
 ### Validation So Far
@@ -806,7 +809,8 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npm run test -- --run src/components/inspector/WorkflowMainInputBindingNotice.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 3 files, 188 tests passed. |
 | `npm run test -- --run src/components/inspector/LiveLogBlocks.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 3 files, 185 tests passed. |
 | `npm run test -- --run src/components/inspector/PortList.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 3 files, 184 tests passed. |
-| `npm run test -- --run` | Passed | 73 files, 462 tests passed. |
+| `npm run test -- --run src/components/inspector/NodeEvidencePaths.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 3 files, 185 tests passed. |
+| `npm run test -- --run` | Passed | 74 files, 464 tests passed. |
 | `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
 
 ### Static Gates So Far
@@ -823,3 +827,4 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `WorkflowViewer.tsx` no longer defines `WorkflowMainInputBindingNotice` or imports `nodeRunHasWorkflowInputBinding` for UI rendering.
 - `WorkflowViewer.tsx` no longer defines `LiveLogBlocks`.
 - `WorkflowViewer.tsx` no longer defines `PortList`.
+- `WorkflowViewer.tsx` no longer defines `NodeEvidencePaths`.
