@@ -2544,62 +2544,12 @@ export function WorkflowViewer({
     durableTasksReady,
   ]);
 
-  useEffect(() => {
-    if (!selectedRunId || typeof EventSource === 'undefined') {
-      return undefined;
-    }
-    const source = new EventSource(api.runStreamUrl(selectedRunId));
-    const onLogDelta = (event: MessageEvent<string>) => {
-      try {
-        const payload = JSON.parse(event.data) as NodeLogDelta;
-        if (payload.type === 'node_log_delta') {
-          appendNodeLogDelta(payload);
-        }
-      } catch {
-        // Ignore malformed stream chunks; polling still owns durable run state.
-      }
-    };
-    const onSummary = (event: MessageEvent<string>) => {
-      try {
-        const payload = JSON.parse(event.data) as { type?: string; summary?: RunSummary };
-        if (payload.type === 'summary' && payload.summary) {
-          updateRunProjection(selectedRunId, (current) => ({
-            ...current,
-            summary: payload.summary,
-            status: payload.summary?.status as WorkflowStatus,
-          }));
-        }
-      } catch {
-        // Keep the stream best-effort; existing run polling remains the fallback.
-      }
-    };
-    const onAgentEvent = (event: MessageEvent<string>) => {
-      try {
-        const payload = JSON.parse(event.data) as RunEvent;
-        appendRunAgentEvent(selectedRunId, payload);
-      } catch {
-        // Durable node event reads refresh the timeline if a live frame is malformed.
-      }
-    };
-    const onLiveEvent = (event: MessageEvent<string>) => {
-      try {
-        const payload = JSON.parse(event.data) as WorkbenchLiveEvent;
-        appendRunLiveEvent(selectedRunId, payload);
-      } catch {
-        // Live output is best-effort; run evidence and polling remain the durable fallback.
-      }
-    };
-    source.addEventListener('node_log_delta', onLogDelta as EventListener);
-    source.addEventListener('agent_event', onAgentEvent as EventListener);
-    source.addEventListener('live_event', onLiveEvent as EventListener);
-    source.addEventListener('summary', onSummary as EventListener);
-    source.onerror = () => {
-      source.close();
-    };
-    return () => {
-      source.close();
-    };
-  }, [appendNodeLogDelta, appendRunAgentEvent, appendRunLiveEvent, selectedRunId, updateRunProjection]);
+  useRunStream(selectedRunId, {
+    appendNodeLogDelta,
+    appendRunAgentEvent,
+    appendRunLiveEvent,
+    updateRunProjection,
+  });
 
   useEffect(() => {
     if (!durableTasksReady) {

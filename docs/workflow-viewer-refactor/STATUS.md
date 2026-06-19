@@ -206,12 +206,16 @@ Status: in progress
 - Added `web/src/hooks/useBoundaryTransferPreview.ts` as the hook owner for boundary-transfer preview API calls, loading preview state, unavailable diagnostics, and cleanup-safe response handling.
 - Replaced EdgeInspector-local boundary preview state/effect with `useBoundaryTransferPreview(...)`.
 - `WorkflowViewer.tsx` now memoizes boundary preview snapshots before passing them to the hook, preventing render-triggered duplicate preview requests.
-- `web/src/components/WorkflowViewer.tsx` is now 578,626 bytes / 15,835 lines after the latest slice.
+- Extended `web/src/hooks/useRunStream.ts` to own selected-run EventSource streaming for `node_log_delta`, `agent_event`, `live_event`, and `summary` frames.
+- Replaced the selected-run inline EventSource effect in `WorkflowViewer.tsx` with `useRunStream(...)`.
+- `web/src/components/WorkflowViewer.tsx` is now 576,566 bytes / 15,785 lines after the latest slice.
 
 ### Added Tests
 
 - `web/src/hooks/useWorkbenchLiveStream.test.tsx`
 - `web/src/hooks/useBoundaryTransferPreview.test.tsx`
+- `web/src/hooks/useRunStream.test.tsx`
+- Extended `web/src/hooks/streamTypes.test.ts`
 
 ### Validation So Far
 
@@ -227,9 +231,14 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npx tsc --noEmit` | Passed | Boundary preview hook extraction compiles. |
 | `npm run test -- --run` | Passed | 22 files, 272 tests passed. |
 | `npm run build` | Passed | Same expected chunk-size warning remains. |
+| `npm run test -- --run src/hooks/useRunStream.test.tsx src/hooks/streamTypes.test.ts src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 4 files, 188 tests passed. |
+| `npx tsc --noEmit` | Passed | Run stream hook extraction compiles. |
+| `npm run test -- --run` | Passed | 23 files, 275 tests passed. |
+| `npm run build` | Passed | Same expected chunk-size warning remains. |
 
 ### Static Gates So Far
 
 - `WorkflowViewer.tsx` no longer defines the Workbench live stream hook or its pure live-event helper functions.
 - EdgeInspector no longer owns boundary preview loading state, API effect, or unavailable-preview fallback logic.
-- `WorkflowViewer.tsx` still has direct `api.*`, `runnerApi.*`, `EventSource`, and timer usage for assistant turn stream, run stream, run submit, task bootstrap/autosave, boundary preview, binding actions, and artifact loading. These are remaining PLAN_03 slices.
+- `WorkflowViewer.tsx` no longer directly creates the selected-run `EventSource`; run stream ownership lives in `useRunStream`.
+- `WorkflowViewer.tsx` still has direct `api.*`, `runnerApi.*`, `EventSource`, and timer usage for assistant turn stream, run submit, task bootstrap/autosave, submit-time boundary preview, binding actions, and artifact loading. These are remaining PLAN_03 slices.

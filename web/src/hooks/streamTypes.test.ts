@@ -6,6 +6,7 @@ import type {
   AssistantChatMessage,
   CanvasAuthoringValidationResult,
   NodeLiveLogs,
+  RunProjection,
   RunProjectionSlim,
   WorkflowStatus,
 } from '../types/workbench';
@@ -22,8 +23,9 @@ describe('stream hook shared type contracts', () => {
     };
     const callbacks: RunStreamCallbacks = {
       appendNodeLogDelta: () => undefined,
-      updateRunProjection: (_runId, update) => update(run),
+      updateRunProjection: (_runId, update) => update(run as unknown as RunProjection),
       appendRunAgentEvent: () => undefined,
+      appendRunLiveEvent: () => undefined,
     };
 
     callbacks.updateRunProjection(run.runId, (current) => ({ ...current, status: 'success' }));
