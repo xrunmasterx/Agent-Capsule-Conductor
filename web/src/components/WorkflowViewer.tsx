@@ -388,6 +388,7 @@ import {
 import { ExecutionDock as ExecutionDockComponent } from './execution';
 import { LiveOutputViewer } from './execution/RunOverlay';
 import { DataConnectionsPanel } from './inspector/DataConnectionsPanel';
+import { LiveLogBlocks } from './inspector/LiveLogBlocks';
 import { NodeDetailOverlay } from './inspector/NodeDetailOverlay';
 import { RightInspector } from './inspector/RightInspector';
 import { ResourceInspector, type ResourceTemplate } from './inspector/ResourceInspector';
@@ -5256,22 +5257,6 @@ function NodeEvidencePaths({
         />
       ) : null}
     </section>
-  );
-}
-
-function LiveLogBlocks({ liveLogs }: { liveLogs?: NodeLiveLogs }) {
-  if (!liveLogs || (!liveLogs.stdout && !liveLogs.stderr)) {
-    return null;
-  }
-  return (
-    <>
-      {liveLogs.stdout ? (
-        <CodeBlock title="Live stdout" content={liveLogs.stdout} variant="log" />
-      ) : null}
-      {liveLogs.stderr ? (
-        <CodeBlock title="Live stderr" content={liveLogs.stderr} variant="log" />
-      ) : null}
-    </>
   );
 }
 
