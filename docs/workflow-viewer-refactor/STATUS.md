@@ -228,7 +228,9 @@ Status: in progress
 - Replaced the local artifact cache `useState`, local `ensureArtifactContent(...)`, and local `readEvidenceContent(...)` helper in `WorkflowViewer.tsx` with `useArtifactContentCache(...)`; the component keeps evidence dock presentation.
 - Added `web/src/hooks/useWorkflowBindings.ts` as the owner for workflow binding loading, unbound fallback projection, save/validate/open/select API actions, binding ref normalization, and local binding state updates.
 - Replaced the local workflow binding state/effect/action functions and local binding normalization helpers in `WorkflowViewer.tsx` with `useWorkflowBindings(...)`; the component keeps only canvas metadata and notice callbacks.
-- `web/src/components/WorkflowViewer.tsx` is now 564,501 bytes / 16,047 lines after the latest slice.
+- Added `web/src/hooks/useOpenedWorkflowLoader.ts` as the owner for external workflow detail loading, enabled/id gating, latest callback delivery, cancellation, and optional load-error reporting.
+- Replaced the local `api.workflow(selectedWorkflowId)` effect in `WorkflowViewer.tsx` with `useOpenedWorkflowLoader(...)`; the component keeps workflow-to-canvas projection and selection updates.
+- `web/src/components/WorkflowViewer.tsx` is now 564,555 bytes / 16,041 lines after the latest slice.
 
 ### Added Tests
 
@@ -242,6 +244,7 @@ Status: in progress
 - `web/src/hooks/useAssistantSession.test.tsx`
 - `web/src/hooks/useArtifactContentCache.test.tsx`
 - `web/src/hooks/useWorkflowBindings.test.tsx`
+- `web/src/hooks/useOpenedWorkflowLoader.test.tsx`
 - Extended `web/src/hooks/streamTypes.test.ts`
 
 ### Validation So Far
@@ -298,6 +301,11 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npm run test -- --run src/App.test.tsx src/components/WorkflowViewer.drag.test.tsx` | Passed | 2 files, 183 tests passed. |
 | `npm run test -- --run` | Passed | 30 files, 312 tests passed. |
 | `npm run build` | Passed | Same expected chunk-size warning remains. |
+| `npm run test -- --run src/hooks/useOpenedWorkflowLoader.test.tsx` | Passed | 1 file, 4 tests passed. |
+| `npx tsc --noEmit` | Passed | Opened workflow loader hook wiring compiles. |
+| `npm run test -- --run src/App.test.tsx src/components/WorkflowViewer.drag.test.tsx` | Passed | 2 files, 183 tests passed. |
+| `npm run test -- --run` | Passed | 31 files, 316 tests passed. |
+| `npm run build` | Passed | Same expected chunk-size warning remains. |
 
 ### Static Gates So Far
 
@@ -318,4 +326,6 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `useArtifactContentCache.test.tsx` covers run evidence priority, artifact fallback, normalized cache writes, same-path in-flight de-dupe, failure cleanup, and retry eligibility.
 - `WorkflowViewer.tsx` no longer owns workflow binding load effects, save/validate/open/select actions, unbound fallback projection, or binding path/ref normalization; this ownership lives in `useWorkflowBindings`.
 - `useWorkflowBindings.test.tsx` covers legacy/camel-case normalization, unique binding load with unbound fallback, stable-id no-reload behavior, save state/callback updates, validate/open/select actions, and runner binding ref normalization.
-- `WorkflowViewer.tsx` still has direct `api.*`, `runnerApi.*`, and timer usage for run submit, submit-time boundary preview, selected-agent action APIs, GraphOps/publish actions, task create/delete, opened workflow loading, run restoration, and UI-only defer timers. These are remaining PLAN_03 or later PLAN_06 slices.
+- `WorkflowViewer.tsx` no longer owns external workflow detail loading or stale-response cancellation for the opened-workflow path; this ownership lives in `useOpenedWorkflowLoader`.
+- `useOpenedWorkflowLoader.test.tsx` covers disabled/missing-id suppression, latest callback delivery without duplicate loading, cleanup suppression of stale responses, and error callback reporting.
+- `WorkflowViewer.tsx` still has direct `api.*`, `runnerApi.*`, and timer usage for run submit, submit-time boundary preview, selected-agent action APIs, GraphOps/publish actions, task create/delete, run restoration, node run detail loading, and UI-only defer timers. These are remaining PLAN_03 or later PLAN_06 slices.

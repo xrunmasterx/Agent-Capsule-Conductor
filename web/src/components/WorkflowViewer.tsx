@@ -380,6 +380,7 @@ import { useArtifactContentCache } from '../hooks/useArtifactContentCache';
 import { useAssistantSession } from '../hooks/useAssistantSession';
 import { useRunStream } from '../hooks/useRunStream';
 import { useSelectedAgentSession, type AgentSessionUiState } from '../hooks/useSelectedAgentSession';
+import { useOpenedWorkflowLoader } from '../hooks/useOpenedWorkflowLoader';
 import { useTaskPersistence } from '../hooks/useTaskPersistence';
 import { useWorkbenchBootstrap } from '../hooks/useWorkbenchBootstrap';
 import {
@@ -2530,33 +2531,26 @@ export function WorkflowViewer({
     };
   }, [currentTask?.activeRunId, currentTask?.latestRunId, currentTask?.taskId, runsById]);
 
-  useEffect(() => {
-    if (!openedExternalWorkflow || !selectedWorkflowId) {
-      return;
-    }
-    let ignore = false;
-    api.workflow(selectedWorkflowId).then((workflow) => {
-      if (ignore) {
-        return;
-      }
-      const nextGraph = normalizeWorkflowGraph(workflow.graph || graphFromLegacyWorkflow(workflow));
-      const nextCanvas = normalizeCanvasEdges(graphToWorkspaceCanvas(nextGraph, workflowRun));
-      const nextNormalizedGraph = canvasToWorkflowGraph(nextCanvas);
-      graphRef.current = nextNormalizedGraph;
-      setSourceGraph(nextNormalizedGraph);
-      setCanvas(nextCanvas);
-      setSelection(
-        nextCanvas.workflows[0]
-          ? { type: 'workflow', id: nextCanvas.workflows[0].id }
-          : { type: 'workflow', id: nextCanvas.rootWorkflowId },
-      );
-      setMessage(`已打开 ${workflow.workflow_id}`);
-      closeEvidenceDock();
-    });
-    return () => {
-      ignore = true;
-    };
-  }, [openedExternalWorkflow, selectedWorkflowId]);
+  const handleOpenedExternalWorkflow = useCallback((workflow: WorkflowDetail) => {
+    const nextGraph = normalizeWorkflowGraph(workflow.graph || graphFromLegacyWorkflow(workflow));
+    const nextCanvas = normalizeCanvasEdges(graphToWorkspaceCanvas(nextGraph, workflowRun));
+    const nextNormalizedGraph = canvasToWorkflowGraph(nextCanvas);
+    graphRef.current = nextNormalizedGraph;
+    setSourceGraph(nextNormalizedGraph);
+    setCanvas(nextCanvas);
+    setSelection(
+      nextCanvas.workflows[0]
+        ? { type: 'workflow', id: nextCanvas.workflows[0].id }
+        : { type: 'workflow', id: nextCanvas.rootWorkflowId },
+    );
+    setMessage(`\u5df2\u6253\u5f00 ${workflow.workflow_id}`);
+    setEvidenceDock({ open: false, title: '\u8fd0\u884c\u8bc1\u636e', content: null });
+  }, [workflowRun]);
+  useOpenedWorkflowLoader({
+    enabled: openedExternalWorkflow,
+    workflowId: selectedWorkflowId,
+    onWorkflowLoaded: handleOpenedExternalWorkflow,
+  });
 
   const displayCanvas = useMemo(() => applyRunOverlayToCanvas(canvas, runOverlay), [canvas, runOverlay]);
   const selectedWorkflow =
