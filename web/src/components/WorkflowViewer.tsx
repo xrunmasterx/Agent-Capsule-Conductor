@@ -66,7 +66,6 @@ import type {
   CallableDetail,
   CallableSummary,
   GraphOpsDryRunPayload,
-  GraphOpsTransactionProposal,
   InteractionRequest,
   NodeLogDelta,
   NodeRunSummary,
@@ -126,6 +125,11 @@ import {
   taskStatusFromRunStatus,
   taskStorePayloadFromSerialized,
 } from '../workbench/model/taskModel';
+import {
+  graphOpsTransactionForTemporaryAgent,
+  isTemporaryCallableId,
+  persistentCallableIdForDraft,
+} from '../workbench/model/graphOpsProposal';
 import {
   addPortToDataConnectNode,
   canvasEdgesAreEquivalent,
@@ -616,62 +620,12 @@ function trimLiveLog(value: string): string {
   return lines.slice(-MAX_LOG_PREVIEW_LINES).join('\n');
 }
 
-function isTemporaryCallableId(callableId: string | null | undefined): boolean {
-  return Boolean(callableId && callableId.startsWith(TEMPORARY_CALLABLE_ID_PREFIX));
-}
-
 function authoringId(prefix: string): string {
   const randomId =
     typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
       ? crypto.randomUUID().replace(/-/g, '_')
       : `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
   return `${prefix}_${randomId}`;
-}
-
-function graphOpsProposalId(prefix = 'graphops_tx'): string {
-  return authoringId(prefix).replace(/[^A-Za-z0-9_.-]/g, '_');
-}
-
-function persistentCallableIdForDraft(draft: TemporaryResourceDraft): string {
-  const requestedId = draft.agent_draft.id || draft.draft_id.replace(/^tmp_agent_/, 'agent_');
-  const safeId = requestedId
-    .trim()
-    .replace(/[^A-Za-z0-9_.-]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-  return safeId || draft.draft_id.replace(/^tmp_agent_/, 'agent');
-}
-
-function graphOpsTransactionForTemporaryAgent(
-  draft: TemporaryResourceDraft,
-): GraphOpsTransactionProposal {
-  const callableId = persistentCallableIdForDraft(draft);
-  const targetPath = `callables/agents/${callableId}.yaml`;
-  return {
-    schema_version: 'acc.graphops.transaction.v1',
-    proposal_id: graphOpsProposalId('graphops_tx_tmp_agent'),
-    author: 'workbench_ai_assistant',
-    source: {
-      kind: 'workbench_temporary_resource',
-      id: draft.draft_id,
-    },
-    base: {
-      content_hashes: {
-        [targetPath]: 'absent',
-      },
-    },
-    rationale: `Persist temporary agent template ${draft.draft_id}.`,
-    targets: [
-      {
-        target_type: 'agent_class',
-        target_path: targetPath,
-        operation: 'create_agent_class',
-        template: {
-          ...draft.agent_draft,
-          id: callableId,
-        },
-      },
-    ],
-  };
 }
 
 function captureAuthoringSnapshot({
