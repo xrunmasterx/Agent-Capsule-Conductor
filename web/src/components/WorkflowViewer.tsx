@@ -293,7 +293,10 @@ import {
   type WorkbenchLiveStreamScope,
   type WorkbenchLiveStreamState,
 } from '../hooks/useWorkbenchLiveStream';
-import { useBoundaryTransferPreview } from '../hooks/useBoundaryTransferPreview';
+import {
+  useBoundaryTransferPreview,
+  useBoundaryTransferValidation,
+} from '../hooks/useBoundaryTransferPreview';
 import {
   outputSchemaFromArtifactContract,
   paletteItemFromCallable,
@@ -2282,6 +2285,7 @@ export function WorkflowViewer({
   const loadRuntimeConfig = useCallback(() => api.runtimeConfig(), []);
   const loadWorkbenchTaskRecords = useCallback(() => api.workbenchTasks(), []);
   const { loadWorkbenchTaskCanvas, saveWorkbenchTaskCanvas } = useWorkbenchTaskCanvasPersistence();
+  const { validateBoundaryTransfers } = useBoundaryTransferValidation();
   const loadDurableWorkbenchTask = useCallback(
     (taskRecord: Record<string, unknown>) => loadWorkbenchTaskFromBackend(taskRecord, loadWorkbenchTaskCanvas),
     [loadWorkbenchTaskCanvas],
@@ -3058,22 +3062,7 @@ export function WorkflowViewer({
   }
 
   async function ensureBoundaryTransfersValid() {
-    let preview: BoundaryTransferPreview;
-    try {
-      preview = await api.boundaryTransferPreview({
-        canvas_snapshot: boundaryTransferPreviewSnapshot(canvas),
-      });
-    } catch (error) {
-      const text = error instanceof Error ? error.message : String(error);
-      throw new Error(`边界控制线 preview 暂不可用: ${text}`);
-    }
-    if (!boundaryTransferPreviewHasErrors(preview)) {
-      return;
-    }
-    const messages = preview.diagnostics
-      .filter((diagnostic) => diagnostic.severity === 'error')
-      .map((diagnostic) => `${diagnostic.code}: ${diagnostic.message}`);
-    throw new Error(messages.join('；') || '边界控制线存在无法运行的配置错误。');
+    await validateBoundaryTransfers(boundaryTransferPreviewSnapshot(canvas));
   }
 
   function reportTemporaryResourceIssue(issue: string) {

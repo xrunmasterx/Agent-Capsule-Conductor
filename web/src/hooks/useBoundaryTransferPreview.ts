@@ -1,13 +1,22 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { api } from '../api';
 import type { BoundaryTransferPreview } from '../types';
-import { unavailableBoundaryTransferPreview } from '../workbench/model/boundaryTransferProjection';
+import {
+  boundaryTransferPreviewHasErrors,
+  unavailableBoundaryTransferPreview,
+} from '../workbench/model/boundaryTransferProjection';
 
 export type BoundaryTransferPreviewRequest = {
   enabled: boolean;
   canvasSnapshot: Record<string, unknown> | null;
   edgeId?: string;
+};
+
+export type ValidateBoundaryTransfers = (canvasSnapshot: Record<string, unknown>) => Promise<void>;
+
+export type UseBoundaryTransferValidationResult = {
+  validateBoundaryTransfers: ValidateBoundaryTransfers;
 };
 
 export function loadingBoundaryTransferPreview(): BoundaryTransferPreview {
@@ -62,4 +71,34 @@ export function useBoundaryTransferPreview({
   }, [canvasSnapshot, edgeId, enabled]);
 
   return preview;
+}
+
+export async function validateBoundaryTransferSnapshot(
+  canvasSnapshot: Record<string, unknown>,
+): Promise<void> {
+  let preview: BoundaryTransferPreview;
+  try {
+    preview = await api.boundaryTransferPreview({
+      canvas_snapshot: canvasSnapshot,
+    });
+  } catch (error) {
+    const text = error instanceof Error ? error.message : String(error);
+    throw new Error(`边界控制线 preview 暂不可用: ${text}`);
+  }
+  if (!boundaryTransferPreviewHasErrors(preview)) {
+    return;
+  }
+  const messages = preview.diagnostics
+    .filter((diagnostic) => diagnostic.severity === 'error')
+    .map((diagnostic) => `${diagnostic.code}: ${diagnostic.message}`);
+  throw new Error(messages.join('；') || '边界控制线存在无法运行的配置错误。');
+}
+
+export function useBoundaryTransferValidation(): UseBoundaryTransferValidationResult {
+  const validateBoundaryTransfers = useCallback<ValidateBoundaryTransfers>(
+    (canvasSnapshot) => validateBoundaryTransferSnapshot(canvasSnapshot),
+    [],
+  );
+
+  return { validateBoundaryTransfers };
 }
