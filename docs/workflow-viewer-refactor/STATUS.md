@@ -1177,3 +1177,22 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `WorkflowViewer.tsx` no longer directly imports `validateCanvasAuthoringProposal`, `mergeAuthoringValidation`, `canvasAuthoringHash`, or `stripRuntimeStateFromCanvas`; assistant validation/hash/undo derived-state ownership moved to `useWorkflowViewerAssistantDerivedState`.
 - `WorkflowViewer.tsx` is now 33,295 bytes / 953 lines after assistant-derived-state hook extraction.
 - `WorkflowViewer.tsx` no longer ends with local helper definitions; the file now ends at the `WorkflowViewer` component close.
+- `WorkflowViewer.tsx` no longer imports or owns `WorkbenchShell`, `TopBar`, `WorkflowViewerMainStage`, `WorkflowViewerRightPanel`, `WorkflowViewerNodeDetailOverlay`, or `WorkflowViewerDock`; page-level layout composition ownership moved to `WorkflowViewerLayout`.
+- `WorkflowViewer.tsx` is now 31,115 bytes / 941 lines after layout composition extraction.
+
+### Layout Composition Extraction
+
+Added `web/src/components/workflow-viewer/WorkflowViewerLayout.tsx` as the Workbench shell composition owner. `WorkflowViewer.tsx` now remains responsible for state/action wiring while passing typed prop groups into the layout boundary.
+
+Added `web/src/components/workflow-viewer/WorkflowViewerLayout.test.tsx` to cover shell region rendering, right-panel layout class projection, and topbar/right-panel action forwarding.
+
+### Latest Validation
+
+Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
+
+| Command | Result | Notes |
+| --- | --- | --- |
+| `npx tsc --noEmit` | Passed | Layout prop grouping compiles. |
+| `npm run test -- --run src/components/workflow-viewer/WorkflowViewerLayout.test.tsx src/components/workflow-viewer/WorkflowViewerMainStage.test.tsx src/components/workflow-viewer/WorkflowViewerRightPanel.test.tsx src/components/workflow-viewer/WorkflowViewerDock.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 6 files, 191 tests passed. |
+| `npm run test -- --run` | Passed | 125 files, 641 tests passed. |
+| `npm run build` | Passed | Same expected Vite production chunk-size warning remains; no WorkflowViewer Babel deopt warning. |

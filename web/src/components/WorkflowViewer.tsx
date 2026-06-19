@@ -42,8 +42,6 @@ import {
 
 import type { ResourceTemplate } from './inspector/ResourceInspector';
 import {
-  TopBar as TopBarComponent,
-  WorkbenchShell,
   type SaveWorkflowDialogState,
 } from './workbench';
 import { useAssistantTurnStream } from '../hooks/useAssistantStream';
@@ -92,14 +90,11 @@ import { useAssistantTaskStoreBindings } from '../hooks/useAssistantTaskStoreBin
 import { useWorkbenchTaskStoreBindings } from '../hooks/useWorkbenchTaskStoreBindings';
 import { useRunStoreBindings } from '../hooks/useRunStoreBindings';
 import { useWorkbenchStoreInitialization } from '../hooks/useWorkbenchStoreInitialization';
-import { WorkflowViewerDock } from './workflow-viewer/WorkflowViewerDock';
-import { WorkflowViewerMainStage } from './workflow-viewer/WorkflowViewerMainStage';
-import { WorkflowViewerNodeDetailOverlay } from './workflow-viewer/WorkflowViewerNodeDetailOverlay';
-import { WorkflowViewerRightPanel } from './workflow-viewer/WorkflowViewerRightPanel';
 import { useWorkflowViewerAssistantDerivedState } from './workflow-viewer/useWorkflowViewerAssistantDerivedState';
 import { useWorkflowViewerCanvasGuards } from './workflow-viewer/useWorkflowViewerCanvasGuards';
 import { useWorkflowViewerChromeState } from './workflow-viewer/useWorkflowViewerChromeState';
 import { useWorkflowViewerGraphState } from './workflow-viewer/useWorkflowViewerGraphState';
+import { WorkflowViewerLayout } from './workflow-viewer/WorkflowViewerLayout';
 import { useWorkflowViewerSelectionState } from './workflow-viewer/useWorkflowViewerSelectionState';
 import { useWorkflowViewerTaskPersistence } from './workflow-viewer/useWorkflowViewerTaskPersistence';
 
@@ -781,200 +776,193 @@ export function WorkflowViewer({
   }, []);
 
   return (
-    <WorkbenchShell durableTasksReady={durableTasksReady}>
-      <TopBarComponent
-        title={canvas.name}
-        subtitle="WorkflowFunctionTemplate / ScopeFrame / SessionInstance / ArtifactBundle 统一视图"
-        isRunning={isRunning}
-        onNew={newTask}
-        onLoadDemo={createDemo}
-        onSave={requestSaveWorkflow}
-        onValidate={validateGraph}
-        onRun={runGraph}
-        onAutoLayout={autoLayout}
-        assistantOpen={assistantOpen}
-        onToggleAssistant={toggleAssistantDock}
-        detailsOpen={viewProjection.detailsOpen}
-        onToggleDetails={toggleDetailsDock}
-      />
-      <div
-        className={[
-          'workspace-canvas-layout',
-          viewProjection.rightPanelVisible ? 'inspector-open' : '',
-        ]
-          .filter(Boolean)
-          .join(' ')}
-        onPointerDownCapture={handleCanvasLayoutPointerDown}
-        onClickCapture={handleCanvasLayoutClick}
-      >
-        <WorkflowViewerMainStage
-          taskWorkspaceView={taskWorkspaceView}
-          onTaskWorkspaceViewChange={setTaskWorkspaceView}
-          tasks={tasks}
-          activeTaskId={activeTaskId}
-          onSelectTask={switchTask}
-          onNewTask={newTask}
-          onDeleteTask={deleteTask}
-          canvas={displayCanvas}
-          layoutSyncVersion={layoutSyncVersion}
-          selection={selection}
-          connectionMode={connectionMode}
-          edgeViewMode={edgeViewMode}
-          workflowRun={workflowRun}
-          focusedWorkflowId={focusedWorkflowId}
-          callables={callables}
-          workflows={workflows}
-          workflowBindings={workflowBindings}
-          onFocusedWorkflow={setFocusedWorkflowId}
-          onCanvasChange={updateCanvas}
-          onSelectCanvasObject={selectCanvasObject}
-          onOpenNodeDetails={openNodeDetails}
-          onDeleteSelection={deleteSelectedCanvasObject}
-          onConnectionMode={setConnectionMode}
-          onEdgeViewMode={setEdgeViewMode}
-          onNotice={setMessage}
-          onConfigureWorkflow={configureWorkflow}
-          isRunning={isRunning}
-          runtimeConfig={runtimeConfig}
-          canRunWorkflow={canRunSelectedWorkflow}
-          canRunNode={canRunSelectedNode}
-          onRunTask={runGraph}
-          onRunWorkflow={runSelectedWorkflow}
-          onRunNode={runSelectedNode}
-        />
-        <WorkflowViewerRightPanel
-          resourceDetailOpen={resourceDetailOpen}
-          inspectorOpen={inspectorOpen}
-          inspectorWidth={inspectorWidth}
-          selection={selection}
-          selectedResource={selectedResource}
-          canvas={displayCanvas}
-          selectedWorkflow={selectedWorkflow}
-          selectedPort={selectedPort}
-          selectedEdge={selectedEdge}
-          selectedInternalNode={selectedInternalNode}
-          connectionMode={connectionMode}
-          dataConnectionDraft={dataConnectionDraft}
-          runtimeConfig={runtimeConfig}
-          liveLogs={selectedLiveLogs}
-          workflowRun={enrichedWorkflowRun}
-          workflowEvents={selectedRunLiveEvents}
-          workflows={workflows}
-          workflowBindings={workflowBindings}
-          onResizeStart={startInspectorResize}
-          onCollapseRightPanel={() => setChrome((current) => ({ ...current, rightPanel: 'none' }))}
-          onConnectionMode={setConnectionMode}
-          onBeginDataConnection={beginDataConnection}
-          onCancelDataConnection={cancelDataConnection}
-          onUpdateDataConnectionMaterialization={updateDataConnectionMaterialization}
-          onCompleteDataConnection={completeDataConnection}
-          onCompleteDataConnectionWithNewInputPort={completeDataConnectionWithNewInputPort}
-          onAddDataConnectPort={addDataConnectPort}
-          onRenameDataConnectPort={renameDataConnectPort}
-          onDeleteDataConnectPort={deleteDataConnectPort}
-          onReadEvidence={readEvidence}
-          onConfigureBinding={setBindingEditorWorkflowId}
-          onUpdateWorkflowInput={updateWorkflowInvocationInput}
-          onUpdateInternalInput={updateInternalInvocationInput}
-          onUpdateWorkflowLabel={updateWorkflowInvocationLabel}
-          onUpdateInternalLabel={updateInternalInvocationLabel}
-          onUpdateWorkflowForwardMainOutput={updateWorkflowForwardMainOutput}
-          onUpdateInternalForwardMainOutput={updateInternalForwardMainOutput}
-          onUpdateWorkflowEmptyInputPolicy={updateWorkflowEmptyInputPolicy}
-          onUpdateInternalEmptyInputPolicy={updateInternalEmptyInputPolicy}
-          onUpdateWorkflowCodexExecutionMode={updateWorkflowCodexExecutionMode}
-          onUpdateInternalCodexExecutionMode={updateInternalCodexExecutionMode}
-          onOpenCallableResource={openCallableResourceFromNode}
-        />
-        <WorkflowViewerNodeDetailOverlay
-          open={blueprintViewActive && nodeDetailOpen}
-          model={selectedDetailsModelWithAgentEvents}
-          selection={selection}
-          selectedWorkflow={selectedWorkflow}
-          selectedInternalNode={selectedInternalNode}
-          artifactCacheByPath={artifactCacheByPath}
-          selectedAgentTurnLiveState={selectedAgentTurnLiveState}
-          selectedAgentLiveState={selectedAgentLiveState}
-          callableState={selectedCallableDetailState}
-          runtimeConfig={runtimeConfig}
-          agentSessionState={agentSessionState}
-          onClose={() => setNodeDetailOpen(false)}
-          onEnsureArtifactContent={ensureArtifactContent}
-          onReadEvidence={readEvidence}
-          onRefreshAgentSession={refreshAgentSession}
-          onPublishAgentOutput={publishSelectedAgentOutput}
-          onAnswerAgentInteraction={answerSelectedAgentInteraction}
-          onUpdateWorkflowInput={updateWorkflowInvocationInput}
-          onUpdateInternalInput={updateInternalInvocationInput}
-          onUpdateWorkflowLabel={updateWorkflowInvocationLabel}
-          onUpdateInternalLabel={updateInternalInvocationLabel}
-          onUpdateWorkflowForwardMainOutput={updateWorkflowForwardMainOutput}
-          onUpdateInternalForwardMainOutput={updateInternalForwardMainOutput}
-          onUpdateWorkflowEmptyInputPolicy={updateWorkflowEmptyInputPolicy}
-          onUpdateInternalEmptyInputPolicy={updateInternalEmptyInputPolicy}
-          onUpdateWorkflowCodexExecutionMode={updateWorkflowCodexExecutionMode}
-          onUpdateInternalCodexExecutionMode={updateInternalCodexExecutionMode}
-          onOpenCallableResource={openCallableResourceFromNode}
-        />
-      </div>
-      <WorkflowViewerDock
-        bindingEditorWorkflowId={bindingEditorWorkflowId}
-        setBindingEditorWorkflowId={setBindingEditorWorkflowId}
-        workflowBindings={workflowBindings}
-        validateBinding={validateBinding}
-        saveBinding={saveBinding}
-        openBindingsFolder={openBindingsFolder}
-        selectBindingDirectory={selectBindingDirectory}
-        saveWorkflowDialog={saveWorkflowDialog}
-        setSaveWorkflowDialog={setSaveWorkflowDialog}
-        confirmSaveWorkflow={confirmSaveWorkflow}
-        blueprintViewActive={blueprintViewActive}
-        evidenceDock={evidenceDock}
-        setEvidenceDock={setEvidenceDock}
-        bottomDockMode={bottomDockMode}
-        message={message}
-        selectedDetailsModel={selectedDetailsModelWithAgentEvents}
-        currentTaskId={currentTask?.taskId}
-        selectedRunId={selectedRunId}
-        readEvidence={readEvidence}
-        assistantInput={assistantInput}
-        assistantMessages={assistantMessages}
-        assistantProposal={assistantProposal}
-        assistantValidation={assistantValidation}
-        temporaryResources={currentAuthoringState.temporaryResources}
-        authoringAgents={authoringAgents}
-        selectedAuthoringAgentId={selectedAuthoringAgentId}
-        assistantSessionId={assistantSessionId}
-        assistantAgentSession={assistantAgentSession}
-        assistantSessionStatus={assistantSessionStatus}
-        assistantPendingTurn={assistantPendingTurn}
-        assistantEvents={assistantEvents}
-        assistantLiveState={assistantLiveState}
-        assistantTurnReason={assistantTurnReason}
-        assistantRequiredActions={assistantRequiredActions}
-        assistantGraphOpsReview={assistantGraphOpsReview}
-        assistantBusy={assistantBusy}
-        selection={selection}
-        selectedWorkflow={selectedWorkflow}
-        selectedInternalNode={selectedInternalNode}
-        hasSelectedRunNode={Boolean(selectedAgentSessionContext)}
-        canUndoAssistantApply={canUndoAssistantApply}
-        setSelectedAuthoringAgentId={setSelectedAuthoringAgentId}
-        setAssistantSessionId={setAssistantSessionId}
-        setAssistantAgentSession={setAssistantAgentSession}
-        setAssistantPendingTurn={setAssistantPendingTurn}
-        setAssistantEvents={setAssistantEvents}
-        setAssistantSessionStatus={setAssistantSessionStatus}
-        setAssistantTurnReason={setAssistantTurnReason}
-        setAssistantInput={setAssistantInput}
-        generateAssistantProposal={generateAssistantProposal}
-        applyAssistantProposal={applyAssistantProposal}
-        discardAssistantProposal={discardAssistantProposal}
-        undoLastAssistantApply={undoLastAssistantApply}
-        persistTemporaryResourceDraft={persistTemporaryResourceDraft}
-        applyGraphOpsPersistenceReview={applyGraphOpsPersistenceReview}
-        setAssistantGraphOpsReview={setAssistantGraphOpsReview}
-      />
-    </WorkbenchShell>
+    <WorkflowViewerLayout
+      durableTasksReady={durableTasksReady}
+      rightPanelVisible={viewProjection.rightPanelVisible}
+      onCanvasPointerDownCapture={handleCanvasLayoutPointerDown}
+      onCanvasClickCapture={handleCanvasLayoutClick}
+      topBarProps={{
+        title: canvas.name,
+        subtitle: 'WorkflowFunctionTemplate / ScopeFrame / SessionInstance / ArtifactBundle 统一视图',
+        isRunning,
+        onNew: newTask,
+        onLoadDemo: createDemo,
+        onSave: requestSaveWorkflow,
+        onValidate: validateGraph,
+        onRun: runGraph,
+        onAutoLayout: autoLayout,
+        assistantOpen,
+        onToggleAssistant: toggleAssistantDock,
+        detailsOpen: viewProjection.detailsOpen,
+        onToggleDetails: toggleDetailsDock,
+      }}
+      mainStageProps={{
+        taskWorkspaceView,
+        onTaskWorkspaceViewChange: setTaskWorkspaceView,
+        tasks,
+        activeTaskId,
+        onSelectTask: switchTask,
+        onNewTask: newTask,
+        onDeleteTask: deleteTask,
+        canvas: displayCanvas,
+        layoutSyncVersion,
+        selection,
+        connectionMode,
+        edgeViewMode,
+        workflowRun,
+        focusedWorkflowId,
+        callables,
+        workflows,
+        workflowBindings,
+        onFocusedWorkflow: setFocusedWorkflowId,
+        onCanvasChange: updateCanvas,
+        onSelectCanvasObject: selectCanvasObject,
+        onOpenNodeDetails: openNodeDetails,
+        onDeleteSelection: deleteSelectedCanvasObject,
+        onConnectionMode: setConnectionMode,
+        onEdgeViewMode: setEdgeViewMode,
+        onNotice: setMessage,
+        onConfigureWorkflow: configureWorkflow,
+        isRunning,
+        runtimeConfig,
+        canRunWorkflow: canRunSelectedWorkflow,
+        canRunNode: canRunSelectedNode,
+        onRunTask: runGraph,
+        onRunWorkflow: runSelectedWorkflow,
+        onRunNode: runSelectedNode,
+      }}
+      rightPanelProps={{
+        resourceDetailOpen,
+        inspectorOpen,
+        inspectorWidth,
+        selection,
+        selectedResource,
+        canvas: displayCanvas,
+        selectedWorkflow,
+        selectedPort,
+        selectedEdge,
+        selectedInternalNode,
+        connectionMode,
+        dataConnectionDraft,
+        runtimeConfig,
+        liveLogs: selectedLiveLogs,
+        workflowRun: enrichedWorkflowRun,
+        workflowEvents: selectedRunLiveEvents,
+        workflows,
+        workflowBindings,
+        onResizeStart: startInspectorResize,
+        onCollapseRightPanel: () => setChrome((current) => ({ ...current, rightPanel: 'none' })),
+        onConnectionMode: setConnectionMode,
+        onBeginDataConnection: beginDataConnection,
+        onCancelDataConnection: cancelDataConnection,
+        onUpdateDataConnectionMaterialization: updateDataConnectionMaterialization,
+        onCompleteDataConnection: completeDataConnection,
+        onCompleteDataConnectionWithNewInputPort: completeDataConnectionWithNewInputPort,
+        onAddDataConnectPort: addDataConnectPort,
+        onRenameDataConnectPort: renameDataConnectPort,
+        onDeleteDataConnectPort: deleteDataConnectPort,
+        onReadEvidence: readEvidence,
+        onConfigureBinding: setBindingEditorWorkflowId,
+        onUpdateWorkflowInput: updateWorkflowInvocationInput,
+        onUpdateInternalInput: updateInternalInvocationInput,
+        onUpdateWorkflowLabel: updateWorkflowInvocationLabel,
+        onUpdateInternalLabel: updateInternalInvocationLabel,
+        onUpdateWorkflowForwardMainOutput: updateWorkflowForwardMainOutput,
+        onUpdateInternalForwardMainOutput: updateInternalForwardMainOutput,
+        onUpdateWorkflowEmptyInputPolicy: updateWorkflowEmptyInputPolicy,
+        onUpdateInternalEmptyInputPolicy: updateInternalEmptyInputPolicy,
+        onUpdateWorkflowCodexExecutionMode: updateWorkflowCodexExecutionMode,
+        onUpdateInternalCodexExecutionMode: updateInternalCodexExecutionMode,
+        onOpenCallableResource: openCallableResourceFromNode,
+      }}
+      nodeDetailOverlayProps={{
+        open: blueprintViewActive && nodeDetailOpen,
+        model: selectedDetailsModelWithAgentEvents,
+        selection,
+        selectedWorkflow,
+        selectedInternalNode,
+        artifactCacheByPath,
+        selectedAgentTurnLiveState,
+        selectedAgentLiveState,
+        callableState: selectedCallableDetailState,
+        runtimeConfig,
+        agentSessionState,
+        onClose: () => setNodeDetailOpen(false),
+        onEnsureArtifactContent: ensureArtifactContent,
+        onReadEvidence: readEvidence,
+        onRefreshAgentSession: refreshAgentSession,
+        onPublishAgentOutput: publishSelectedAgentOutput,
+        onAnswerAgentInteraction: answerSelectedAgentInteraction,
+        onUpdateWorkflowInput: updateWorkflowInvocationInput,
+        onUpdateInternalInput: updateInternalInvocationInput,
+        onUpdateWorkflowLabel: updateWorkflowInvocationLabel,
+        onUpdateInternalLabel: updateInternalInvocationLabel,
+        onUpdateWorkflowForwardMainOutput: updateWorkflowForwardMainOutput,
+        onUpdateInternalForwardMainOutput: updateInternalForwardMainOutput,
+        onUpdateWorkflowEmptyInputPolicy: updateWorkflowEmptyInputPolicy,
+        onUpdateInternalEmptyInputPolicy: updateInternalEmptyInputPolicy,
+        onUpdateWorkflowCodexExecutionMode: updateWorkflowCodexExecutionMode,
+        onUpdateInternalCodexExecutionMode: updateInternalCodexExecutionMode,
+        onOpenCallableResource: openCallableResourceFromNode,
+      }}
+      dockProps={{
+        bindingEditorWorkflowId,
+        setBindingEditorWorkflowId,
+        workflowBindings,
+        validateBinding,
+        saveBinding,
+        openBindingsFolder,
+        selectBindingDirectory,
+        saveWorkflowDialog,
+        setSaveWorkflowDialog,
+        confirmSaveWorkflow,
+        blueprintViewActive,
+        evidenceDock,
+        setEvidenceDock,
+        bottomDockMode,
+        message,
+        selectedDetailsModel: selectedDetailsModelWithAgentEvents,
+        currentTaskId: currentTask?.taskId,
+        selectedRunId,
+        readEvidence,
+        assistantInput,
+        assistantMessages,
+        assistantProposal,
+        assistantValidation,
+        temporaryResources: currentAuthoringState.temporaryResources,
+        authoringAgents,
+        selectedAuthoringAgentId,
+        assistantSessionId,
+        assistantAgentSession,
+        assistantSessionStatus,
+        assistantPendingTurn,
+        assistantEvents,
+        assistantLiveState,
+        assistantTurnReason,
+        assistantRequiredActions,
+        assistantGraphOpsReview,
+        assistantBusy,
+        selection,
+        selectedWorkflow,
+        selectedInternalNode,
+        hasSelectedRunNode: Boolean(selectedAgentSessionContext),
+        canUndoAssistantApply,
+        setSelectedAuthoringAgentId,
+        setAssistantSessionId,
+        setAssistantAgentSession,
+        setAssistantPendingTurn,
+        setAssistantEvents,
+        setAssistantSessionStatus,
+        setAssistantTurnReason,
+        setAssistantInput,
+        generateAssistantProposal,
+        applyAssistantProposal,
+        discardAssistantProposal,
+        undoLastAssistantApply,
+        persistTemporaryResourceDraft,
+        applyGraphOpsPersistenceReview,
+        setAssistantGraphOpsReview,
+      }}
+    />
   );
 }
