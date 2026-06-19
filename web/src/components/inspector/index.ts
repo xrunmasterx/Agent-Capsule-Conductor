@@ -15,6 +15,14 @@ export { SelectionDetailsDock } from './SelectionDetailsDock';
 export { DataConnectionsPanel } from './DataConnectionsPanel';
 export { EdgeInspector } from './EdgeInspector';
 export { PortInspector } from './PortInspector';
+export {
+  SchemaFieldCards,
+  dedupeSchemaFields,
+  schemaFieldsFromArtifactContract,
+  schemaFieldsFromJsonSchema,
+  schemaFieldsFromPorts,
+  type SchemaFieldCard,
+} from './SchemaFieldCards';
 export { SelectionInputPane } from './SelectionInputPane';
 export { SelectionOutputPane } from './SelectionOutputPane';
 export { StructuredValueView } from './StructuredValueView';
