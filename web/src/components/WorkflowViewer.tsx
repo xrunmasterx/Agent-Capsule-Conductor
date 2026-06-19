@@ -27,12 +27,10 @@ import type {
   NodeRunSummary,
   RunEvent,
   RuntimeConfig,
-  RunSummary,
   BoundaryTransferPreview,
   WorkflowDataEdge,
   WorkflowGraph,
   WorkflowGraphEdge,
-  WorkflowRunResult,
   WorkflowSummary,
 } from '../types';
 import {
@@ -49,10 +47,7 @@ import {
 import {
   emptyInputPolicyFromMetadata,
   emptyWorkbenchAuthoringState,
-  isActiveRunStatus,
   isActiveTaskStatus,
-  normalizeTaskRunStatus,
-  taskStatusFromRunStatus,
 } from '../workbench/model/taskModel';
 import {
   isTemporaryCallableId,
@@ -244,8 +239,6 @@ import {
   mergeNodeRunDetail,
   mergeWorkflowRunNodeDetails,
   nodeRunDetailCacheKey,
-  workflowRunFromRunStateSnapshot,
-  workflowRunFromRunSummary,
 } from '../workbench/model/workflowRuntimeProjection';
 import {
   type EdgeAddress,
@@ -296,9 +289,6 @@ import {
 import { WorkspaceCanvas } from './canvas/WorkspaceCanvas';
 import {
   applyRunOverlayToCanvas,
-  liveWorkflowRunFromEvents,
-  mergeWorkflowRunWithEvents,
-  runOverlayFromRun,
   stripRuntimeStateFromCanvas,
   workflowRunFailureText,
 } from './workflow-viewer/runState';
@@ -343,7 +333,6 @@ import { useOpenedWorkflowCanvas } from '../hooks/useOpenedWorkflowCanvas';
 import { useNodeRunDetails } from '../hooks/useNodeRunDetails';
 import { useCallableDetail, type CallableDetailLoadState } from '../hooks/useCallableDetail';
 import { useGraphOpsPersistence } from '../hooks/useGraphOpsPersistence';
-import { useRunRestorationLoader } from '../hooks/useRunRestorationLoader';
 import { useRunnerSubmit } from '../hooks/useRunnerSubmit';
 import { useSelectedAgentActions } from '../hooks/useSelectedAgentActions';
 import { useSelectedAgentTurnActions } from '../hooks/useSelectedAgentTurnActions';
@@ -395,6 +384,7 @@ import { useCanvasSelectionUiActions } from '../hooks/useCanvasSelectionUiAction
 import { useAssistantAuthoringSessionActions } from '../hooks/useAssistantAuthoringSessionActions';
 import { useRunProjectionActions } from '../hooks/useRunProjectionActions';
 import { useCanvasGraphStateActions } from '../hooks/useCanvasGraphStateActions';
+import { useRunRestorationActions } from '../hooks/useRunRestorationActions';
 
 type Props = {
   workflows: WorkflowSummary[];
@@ -871,77 +861,11 @@ export function WorkflowViewer({
     onOpenedFolder: handleWorkflowBindingFolderOpened,
   });
 
-  const restorationRunId = currentTask?.activeRunId || currentTask?.latestRunId || null;
-  const shouldRestoreRun = Boolean(restorationRunId && !runsById[restorationRunId]?.run);
-  const handleRunRestorationLoaded = useCallback(
-    ({ runId, summary, stateSnapshot, events }: {
-      runId: string;
-      summary: RunSummary;
-      stateSnapshot: WorkflowRunResult | null;
-      events: RunEvent[] | null;
-    }) => {
-      if (!currentTask) {
-        return;
-      }
-      const taskGraph = canvasToWorkflowGraph(currentTask.canvas);
-      const restoredRun = stateSnapshot
-        ? workflowRunFromRunStateSnapshot(stateSnapshot, taskGraph)
-        : workflowRunFromRunSummary(summary, taskGraph);
-      const liveRun = events
-        ? mergeWorkflowRunWithEvents(
-            restoredRun,
-            liveWorkflowRunFromEvents(taskGraph, summary.run_dir || `runs/${runId}`, events),
-          )
-        : restoredRun;
-      const overlay = runOverlayFromRun(liveRun, {
-        runId,
-        scope: 'task',
-        targetId: taskGraph.id,
-      });
-      setRunsById((current) => ({
-        ...current,
-        [runId]: {
-          runId,
-          taskId: currentTask.taskId,
-          status: normalizeTaskRunStatus(restoredRun.status),
-          scope: 'task',
-          targetId: taskGraph.id,
-          graph: taskGraph,
-          runDir: summary.run_dir,
-          summary,
-          run: liveRun,
-          events: events || [],
-          overlay,
-          pollState: 'idle',
-        },
-      }));
-      setTasks((current) =>
-        current.map((task) =>
-          task.taskId === currentTask.taskId
-            ? {
-                ...task,
-                status: taskStatusFromRunStatus(restoredRun.status),
-                latestRunId: runId,
-                activeRunId: isActiveRunStatus(restoredRun.status) ? runId : undefined,
-              }
-            : task,
-        ),
-      );
-    },
-    [currentTask],
-  );
-  const handleRunRestorationFailed = useCallback((runId: string) => {
-    setRunsById((current) => {
-      const next = { ...current };
-      delete next[runId];
-      return next;
-    });
-  }, []);
-  useRunRestorationLoader({
-    enabled: shouldRestoreRun,
-    runId: restorationRunId,
-    onLoaded: handleRunRestorationLoaded,
-    onLoadFailed: handleRunRestorationFailed,
+  useRunRestorationActions({
+    currentTask,
+    runsById,
+    setRunsById,
+    setTasks,
   });
 
   useOpenedWorkflowCanvas({
