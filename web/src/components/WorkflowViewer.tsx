@@ -106,13 +106,11 @@ import {
 } from '../workbench/model/paletteCanvasOps';
 import {
   addPortToDataConnectNode,
-  canvasEdgesAreEquivalent,
   connectionCandidatesFromPendingEndpoint,
   connectionFromPendingEndpoint,
   controlSlotLimitIssue,
   controlSourceTokenId,
   controlTargetTokenId,
-  controlEdgeWithId,
   createDataEdgeCommand,
   dataConnectEdges,
   dataConnectNodes,
@@ -131,7 +129,6 @@ import {
   reverseConnection,
   tryCommitResolvedConnection,
   uniqueCanvasEdges,
-  uniqueEdgeIdForScope,
   uniqueInputPortIdForNode,
   workflowInputInnerSourceTokenId,
   workflowInputOuterTargetTokenId,
@@ -190,7 +187,6 @@ import {
   nodeLogDeltaKeys,
   nodeRunForInternalNode,
   nodeRunForWorkflow,
-  normalizeRunDirKey,
   selectedNodeRunForSelection,
   sameRunDir,
   selectedEntityDetailsModel,
@@ -291,7 +287,9 @@ import {
 } from '../workbench/model/workflowGraphProjection';
 import {
   graphFromLegacyWorkflow,
-  nodeRunProjectionKey,
+  mergeNodeRunDetail,
+  mergeWorkflowRunNodeDetails,
+  nodeRunDetailCacheKey,
   normalizeWorkflowGraph,
   reusableWorkflowClassGraph,
   singleNodeWorkflowGraph,
@@ -314,13 +312,10 @@ import {
 } from './canvas/flowProjection';
 import {
   flowEndpointForCanvas,
-  internalFlowNodeId,
   isWorkflowBoundaryId,
   parseInternalFlowNodeId,
   workflowBoundaryKind,
-  workflowInputBoundaryId,
   workflowIdFromBoundaryId,
-  workflowOutputBoundaryId,
   type FlowEndpoint,
 } from '../workbench/model/workflowNodeModel';
 import {
@@ -3047,150 +3042,6 @@ function limitText(value: string, maxLength: number): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function uniqueEdgeId(
-  canvas: WorkspaceCanvasModel,
-  kind: 'data' | 'control',
-  sourceWorkflowId: string,
-  targetWorkflowId: string,
-): string {
-  const existing = new Set(canvas.edges.map((edge) => edge.id));
-  let index = 1;
-  let edgeId = `${kind}_${sourceWorkflowId}_${targetWorkflowId}`;
-  while (existing.has(edgeId)) {
-    index += 1;
-    edgeId = `${kind}_${sourceWorkflowId}_${targetWorkflowId}_${index}`;
-  }
-  return edgeId;
-}
-
-function addEdgeWithControlDependency(
-  canvas: WorkspaceCanvasModel,
-  edge: WorkflowCanvasEdge,
-  scopeWorkflowId: string | null,
-): WorkspaceCanvasModel {
-  const existing = canvas.edges.find((item) => canvasEdgesAreEquivalent(item, edge));
-  const edgeToStore = existing || edge;
-  const edges = [
-    ...canvas.edges.filter((item) => item.id !== edgeToStore.id && !canvasEdgesAreEquivalent(item, edgeToStore)),
-    edgeToStore,
-  ];
-  if (edgeToStore.kind !== 'data') {
-    return { ...canvas, edges };
-  }
-  if (isWorkflowBoundaryEdge(edgeToStore)) {
-    return { ...canvas, edges };
-  }
-  const hasControlEdge = edges.some(
-    (item) =>
-      item.kind === 'control' &&
-      item.source.workflowId === edgeToStore.source.workflowId &&
-      item.target.workflowId === edgeToStore.target.workflowId,
-  );
-  if (hasControlEdge) {
-    return { ...canvas, edges };
-  }
-  const control = controlEdgeWithId(
-    uniqueEdgeIdForScope(
-      { ...canvas, edges },
-      scopeWorkflowId,
-      'control',
-      edgeToStore.source.workflowId,
-      edgeToStore.target.workflowId,
-    ),
-    edgeToStore.source.workflowId,
-    edgeToStore.target.workflowId,
-  );
-  return { ...canvas, edges: [...edges, control] };
-}
-
-function internalEdgeEndpointToFlowId(workflowId: string, nodeId: string): string {
-  if (nodeId === workflowInputBoundaryId(workflowId) || nodeId === workflowOutputBoundaryId(workflowId)) {
-    return nodeId;
-  }
-  return internalFlowNodeId(workflowId, nodeId);
-}
-
-function mergeWorkflowRunNodeDetails(
-  workflowRun: WorkflowRunResult | null,
-  runId: string | null,
-  detailsByKey: Record<string, NodeRunSummary>,
-): WorkflowRunResult | null {
-  if (!workflowRun || !runId) {
-    return workflowRun;
-  }
-  return {
-    ...workflowRun,
-    nodes: workflowRun.nodes.map((node) => {
-      const detail = detailsByKey[nodeRunDetailCacheKey(runId, node)];
-      return detail ? mergeNodeRunDetail(node, detail) : node;
-    }),
-  };
-}
-
-function mergeNodeRunDetail(base: NodeRunSummary, detail: NodeRunSummary): NodeRunSummary {
-  return {
-    ...base,
-    ...detail,
-    ui_node_id: base.ui_node_id || detail.ui_node_id,
-    parent_node_id: base.parent_node_id || detail.parent_node_id,
-    status: detail.status || base.status,
-    run_dir: detail.run_dir || base.run_dir,
-  };
-}
-
-function nodeRunDetailCacheKey(runId: string, nodeRun: NodeRunSummary): string {
-  return [
-    runId,
-    nodeRunProjectionKey(nodeRun),
-    normalizeRunDirKey(effectiveNodeRunDir(nodeRun)),
-  ]
-    .filter(Boolean)
-    .join('|');
-}
-
-function edgeConnectsRemainingNodes(edge: WorkflowCanvasEdge, remainingIds: Set<string>): boolean {
-  return (
-    (remainingIds.has(edge.source.workflowId) || isWorkflowBoundaryId(edge.source.workflowId)) &&
-    (remainingIds.has(edge.target.workflowId) || isWorkflowBoundaryId(edge.target.workflowId))
-  );
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-function workflowSummaryForRef(
-  workflows: WorkflowSummary[],
-  workflowRef: string | undefined,
-): WorkflowSummary | undefined {
-  if (!workflowRef) {
-    return undefined;
-  }
-  const normalized = workflowRef.replace(/\\/gu, '/');
-  return workflows.find((workflow) => {
-    const path = workflow.path.replace(/\\/gu, '/');
-    return path === normalized || workflow.workflow_id === workflowRef || workflow.file_id === workflowRef;
-  });
-}
-
-function isChildWorkflowSummary(workflow: WorkflowSummary): boolean {
-  const id = workflow.workflow_id || workflow.file_id || '';
-  const path = workflow.path || '';
-  return /__[^/\\]+\.accflow\.json$/u.test(path) || id.includes('__');
 }
 
 function isNodeDetailModel(model: SelectedEntityDetailsModel): boolean {

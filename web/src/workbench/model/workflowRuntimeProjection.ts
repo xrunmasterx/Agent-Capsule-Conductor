@@ -9,6 +9,7 @@ import type {
 import type { InternalNodeView } from '../../types/workbench';
 import { internalNodeToGraphNode } from './workflowGraphProjection';
 import { internalFlowNodeId } from './workflowNodeModel';
+import { effectiveNodeRunDir, normalizeRunDirKey } from './selectedNodeModel';
 
 export function reusableWorkflowClassGraph(graph: WorkflowGraph): WorkflowGraph {
   const metadata = omitEmptyRecord(
@@ -67,6 +68,44 @@ export function nodeRunProjectionKey(node: NodeRunSummary): string {
     return internalFlowNodeId(node.parent_node_id, node.node_id);
   }
   return node.node_id;
+}
+
+export function mergeWorkflowRunNodeDetails(
+  workflowRun: WorkflowRunResult | null,
+  runId: string | null,
+  detailsByKey: Record<string, NodeRunSummary>,
+): WorkflowRunResult | null {
+  if (!workflowRun || !runId) {
+    return workflowRun;
+  }
+  return {
+    ...workflowRun,
+    nodes: workflowRun.nodes.map((node) => {
+      const detail = detailsByKey[nodeRunDetailCacheKey(runId, node)];
+      return detail ? mergeNodeRunDetail(node, detail) : node;
+    }),
+  };
+}
+
+export function mergeNodeRunDetail(base: NodeRunSummary, detail: NodeRunSummary): NodeRunSummary {
+  return {
+    ...base,
+    ...detail,
+    ui_node_id: base.ui_node_id || detail.ui_node_id,
+    parent_node_id: base.parent_node_id || detail.parent_node_id,
+    status: detail.status || base.status,
+    run_dir: detail.run_dir || base.run_dir,
+  };
+}
+
+export function nodeRunDetailCacheKey(runId: string, nodeRun: NodeRunSummary): string {
+  return [
+    runId,
+    nodeRunProjectionKey(nodeRun),
+    normalizeRunDirKey(effectiveNodeRunDir(nodeRun)),
+  ]
+    .filter(Boolean)
+    .join('|');
 }
 
 export function normalizeWorkflowGraph(graph: WorkflowGraph): WorkflowGraph {

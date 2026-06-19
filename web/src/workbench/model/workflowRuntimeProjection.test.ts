@@ -4,6 +4,9 @@ import type { NodeRunSummary, WorkflowDetail, WorkflowGraph } from '../../types'
 import type { InternalNodeView } from '../../types/workbench';
 import {
   graphFromLegacyWorkflow,
+  mergeNodeRunDetail,
+  mergeWorkflowRunNodeDetails,
+  nodeRunDetailCacheKey,
   nodeRunProjectionKey,
   reusableWorkflowClassGraph,
   singleNodeWorkflowGraph,
@@ -141,5 +144,44 @@ describe('workflowRuntimeProjection', () => {
         run_dir: '',
       }),
     ).toBe('flow__internal__agent');
+  });
+
+  test('merges fetched node run details into workflow run projections', () => {
+    const baseNode: NodeRunSummary = {
+      node_id: 'agent',
+      callable_id: 'fake',
+      status: 'running',
+      run_dir: 'C:/runs/run_1/nodes/agent',
+      ui_node_id: 'ui_agent',
+    };
+    const detail: NodeRunSummary = {
+      node_id: 'agent',
+      callable_id: 'fake',
+      status: 'success',
+      run_dir: 'C:/runs/run_1/nodes/agent',
+      output_path: 'C:/runs/run_1/nodes/agent/output.json',
+    };
+    const run = workflowRunFromRunStateSnapshot(
+      {
+        workflow_id: 'flow',
+        status: 'running',
+        run_dir: 'C:/runs/run_1',
+        nodes: [baseNode],
+        edges: [],
+      },
+      graphFixture(),
+    );
+    const key = nodeRunDetailCacheKey('run_1', baseNode);
+
+    expect(mergeNodeRunDetail(baseNode, detail)).toMatchObject({
+      status: 'success',
+      ui_node_id: 'ui_agent',
+      output_path: 'C:/runs/run_1/nodes/agent/output.json',
+    });
+    expect(mergeWorkflowRunNodeDetails(run, 'run_1', { [key]: detail })?.nodes[0]).toMatchObject({
+      status: 'success',
+      ui_node_id: 'ui_agent',
+      output_path: 'C:/runs/run_1/nodes/agent/output.json',
+    });
   });
 });
