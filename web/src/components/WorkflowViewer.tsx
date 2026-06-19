@@ -21,7 +21,6 @@ import type {
   InteractionRequest,
   NodeRunSummary,
   RunEvent,
-  RuntimeConfig,
   BoundaryTransferPreview,
   WorkflowDataEdge,
   WorkflowGraph,
@@ -372,6 +371,7 @@ import { useCanvasGraphStateActions } from '../hooks/useCanvasGraphStateActions'
 import { useRunRestorationActions } from '../hooks/useRunRestorationActions';
 import { useAssistantTaskStoreBindings } from '../hooks/useAssistantTaskStoreBindings';
 import { useWorkbenchTaskStoreBindings } from '../hooks/useWorkbenchTaskStoreBindings';
+import { useRunStoreBindings } from '../hooks/useRunStoreBindings';
 
 type Props = {
   workflows: WorkflowSummary[];
@@ -444,14 +444,16 @@ export function WorkflowViewer({
   );
   const [message, setMessage] = useState('已加载工作台');
   const [durableTasksReady, setDurableTasksReady] = useState(false);
-  const runsById = useRunStore((state) => state.runsById);
-  const setRunsById = useRunStore((state) => state.setRunsById);
-  const runLogsById = useRunStore((state) => state.runLogsById);
-  const setRunLogsById = useRunStore((state) => state.setRunLogsById);
-  const runLiveEventsById = useRunStore((state) => state.liveEventsByRunId);
-  const setRunLiveEventsById = useRunStore((state) => state.setLiveEventsByRunId);
-  const runtimeConfig = useRunStore((state) => state.runtimeConfig);
-  const setRuntimeConfig = useRunStore((state) => state.setRuntimeConfig);
+  const {
+    runsById,
+    setRunsById,
+    runLogsById,
+    setRunLogsById,
+    runLiveEventsById,
+    setRunLiveEventsById,
+    runtimeConfig,
+    setRuntimeConfig,
+  } = useRunStoreBindings();
   const [openedExternalWorkflow, setOpenedExternalWorkflow] = useState(false);
   const [dataConnectionDraft, setDataConnectionDraft] = useState<DataConnectionDraft>(null);
 
