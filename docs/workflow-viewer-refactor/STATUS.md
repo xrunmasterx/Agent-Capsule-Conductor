@@ -814,6 +814,10 @@ Status: in progress
 - Moved right-inspector and node-detail overlay node property composition into `web/src/components/inspector/AgentNodeSettingsPanel.tsx`.
 - Restored readable UTF-8 Chinese labels in the extracted node settings/property panels and removed the unused `agentLiveState` prop from the selection properties composition.
 - `web/src/components/WorkflowViewer.tsx` is now 129,309 bytes / 3,622 lines after moving `AgentNodeSettingsPanel` and `SelectionPropertiesPane`.
+- Added `web/src/workbench/model/agentEventText.ts` as the pure owner for agent event summaries, assistant-message projection, agent-event merge/de-duplication, live output filter labels, transcript entry labels, and runtime agent event text.
+- Moved the generic event timeline renderer into `web/src/components/inspector/EventTimeline.tsx`.
+- Restored readable UTF-8 Chinese labels for the extracted live output filters and event empty state.
+- `web/src/components/WorkflowViewer.tsx` is now 117,217 bytes / 3,263 lines after moving agent event text helpers and `EventTimeline`.
 
 ### Added/Updated Tests
 
@@ -842,6 +846,8 @@ Status: in progress
 - Added `web/src/components/inspector/EvidencePreview.test.tsx` for empty, loaded artifact, and artifact error rendering.
 - Added `web/src/components/inspector/AgentSessionPanel.test.tsx` for no-render states, publishable session rendering, draft publish, pending approval answers, artifact path actions, session messages, timeline summaries, loading, error, and unbound states.
 - Added `web/src/components/inspector/AgentNodeSettingsPanel.test.tsx` for node basics editing, template summary rendering, property group fallback, and selected-node Agent Session composition.
+- Added `web/src/workbench/model/agentEventText.test.ts` for structured assistant message summaries, session-message projection, agent event de-duplication/sorting, live event text, filter labels, and transcript labels.
+- Added `web/src/components/inspector/EventTimeline.test.tsx` for empty timeline rendering and reverse chronological event display.
 - Existing `web/src/App.test.tsx` and `web/src/components/WorkflowViewer.drag.test.tsx` now validate against the real owner imports instead of `WorkflowViewer.tsx` compatibility exports.
 
 ### Validation So Far
@@ -904,6 +910,10 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npm run test -- --run src/components/inspector/AgentNodeSettingsPanel.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 3 files, 186 tests passed. |
 | `npm run test -- --run` | Passed | 89 files, 505 tests passed. |
 | `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
+| `npx tsc --noEmit` | Passed | Agent event text extraction compiles. |
+| `npm run test -- --run src/workbench/model/agentEventText.test.ts src/components/inspector/EventTimeline.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 4 files, 190 tests passed. |
+| `npm run test -- --run` | Passed | 91 files, 512 tests passed. |
+| `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
 
 ### Static Gates So Far
 
@@ -940,3 +950,5 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `WorkflowViewer.tsx` no longer defines `AgentNodeSettings`, `SelectionPropertiesPane`, or `SelectionNodeProperties`.
 - `WorkflowViewer.tsx` no longer owns callable template display/provider/skills/thinking-label helpers used only by node settings panels.
 - `WorkflowViewer.tsx` no longer imports node-settings-only inspector components such as `DataConnectionsPanel`, `NodePromptEditor`, `RunEvidenceCard`, `TechnicalDetailsDisclosure`, or `WorkflowMainInputBindingNotice`.
+- `WorkflowViewer.tsx` no longer defines agent-event text helpers such as `agentEventSummary`, `agentMessagesToAssistantMessages`, `mergeAgentEvents`, `agentEventsLiveText`, or `failedAgentEventsText`.
+- `WorkflowViewer.tsx` no longer defines `EventTimeline`.

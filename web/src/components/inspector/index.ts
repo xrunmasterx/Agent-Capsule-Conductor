@@ -21,6 +21,7 @@ export { CodexExecutionModeSelector } from './CodexExecutionModeSelector';
 export { DataConnectionsPanel } from './DataConnectionsPanel';
 export { EdgeInspector } from './EdgeInspector';
 export { EvidencePreview } from './EvidencePreview';
+export { EventTimeline } from './EventTimeline';
 export { AgentSessionPanel } from './AgentSessionPanel';
 export { AgentNodeSettingsPanel, SelectionPropertiesPane } from './AgentNodeSettingsPanel';
 export { PortInspector } from './PortInspector';
