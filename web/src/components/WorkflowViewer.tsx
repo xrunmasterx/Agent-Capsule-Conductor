@@ -1,12 +1,9 @@
 import {
-  ChevronDown,
-  ChevronUp,
   FileText,
   RefreshCw,
   UploadCloud,
 } from 'lucide-react';
 import {
-  Fragment,
   useCallback,
   useContext,
   useEffect,
@@ -391,6 +388,7 @@ import { NodeDetailOverlay } from './inspector/NodeDetailOverlay';
 import { NodeEvidencePaths } from './inspector/NodeEvidencePaths';
 import { NodePromptEditor } from './inspector/NodePromptEditor';
 import { PortList } from './inspector/PortList';
+import { PropertyGroups } from './inspector/PropertyGroups';
 import { RightInspector } from './inspector/RightInspector';
 import { ResourceInspector, type ResourceTemplate } from './inspector/ResourceInspector';
 import {
@@ -407,6 +405,7 @@ import {
 } from './inspector/SelectionDetailsDock';
 import { SelectionInputPane } from './inspector/SelectionInputPane';
 import { SelectionOutputPane } from './inspector/SelectionOutputPane';
+import { TechnicalDetailsDisclosure } from './inspector/TechnicalDetailsDisclosure';
 import { WorkflowMainInputBindingNotice } from './inspector/WorkflowMainInputBindingNotice';
 import {
   SaveWorkflowDialog as SaveWorkflowDialogComponent,
@@ -3996,31 +3995,6 @@ function agentSessionArtifactPath(session: AgentSessionRecord | null | undefined
   return `${sessionDir.replace(/[\\/]+$/u, '')}/${ref}`;
 }
 
-function PropertyGroups({ groups }: { groups: SelectedDetailsPropertyGroup[] }) {
-  return (
-    <div className="selection-property-groups">
-      {groups.map((group) => (
-        <section key={group.title} className="node-settings-card">
-          <div className="node-settings-section-header">
-            <div>
-              <span className="panel-kicker">属性</span>
-              <h4>{group.title}</h4>
-            </div>
-          </div>
-          <dl className="node-settings-facts">
-            {group.rows.map((row) => (
-              <Fragment key={`${group.title}-${row.label}`}>
-                <dt>{row.label}</dt>
-                <dd>{row.value}</dd>
-              </Fragment>
-            ))}
-          </dl>
-        </section>
-      ))}
-    </div>
-  );
-}
-
 function isCodexAgentNode(node: AgentNodeSettingsModel, detail: CallableDetail | null): boolean {
   if (node.kind !== 'Agent') {
     return false;
@@ -4030,46 +4004,6 @@ function isCodexAgentNode(node: AgentNodeSettingsModel, detail: CallableDetail |
   }
   const callableId = node.callableId.toLowerCase();
   return callableId.includes('codex');
-}
-
-function TechnicalDetailsDisclosure({
-  node,
-  runtimeConfig,
-  callableDetail,
-}: {
-  node: AgentNodeSettingsModel;
-  runtimeConfig: RuntimeConfig | null;
-  callableDetail: CallableDetail | null;
-}) {
-  const [open, setOpen] = useState(false);
-  return (
-    <section className="node-settings-card technical-details-card">
-      <button type="button" className="technical-details-toggle" onClick={() => setOpen((value) => !value)}>
-        <span>更多技术详情</span>
-        {open ? <ChevronUp aria-hidden="true" size={16} /> : <ChevronDown aria-hidden="true" size={16} />}
-      </button>
-      {open ? (
-        <div className="technical-details-content">
-          <dl className="node-settings-facts">
-            <dt>node id</dt>
-            <dd>{node.nodeId}</dd>
-            <dt>callable id</dt>
-            <dd>{node.callableId || 'n/a'}</dd>
-            <dt>scope</dt>
-            <dd>{node.scopeLabel}</dd>
-            <dt>run mode</dt>
-            <dd>{runtimeConfig?.real_external_agents_enabled ? 'production / real CLI' : 'hermetic or external gate disabled'}</dd>
-          </dl>
-          <LiveLogBlocks liveLogs={node.logs} />
-          <CodeBlock title="core-v2-invocation-preview.json" content={JSON.stringify(node.preview, null, 2)} variant="json" />
-          <CodeBlock title="node-raw.json" content={JSON.stringify(node.raw, null, 2)} variant="json" />
-          {callableDetail ? (
-            <CodeBlock title="callable-template.json" content={JSON.stringify(callableDetail, null, 2)} variant="json" />
-          ) : null}
-        </div>
-      ) : null}
-    </section>
-  );
 }
 
 function EvidencePreview({

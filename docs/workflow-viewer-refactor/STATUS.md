@@ -800,6 +800,9 @@ Status: in progress
 - Moved invocation identity rendering into `web/src/components/inspector/InvocationIdentityCard.tsx`.
 - Moved invocation prompt/static-input JSON editing into `web/src/components/inspector/InvocationInputEditor.tsx`, restoring readable UTF-8 Chinese labels and validation messages.
 - `web/src/components/WorkflowViewer.tsx` is now 169,447 bytes / 4,728 lines after moving invocation editor components.
+- Moved selected-detail property group rendering into `web/src/components/inspector/PropertyGroups.tsx`, restoring the readable Chinese section label.
+- Moved node technical detail disclosure into `web/src/components/inspector/TechnicalDetailsDisclosure.tsx`, including local expand/collapse state and technical evidence JSON blocks.
+- `web/src/components/WorkflowViewer.tsx` is now 167,172 bytes / 4,662 lines after moving property and technical detail components.
 
 ### Added/Updated Tests
 
@@ -822,6 +825,8 @@ Status: in progress
 - Extended `web/src/workbench/model/selectionModel.test.ts` with `mergeInvocationInput(...)` coverage for static input preservation and empty legacy prompt-key cleanup.
 - Added `web/src/components/inspector/InvocationIdentityCard.test.tsx` for identity field rendering and label editing.
 - Added `web/src/components/inspector/InvocationInputEditor.test.tsx` for prompt updates, static JSON edits, object validation, formatting, and reset behavior.
+- Added `web/src/components/inspector/PropertyGroups.test.tsx` for grouped property row rendering.
+- Added `web/src/components/inspector/TechnicalDetailsDisclosure.test.tsx` for collapsed/expanded technical evidence, live log, runtime mode, and callable-detail rendering.
 - Existing `web/src/App.test.tsx` and `web/src/components/WorkflowViewer.drag.test.tsx` now validate against the real owner imports instead of `WorkflowViewer.tsx` compatibility exports.
 
 ### Validation So Far
@@ -864,6 +869,10 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npm run test -- --run src/components/inspector/InvocationIdentityCard.test.tsx src/components/inspector/InvocationInputEditor.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 4 files, 188 tests passed. |
 | `npm run test -- --run` | Passed | 83 files, 490 tests passed. |
 | `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
+| `npx tsc --noEmit` | Passed | Property group and technical disclosure extraction compiles. |
+| `npm run test -- --run src/components/inspector/PropertyGroups.test.tsx src/components/inspector/TechnicalDetailsDisclosure.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 4 files, 186 tests passed. |
+| `npm run test -- --run` | Passed | 85 files, 493 tests passed. |
+| `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
 
 ### Static Gates So Far
 
@@ -890,3 +899,5 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `WorkflowViewer.tsx` no longer defines `NodePromptEditor` or local prompt-input merge logic.
 - `WorkflowViewer.tsx` no longer defines `InvocationIdentityCard` or `InvocationInputEditor`.
 - `WorkflowViewer.tsx` no longer imports prompt/static input projection helpers from `selectionModel`.
+- `WorkflowViewer.tsx` no longer defines `PropertyGroups` or `TechnicalDetailsDisclosure`.
+- `WorkflowViewer.tsx` no longer imports `Fragment`, `ChevronDown`, or `ChevronUp`.
