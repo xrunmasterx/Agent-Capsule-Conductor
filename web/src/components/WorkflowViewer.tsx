@@ -252,11 +252,9 @@ import {
 import {
   canvasToWorkflowGraph,
   edgeCanonicalPreview,
-  graphForCurrentView,
   internalNodeInputPorts,
   internalNodeInvocationPreview,
   internalNodeOutputPorts,
-  internalWorkflowToGraph,
   isInlineWorkflowContainer,
   port,
   workflowInvocationPreview,
@@ -267,7 +265,6 @@ import {
   mergeNodeRunDetail,
   mergeWorkflowRunNodeDetails,
   nodeRunDetailCacheKey,
-  singleNodeWorkflowGraph,
   workflowRunFromRunStateSnapshot,
   workflowRunFromRunSummary,
 } from '../workbench/model/workflowRuntimeProjection';
@@ -317,9 +314,6 @@ import {
   rectCenter,
   type DomConnectionEndpoint,
 } from './canvas/connectionDom';
-import {
-  internalNodeFromExecutableWorkflow,
-} from './canvas/canvasMutation';
 import { WorkspaceCanvas } from './canvas/WorkspaceCanvas';
 import {
   applyRunOverlayToCanvas,
@@ -327,7 +321,6 @@ import {
   mergeWorkflowRunWithEvents,
   runOverlayFromRun,
   stripRuntimeStateFromCanvas,
-  stripRuntimeStateFromWorkflow,
   workflowRunFailureText,
 } from './workflow-viewer/runState';
 
@@ -417,6 +410,7 @@ import {
   type EvidenceDockState,
 } from '../hooks/useEvidenceDockActions';
 import { useWorkflowRunSubmitActions } from '../hooks/useWorkflowRunSubmitActions';
+import { useWorkflowRunSelectionActions } from '../hooks/useWorkflowRunSelectionActions';
 import {
   boundaryTransferPreviewSnapshotForCanvas,
   useWorkflowSaveValidationActions,
@@ -1382,10 +1376,6 @@ export function WorkflowViewer({
           !isExecutableNodeWorkflow(selectedWorkflow)
         ? selectedWorkflow
         : null;
-  const canRunSelectedWorkflow = Boolean(selectedWorkflow && !isExecutableNodeWorkflow(selectedWorkflow));
-  const canRunSelectedNode = Boolean(
-    selectedInternalNode || (selection.type === 'workflow' && selectedWorkflow && isExecutableNodeWorkflow(selectedWorkflow)),
-  );
   const assistantLocalValidation = useMemo(
     () =>
       assistantProposal
@@ -1719,51 +1709,23 @@ export function WorkflowViewer({
     reportTemporaryResourceIssue,
     onChanged,
   });
-
-  async function runGraph() {
-    const issue = currentTemporaryResourceIssue();
-    if (issue) {
-      reportTemporaryResourceIssue(issue);
-      return;
-    }
-    await runWorkflowGraph(graphForCurrentView(stripRuntimeStateFromCanvas(canvas), null), 'task', canvas.id);
-  }
-
-  async function runSelectedWorkflow() {
-    const issue = currentTemporaryResourceIssue();
-    if (issue) {
-      reportTemporaryResourceIssue(issue);
-      return;
-    }
-    if (!selectedWorkflow || isExecutableNodeWorkflow(selectedWorkflow)) {
-      return;
-    }
-    try {
-      await ensureBoundaryTransfersValid();
-    } catch (error) {
-      const text = error instanceof Error ? error.message : String(error);
-      setMessage(`运行失败: ${text}`);
-      return;
-    }
-    await runWorkflowGraph(internalWorkflowToGraph(stripRuntimeStateFromWorkflow(selectedWorkflow)), 'workflow', selectedWorkflow.id);
-  }
-
-  async function runSelectedNode() {
-    const issue = currentTemporaryResourceIssue();
-    if (issue) {
-      reportTemporaryResourceIssue(issue);
-      return;
-    }
-    const node =
-      selectedInternalNode ||
-      (selection.type === 'workflow' && selectedWorkflow && isExecutableNodeWorkflow(selectedWorkflow)
-        ? internalNodeFromExecutableWorkflow(selectedWorkflow, { x: 0, y: 0 })
-        : null);
-    if (!node) {
-      return;
-    }
-    await runWorkflowGraph(singleNodeWorkflowGraph(node, selectedWorkflow?.id || canvas.id), 'node', node.id);
-  }
+  const {
+    canRunSelectedWorkflow,
+    canRunSelectedNode,
+    runGraph,
+    runSelectedWorkflow,
+    runSelectedNode,
+  } = useWorkflowRunSelectionActions({
+    canvas,
+    selection,
+    selectedWorkflow,
+    selectedInternalNode,
+    currentTemporaryResourceIssue,
+    ensureBoundaryTransfersValid,
+    reportTemporaryResourceIssue,
+    runWorkflowGraph,
+    setMessage,
+  });
 
   function openCallableResourceFromNode(callableId: string, name: string, kind: 'agent_class' | 'tool_class') {
     setSelectedResource({

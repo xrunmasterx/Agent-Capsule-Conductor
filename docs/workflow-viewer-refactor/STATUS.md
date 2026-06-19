@@ -1015,6 +1015,10 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npm run test -- --run src/hooks/useAssistantGraphOpsPersistenceActions.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 3 files, 187 tests passed. |
 | `npm run test -- --run` | Passed | 103 files, 564 tests passed. |
 | `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
+| `npx tsc --noEmit` | Passed | Workflow run selection action hook extraction compiles. |
+| `npm run test -- --run src/hooks/useWorkflowRunSelectionActions.test.tsx src/components/WorkflowViewer.drag.test.tsx src/App.test.tsx` | Passed | 3 files, 189 tests passed. |
+| `npm run test -- --run` | Passed | 104 files, 570 tests passed. |
+| `npm run build` | Passed | Same expected Vite chunk-size warning remains for the main production JS chunk. |
 
 ### Static Gates So Far
 
@@ -1069,5 +1073,6 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `WorkflowViewer.tsx` no longer defines `generateAssistantProposal(...)`; Workbench assistant turn submission ownership moved to `useAssistantProposalGenerateActions(...)`.
 - `WorkflowViewer.tsx` no longer defines `applyAssistantProposal(...)`, `undoLastAssistantApply(...)`, or `discardAssistantProposal(...)`; assistant proposal apply/undo/discard ownership moved to `useAssistantProposalApplyActions(...)`.
 - `WorkflowViewer.tsx` no longer defines `persistTemporaryResourceDraft(...)` or `applyGraphOpsPersistenceReview(...)`; assistant temporary-resource GraphOps persistence ownership moved to `useAssistantGraphOpsPersistenceActions(...)`.
-- `WorkflowViewer.tsx` is now 78,303 bytes / 2,119 lines after assistant GraphOps persistence action extraction.
+- `WorkflowViewer.tsx` no longer defines `runGraph(...)`, `runSelectedWorkflow(...)`, or `runSelectedNode(...)`; selected run entry-point ownership moved to `useWorkflowRunSelectionActions(...)`.
+- `WorkflowViewer.tsx` is now 76,843 bytes / 2,081 lines after workflow run selection action extraction.
 - `WorkflowViewer.tsx` no longer ends with local helper definitions; the file now ends at the `WorkflowViewer` component close.
