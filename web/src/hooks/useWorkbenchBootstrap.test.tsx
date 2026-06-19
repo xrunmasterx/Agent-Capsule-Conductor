@@ -1,9 +1,21 @@
 import { render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
+import { api } from '../api';
 import type { RuntimeConfig } from '../types';
 import type { WorkbenchTask, WorkbenchTaskStorePayload } from '../types/workbench';
-import { useWorkbenchBootstrap, type UseWorkbenchBootstrapOptions } from './useWorkbenchBootstrap';
+import {
+  useWorkbenchBootstrap,
+  useWorkbenchBootstrapLoaders,
+  type UseWorkbenchBootstrapOptions,
+} from './useWorkbenchBootstrap';
+
+vi.mock('../api', () => ({
+  api: {
+    runtimeConfig: vi.fn(),
+    workbenchTasks: vi.fn(),
+  },
+}));
 
 function task(taskId: string): WorkbenchTask {
   return {
@@ -59,9 +71,31 @@ function Harness(options: UseWorkbenchBootstrapOptions) {
   return <output>bootstrap</output>;
 }
 
+let latestLoaders: ReturnType<typeof useWorkbenchBootstrapLoaders> | null = null;
+
+function LoaderHarness() {
+  latestLoaders = useWorkbenchBootstrapLoaders();
+  return <output>bootstrap-loaders</output>;
+}
+
 describe('useWorkbenchBootstrap', () => {
   afterEach(() => {
+    latestLoaders = null;
     vi.clearAllMocks();
+  });
+
+  test('provides API-backed bootstrap loaders for runtime config and durable task records', async () => {
+    vi.mocked(api.runtimeConfig).mockResolvedValue(runtimeConfig());
+    vi.mocked(api.workbenchTasks).mockResolvedValue({ tasks: [{ task_id: 'task_1' }] });
+
+    render(<LoaderHarness />);
+
+    await expect(latestLoaders?.loadRuntimeConfig()).resolves.toEqual(runtimeConfig());
+    await expect(latestLoaders?.loadWorkbenchTaskRecords()).resolves.toEqual({
+      tasks: [{ task_id: 'task_1' }],
+    });
+    expect(api.runtimeConfig).toHaveBeenCalledTimes(1);
+    expect(api.workbenchTasks).toHaveBeenCalledTimes(1);
   });
 
   test('loads runtime config and migrates initial local tasks when backend has no tasks', async () => {

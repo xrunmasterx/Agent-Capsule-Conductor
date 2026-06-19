@@ -196,7 +196,7 @@ PLAN_03 may start. It must migrate effect/hooks ownership without changing the p
 
 ## PLAN_03 Effect Hooks
 
-Status: in progress
+Status: complete
 
 ### Scope Completed So Far
 
@@ -238,7 +238,12 @@ Status: in progress
 - Replaced the local run restoration effect in `WorkflowViewer.tsx` with `useRunRestorationLoader(...)`; the component keeps summary/state/events projection into `RunProjection` and task status updates.
 - Added `web/src/hooks/useRunRefreshLoader.ts` as the owner for manual run refresh summary/state/events loading and optional state/events fallback.
 - Replaced direct run refresh `api.run(...)` / `api.runState(...)` / `api.runEvents(...)` calls in `WorkflowViewer.tsx` with `useRunRefreshLoader(...)`; the component keeps existing run projection merging.
-- `web/src/components/WorkflowViewer.tsx` is now 563,895 bytes / 16,010 lines after the latest slice.
+- Added API-backed bootstrap loaders to `web/src/hooks/useWorkbenchBootstrap.ts`, so runtime config and durable task-record loading are no longer direct component API calls.
+- Added `web/src/hooks/useSelectedAgentActions.ts` as the selected-agent submit/publish/interaction API action owner.
+- Added `web/src/hooks/useWorkbenchAssistantActions.ts` as the Workbench assistant session load and turn-submit API action owner.
+- Added `web/src/hooks/useGraphOpsPersistence.ts` as the GraphOps proposal, validation, dry-run, approval, and apply API action owner.
+- Replaced the remaining direct `api.*` endpoint calls in `WorkflowViewer.tsx` with hook-owned action callbacks.
+- `web/src/components/WorkflowViewer.tsx` is now 564,834 bytes / 15,419 lines after PLAN_03 completion.
 
 ### Added Tests
 
@@ -257,6 +262,9 @@ Status: in progress
 - `web/src/hooks/useWorkbenchTaskDurability.test.tsx`
 - `web/src/hooks/useRunRestorationLoader.test.tsx`
 - `web/src/hooks/useRunRefreshLoader.test.tsx`
+- `web/src/hooks/useSelectedAgentActions.test.tsx`
+- `web/src/hooks/useWorkbenchAssistantActions.test.tsx`
+- `web/src/hooks/useGraphOpsPersistence.test.tsx`
 - Extended `web/src/hooks/streamTypes.test.ts`
 
 ### Validation So Far
@@ -363,6 +371,13 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 | `npm run test -- --run src/App.test.tsx src/components/WorkflowViewer.drag.test.tsx` | Passed | 2 files, 183 tests passed. |
 | `npm run test -- --run` | Passed | 39 files, 343 tests passed. |
 | `npm run build` | Passed | Same expected chunk-size warning remains. |
+| `npm run test -- --run src/hooks/useSelectedAgentActions.test.tsx src/hooks/useWorkbenchAssistantActions.test.tsx src/hooks/useGraphOpsPersistence.test.tsx src/hooks/useWorkbenchBootstrap.test.tsx` | Passed | 4 files, 13 tests passed. |
+| `npx tsc --noEmit` | Passed | Final action hook and bootstrap loader wiring compiles. |
+| `npm run test -- --run src/App.test.tsx src/components/WorkflowViewer.drag.test.tsx` | Passed | 2 files, 183 tests passed. |
+| `npm run test -- --run` | Passed | 42 files, 351 tests passed. |
+| `npm run build` | Passed | Same expected chunk-size warning remains. |
+| `python -m pytest -q tests/server/test_agent_sessions_api.py tests/server/test_runs_projection_api.py tests/server/test_workbench_canvas_snapshots_api.py tests/unit/test_workbench_adapter.py` | Failed | System Python environment is missing `fastapi`; retried with project-managed `uv`. |
+| `uv run pytest -q tests/server/test_agent_sessions_api.py tests/server/test_runs_projection_api.py tests/server/test_workbench_canvas_snapshots_api.py tests/unit/test_workbench_adapter.py` | Passed | 70 backend tests passed. |
 
 ### Static Gates So Far
 
@@ -403,5 +418,14 @@ Commands were run from `F:\Agent-Capsule-Conductor-v2\web`.
 - `useWorkflowPersistence.test.tsx` covers save force semantics, canonical preview passthrough, and workflow-id validation.
 - `WorkflowViewer.tsx` no longer owns runner job submission endpoint calls; this ownership lives in `useRunnerSubmit`.
 - `useRunnerSubmit.test.tsx` covers run/task/binding submit option passthrough and queued status propagation.
-- `WorkflowViewer.tsx` is now 564,055 bytes / 15,398 lines after the latest slice.
-- `WorkflowViewer.tsx` still has direct `api.*` and timer usage for selected-agent action APIs, GraphOps/publish actions, and UI-only defer timers. These are remaining PLAN_03 or later PLAN_06 slices.
+- Workbench bootstrap API loaders now live in `useWorkbenchBootstrapLoaders`.
+- Selected-agent submit/publish/interaction API calls now live in `useSelectedAgentActions`.
+- Workbench assistant session/turn API calls now live in `useWorkbenchAssistantActions`.
+- GraphOps proposal, validation, dry-run, approval, and apply API calls now live in `useGraphOpsPersistence`.
+- `WorkflowViewer.tsx` has no remaining direct `api.*`, `runnerApi.*`, `new EventSource`, or `setInterval` usage.
+- Remaining `WorkflowViewer.tsx` `setTimeout` calls are UI defer timers only.
+- `WorkflowViewer.tsx` is now 564,834 bytes / 15,419 lines after PLAN_03 completion.
+
+## Next Plan
+
+PLAN_04 may start. It must keep the hook ownership boundaries from PLAN_03 intact and avoid reintroducing endpoint calls, EventSource construction, or polling timers into `WorkflowViewer.tsx`.

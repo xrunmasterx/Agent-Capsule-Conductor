@@ -385,18 +385,24 @@ import { useRunStream } from '../hooks/useRunStream';
 import { useSelectedAgentSession, type AgentSessionUiState } from '../hooks/useSelectedAgentSession';
 import { useOpenedWorkflowLoader } from '../hooks/useOpenedWorkflowLoader';
 import { useNodeRunDetails } from '../hooks/useNodeRunDetails';
+import { useGraphOpsPersistence } from '../hooks/useGraphOpsPersistence';
 import { useRunRestorationLoader } from '../hooks/useRunRestorationLoader';
 import { useRunRefreshLoader } from '../hooks/useRunRefreshLoader';
 import { useRunnerSubmit } from '../hooks/useRunnerSubmit';
+import { useSelectedAgentActions } from '../hooks/useSelectedAgentActions';
 import { useSubmittedRunPolling } from '../hooks/useSubmittedRunPolling';
 import { useTaskPersistence } from '../hooks/useTaskPersistence';
+import { useWorkbenchAssistantActions } from '../hooks/useWorkbenchAssistantActions';
 import { useWorkbenchTaskDurability } from '../hooks/useWorkbenchTaskDurability';
 import {
   useWorkbenchTaskCanvasPersistence,
   type LoadWorkbenchTaskCanvas,
   type SaveWorkbenchTaskCanvas,
 } from '../hooks/useWorkbenchTaskCanvasPersistence';
-import { useWorkbenchBootstrap } from '../hooks/useWorkbenchBootstrap';
+import {
+  useWorkbenchBootstrap,
+  useWorkbenchBootstrapLoaders,
+} from '../hooks/useWorkbenchBootstrap';
 import {
   bindingPathOf,
   bindingRefOfPath,
@@ -2285,12 +2291,27 @@ export function WorkflowViewer({
     }));
   }, []);
 
-  const loadRuntimeConfig = useCallback(() => api.runtimeConfig(), []);
-  const loadWorkbenchTaskRecords = useCallback(() => api.workbenchTasks(), []);
+  const { loadRuntimeConfig, loadWorkbenchTaskRecords } = useWorkbenchBootstrapLoaders();
   const { loadWorkbenchTaskCanvas, saveWorkbenchTaskCanvas } = useWorkbenchTaskCanvasPersistence();
   const { validateBoundaryTransfers } = useBoundaryTransferValidation();
   const { pollSubmittedRunUntilTerminal } = useSubmittedRunPolling();
   const { submitRunnerJob } = useRunnerSubmit();
+  const {
+    loadWorkbenchAssistantSession,
+    submitWorkbenchAssistantTurnRequest,
+  } = useWorkbenchAssistantActions();
+  const {
+    createGraphOpsProposalRequest,
+    validateGraphOpsProposalRequest,
+    dryRunGraphOpsProposalRequest,
+    approveGraphOpsProposalRequest,
+    applyGraphOpsProposalRequest,
+  } = useGraphOpsPersistence();
+  const {
+    submitSelectedAgentTurnRequest,
+    publishSelectedAgentOutputRequest,
+    answerSelectedAgentInteractionRequest,
+  } = useSelectedAgentActions();
   const { saveWorkflowGraph, validateWorkflowGraph } = useWorkflowPersistence();
   const loadDurableWorkbenchTask = useCallback(
     (taskRecord: Record<string, unknown>) => loadWorkbenchTaskFromBackend(taskRecord, loadWorkbenchTaskCanvas),
@@ -3736,9 +3757,9 @@ export function WorkflowViewer({
       const currentSession =
         assistantAgentSession && assistantAgentSession.session_id === sessionId
           ? assistantAgentSession
-          : await api.getAgentSession(sessionId);
+          : await loadWorkbenchAssistantSession(sessionId);
       setAssistantAgentSession(currentSession);
-      const turn = await api.submitWorkbenchAssistantTurn(sessionId, {
+      const turn = await submitWorkbenchAssistantTurnRequest(sessionId, {
         message: userText,
         reason: effectiveTurnReason,
         canvas_hash: snapshot.snapshot_id,
@@ -3883,12 +3904,12 @@ export function WorkflowViewer({
     const callableId = persistentCallableIdForDraft(draft);
     setAssistantBusy(true);
     try {
-      await api.createGraphOpsProposal(transaction);
-      const validation = await api.validateGraphOpsProposal(transaction.proposal_id);
+      await createGraphOpsProposalRequest(transaction);
+      const validation = await validateGraphOpsProposalRequest(transaction.proposal_id);
       if (validation.status !== 'valid') {
         throw new Error(`GraphOps validate failed: ${JSON.stringify(validation)}`);
       }
-      const dryRun = await api.dryRunGraphOpsProposal(transaction.proposal_id);
+      const dryRun = await dryRunGraphOpsProposalRequest(transaction.proposal_id);
       setAssistantGraphOpsReview({
         resourceDraftId,
         callableId,
@@ -3931,12 +3952,12 @@ export function WorkflowViewer({
     }
     setAssistantBusy(true);
     try {
-      await api.approveGraphOpsProposal(review.proposal.proposal_id, {
+      await approveGraphOpsProposalRequest(review.proposal.proposal_id, {
         target_paths: review.dryRun.target_paths,
         base_hashes: review.proposal.base.content_hashes,
         dry_run_digest: review.dryRun.dry_run_digest,
       });
-      const manifest = await api.applyGraphOpsProposal(review.proposal.proposal_id);
+      const manifest = await applyGraphOpsProposalRequest(review.proposal.proposal_id);
       const nextCanvas = normalizeCanvasEdges(
         replaceTemporaryResourceWithCallable(
           stripRuntimeStateFromCanvas(canvas),
@@ -4008,7 +4029,7 @@ export function WorkflowViewer({
     if (!session) {
       throw new Error('当前节点还没有可用的 Agent Session');
     }
-    const turn = await api.submitAgentTurn(session.session_id, {
+    const turn = await submitSelectedAgentTurnRequest(session.session_id, {
       message: messageText,
       reason,
       expected_provider_session_id:
@@ -4024,7 +4045,7 @@ export function WorkflowViewer({
     if (!session) {
       throw new Error('当前节点还没有可用的 Agent Session');
     }
-    await api.publishAgentOutput(session.session_id, expectedTurnId);
+    await publishSelectedAgentOutputRequest(session.session_id, expectedTurnId);
     if (selectedRunId) {
       await refreshRunProjection(selectedRunId);
     }
@@ -4038,7 +4059,7 @@ export function WorkflowViewer({
     if (!runId) {
       throw new Error('当前节点没有绑定 run，无法处理审批');
     }
-    await api.answerInteraction(runId, interactionId, answer);
+    await answerSelectedAgentInteractionRequest(runId, interactionId, answer);
     await refreshAgentSession();
   }
 

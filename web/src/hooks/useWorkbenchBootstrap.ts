@@ -1,5 +1,6 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 
+import { api } from '../api';
 import type { RuntimeConfig } from '../types';
 import type { WorkbenchTask, WorkbenchTaskStorePayload } from '../types/workbench';
 
@@ -17,6 +18,21 @@ export type UseWorkbenchBootstrapOptions = {
   onBootstrapError: (error: unknown) => void;
   setDurableTasksReady: (ready: boolean) => void;
 };
+
+export type UseWorkbenchBootstrapLoadersResult = {
+  loadRuntimeConfig: () => Promise<RuntimeConfig>;
+  loadWorkbenchTaskRecords: () => Promise<{ tasks: WorkbenchTaskRecord[] }>;
+};
+
+export function useWorkbenchBootstrapLoaders(): UseWorkbenchBootstrapLoadersResult {
+  const loadRuntimeConfig = useCallback(() => api.runtimeConfig(), []);
+  const loadWorkbenchTaskRecords = useCallback(() => api.workbenchTasks(), []);
+
+  return {
+    loadRuntimeConfig,
+    loadWorkbenchTaskRecords,
+  };
+}
 
 export function useWorkbenchBootstrap({
   initialTaskStore,
