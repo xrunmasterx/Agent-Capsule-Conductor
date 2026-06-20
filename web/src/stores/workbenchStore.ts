@@ -7,6 +7,7 @@
 
 import { create } from 'zustand';
 import { DEFAULT_TASK_ID, INSPECTOR_DEFAULT_WIDTH } from '../workbench/constants';
+import { stripRuntimeStateFromCanvas } from '../workbench/model/canvasRuntimeState';
 import { defaultTaskStorePayload } from '../workbench/model/taskModel';
 import type {
   BottomDockMode,
@@ -31,6 +32,11 @@ export type {
 };
 
 type CanvasUpdater = WorkspaceCanvasModel | ((prev: WorkspaceCanvasModel) => WorkspaceCanvasModel);
+
+export type ActiveTaskMeta = Pick<
+  WorkbenchTask,
+  'taskId' | 'title' | 'status' | 'activeRunId' | 'latestRunId' | 'savedWorkflowRef'
+>;
 
 export interface WorkbenchStoreState {
   // --- task ownership ---
@@ -190,10 +196,14 @@ export const useWorkbenchStore = create<WorkbenchStoreState>((set) => ({
         return {};
       }
       const nextCanvas = typeof updater === 'function' ? updater(task.canvas) : updater;
+      if (nextCanvas === task.canvas) {
+        return {};
+      }
+      const durableCanvas = stripRuntimeStateFromCanvas(nextCanvas);
       return {
         tasksById: {
           ...state.tasksById,
-          [taskId]: { ...task, canvas: nextCanvas },
+          [taskId]: { ...task, title: durableCanvas.name, canvas: durableCanvas },
         },
         canvasRevisionsByTaskId: {
           ...state.canvasRevisionsByTaskId,
@@ -252,6 +262,21 @@ export function selectTaskOrder(state: WorkbenchStoreState): string[] {
 
 export function selectActiveTask(state: WorkbenchStoreState): WorkbenchTask | undefined {
   return state.tasksById[state.activeTaskId];
+}
+
+export function selectActiveTaskMeta(state: WorkbenchStoreState): ActiveTaskMeta | undefined {
+  const task = selectActiveTask(state);
+  if (!task) {
+    return undefined;
+  }
+  return {
+    taskId: task.taskId,
+    title: task.title,
+    status: task.status,
+    activeRunId: task.activeRunId,
+    latestRunId: task.latestRunId,
+    savedWorkflowRef: task.savedWorkflowRef,
+  };
 }
 
 export function selectActiveCanvas(state: WorkbenchStoreState): WorkspaceCanvasModel | undefined {

@@ -17,7 +17,6 @@ let latestMessage = '';
 let latestEvidenceDock: EvidenceDockState | null = null;
 let latestDialog: WorkflowSaveDialogState | null = null;
 let latestGraphRef: { current: WorkflowGraph } | null = null;
-let latestSourceGraph: WorkflowGraph | null = null;
 
 const saveWorkflowGraph = vi.fn();
 const validateWorkflowGraph = vi.fn();
@@ -54,7 +53,6 @@ function Harness({
 }) {
   const graphRef = useRef<WorkflowGraph>(workflowGraph());
   const [message, setMessage] = useState('');
-  const [sourceGraph, setSourceGraph] = useState<WorkflowGraph>(workflowGraph());
   const [dialog, setDialog] = useState<WorkflowSaveDialogState | null>(initialDialog);
   const [evidenceDock, setEvidenceDock] = useState<EvidenceDockState>({
     open: false,
@@ -70,7 +68,6 @@ function Harness({
     saveWorkflowDialog: dialog,
     setSaveWorkflowDialog: setDialog,
     graphRef,
-    setSourceGraph,
     setMessage,
     setEvidenceDock,
     saveWorkflowGraph,
@@ -84,7 +81,6 @@ function Harness({
   latestEvidenceDock = evidenceDock;
   latestDialog = dialog;
   latestGraphRef = graphRef;
-  latestSourceGraph = sourceGraph;
 
   return <output>{message}</output>;
 }
@@ -110,7 +106,6 @@ describe('useWorkflowSaveValidationActions', () => {
     latestEvidenceDock = null;
     latestDialog = null;
     latestGraphRef = null;
-    latestSourceGraph = null;
     vi.useRealTimers();
     vi.clearAllMocks();
   });
@@ -130,7 +125,6 @@ describe('useWorkflowSaveValidationActions', () => {
       true,
     );
     expect(latestGraphRef?.current).toMatchObject({ id: 'Saved_Workflow' });
-    expect(latestSourceGraph).toMatchObject({ id: 'Saved_Workflow' });
     expect(latestMessage).toBe('已保存 saved_workflow');
     expect(onSelect).toHaveBeenCalledWith('saved_workflow');
     expect(closeEvidenceDock).toHaveBeenCalledTimes(1);

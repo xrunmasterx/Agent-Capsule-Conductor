@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from acc.app.workbench_adapter import normalize_workbench_canvas_snapshot
 from acc.session import utc_now_iso
 from acc.store import load_json, write_json
 from acc.utils import AccError
@@ -126,6 +127,7 @@ class WorkbenchTaskService:
             raise AccError("canvas_hash is required")
         if not isinstance(canvas_snapshot, dict):
             raise AccError("canvas_snapshot must be an object")
+        normalized_canvas_snapshot = normalize_workbench_canvas_snapshot(canvas_snapshot)
         task = self._ensure_task_for_canvas(safe_task_id, canvas_snapshot)
         existing = self._optional_canvas_payload(safe_task_id)
         if base_canvas_hash and existing and existing.get("canvas_hash") != base_canvas_hash:
@@ -140,7 +142,7 @@ class WorkbenchTaskService:
             "schema_version": CANVAS_SNAPSHOT_SCHEMA_VERSION,
             "task_id": safe_task_id,
             "canvas_hash": canvas_hash,
-            "canvas_snapshot": strip_canvas_runtime_state(canvas_snapshot),
+            "canvas_snapshot": strip_canvas_runtime_state(normalized_canvas_snapshot),
             "selection": strip_transient_selection(selection),
             "temporary_resources": temporary_resources,
             "published_at": utc_now_iso(),
@@ -161,7 +163,11 @@ class WorkbenchTaskService:
         snapshot = self._optional_canvas_payload(safe_task_id)
         if snapshot is None:
             raise AccError(f"Workbench canvas snapshot not found: {safe_task_id}")
-        return snapshot
+        normalized = copy.deepcopy(snapshot)
+        canvas_snapshot = normalized.get("canvas_snapshot")
+        if isinstance(canvas_snapshot, dict):
+            normalized["canvas_snapshot"] = normalize_workbench_canvas_snapshot(canvas_snapshot)
+        return normalized
 
     def _ensure_task_for_canvas(
         self,
@@ -252,13 +258,6 @@ def strip_canvas_runtime_state(value: Any) -> Any:
             stripped[key] = copy.deepcopy(item)
             continue
         if key in RUNTIME_ONLY_KEYS:
-            continue
-        if key == "ui" and isinstance(item, dict):
-            stripped[key] = {
-                child_key: strip_canvas_runtime_state(child_value)
-                for child_key, child_value in item.items()
-                if child_key != "internal_nodes"
-            }
             continue
         stripped[key] = strip_canvas_runtime_state(item)
     return stripped

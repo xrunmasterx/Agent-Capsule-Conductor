@@ -6,6 +6,7 @@ from pathlib import Path
 import yaml
 from fastapi.testclient import TestClient
 
+from acc.app.workbench_tasks import WorkbenchTaskService
 from acc.runner import artifact_id_for_project_path
 from acc.server.app import create_app
 from acc.storage import RUN_MARKER_FILENAME
@@ -201,6 +202,30 @@ def test_runner_submit_returns_job_without_run_dir(
     assert "run_dir" not in payload
     assert str(project_root) not in response.text
     assert (project_root / "runs" / "runner_submit_run" / RUN_MARKER_FILENAME).exists()
+
+
+def test_runner_submit_updates_existing_workbench_task_run_index(
+    client: TestClient,
+    project_root: Path,
+) -> None:
+    WorkbenchTaskService(project_root).create({"task_id": "task_runner_canvas", "title": "Task"})
+
+    response = client.post(
+        "/api/runner/jobs",
+        json={
+            "graph": _runner_graph("runner_submit_flow"),
+            "job_id": "job_runner_task_submit",
+            "run_id": "runner_task_submit_run",
+            "task_id": "task_runner_canvas",
+            "workspace_alias": "default",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    task = client.get("/api/workbench/tasks/task_runner_canvas")
+    assert task.status_code == 200, task.text
+    assert task.json()["active_run_id"] is None
+    assert task.json()["latest_run_id"] == "runner_task_submit_run"
 
 
 def test_runner_projection_does_not_expose_absolute_paths(

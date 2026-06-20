@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
+from types import SimpleNamespace
+
+from acc.server.routes import runs as runs_route
 
 
 def test_get_node_includes_projection_fields(client, project_root) -> None:
@@ -174,6 +178,58 @@ def test_run_state_includes_recursive_nested_node_snapshot(client, project_root)
     assert nodes["workflow_c__internal__fallback_agent"]["callable_id"] == "fallback-agent.generic"
 
 
+def test_run_state_includes_nested_node_binding_manifest_and_output_preview(
+    client,
+    project_root,
+) -> None:
+    run_dir = project_root / "runs" / "state_nested_evidence_run"
+    parent_dir = run_dir / "nodes" / "workflow_parent"
+    nested_run_dir = parent_dir / "nested_workflow"
+    writer_dir = nested_run_dir / "nodes" / "writer"
+    writer_dir.mkdir(parents=True, exist_ok=True)
+    parent_dir.mkdir(parents=True, exist_ok=True)
+    (writer_dir / "binding_manifest.json").write_text(
+        json.dumps(
+            {
+                "bindings": [
+                    {
+                        "binding_kind": "workflow_input",
+                        "source_port": "main",
+                        "target_node": "writer",
+                        "target_port": "main",
+                    }
+                ],
+                "inputs": ["main"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (writer_dir / "output.json").write_text(
+        json.dumps({"status": "success", "summary": "writer received workflow input"}),
+        encoding="utf-8",
+    )
+    (writer_dir / "events.jsonl").write_text("", encoding="utf-8")
+    write_run_summary_payload(
+        run_dir,
+        "state_nested_evidence_run",
+        [node_summary_payload(parent_dir, "workflow_parent", "child.accflow.json", "success")],
+    )
+    write_run_summary_payload(
+        nested_run_dir,
+        "nested_workflow",
+        [node_summary_payload(writer_dir, "writer", "writer.codex", "success")],
+    )
+
+    response = client.get("/api/runs/state_nested_evidence_run/state")
+
+    assert response.status_code == 200, response.text
+    nodes = {node.get("ui_node_id") or node["node_id"]: node for node in response.json()["nodes"]}
+    writer = nodes["workflow_parent__internal__writer"]
+    assert writer["binding_manifest"]["bindings"][0]["binding_kind"] == "workflow_input"
+    assert writer["binding_manifest"]["inputs"] == ["main"]
+    assert writer["output_preview"]["summary"] == "writer received workflow input"
+
+
 def test_node_events_include_agent_session_timeline(client, project_root) -> None:
     run_dir = project_root / "runs" / "agent_events_run"
     node_dir = run_dir / "nodes" / "agent"
@@ -306,18 +362,87 @@ def test_run_stream_emits_agent_session_events(client, project_root) -> None:
         + "\n",
         encoding="utf-8",
     )
+    (run_dir / "run_summary.json").write_text(
+        json.dumps(
+            {
+                "run_id": "server_run",
+                "status": "success",
+                "run_dir": str(run_dir.resolve()),
+                "node_count": 1,
+                "nodes": [],
+            }
+        ),
+        encoding="utf-8",
+    )
 
-    with client.stream("GET", "/api/runs/server_run/stream") as response:
+    with client.stream("GET", "/api/runs/server_run/stream?history=tail") as response:
         text = "".join(response.iter_text())
 
     assert response.status_code == 200
     assert "event: agent_event" in text
-    assert "event: live_event" in text
+    assert "event: live_event" not in text
     assert '"node_id": "server_node"' in text
     assert '"agent_turn_id": "turn_1"' in text
     assert '"projection":' in text
     assert '"event_seq":' in text
     assert "streamed" in text
+
+
+def test_run_stream_history_none_on_terminal_run_emits_summary_without_history(client, project_root) -> None:
+    run_dir = project_root / "runs" / "terminal_stream_run"
+    node_dir = run_dir / "nodes" / "agent"
+    session_dir = project_root / "runs" / "_agent_sessions" / "terminal_stream_run" / "agent"
+    turn_dir = session_dir / "turns" / "turn_1"
+    node_dir.mkdir(parents=True, exist_ok=True)
+    turn_dir.mkdir(parents=True)
+    (node_dir / "runtime.json").write_text(
+        json.dumps({"agent_session_ref": str(session_dir.resolve()), "turn_id": "turn_1"}),
+        encoding="utf-8",
+    )
+    (node_dir / "stdout.log").write_text("historical stdout\n", encoding="utf-8")
+    (turn_dir / "events.jsonl").write_text(
+        json.dumps({"event_id": "agent_evt_1", "type": "agent_message", "payload": {"content": "old"}})
+        + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "run_summary.json").write_text(
+        json.dumps(
+            {
+                "run_id": "terminal_stream_run",
+                "status": "success",
+                "run_dir": str(run_dir.resolve()),
+                "node_count": 1,
+                "nodes": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with client.stream("GET", "/api/runs/terminal_stream_run/stream") as response:
+        text = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    assert "event: summary" in text
+    assert "event: node_log_delta" not in text
+    assert "event: agent_event" not in text
+    assert "event: live_event" not in text
+
+
+def test_run_stream_emits_heartbeat_when_idle(monkeypatch, project_root) -> None:
+    run_dir = project_root / "runs" / "idle_stream_run"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(runs_route, "STREAM_HEARTBEAT_INTERVAL_SECONDS", 0.0, raising=False)
+
+    async def read_first_frame() -> str:
+        response = await runs_route.stream_run(
+            "idle_stream_run",
+            _FakeStreamRequest(project_root),
+        )
+        return await response.body_iterator.__anext__()
+
+    frame = asyncio.run(read_first_frame())
+
+    assert frame.startswith(": heartbeat") or "event: heartbeat" in frame
 
 
 def test_run_stream_projects_agent_message_delta_live_event(client, project_root) -> None:
@@ -358,14 +483,14 @@ def test_run_stream_projects_agent_message_delta_live_event(client, project_root
         encoding="utf-8",
     )
 
-    with client.stream("GET", "/api/runs/server_delta_run/stream") as response:
+    with client.stream("GET", "/api/runs/server_delta_run/stream?history=tail") as response:
         text = "".join(response.iter_text())
 
     assert response.status_code == 200
-    assert "event: live_event" in text
+    assert "event: agent_event" in text
+    assert "event: live_event" not in text
     assert '"type": "agent_message_delta"' in text
-    assert '"stream": "agent"' in text
-    assert '"text": "模"' in text
+    assert "agent_delta_evt_1" in text
 
 
 def test_run_stream_emits_nested_agent_session_events(client, project_root) -> None:
@@ -411,13 +536,26 @@ def test_run_stream_emits_nested_agent_session_events(client, project_root) -> N
         + "\n",
         encoding="utf-8",
     )
+    run_dir = project_root / "runs" / "server_run"
+    (run_dir / "run_summary.json").write_text(
+        json.dumps(
+            {
+                "run_id": "server_run",
+                "status": "success",
+                "run_dir": str(run_dir.resolve()),
+                "node_count": 1,
+                "nodes": [],
+            }
+        ),
+        encoding="utf-8",
+    )
 
-    with client.stream("GET", "/api/runs/server_run/stream") as response:
+    with client.stream("GET", "/api/runs/server_run/stream?history=tail") as response:
         text = "".join(response.iter_text())
 
     assert response.status_code == 200
     assert "event: agent_event" in text
-    assert "event: live_event" in text
+    assert "event: live_event" not in text
     assert '"node_id": "agent_node"' in text
     assert '"parent_node_id": "workflow_parent"' in text
     assert '"ui_node_id": "workflow_parent__internal__agent_node"' in text
@@ -587,3 +725,13 @@ def write_run_summary_payload(run_dir, run_id: str, nodes: list[dict]) -> None:
         ),
         encoding="utf-8",
     )
+
+
+class _FakeStreamRequest:
+    def __init__(self, project_root) -> None:
+        self.app = SimpleNamespace(state=SimpleNamespace(project_root=project_root))
+        self._disconnect_checks = 0
+
+    async def is_disconnected(self) -> bool:
+        self._disconnect_checks += 1
+        return self._disconnect_checks > 1

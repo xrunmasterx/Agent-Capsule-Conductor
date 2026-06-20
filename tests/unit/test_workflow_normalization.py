@@ -38,6 +38,22 @@ def test_main_to_main_data_edge_normalization_removes_edge_and_adds_control() ->
     assert summary.conflicts == []
 
 
+def test_main_to_main_data_edge_preserve_explicit_policy_keeps_edge() -> None:
+    workflow = _workflow_with_main_data_edge()
+
+    payload, summary = normalize_workflow_payload_contracts(
+        workflow,
+        main_data_edge_policy="preserve_explicit",
+    )
+
+    assert payload["data_edges"] == workflow["data_edges"]
+    assert payload["control_edges"] == []
+    assert "control" not in payload["nodes"][0]
+    assert summary.removed_main_data_edges == 0
+    assert summary.added_control_edges == 0
+    assert summary.conflicts == []
+
+
 def test_main_data_edge_normalization_detects_mixed_fanout_without_force() -> None:
     workflow = _workflow_with_main_data_edge()
     workflow["control_edges"] = [

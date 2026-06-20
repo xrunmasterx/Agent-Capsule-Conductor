@@ -18,6 +18,7 @@ import type {
 import { WorkspaceCanvas } from '../canvas/WorkspaceCanvas';
 import { ExecutionDock } from '../execution';
 import { TaskOverviewPage, TaskWorkspaceSwitcher } from '../workbench';
+import type { RunOverlayState } from './runState';
 
 export type WorkflowViewerMainStageProps = {
   taskWorkspaceView: TaskWorkspaceView;
@@ -32,6 +33,7 @@ export type WorkflowViewerMainStageProps = {
   selection: CanvasSelection;
   connectionMode: ConnectionMode;
   edgeViewMode: EdgeViewMode;
+  runOverlay?: RunOverlayState | null;
   workflowRun: WorkflowRunResult | null;
   focusedWorkflowId: string | null;
   callables: CallableSummary[];
@@ -68,6 +70,7 @@ export function WorkflowViewerMainStage({
   selection,
   connectionMode,
   edgeViewMode,
+  runOverlay = null,
   workflowRun,
   focusedWorkflowId,
   callables,
@@ -109,6 +112,8 @@ export function WorkflowViewerMainStage({
             layoutSyncVersion={layoutSyncVersion}
             selection={selection}
             connectionMode={connectionMode}
+            edgeViewMode={edgeViewMode}
+            runOverlay={runOverlay}
             workflowRun={workflowRun}
             focusedWorkflowId={focusedWorkflowId}
             callables={callables}
@@ -119,7 +124,6 @@ export function WorkflowViewerMainStage({
             onSelect={onSelectCanvasObject}
             onOpenNodeDetails={onOpenNodeDetails}
             onDeleteSelection={onDeleteSelection}
-            edgeViewMode={edgeViewMode}
             onConnectionMode={onConnectionMode}
             onEdgeViewMode={onEdgeViewMode}
             onBlankCanvas={() => undefined}

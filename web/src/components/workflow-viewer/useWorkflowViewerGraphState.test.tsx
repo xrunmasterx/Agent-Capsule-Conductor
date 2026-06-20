@@ -29,19 +29,33 @@ function canvas(id = 'task_canvas'): WorkspaceCanvasModel {
 }
 
 describe('useWorkflowViewerGraphState', () => {
-  test('initializes source graph and graph ref from the initial canvas', () => {
+  test('derives source graph and graph ref from the current canvas revision', () => {
     const initialCanvas = canvas();
-    const { result } = renderHook(() => useWorkflowViewerGraphState(initialCanvas));
+    const revisedCanvas = { ...initialCanvas, id: 'task_canvas_revised', name: 'Task Canvas Revised' };
+    const { result, rerender } = renderHook(
+      ({ currentCanvas, canvasRevision }) =>
+        useWorkflowViewerGraphState(currentCanvas, canvasRevision),
+      {
+        initialProps: { currentCanvas: initialCanvas, canvasRevision: 0 },
+      },
+    );
 
     expect(result.current.sourceGraph.id).toBe('task_canvas');
     expect(result.current.sourceGraph.name).toBe('Task Canvas');
     expect(result.current.sourceGraph.nodes).toHaveLength(1);
     expect(result.current.sourceGraph.nodes[0]?.id).toBe('workflow_1');
     expect(result.current.graphRef.current).toBe(result.current.sourceGraph);
+    expect('setSourceGraph' in result.current).toBe(false);
+
+    rerender({ currentCanvas: revisedCanvas, canvasRevision: 1 });
+
+    expect(result.current.sourceGraph.id).toBe('task_canvas_revised');
+    expect(result.current.sourceGraph.name).toBe('Task Canvas Revised');
+    expect(result.current.graphRef.current).toBe(result.current.sourceGraph);
   });
 
   test('keeps layout sync version owned by the graph state hook', () => {
-    const { result } = renderHook(() => useWorkflowViewerGraphState(canvas()));
+    const { result } = renderHook(() => useWorkflowViewerGraphState(canvas(), 0));
 
     act(() => {
       result.current.setLayoutSyncVersion((current) => current + 1);

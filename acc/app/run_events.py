@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from acc.agent_events import ensure_agent_event_projection
+from acc.app.run_projection import build_node_run_projection
 from acc.run_index import NodeRunSummary, load_run_summary
 
 
@@ -93,7 +94,7 @@ class RunEventProjectionService:
                 "edges": [],
                 "errors": [],
             }
-        nodes = [node.model_dump() for node in summary.nodes]
+        nodes = [build_node_run_projection(node) for node in summary.nodes]
         nodes.extend(self._read_nested_state_nodes(self.run_dir, parent_ui_node_id=None))
         return {
             "workflow_id": summary.workflow_id or self.run_id,
@@ -352,7 +353,7 @@ class RunEventProjectionService:
         parent_ui_node_id: str,
         nested_run_dir: Path,
     ) -> dict[str, Any]:
-        payload = node.model_dump()
+        payload = build_node_run_projection(node)
         node_id = str(payload.get("node_id") or "")
         payload["parent_node_id"] = parent_ui_node_id
         payload["ui_node_id"] = f"{parent_ui_node_id}__internal__{node_id}"
@@ -502,6 +503,45 @@ def read_jsonl_tolerant(path: Path, limit: int = 200) -> list[dict[str, Any]]:
             if event is not None:
                 events.append(event)
     return list(events)
+
+
+def read_jsonl_since_offset(path: Path, offset: int, limit: int = 200) -> tuple[list[dict[str, Any]], int]:
+    if not path.exists():
+        return [], max(0, offset)
+    size = path.stat().st_size
+    safe_offset = min(max(0, offset), size)
+    records: list[dict[str, Any]] = []
+    with path.open("rb") as file:
+        file.seek(safe_offset)
+        while len(records) < limit:
+            line_offset = file.tell()
+            raw_line = file.readline()
+            if not raw_line:
+                return records, file.tell()
+            line = raw_line.decode("utf-8", errors="replace")
+            record = parse_jsonl_event(line, line_number=len(records) + 1)
+            if record is not None:
+                records.append(record)
+            if file.tell() == line_offset:
+                break
+        return records, file.tell()
+
+
+def read_jsonl_tail_with_offset(path: Path, limit: int = 200) -> tuple[list[dict[str, Any]], int]:
+    if not path.exists():
+        return [], 0
+    records: deque[dict[str, Any]] = deque(maxlen=max(0, limit))
+    with path.open("rb") as file:
+        line_number = 0
+        while True:
+            raw_line = file.readline()
+            if not raw_line:
+                return list(records), file.tell()
+            line_number += 1
+            line = raw_line.decode("utf-8", errors="replace")
+            record = parse_jsonl_event(line, line_number=line_number)
+            if record is not None and limit > 0:
+                records.append(record)
 
 
 def annotate_nested_event(

@@ -23,7 +23,6 @@ export type UseOpenedWorkflowCanvasOptions = {
   workflowId: string | null | undefined;
   workflowRun: WorkflowRunResult | null;
   graphRef: MutableRefObject<WorkflowGraph>;
-  setSourceGraph: Dispatch<SetStateAction<WorkflowGraph>>;
   setCanvas: Dispatch<SetStateAction<WorkspaceCanvasModel>>;
   setSelection: Dispatch<SetStateAction<CanvasSelection>>;
   setMessage: Dispatch<SetStateAction<string>>;
@@ -62,7 +61,6 @@ export function useOpenedWorkflowCanvas({
   workflowId,
   workflowRun,
   graphRef,
-  setSourceGraph,
   setCanvas,
   setSelection,
   setMessage,
@@ -73,7 +71,6 @@ export function useOpenedWorkflowCanvas({
     (workflow: WorkflowDetail) => {
       const projection = openedWorkflowCanvasProjection(workflow, workflowRun);
       graphRef.current = projection.graph;
-      setSourceGraph(projection.graph);
       setCanvas(projection.canvas);
       setSelection(projection.selection);
       setMessage(projection.message);
@@ -85,7 +82,6 @@ export function useOpenedWorkflowCanvas({
       setCanvas,
       setMessage,
       setSelection,
-      setSourceGraph,
       workflowRun,
     ],
   );

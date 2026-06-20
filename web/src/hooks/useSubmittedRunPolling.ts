@@ -23,27 +23,70 @@ export type UseSubmittedRunPollingResult = {
 const FOREGROUND_POLL_MS = 1000;
 const BACKGROUND_POLL_MS = 2500;
 
+type ActiveSubmittedRunPoller = {
+  timerId: number | null;
+  stopped: boolean;
+};
+
 export function useSubmittedRunPolling(): UseSubmittedRunPollingResult {
-  const timersRef = useRef<number[]>([]);
+  const pollersRef = useRef<Map<string, ActiveSubmittedRunPoller>>(new Map());
 
   useEffect(
     () => () => {
-      for (const timerId of timersRef.current) {
-        window.clearTimeout(timerId);
+      for (const poller of pollersRef.current.values()) {
+        poller.stopped = true;
+        if (poller.timerId !== null) {
+          window.clearTimeout(poller.timerId);
+        }
       }
-      timersRef.current = [];
+      pollersRef.current.clear();
     },
     [],
   );
 
   const pollSubmittedRunUntilTerminal = useCallback(
     ({ runId, foreground, onSnapshot, onError }: StartSubmittedRunPollingOptions) => {
+      const stopPoller = () => {
+        const current = pollersRef.current.get(runId);
+        if (current !== poller) {
+          return;
+        }
+        poller.stopped = true;
+        if (poller.timerId !== null) {
+          window.clearTimeout(poller.timerId);
+          poller.timerId = null;
+        }
+        pollersRef.current.delete(runId);
+      };
+
+      const existingPoller = pollersRef.current.get(runId);
+      if (existingPoller) {
+        existingPoller.stopped = true;
+        if (existingPoller.timerId !== null) {
+          window.clearTimeout(existingPoller.timerId);
+        }
+      }
+
+      const poller: ActiveSubmittedRunPoller = {
+        timerId: null,
+        stopped: false,
+      };
+      pollersRef.current.set(runId, poller);
+
+      const isActivePoller = () => !poller.stopped && pollersRef.current.get(runId) === poller;
+
       const schedule = (delayMs: number) => {
+        if (!isActivePoller()) {
+          return;
+        }
         const timerId = window.setTimeout(() => {
-          timersRef.current = timersRef.current.filter((currentTimerId) => currentTimerId !== timerId);
+          if (!isActivePoller()) {
+            return;
+          }
+          poller.timerId = null;
           void pollOnce();
         }, delayMs);
-        timersRef.current.push(timerId);
+        poller.timerId = timerId;
       };
 
       async function pollOnce() {
@@ -53,6 +96,9 @@ export function useSubmittedRunPolling(): UseSubmittedRunPollingResult {
             api.runState(runId).catch(() => null),
             api.runEvents(runId).catch(() => ({ events: [] as RunEvent[] })),
           ]);
+          if (!isActivePoller()) {
+            return;
+          }
           const shouldContinue = onSnapshot({
             summary,
             stateSnapshot,
@@ -60,10 +106,15 @@ export function useSubmittedRunPolling(): UseSubmittedRunPollingResult {
           });
           if (shouldContinue) {
             schedule(foreground ? FOREGROUND_POLL_MS : BACKGROUND_POLL_MS);
+          } else {
+            stopPoller();
           }
         } catch {
+          if (!isActivePoller()) {
+            return;
+          }
           onError();
-          schedule(BACKGROUND_POLL_MS);
+          stopPoller();
         }
       }
 

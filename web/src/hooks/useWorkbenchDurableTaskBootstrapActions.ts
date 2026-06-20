@@ -28,7 +28,6 @@ export type UseWorkbenchDurableTaskBootstrapActionsOptions = {
   setTasks: Dispatch<SetStateAction<WorkbenchTask[]>>;
   setActiveTaskId: (taskId: string) => void;
   setCanvas: Dispatch<SetStateAction<WorkspaceCanvasModel>>;
-  setSourceGraph: Dispatch<SetStateAction<WorkflowGraph>>;
   setSelection: Dispatch<SetStateAction<CanvasSelection>>;
   setMessage: Dispatch<SetStateAction<string>>;
   setDurableTasksReady: Dispatch<SetStateAction<boolean>>;
@@ -45,7 +44,6 @@ export function useWorkbenchDurableTaskBootstrapActions({
   setTasks,
   setActiveTaskId,
   setCanvas,
-  setSourceGraph,
   setSelection,
   setMessage,
   setDurableTasksReady,
@@ -76,11 +74,10 @@ export function useWorkbenchDurableTaskBootstrapActions({
       setCanvas(nextCanvas);
       const nextGraph = canvasToWorkflowGraph(nextCanvas);
       graphRef.current = nextGraph;
-      setSourceGraph(nextGraph);
       setSelection({ type: 'task_canvas', taskId: nextCanvas.id });
       setMessage('已从本地 runner 加载持久化任务');
     },
-    [graphRef, setActiveTaskId, setCanvas, setMessage, setSelection, setSourceGraph, setTasks],
+    [graphRef, setActiveTaskId, setCanvas, setMessage, setSelection, setTasks],
   );
 
   const handleMigratedInitialTasks = useCallback(() => {

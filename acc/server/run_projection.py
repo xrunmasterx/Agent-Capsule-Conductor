@@ -188,6 +188,10 @@ def _bundle_summary(result: NodeResult) -> dict[str, Any]:
 def _safe_provenance(raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict):
         return {}
+    inline_value_sha256 = raw.get("inline_value_sha256")
+    source_artifact_sha256 = raw.get("source_artifact_sha256")
+    if (inline_value_sha256 is None) == (source_artifact_sha256 is None):
+        return {}
     # Return a sanitized copy with only known provenance fields.
     _PROVENANCE_KEYS = frozenset({
         "producer_session_id", "bundle_id", "binding_applied",

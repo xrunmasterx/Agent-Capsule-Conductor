@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from acc.callable_registry import CallableRegistry
 from acc.callable_runner import DEFAULT_AGENT_OUTPUT_SCHEMA
@@ -13,6 +13,7 @@ from acc.engine.schema_ports import (
 from acc.models import AccError, AgentClassTemplate, CallableRef, PortContract
 
 MAIN_PORTS = {"main", "default"}
+MainDataEdgePolicy = Literal["migrate_legacy", "preserve_explicit"]
 
 
 @dataclass
@@ -62,6 +63,7 @@ def normalize_workflow_payload_contracts(
     callable_registry: CallableRegistry | None = None,
     force: bool = False,
     allow_conflicts: bool = False,
+    main_data_edge_policy: MainDataEdgePolicy = "migrate_legacy",
 ) -> tuple[dict[str, Any], WorkflowNormalizationSummary]:
     """Normalize Workbench/Core-v2 transport contracts before save or run."""
 
@@ -69,7 +71,10 @@ def normalize_workflow_payload_contracts(
     summary = WorkflowNormalizationSummary()
     if callable_registry is not None:
         _snapshot_callable_instance_defaults(normalized, callable_registry, summary)
-    _normalize_main_data_edges(normalized, summary, force=force)
+    if main_data_edge_policy == "migrate_legacy":
+        _normalize_main_data_edges(normalized, summary, force=force)
+    elif main_data_edge_policy != "preserve_explicit":
+        raise AccError(f"Unsupported main data edge policy: {main_data_edge_policy}")
     _warn_control_main_suppressed_by_data_edges(normalized, summary)
     if summary.conflicts and not force and not allow_conflicts:
         raise AccError(

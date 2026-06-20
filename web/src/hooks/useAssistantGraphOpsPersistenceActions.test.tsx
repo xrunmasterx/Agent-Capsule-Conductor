@@ -34,7 +34,6 @@ vi.mock('../components/authoring/authoringRuntime', () => ({
 
 let latestActions: UseAssistantGraphOpsPersistenceActionsResult | null = null;
 let latestCanvas: WorkspaceCanvasModel | null = null;
-let latestSourceGraph: WorkflowGraph | null = null;
 let latestGraphRefCurrent: WorkflowGraph | null = null;
 let latestTasks: WorkbenchTask[] = [];
 let latestRequiredActions: AuthoringRequiredAction[] = [];
@@ -141,7 +140,6 @@ function Harness({
   requiredActions?: AuthoringRequiredAction[];
 }) {
   const [currentCanvas, setCanvas] = useState(canvas);
-  const [sourceGraph, setSourceGraph] = useState<WorkflowGraph>(() => canvasToWorkflowGraph(canvas));
   const graphRef = useRef<WorkflowGraph>(canvasToWorkflowGraph(canvas));
   const [tasks, setTasks] = useState<WorkbenchTask[]>([taskForCanvas(canvas, temporaryResources)]);
   const [actions, setActions] = useState<AuthoringRequiredAction[]>(requiredActions);
@@ -156,7 +154,6 @@ function Harness({
     temporaryResources,
     graphRef,
     graphOps,
-    setSourceGraph,
     setCanvas,
     setTasks,
     setAssistantRequiredActions: setActions,
@@ -167,7 +164,6 @@ function Harness({
     onChanged,
   });
   latestCanvas = currentCanvas;
-  latestSourceGraph = sourceGraph;
   latestGraphRefCurrent = graphRef.current;
   latestTasks = tasks;
   latestRequiredActions = actions;
@@ -183,7 +179,6 @@ describe('useAssistantGraphOpsPersistenceActions', () => {
   afterEach(() => {
     latestActions = null;
     latestCanvas = null;
-    latestSourceGraph = null;
     latestGraphRefCurrent = null;
     latestTasks = [];
     latestRequiredActions = [];
@@ -293,7 +288,6 @@ describe('useAssistantGraphOpsPersistenceActions', () => {
       warnings: [],
     });
     expect(latestCanvas?.workflows[0].temporaryResourceId).toBeUndefined();
-    expect(latestSourceGraph?.nodes[0].callable_ref.id).toBe('agent_final');
     expect(latestGraphRefCurrent?.nodes[0].callable_ref.id).toBe('agent_final');
     expect(latestTasks[0].authoring?.temporaryResources.draft_1.status).toBe('discarded');
     expect(latestRequiredActions).toEqual([

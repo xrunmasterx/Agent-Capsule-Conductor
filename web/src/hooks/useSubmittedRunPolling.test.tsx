@@ -115,10 +115,38 @@ describe('useSubmittedRunPolling', () => {
     });
   });
 
-  test('retries failed polls in the background and clears pending timers on unmount', async () => {
-    vi.mocked(api.run)
-      .mockRejectedValueOnce(new Error('run missing'))
-      .mockResolvedValueOnce(summary('success'));
+  test('replaces an existing poller for the same run id', async () => {
+    vi.mocked(api.run).mockResolvedValue(summary('running'));
+    vi.mocked(api.runState).mockRejectedValue(new Error('state missing'));
+    vi.mocked(api.runEvents).mockResolvedValue(runEvents());
+    const firstSnapshot = vi.fn().mockReturnValue(true);
+    const secondSnapshot = vi.fn().mockReturnValue(false);
+
+    render(<Harness />);
+    latestActions?.pollSubmittedRunUntilTerminal({
+      runId: 'run_1',
+      foreground: true,
+      onSnapshot: firstSnapshot,
+      onError: vi.fn(),
+    });
+    await flushPromises();
+    expect(vi.getTimerCount()).toBe(1);
+
+    latestActions?.pollSubmittedRunUntilTerminal({
+      runId: 'run_1',
+      foreground: true,
+      onSnapshot: secondSnapshot,
+      onError: vi.fn(),
+    });
+    await flushPromises();
+
+    expect(firstSnapshot).toHaveBeenCalledTimes(1);
+    expect(secondSnapshot).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  test('stops polling after summary reads fail', async () => {
+    vi.mocked(api.run).mockRejectedValue(new Error('run missing'));
     vi.mocked(api.runState).mockRejectedValue(new Error('state missing'));
     vi.mocked(api.runEvents).mockResolvedValue(runEvents());
     const onSnapshot = vi.fn().mockReturnValue(false);
@@ -138,8 +166,10 @@ describe('useSubmittedRunPolling', () => {
 
     await vi.advanceTimersByTimeAsync(2500);
     await flushPromises();
-    expect(onSnapshot).toHaveBeenCalledTimes(1);
+    expect(api.run).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
 
+    vi.mocked(api.run).mockResolvedValue(summary('running'));
     latestActions?.pollSubmittedRunUntilTerminal({
       runId: 'run_1',
       foreground: true,
@@ -147,7 +177,7 @@ describe('useSubmittedRunPolling', () => {
       onError: vi.fn(),
     });
     await flushPromises();
-    expect(vi.getTimerCount()).toBeGreaterThan(0);
+    expect(vi.getTimerCount()).toBe(1);
     view.unmount();
     expect(vi.getTimerCount()).toBe(0);
   });

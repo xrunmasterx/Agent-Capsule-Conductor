@@ -26,7 +26,6 @@ vi.mock('./useWorkbenchBootstrap', () => ({
 let latestTasks: WorkbenchTask[] = [];
 let latestActiveTaskId = '';
 let latestCanvas: WorkspaceCanvasModel | null = null;
-let latestSourceGraph: WorkflowGraph | null = null;
 let latestSelection: CanvasSelection | null = null;
 let latestMessage = '';
 let latestRuntimeConfig: RuntimeConfig | null = null;
@@ -102,7 +101,6 @@ function Harness() {
   const [tasks, setTasks] = useState<WorkbenchTask[]>([]);
   const [activeTaskId, setActiveTaskId] = useState('');
   const [currentCanvas, setCanvas] = useState<WorkspaceCanvasModel>(canvas({ id: 'initial' }));
-  const [sourceGraph, setSourceGraph] = useState<WorkflowGraph>(graph('source'));
   const [selection, setSelection] = useState<CanvasSelection>({ type: 'task_canvas', taskId: 'initial' });
   const [message, setMessage] = useState('');
   const [config, setRuntimeConfig] = useState<RuntimeConfig | null>(null);
@@ -119,7 +117,6 @@ function Harness() {
     setTasks,
     setActiveTaskId,
     setCanvas,
-    setSourceGraph,
     setSelection,
     setMessage,
     setDurableTasksReady,
@@ -128,7 +125,6 @@ function Harness() {
   latestTasks = tasks;
   latestActiveTaskId = activeTaskId;
   latestCanvas = currentCanvas;
-  latestSourceGraph = sourceGraph;
   latestSelection = selection;
   latestMessage = message;
   latestRuntimeConfig = config;
@@ -151,7 +147,6 @@ describe('useWorkbenchDurableTaskBootstrapActions', () => {
     latestTasks = [];
     latestActiveTaskId = '';
     latestCanvas = null;
-    latestSourceGraph = null;
     latestSelection = null;
     latestMessage = '';
     latestRuntimeConfig = null;
@@ -212,8 +207,7 @@ describe('useWorkbenchDurableTaskBootstrapActions', () => {
     expect(latestTasks).toEqual([loadedTask]);
     expect(latestActiveTaskId).toBe('task_1');
     expect(latestCanvas?.name).toBe('Loaded Canvas');
-    expect(latestSourceGraph?.name).toBe('Loaded Canvas');
-    expect(latestGraphRef?.current).toBe(latestSourceGraph);
+    expect(latestGraphRef?.current.name).toBe('Loaded Canvas');
     expect(latestSelection).toEqual({ type: 'task_canvas', taskId: 'task_1' });
     expect(latestMessage).toBe('已从本地 runner 加载持久化任务');
   });

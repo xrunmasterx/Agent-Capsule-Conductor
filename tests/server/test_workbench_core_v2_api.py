@@ -132,12 +132,12 @@ def test_post_workflow_canonicalizes_workbench_draft(
     assert payload["normalization"]["snapshotted_output_schemas"] == 1
 
 
-def test_post_workflow_normalizes_main_data_edge_to_control_main_channel(
+def test_post_workflow_preserves_explicit_main_data_edge(
     client: TestClient,
     project_root: Path,
 ) -> None:
     draft = workbench_draft()
-    draft["id"] = "main_data_edge_migration"
+    draft["id"] = "explicit_main_data_edge"
     draft["nodes"].append(
         {
             "id": "consume",
@@ -158,16 +158,30 @@ def test_post_workflow_normalizes_main_data_edge_to_control_main_channel(
             "materialization": "copy",
         }
     ]
+    draft["control_edges"].append(
+        {
+            "id": "collect-consume",
+            "from": "collect",
+            "to": "consume",
+            "context": "none",
+        }
+    )
 
     response = client.post("/api/workflows", json={"graph": draft, "force": True})
 
     assert response.status_code == 200, response.text
     payload = response.json()
-    assert payload["normalization"]["removed_main_data_edges"] == 1
+    assert payload["normalization"]["removed_main_data_edges"] == 0
     saved = json.loads(
-        (project_root / "workflows" / "main_data_edge_migration.accflow.json").read_text()
+        (project_root / "workflows" / "explicit_main_data_edge.accflow.json").read_text()
     )
-    assert saved["data_edges"] == []
+    assert saved["data_edges"] == [
+        {
+            "source": {"node": "collect", "port": "main"},
+            "target": {"node": "consume", "port": "main"},
+            "materialization": "copy",
+        }
+    ]
     assert saved["control_edges"] == [{"context": "none", "from": "collect", "to": "consume"}]
 
 
@@ -438,6 +452,37 @@ def test_submit_workbench_container_writes_run_local_child_specs(
         "workbench_container_flow__New_Workflow.accflow.json",
     )
     assert (spec_dir / child_path).exists()
+
+
+def test_submit_workbench_container_compiles_once(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    compile_count = 0
+    original_compile = workflow_routes.compile_workbench_workflow_bundle
+
+    def counted_compile(*args, **kwargs):
+        nonlocal compile_count
+        compile_count += 1
+        return original_compile(*args, **kwargs)
+
+    monkeypatch.setattr(
+        workflow_routes,
+        "compile_workbench_workflow_bundle",
+        counted_compile,
+    )
+
+    response = client.post(
+        "/api/workflows/run-graph/submit",
+        json={
+            "graph": workbench_container_draft(),
+            "run_dir": "runs/container_submit_compile_once",
+            "task_id": "task_container_compile_once",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert compile_count == 1
 
 
 def test_submit_runtime_specs_use_bounded_paths_for_long_workbench_run_ids(
@@ -758,6 +803,97 @@ def test_submit_empty_workbench_container_writes_noop_child_spec(
     assert child_path.exists()
     child = json.loads(child_path.read_text())
     assert child["nodes"] == []
+
+
+def test_submit_workbench_container_hydrates_internal_nodes_from_task_snapshot(
+    client: TestClient,
+    project_root: Path,
+) -> None:
+    submitted_graph = {
+        "id": "snapshot_hydrate_flow",
+        "version": "0.4.0",
+        "name": "Snapshot Hydrate Flow",
+        "nodes": [
+            {
+                "id": "New_Workflow",
+                "kind": "workflow",
+                "label": "New Workflow",
+                "callable_ref": {"kind": "workflow_function", "id": "New_Workflow"},
+                "input_ports": [{"id": "main"}],
+                "output_ports": [{"id": "main"}],
+                "ui": {"semantic_kind": "workflow_container"},
+            }
+        ],
+        "control_edges": [],
+        "data_edges": [],
+    }
+    canvas_snapshot = {
+        "id": "snapshot_hydrate_flow",
+        "name": "Snapshot Hydrate Flow",
+        "canonical_graph": submitted_graph,
+        "workflows": [
+            {
+                "id": "New_Workflow",
+                "internalNodes": [
+                    {
+                        "id": "writer",
+                        "name": "Writer",
+                        "kind": "Agent",
+                        "callableId": "echo-test.generic",
+                        "input": {"prompt": "Write report."},
+                        "inputPorts": [{"id": "main"}],
+                        "outputPorts": [{"id": "main"}],
+                    }
+                ],
+                "internalEdges": [
+                    {
+                        "id": "workflow_input_writer",
+                        "kind": "control",
+                        "source": {"workflowId": "New_Workflow__workflow_inputs"},
+                        "target": {"workflowId": "writer"},
+                    }
+                ],
+            }
+        ],
+        "edges": [],
+    }
+    saved = client.put(
+        "/api/workbench/tasks/task_snapshot_hydrate/canvas",
+        json={
+            "canvas_hash": "snapshot_hydrate_hash",
+            "canvas_snapshot": canvas_snapshot,
+        },
+    )
+    assert saved.status_code == 200, saved.text
+
+    response = client.post(
+        "/api/workflows/run-graph/submit",
+        json={
+            "graph": submitted_graph,
+            "run_dir": "runs/snapshot_hydrate_run",
+            "task_id": "task_snapshot_hydrate",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    spec_dir = runtime_spec_dir(project_root, "snapshot_hydrate_run")
+    manifest = runtime_spec_manifest(project_root, "snapshot_hydrate_run")
+    child_path = spec_dir / runtime_spec_child_path(
+        manifest,
+        "snapshot_hydrate_flow__New_Workflow.accflow.json",
+    )
+    child = json.loads(child_path.read_text())
+    assert [node["id"] for node in child["nodes"]] == ["writer"]
+    assert child["workflow_input_bindings"] == [
+        {
+            "source_port": "main",
+            "target": {"node": "writer", "port": "main"},
+            "materialization": "copy",
+            "required": False,
+        }
+    ]
+    assert child["control_edges"] == []
+    assert child["data_edges"] == []
 
 
 def test_agent_callable_authoring_round_trip(client: TestClient, project_root: Path) -> None:

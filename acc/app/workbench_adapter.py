@@ -8,8 +8,14 @@ from pathlib import Path
 from typing import Any
 
 from acc.app.workflow_normalization import (
+    MainDataEdgePolicy,
     aggregate_normalization_summaries,
     normalize_workflow_payload_contracts,
+)
+from acc.app.workbench_boundary_transfer import (
+    expand_boundary_transfer_bindings,
+    first_error_message,
+    normalize_boundary_transfer_metadata,
 )
 from acc.callable_registry import CallableRegistry
 from acc.callable_runner import normalize_output_schema_for_structured_output
@@ -156,6 +162,277 @@ def merge_workbench_codex_execution_modes(
     return merged
 
 
+def merge_workbench_snapshot_projection(
+    graph: dict[str, Any],
+    canvas_snapshot: dict[str, Any],
+) -> dict[str, Any]:
+    """Merge latest Workbench authoring projection into a submitted graph.
+
+    The submitted graph is still the backend-consumable projection. The
+    Workbench canvas snapshot is only used to fill missing inline workflow
+    authoring state that is required to compile child workflows.
+    """
+
+    merged = hydrate_workbench_inline_container_ui_from_snapshot(graph, canvas_snapshot)
+    return merge_workbench_codex_execution_modes(merged, canvas_snapshot)
+
+
+def normalize_workbench_canvas_snapshot(canvas_snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Return a canvas snapshot whose canonical graph can compile inline workflows.
+
+    Older saved snapshots can contain the visual inline workflow body under
+    ``workflows[].internalNodes`` while ``canonical_graph.nodes[].ui`` lost
+    ``internal_nodes`` during runtime-state stripping. This repairs only that
+    Workbench projection boundary; it does not alter Core v2 runtime schema.
+    """
+
+    normalized = copy.deepcopy(canvas_snapshot)
+    graph = normalized.get("canonical_graph")
+    if not isinstance(graph, dict):
+        return normalized
+    normalized["canonical_graph"] = hydrate_workbench_inline_container_ui_from_snapshot(
+        graph,
+        normalized,
+    )
+    return normalized
+
+
+def hydrate_workbench_inline_container_ui_from_snapshot(
+    graph: dict[str, Any],
+    canvas_snapshot: dict[str, Any],
+) -> dict[str, Any]:
+    workflows = workbench_workflow_snapshot_index(canvas_snapshot)
+    if not workflows:
+        return graph
+    nodes = graph.get("nodes")
+    if not isinstance(nodes, list):
+        return graph
+    hydrated = copy.deepcopy(graph)
+    for node in hydrated.get("nodes") or []:
+        if not isinstance(node, dict):
+            continue
+        node_id = str(node.get("id") or "")
+        workflow = workflows.get(node_id)
+        if not workflow:
+            continue
+        if not is_workbench_workflow_container_graph_node(node):
+            remove_invalid_workflow_container_marker(node)
+            continue
+        ui = node.get("ui")
+        if not isinstance(ui, dict):
+            ui = {}
+            node["ui"] = ui
+        if "semantic_kind" not in ui:
+            ui["semantic_kind"] = "workflow_container"
+        hydrate_workbench_internal_nodes(ui, workflow)
+        hydrate_workbench_internal_edges(ui, workflow)
+    return hydrated
+
+
+def workbench_workflow_snapshot_index(canvas_snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    workflows = canvas_snapshot.get("workflows")
+    if not isinstance(workflows, list):
+        return {}
+    indexed: dict[str, dict[str, Any]] = {}
+    for workflow in workflows:
+        if not isinstance(workflow, dict):
+            continue
+        workflow_id = str(workflow.get("id") or "")
+        if workflow_id:
+            indexed[workflow_id] = workflow
+    return indexed
+
+
+def is_workbench_workflow_container_graph_node(node: dict[str, Any]) -> bool:
+    node_kind = str(node.get("kind") or node.get("sourceKind") or "").lower()
+    callable_ref = node.get("callable_ref")
+    callable_kind = (
+        str(callable_ref.get("kind") or "").lower()
+        if isinstance(callable_ref, dict)
+        else ""
+    )
+    return node_kind in {"workflow", "workflow_function"} or callable_kind == "workflow_function"
+
+
+def remove_invalid_workflow_container_marker(node: dict[str, Any]) -> None:
+    ui = node.get("ui")
+    if not isinstance(ui, dict) or ui.get("semantic_kind") != "workflow_container":
+        return
+    if isinstance(ui.get("internal_nodes"), list) or isinstance(ui.get("internal_edges"), list):
+        return
+    repaired = {key: value for key, value in ui.items() if key != "semantic_kind"}
+    if repaired:
+        node["ui"] = repaired
+    else:
+        node.pop("ui", None)
+
+
+def hydrate_workbench_internal_nodes(ui: dict[str, Any], workflow: dict[str, Any]) -> None:
+    internal_nodes = workflow.get("internalNodes")
+    if not isinstance(internal_nodes, list) or not internal_nodes:
+        return
+    existing_nodes = ui.get("internal_nodes")
+    merged_nodes = (
+        [copy.deepcopy(node) for node in existing_nodes if isinstance(node, dict)]
+        if isinstance(existing_nodes, list)
+        else []
+    )
+    existing_ids = {
+        str(node.get("id") or "")
+        for node in merged_nodes
+        if isinstance(node.get("id"), str) and node.get("id")
+    }
+    for node in internal_nodes:
+        if not isinstance(node, dict):
+            continue
+        node_id = str(node.get("id") or "")
+        if not node_id or node_id in existing_ids:
+            continue
+        merged_nodes.append(copy.deepcopy(node))
+        existing_ids.add(node_id)
+    if merged_nodes:
+        ui["internal_nodes"] = merged_nodes
+
+
+def hydrate_workbench_internal_edges(ui: dict[str, Any], workflow: dict[str, Any]) -> None:
+    existing_edges = ui.get("internal_edges")
+    merged_edges = (
+        [
+            normalize_existing_workbench_internal_edge(edge)
+            for edge in existing_edges
+            if isinstance(edge, dict)
+        ]
+        if isinstance(existing_edges, list)
+        else []
+    )
+    existing_keys = {
+        key
+        for key in (canonical_internal_edge_key(edge) for edge in merged_edges)
+        if key is not None
+    }
+
+    internal_edges = workflow.get("internalEdges")
+    converted: list[dict[str, Any]] = []
+    if isinstance(internal_edges, list):
+        converted = [
+            edge
+            for edge in (
+                canonical_internal_edge_from_workbench_canvas_edge(item)
+                for item in internal_edges
+                if isinstance(item, dict)
+            )
+            if edge is not None
+        ]
+    for edge in converted:
+        key = canonical_internal_edge_key(edge)
+        if key is not None and key in existing_keys:
+            continue
+        merged_edges.append(edge)
+        if key is not None:
+            existing_keys.add(key)
+    if merged_edges:
+        ui["internal_edges"] = merged_edges
+
+
+def normalize_existing_workbench_internal_edge(edge: dict[str, Any]) -> dict[str, Any]:
+    if not existing_workbench_internal_edge_needs_canonicalization(edge):
+        return copy.deepcopy(edge)
+    return canonical_internal_edge_from_workbench_canvas_edge(edge) or copy.deepcopy(edge)
+
+
+def existing_workbench_internal_edge_needs_canonicalization(edge: dict[str, Any]) -> bool:
+    if "source" in edge or "target" in edge:
+        return True
+    for endpoint in (edge.get("from"), edge.get("to")):
+        if isinstance(endpoint, dict) and "workflowId" in endpoint:
+            return True
+    return False
+
+
+def canonical_internal_edge_key(edge: dict[str, Any]) -> tuple[str, ...] | None:
+    edge_id = edge.get("id")
+    if isinstance(edge_id, str) and edge_id:
+        return ("id", edge_id)
+    source = edge.get("from") if "from" in edge else edge.get("source")
+    target = edge.get("to") if "to" in edge else edge.get("target")
+    source_node, source_port = canvas_edge_endpoint_parts(source)
+    target_node, target_port = canvas_edge_endpoint_parts(target)
+    if not source_node or not target_node:
+        return None
+    if isinstance(source, dict) or isinstance(target, dict):
+        return (
+            "data",
+            source_node,
+            source_port or "main",
+            target_node,
+            target_port or "main",
+        )
+    return ("control", source_node, target_node)
+
+
+def canonical_internal_edge_from_workbench_canvas_edge(
+    edge: dict[str, Any],
+) -> dict[str, Any] | None:
+    source = edge.get("source") if "source" in edge else edge.get("from")
+    target = edge.get("target") if "target" in edge else edge.get("to")
+    source_node, source_port = canvas_edge_endpoint_parts(source)
+    target_node, target_port = canvas_edge_endpoint_parts(target)
+    if not source_node or not target_node:
+        return None
+    if edge_is_workbench_data_edge(edge, source, target):
+        return prune_none(
+            {
+                "id": edge.get("id"),
+                "from": {"node": source_node, "port": source_port or "main"},
+                "to": {"node": target_node, "port": target_port or "main"},
+                "materialization": edge.get("materialization") or "copy",
+                "required": edge.get("required"),
+            }
+        )
+    control_edge = {
+        "id": edge.get("id"),
+        "from": source_node,
+        "to": target_node,
+        "label": edge.get("label") or "control",
+        "context": edge.get("context") or "none",
+        "mapping": edge.get("mapping") if isinstance(edge.get("mapping"), dict) else {},
+    }
+    boundary_transfer = normalize_boundary_transfer_metadata(edge)
+    if boundary_transfer:
+        control_edge["boundary_transfer"] = boundary_transfer
+    if isinstance(edge.get("condition"), str):
+        control_edge["condition"] = edge["condition"]
+    return {key: value for key, value in control_edge.items() if value is not None}
+
+
+def canvas_edge_endpoint_parts(value: Any) -> tuple[str | None, str | None]:
+    if isinstance(value, str) and value:
+        return value, None
+    if not isinstance(value, dict):
+        return None, None
+    node = value.get("workflowId") or value.get("node")
+    if not isinstance(node, str) or not node:
+        return None, None
+    port = value.get("portId") or value.get("port") or value.get("input") or value.get("output")
+    return node, str(port) if isinstance(port, str) and port else None
+
+
+def edge_is_workbench_data_edge(edge: dict[str, Any], source: Any, target: Any) -> bool:
+    if edge.get("kind") == "data":
+        return True
+    if edge.get("kind") == "control":
+        return False
+    if isinstance(edge.get("from"), dict) or isinstance(edge.get("to"), dict):
+        return True
+    if "materialization" in edge:
+        return True
+    return endpoint_has_explicit_port(source) or endpoint_has_explicit_port(target)
+
+
+def endpoint_has_explicit_port(value: Any) -> bool:
+    return isinstance(value, dict) and any(key in value for key in ("portId", "port", "input", "output"))
+
+
 def codex_execution_mode_index(
     canvas_snapshot: dict[str, Any],
 ) -> dict[tuple[str | None, str], str]:
@@ -206,6 +483,7 @@ def compile_workbench_workflow_bundle(
     callable_registry: CallableRegistry | None = None,
     force_main_data_edge_migration: bool = False,
     allow_normalization_conflicts: bool = False,
+    main_data_edge_policy: MainDataEdgePolicy = "migrate_legacy",
 ) -> CompiledWorkbenchWorkflowBundle:
     """Compile a Workbench draft into root + child Core v2 templates.
 
@@ -227,6 +505,7 @@ def compile_workbench_workflow_bundle(
         callable_registry=callable_registry,
         force=force_main_data_edge_migration,
         allow_conflicts=allow_normalization_conflicts,
+        main_data_edge_policy=main_data_edge_policy,
     )
     child_normalizations = {}
     for child_name, child_payload in list(children.items()):
@@ -235,6 +514,7 @@ def compile_workbench_workflow_bundle(
             callable_registry=callable_registry,
             force=force_main_data_edge_migration,
             allow_conflicts=allow_normalization_conflicts,
+            main_data_edge_policy=main_data_edge_policy,
         )
         children[child_name] = normalized_child
         child_normalizations[child_name] = child_summary
@@ -420,6 +700,8 @@ def rewrite_inline_workflow_containers(
 
 
 def is_inline_workflow_container_node(node: dict[str, Any]) -> bool:
+    if not is_workbench_workflow_container_graph_node(node):
+        return False
     ui = node.get("ui")
     if not isinstance(ui, dict):
         return False
@@ -481,8 +763,16 @@ def workflow_container_child_draft(
     validate_unique_workflow_container_internal_node_ids(node, internal_nodes)
     child_nodes = [internal_ui_node_to_workbench_node(item) for item in internal_nodes]
     edges = workflow_container_internal_edges(node)
+    exposed_inputs = node.get("input_ports") or [{"id": "main", "required": False}]
+    exposed_outputs = node.get("output_ports") or [{"id": "main", "required": False}]
     control_edges, data_edges, workflow_input_bindings, workflow_output_bindings = (
-        split_internal_edges_for_child_workflow(str(node.get("id") or ""), edges)
+        split_internal_edges_for_child_workflow(
+            str(node.get("id") or ""),
+            edges,
+            internal_nodes=internal_nodes,
+            exposed_inputs=exposed_inputs,
+            exposed_outputs=exposed_outputs,
+        )
     )
     metadata = {
         "canonical_format": "accflow",
@@ -500,8 +790,8 @@ def workflow_container_child_draft(
         "nodes": child_nodes,
         "control_edges": control_edges,
         "data_edges": data_edges,
-        "exposed_inputs": node.get("input_ports") or [{"id": "main", "required": False}],
-        "exposed_outputs": node.get("output_ports") or [{"id": "main", "required": False}],
+        "exposed_inputs": exposed_inputs,
+        "exposed_outputs": exposed_outputs,
         "workflow_input_bindings": workflow_input_bindings,
         "workflow_output_bindings": workflow_output_bindings,
         "policy": {"failure_mode": "fail_fast", "max_concurrency": 8},
@@ -608,13 +898,14 @@ def normalize_ui_ports(value: Any) -> list[dict[str, Any]]:
 def split_internal_edges_for_child_workflow(
     workflow_id: str,
     edges: list[dict[str, Any]],
+    *,
+    internal_nodes: list[dict[str, Any]] | None = None,
+    exposed_inputs: Any = None,
+    exposed_outputs: Any = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     control_edges: list[dict[str, Any]] = []
     data_edges: list[dict[str, Any]] = []
-    workflow_input_bindings: list[dict[str, Any]] = []
-    workflow_output_bindings: list[dict[str, Any]] = []
-    workflow_input_binding_keys: set[tuple[str, str, str]] = set()
-    workflow_output_binding_keys: set[tuple[str, str, str]] = set()
+    boundary_edges: list[dict[str, Any]] = []
     input_boundary = f"{workflow_id}__workflow_inputs"
     output_boundary = f"{workflow_id}__workflow_outputs"
     for edge in edges:
@@ -624,32 +915,8 @@ def split_internal_edges_for_child_workflow(
             if not source or not target:
                 continue
             materialization = edge.get("materialization") or "copy"
-            if source["node"] == input_boundary:
-                binding_key = (source["port"], target["node"], target["port"])
-                if binding_key in workflow_input_binding_keys:
-                    continue
-                workflow_input_binding_keys.add(binding_key)
-                workflow_input_bindings.append(
-                    {
-                        "source_port": source["port"],
-                        "target": {"node": target["node"], "port": target["port"]},
-                        "materialization": materialization,
-                        "required": bool(edge.get("required", False)),
-                    }
-                )
-            elif target["node"] == output_boundary:
-                binding_key = (source["node"], source["port"], target["port"])
-                if binding_key in workflow_output_binding_keys:
-                    continue
-                workflow_output_binding_keys.add(binding_key)
-                workflow_output_bindings.append(
-                    {
-                        "source": {"node": source["node"], "port": source["port"]},
-                        "target_port": target["port"],
-                        "materialization": materialization,
-                        "required": bool(edge.get("required", True)),
-                    }
-                )
+            if source["node"] == input_boundary or target["node"] == output_boundary:
+                boundary_edges.append(edge)
             elif not is_workflow_boundary_node(source["node"]) and not is_workflow_boundary_node(
                 target["node"]
             ):
@@ -666,6 +933,11 @@ def split_internal_edges_for_child_workflow(
         target_id = edge.get("to") or edge.get("target")
         if not isinstance(source_id, str) or not isinstance(target_id, str):
             continue
+        if (
+            source_id == input_boundary and not is_workflow_boundary_node(target_id)
+        ) or (target_id == output_boundary and not is_workflow_boundary_node(source_id)):
+            boundary_edges.append(edge)
+            continue
         if is_workflow_boundary_node(source_id) or is_workflow_boundary_node(target_id):
             continue
         control_edges.append(
@@ -677,11 +949,30 @@ def split_internal_edges_for_child_workflow(
                 "context": "none",
             }
         )
+    expansion = expand_boundary_transfer_bindings(
+        workflow_id=workflow_id,
+        edges=boundary_edges,
+        internal_nodes=internal_nodes or [],
+        exposed_inputs=exposed_inputs,
+        exposed_outputs=exposed_outputs,
+    )
+    error_message = first_error_message(expansion["diagnostics"])
+    if error_message:
+        raise AccError(error_message)
     control_edges = ensure_control_edges_for_data_edges(control_edges, data_edges)
-    return control_edges, data_edges, workflow_input_bindings, workflow_output_bindings
+    return (
+        control_edges,
+        data_edges,
+        expansion["bindings"]["workflow_input_bindings"],
+        expansion["bindings"]["workflow_output_bindings"],
+    )
 
 
 def is_data_edge_payload(edge: dict[str, Any]) -> bool:
+    if edge.get("kind") == "data":
+        return True
+    if edge.get("kind") == "control":
+        return False
     source = edge.get("from") or edge.get("source")
     target = edge.get("to") or edge.get("target")
     return isinstance(source, dict) or isinstance(target, dict) or "materialization" in edge
@@ -690,7 +981,7 @@ def is_data_edge_payload(edge: dict[str, Any]) -> bool:
 def edge_endpoint(value: Any) -> dict[str, str] | None:
     if not isinstance(value, dict):
         return None
-    node = value.get("node")
+    node = value.get("node") or value.get("workflowId")
     if not isinstance(node, str) or not node:
         return None
     port = str(value.get("port") or value.get("input") or value.get("output") or "main")

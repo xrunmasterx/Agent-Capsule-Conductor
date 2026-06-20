@@ -18,7 +18,6 @@ vi.mock('../api', () => ({
 
 type HarnessState = {
   canvas: WorkspaceCanvasModel;
-  sourceGraph: WorkflowGraph;
   selection: CanvasSelection;
   message: string;
 };
@@ -89,28 +88,26 @@ function Harness({
   enabled?: boolean;
   workflowId?: string;
 }) {
-  const [sourceGraph, setSourceGraph] = useState<WorkflowGraph>(emptyGraph);
   const [canvas, setCanvas] = useState<WorkspaceCanvasModel>(emptyCanvas);
   const [selection, setSelection] = useState<CanvasSelection>({
     type: 'task_canvas',
     taskId: 'task_canvas',
   });
   const [message, setMessage] = useState('');
-  const graphRef = useRef(sourceGraph);
+  const graphRef = useRef(emptyGraph());
 
   useOpenedWorkflowCanvas({
     enabled,
     workflowId,
     workflowRun: null,
     graphRef,
-    setSourceGraph,
     setCanvas,
     setSelection,
     setMessage,
     closeEvidenceDock,
   });
 
-  latestState = { canvas, sourceGraph, selection, message };
+  latestState = { canvas, selection, message };
   latestGraphRef = graphRef;
 
   return <output>{message}</output>;
@@ -135,7 +132,6 @@ describe('useOpenedWorkflowCanvas', () => {
     });
 
     expect(api.workflow).toHaveBeenCalledWith('workflow_a');
-    expect(latestState?.sourceGraph.id).toBe('workflow_a');
     expect(latestGraphRef?.current.id).toBe('workflow_a');
     expect(latestState?.canvas.workflows.map((workflow) => workflow.id)).toEqual(['agent_a']);
     expect(latestState?.selection).toEqual({ type: 'workflow', id: 'agent_a' });

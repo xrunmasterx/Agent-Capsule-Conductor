@@ -57,6 +57,11 @@ import type {
   WorkflowContainerModel,
   WorkspaceCanvasModel,
 } from '../../types/workbench';
+import {
+  overlayStatusForNode,
+  overlayStatusForWorkflow,
+  type RunOverlayState,
+} from '../workflow-viewer/runState';
 import type { AgentToolFlowNode, CanvasFlowNode, WorkflowFlowNode } from './NodeRenderer';
 
 export function toFlowEdges(
@@ -479,12 +484,15 @@ export function toFlowNodes(
   edgeViewMode: EdgeViewMode,
   dataDropTargetPreview: DataDropTargetPreview | null,
   onSelectEdge: (address: EdgeAddress, altKey?: boolean) => void,
+  runOverlay: RunOverlayState | null = null,
 ): CanvasFlowNode[] {
   return canvas.workflows.flatMap((workflow) => {
+    const workflowStatus = workflowOverlayStatus(runOverlay, canvas, workflow);
     if (isExecutableNodeWorkflow(workflow)) {
       return [
         topLevelAgentToolFlowNode(
           workflow,
+          workflowStatus,
           selection,
           showAgentDataPorts,
           showDataPortLabels,
@@ -495,6 +503,7 @@ export function toFlowNodes(
         ),
       ];
     }
+    const projectedWorkflow = workflowStatus === workflow.status ? workflow : { ...workflow, status: workflowStatus };
     const workflowNode: WorkflowFlowNode = {
       id: workflow.id,
       type: 'workflowContainer',
@@ -502,7 +511,7 @@ export function toFlowNodes(
       selected: selection.type === 'workflow' && selection.id === workflow.id,
       zIndex: WORKFLOW_CONTAINER_Z_INDEX,
       data: {
-        workflow,
+        workflow: projectedWorkflow,
         binding: bindings[workflow.id],
         selection,
         connectionMode,
@@ -526,6 +535,7 @@ export function toFlowNodes(
       },
     };
     const internalNodes = workflow.internalNodes.map((node, index): AgentToolFlowNode => {
+      const flowNodeId = internalFlowNodeId(workflow.id, node.id);
       const inputPorts = internalNodeInputPorts(node);
       const outputPorts = internalNodeOutputPorts(node);
       const selected =
@@ -533,7 +543,7 @@ export function toFlowNodes(
         selection.workflowId === workflow.id &&
         selection.nodeId === node.id;
       return {
-        id: internalFlowNodeId(workflow.id, node.id),
+        id: flowNodeId,
         type: 'agentToolNode',
         parentId: workflow.id,
         extent: 'parent',
@@ -541,12 +551,12 @@ export function toFlowNodes(
         selected,
         zIndex: selected ? WORKFLOW_INTERNAL_SELECTED_NODE_Z_INDEX : WORKFLOW_INTERNAL_NODE_Z_INDEX,
         data: {
-          id: internalFlowNodeId(workflow.id, node.id),
+          id: flowNodeId,
           title: internalInvocationLabel(node),
           subtitle: node.callableId || node.runtime,
           scopeLabel: `Inside: ${workflowInvocationLabel(workflow)}`,
           kind: node.kind,
-          status: node.status,
+          status: overlayStatusForNode(runOverlay, flowNodeId, node.status),
           callableId: node.callableId || node.runtime,
           temporaryResourceId: node.temporaryResourceId,
           workflowId: workflow.id,
@@ -556,7 +566,7 @@ export function toFlowNodes(
           size: agentToolNodeSize(inputPorts, outputPorts, showAgentDataPorts),
           selected,
           dataDropHint:
-            dataDropTargetPreview?.flowNodeId === internalFlowNodeId(workflow.id, node.id)
+            dataDropTargetPreview?.flowNodeId === flowNodeId
               ? `释放后创建输入端口：${dataDropTargetPreview.portId}`
               : undefined,
           showDataPorts: showAgentDataPorts,
@@ -573,6 +583,7 @@ export function toFlowNodes(
 
 function topLevelAgentToolFlowNode(
   workflow: WorkflowContainerModel,
+  status: WorkflowContainerModel['status'],
   selection: CanvasSelection,
   showDataPorts: boolean,
   showDataPortLabels: boolean,
@@ -599,7 +610,7 @@ function topLevelAgentToolFlowNode(
       title: workflowInvocationLabel(workflow),
       subtitle: workflow.callableId,
       kind,
-      status: workflow.status,
+      status,
       callableId: workflow.callableId,
       temporaryResourceId: workflow.temporaryResourceId,
       inputPorts,
@@ -617,6 +628,22 @@ function topLevelAgentToolFlowNode(
       onControlHandleMouseDown,
     },
   };
+}
+
+function workflowOverlayStatus(
+  runOverlay: RunOverlayState | null,
+  canvas: WorkspaceCanvasModel,
+  workflow: WorkflowContainerModel,
+): WorkflowContainerModel['status'] {
+  const status = overlayStatusForWorkflow(runOverlay, workflow);
+  if (canvas.layout !== 'workflow-focus' || !canvas.focusedWorkflowId || workflow.boundaryKind) {
+    return status;
+  }
+  return overlayStatusForNode(
+    runOverlay,
+    internalFlowNodeId(canvas.focusedWorkflowId, workflow.id),
+    status,
+  );
 }
 
 export function agentToolNodeSize(

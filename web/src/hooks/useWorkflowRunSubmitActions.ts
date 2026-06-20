@@ -43,7 +43,6 @@ export type UseWorkflowRunSubmitActionsOptions = {
   setRunsById: Dispatch<SetStateAction<Record<string, RunProjection>>>;
   updateRunProjection: (runId: string, update: (current: RunProjection) => RunProjection) => void;
   graphRef: MutableRefObject<WorkflowGraph>;
-  setSourceGraph: Dispatch<SetStateAction<WorkflowGraph>>;
   ensureBoundaryTransfersValid: () => Promise<void>;
   reportTemporaryResourceIssue: (issue: string) => void;
   onChanged?: () => void;
@@ -65,7 +64,6 @@ export function useWorkflowRunSubmitActions({
   setRunsById,
   updateRunProjection,
   graphRef,
-  setSourceGraph,
   ensureBoundaryTransfersValid,
   reportTemporaryResourceIssue,
   onChanged,
@@ -100,7 +98,6 @@ export function useWorkflowRunSubmitActions({
       try {
         if (scope === 'task') {
           graphRef.current = graph;
-          setSourceGraph(graph);
         }
         const initialRun = liveWorkflowRunFromEvents(runnableGraph, runDir, []);
         const initialOverlay = runOverlayFromRun(
@@ -241,7 +238,6 @@ export function useWorkflowRunSubmitActions({
       setEvidenceDock,
       setMessage,
       setRunsById,
-      setSourceGraph,
       setTasks,
       submitRunnerJob,
       updateRunProjection,

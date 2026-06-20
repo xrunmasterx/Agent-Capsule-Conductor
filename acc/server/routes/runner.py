@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict
 
 from acc.app import WorkflowAppService
 from acc.app.run_lifecycle import is_terminal_run_status
+from acc.app.workbench_tasks import WorkbenchTaskService
 from acc.run_index import load_run_summary_by_id
 from acc.runner import (
     LOCAL_TOKEN_HEADER,
@@ -130,6 +131,7 @@ async def submit_runner_job(
                 service_factory=lambda: WorkflowAppService(project_root=project_root),
             )
         )
+        remember_workbench_task_run(project_root, payload.task_id, handle.run_id)
         return service.write_job_receipt(
             job_id=job_id,
             status=str(submit_result.get("status") or "queued"),
@@ -218,6 +220,28 @@ def runner_artifact_preview(artifact_id: str, request: Request) -> dict[str, Any
 
 def service_for(request: Request) -> LocalRunnerService:
     return LocalRunnerService(get_project_root(request))
+
+
+def remember_workbench_task_run(project_root: Path, task_id: str | None, run_id: str) -> None:
+    """Best-effort index update for Workbench-owned runner submissions.
+
+    The runner API also accepts ``task_id`` as loose metadata for non-Workbench
+    callers. Missing or invalid Workbench task records must not turn a valid
+    runner submission into a failed request after the run has been queued.
+    """
+
+    if not task_id:
+        return
+    try:
+        WorkbenchTaskService(project_root).update(
+            task_id,
+            {
+                "active_run_id": None,
+                "latest_run_id": run_id,
+            },
+        )
+    except AccError:
+        return
 
 
 def require_debug_auth_if_needed(request: Request, local_debug: bool) -> None:

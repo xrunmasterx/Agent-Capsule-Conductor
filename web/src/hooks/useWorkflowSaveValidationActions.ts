@@ -34,7 +34,6 @@ export type UseWorkflowSaveValidationActionsOptions = {
   saveWorkflowDialog: WorkflowSaveDialogState | null;
   setSaveWorkflowDialog: Dispatch<SetStateAction<WorkflowSaveDialogState | null>>;
   graphRef: MutableRefObject<WorkflowGraph>;
-  setSourceGraph: Dispatch<SetStateAction<WorkflowGraph>>;
   setMessage: Dispatch<SetStateAction<string>>;
   setEvidenceDock: Dispatch<SetStateAction<EvidenceDockState>>;
   saveWorkflowGraph: SaveWorkflowGraph;
@@ -73,7 +72,6 @@ export function useWorkflowSaveValidationActions({
   saveWorkflowDialog,
   setSaveWorkflowDialog,
   graphRef,
-  setSourceGraph,
   setMessage,
   setEvidenceDock,
   saveWorkflowGraph,
@@ -128,7 +126,6 @@ export function useWorkflowSaveValidationActions({
           }
         : baseGraph;
       graphRef.current = graph;
-      setSourceGraph(graph);
       const result = await saveWorkflowGraph(graph, true);
       setMessage(`已保存 ${result.workflow_id}`);
       if (selectSavedWorkflow) {
@@ -150,7 +147,6 @@ export function useWorkflowSaveValidationActions({
       onSelect,
       saveWorkflowGraph,
       setMessage,
-      setSourceGraph,
     ],
   );
 

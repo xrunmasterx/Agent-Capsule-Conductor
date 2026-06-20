@@ -1,5 +1,9 @@
 import type { NodeRunSummary, RunEvent, WorkflowGraph, WorkflowRunResult } from '../../types';
 import type { WorkflowStatus } from '../../types/workbench';
+export {
+  stripRuntimeStateFromCanvas,
+  stripRuntimeStateFromWorkflow,
+} from '../../workbench/model/canvasRuntimeState';
 
 export type RunOverlayState = {
   runId: string;
@@ -68,38 +72,42 @@ export function applyRunOverlayToCanvas<TCanvas extends RunStateCanvas>(
   return {
     ...canvas,
     workflows: canvas.workflows.map((workflow) => {
-      const directStatus =
-        overlay.workflowStatusById[workflow.id] ||
-        overlay.nodeStatusById[workflow.id] ||
-        (overlay.targetId === workflow.id ? overlay.status : undefined);
       const internalNodes = workflow.internalNodes.map((node) => ({
         ...node,
-        status:
-          overlay.nodeStatusById[internalFlowNodeId(workflow.id, node.id)] ||
-          node.status,
+        status: overlayStatusForNode(overlay, internalFlowNodeId(workflow.id, node.id), node.status),
       }));
       return {
         ...workflow,
-        status: directStatus || aggregateWorkflowStatus(internalNodes) || workflow.status,
+        status: overlayStatusForWorkflow(overlay, workflow),
         internalNodes,
       };
     }),
   } as TCanvas;
 }
 
-export function stripRuntimeStateFromCanvas<TCanvas extends RunStateCanvas>(canvas: TCanvas): TCanvas {
-  return {
-    ...canvas,
-    workflows: canvas.workflows.map(stripRuntimeStateFromWorkflow),
-  } as TCanvas;
+export function overlayStatusForNode(
+  overlay: Pick<RunOverlayState, 'nodeStatusById'> | null | undefined,
+  nodeId: string,
+  fallback: WorkflowStatus,
+): WorkflowStatus {
+  return overlay?.nodeStatusById[nodeId] ?? fallback;
 }
 
-export function stripRuntimeStateFromWorkflow<TWorkflow extends RunStateWorkflow>(workflow: TWorkflow): TWorkflow {
-  return {
-    ...workflow,
-    status: 'not_run',
-    internalNodes: workflow.internalNodes.map((node) => ({ ...node, status: 'not_run' })),
-  } as TWorkflow;
+export function overlayStatusForWorkflow<TWorkflow extends RunStateWorkflow>(
+  overlay: RunOverlayState | null | undefined,
+  workflow: TWorkflow,
+): WorkflowStatus {
+  if (!overlay) {
+    return workflow.status;
+  }
+  const directStatus =
+    overlay.workflowStatusById[workflow.id] ??
+    overlay.nodeStatusById[workflow.id] ??
+    (overlay.targetId === workflow.id ? overlay.status : undefined);
+  if (directStatus) {
+    return directStatus;
+  }
+  return aggregateWorkflowStatus(internalOverlayNodes(overlay, workflow)) ?? workflow.status;
 }
 
 export function liveWorkflowRunFromEvents(
@@ -316,6 +324,16 @@ function aggregateWorkflowStatus(nodes: RunStateInternalNode[]): WorkflowStatus 
     return 'success';
   }
   return null;
+}
+
+function internalOverlayNodes<TWorkflow extends RunStateWorkflow>(
+  overlay: RunOverlayState,
+  workflow: TWorkflow,
+): RunStateInternalNode[] {
+  return workflow.internalNodes.map((node) => ({
+    id: node.id,
+    status: overlayStatusForNode(overlay, internalFlowNodeId(workflow.id, node.id), node.status),
+  }));
 }
 
 function normalizeWorkflowStatus(status: string): WorkflowStatus {

@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -21,7 +22,7 @@ from acc.app.workbench_adapter import (
     CompiledWorkbenchWorkflowBundle,
     canonicalize_workbench_workflow_payload,
     compile_workbench_workflow_bundle,
-    merge_workbench_codex_execution_modes,
+    merge_workbench_snapshot_projection,
 )
 from acc.app.workbench_snapshots import WorkbenchCanvasSnapshotService
 from acc.app.workflow_refs import WorkflowCatalog, WorkflowRefMode, rewrite_workflow_function_refs
@@ -34,10 +35,27 @@ from acc.server.context import (
 )
 from acc.server.run_manager import WorkbenchRunJob
 from acc.runner import LocalRunnerService, RunnerCapabilityError
-from acc.storage import RunHandle, claim_run, parse_legacy_run_dir, resolve_run_dir as storage_run_dir
+from acc.storage import (
+    RunHandle,
+    claim_run,
+    generate_run_id,
+    parse_legacy_run_dir,
+    resolve_run_dir as storage_run_dir,
+    validate_run_id,
+)
 from acc.utils import AccError, load_json
 
 router = APIRouter(prefix="/workflows", tags=["workflows"])
+
+
+@dataclass(frozen=True)
+class PreparedRuntimeGraph:
+    workflow_id: str
+    graph_dir: Path
+    accflow_path: Path
+    workflows_dir: Path
+    bundle: CompiledWorkbenchWorkflowBundle
+    child_name_map: dict[str, str]
 
 
 class WorkflowSaveRequest(BaseModel):
@@ -157,7 +175,9 @@ async def submit_run_graph_endpoint(
     request: Request,
 ) -> dict[str, Any]:
     project_root = get_project_root(request)
-    preflight_runtime_graph(payload.graph, request, task_id=payload.task_id)
+    run_id = select_run_id_for_payload(payload)
+    run_dir = storage_run_dir(project_root, run_id)
+    prepared = compile_runtime_graph(payload.graph, run_dir, request, task_id=payload.task_id)
     manager = get_workbench_run_manager(request)
     resolved = resolve_runner_environment_before_evidence(
         project_root,
@@ -166,20 +186,19 @@ async def submit_run_graph_endpoint(
         graph=payload.graph,
         manager=manager,
     )
-    handle = claim_run_for_payload(
+    handle = claim_selected_run(
         project_root,
-        payload,
-        workflow_id=str(payload.graph.get("id") or ""),
+        run_id,
+        workflow_id=prepared.workflow_id,
         task_id=payload.task_id,
     )
-    graph_path = prepare_runtime_graph(payload.graph, handle.run_dir, request, task_id=payload.task_id)
-    workflow_id = str(load_json_or_500(graph_path).get("id") or graph_path.stem)
+    graph_path = write_prepared_runtime_graph(prepared, handle.run_dir, request)
     try:
         return await manager.submit(
             WorkbenchRunJob(
                 graph_path=graph_path,
                 run_dir=handle.run_dir,
-                workflow_id=workflow_id,
+                workflow_id=prepared.workflow_id,
                 task_id=payload.task_id,
                 workspace=resolved["workspace"],
                 binding_path=resolved["binding_path"],
@@ -198,19 +217,30 @@ def prepare_runtime_graph(
     *,
     task_id: str | None = None,
 ) -> Path:
+    prepared = compile_runtime_graph(graph_payload, run_dir, request, task_id=task_id)
+    return write_prepared_runtime_graph(prepared, run_dir, request)
+
+
+def compile_runtime_graph(
+    graph_payload: dict[str, Any],
+    run_dir: Path,
+    request: Request,
+    *,
+    task_id: str | None = None,
+) -> PreparedRuntimeGraph:
     project_root = get_project_root(request)
     graph = graph_with_latest_workbench_node_modes(graph_payload, project_root, task_id)
     workflow_id = str(graph.get("id") or "")
     if not workflow_id:
         raise HTTPException(status_code=400, detail="Workflow graph id is required")
     graph_dir = runtime_workflow_spec_dir(project_root, run_dir)
-    graph_dir.mkdir(parents=True, exist_ok=True)
     accflow_path = graph_dir / "root.accflow.json"
     workflows_dir = configured_project_dir(project_root, "ACC_WORKFLOWS_DIR", "workflows")
     bundle = graph_bundle_for_accflow_save(
         graph,
         source_path=accflow_path,
         callable_registry=CallableRegistry.from_project_root(project_root),
+        main_data_edge_policy="preserve_explicit",
     )
     bundle, child_name_map = runtime_named_workflow_bundle(bundle)
     try:
@@ -223,22 +253,37 @@ def prepare_runtime_graph(
         )
     except AccError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    write_bundle_to_directory(
-        bundle,
+    return PreparedRuntimeGraph(
+        workflow_id=workflow_id,
+        graph_dir=graph_dir,
         accflow_path=accflow_path,
-        request=request,
         workflows_dir=workflows_dir,
+        bundle=bundle,
+        child_name_map=child_name_map,
+    )
+
+
+def write_prepared_runtime_graph(
+    prepared: PreparedRuntimeGraph,
+    run_dir: Path,
+    request: Request,
+) -> Path:
+    write_bundle_to_directory(
+        prepared.bundle,
+        accflow_path=prepared.accflow_path,
+        request=request,
+        workflows_dir=prepared.workflows_dir,
     )
     write_runtime_spec_manifest(
-        graph_dir,
-        project_root=project_root,
+        prepared.graph_dir,
+        project_root=get_project_root(request),
         run_dir=run_dir,
-        workflow_id=workflow_id,
-        root_path=accflow_path,
-        child_name_map=child_name_map,
-        child_names=sorted(bundle.children),
+        workflow_id=prepared.workflow_id,
+        root_path=prepared.accflow_path,
+        child_name_map=prepared.child_name_map,
+        child_names=sorted(prepared.bundle.children),
     )
-    return accflow_path
+    return prepared.accflow_path
 
 
 def preflight_runtime_graph(
@@ -258,6 +303,7 @@ def preflight_runtime_graph(
         graph,
         source_path=source_path,
         callable_registry=CallableRegistry.from_project_root(project_root),
+        main_data_edge_policy="preserve_explicit",
     )
     bundle, _child_name_map = runtime_named_workflow_bundle(bundle)
     try:
@@ -369,7 +415,7 @@ def graph_with_latest_workbench_node_modes(
     canvas_snapshot = snapshot.get("canvas_snapshot")
     if not isinstance(canvas_snapshot, dict):
         return graph_payload
-    return merge_workbench_codex_execution_modes(graph_payload, canvas_snapshot)
+    return merge_workbench_snapshot_projection(graph_payload, canvas_snapshot)
 
 
 def project_run_response(result: dict[str, Any]) -> dict[str, Any]:
@@ -605,12 +651,33 @@ def claim_run_for_payload(
     workflow_id: str | None = None,
     task_id: str | None = None,
 ) -> RunHandle:
+    return claim_selected_run(
+        project_root,
+        select_run_id_for_payload(payload),
+        workflow_id=workflow_id,
+        task_id=task_id,
+    )
+
+
+def select_run_id_for_payload(payload: WorkflowRunRequest) -> str:
     if payload.run_id and payload.run_dir:
         raise HTTPException(status_code=400, detail="Provide run_id or run_dir, not both")
     try:
-        run_id = payload.run_id
         if payload.run_dir:
-            run_id = parse_legacy_run_dir(payload.run_dir)
+            return parse_legacy_run_dir(payload.run_dir)
+        return validate_run_id(payload.run_id or generate_run_id())
+    except AccError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def claim_selected_run(
+    project_root: Path,
+    run_id: str,
+    *,
+    workflow_id: str | None = None,
+    task_id: str | None = None,
+) -> RunHandle:
+    try:
         return claim_run(project_root, run_id=run_id, workflow_id=workflow_id, task_id=task_id)
     except AccError as exc:
         status_code = 409 if str(exc).startswith("Run already exists:") else 400
@@ -786,6 +853,7 @@ def save_graph(
         source_path=accflow_path,
         callable_registry=CallableRegistry.from_project_root(project_root),
         force_main_data_edge_migration=force_main_data_edge_migration,
+        main_data_edge_policy="preserve_explicit",
     )
     try:
         bundle = resolve_bundle_workflow_refs(
@@ -847,6 +915,7 @@ def graph_bundle_for_accflow_save(
     source_path: Path,
     callable_registry: CallableRegistry | None = None,
     force_main_data_edge_migration: bool = False,
+    main_data_edge_policy: str = "migrate_legacy",
 ) -> CompiledWorkbenchWorkflowBundle:
     try:
         return compile_workbench_workflow_bundle(
@@ -854,6 +923,7 @@ def graph_bundle_for_accflow_save(
             source_path=source_path,
             callable_registry=callable_registry,
             force_main_data_edge_migration=force_main_data_edge_migration,
+            main_data_edge_policy=main_data_edge_policy,  # type: ignore[arg-type]
         )
     except AccError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

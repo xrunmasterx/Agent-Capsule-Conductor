@@ -37,7 +37,6 @@ vi.mock('../components/authoring/authoringRuntime', () => ({
 
 let latestActions: UseAssistantProposalApplyActionsResult | null = null;
 let latestCanvas: WorkspaceCanvasModel | null = null;
-let latestSourceGraph: WorkflowGraph | null = null;
 let latestGraphRefCurrent: WorkflowGraph | null = null;
 let latestTasks: WorkbenchTask[] = [];
 let latestSelection: CanvasSelection | null = null;
@@ -118,7 +117,6 @@ function Harness({
   initialSelection?: CanvasSelection;
 }) {
   const [canvas, setCanvas] = useState(initialCanvas);
-  const [sourceGraph, setSourceGraph] = useState<WorkflowGraph>(() => canvasToWorkflowGraph(initialCanvas));
   const graphRef = useRef<WorkflowGraph>(canvasToWorkflowGraph(initialCanvas));
   const [tasks, setTasks] = useState<WorkbenchTask[]>([taskForCanvas(initialCanvas, temporaryResources)]);
   const [selection, setSelection] = useState<CanvasSelection>(initialSelection);
@@ -144,7 +142,6 @@ function Harness({
     callables: [],
     workflows: [],
     graphRef,
-    setSourceGraph,
     setCanvas,
     setTasks,
     setSelection,
@@ -156,7 +153,6 @@ function Harness({
     setMessage,
   });
   latestCanvas = canvas;
-  latestSourceGraph = sourceGraph;
   latestGraphRefCurrent = graphRef.current;
   latestTasks = tasks;
   latestSelection = selection;
@@ -174,7 +170,6 @@ describe('useAssistantProposalApplyActions', () => {
   afterEach(() => {
     latestActions = null;
     latestCanvas = null;
-    latestSourceGraph = null;
     latestGraphRefCurrent = null;
     latestTasks = [];
     latestSelection = null;
@@ -224,7 +219,6 @@ describe('useAssistantProposalApplyActions', () => {
       }),
     );
     expect(latestCanvas?.name).toBe('After');
-    expect(latestSourceGraph?.name).toBe('After');
     expect(latestGraphRefCurrent?.name).toBe('After');
     expect(latestTasks[0]).toMatchObject({
       title: 'After',
@@ -290,7 +284,6 @@ describe('useAssistantProposalApplyActions', () => {
     });
 
     expect(latestCanvas?.name).toBe('Before');
-    expect(latestSourceGraph?.name).toBe('Before');
     expect(latestGraphRefCurrent?.name).toBe('Before');
     expect(latestTasks[0]).toMatchObject({
       title: 'Before',

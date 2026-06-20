@@ -471,8 +471,30 @@ export const api = {
       `/api/agent-sessions/${encodeURIComponent(sessionId)}/output/publish`,
       { expected_turn_id: expectedTurnId },
     ),
-  runStreamUrl: (runId: string, afterSeq = 0) =>
-    `/api/runs/${encodeURIComponent(runId)}/stream?after_seq=${encodeURIComponent(String(afterSeq))}`,
+  runStreamUrl: (
+    runId: string,
+    options: number | {
+      afterSeq?: number;
+      history?: 'none' | 'tail' | 'full';
+      tailBytes?: number;
+      tailEvents?: number;
+    } = 0,
+  ) => {
+    const params = new URLSearchParams();
+    if (typeof options === 'number') {
+      params.set('after_seq', String(options));
+    } else {
+      params.set('after_seq', String(options.afterSeq ?? 0));
+      params.set('history', options.history ?? 'none');
+      if (options.tailBytes !== undefined) {
+        params.set('tail_bytes', String(options.tailBytes));
+      }
+      if (options.tailEvents !== undefined) {
+        params.set('tail_events', String(options.tailEvents));
+      }
+    }
+    return `/api/runs/${encodeURIComponent(runId)}/stream?${params.toString()}`;
+  },
   decisions: (limit = 100) =>
     getJson<DecisionInbox>(`/api/decisions?limit=${encodeURIComponent(String(limit))}`),
   replayRun: (runId: string, nodeId?: string) =>

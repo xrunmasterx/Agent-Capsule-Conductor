@@ -14,7 +14,6 @@ let latestTasks: WorkbenchTask[] = [];
 let latestRunsById: Record<string, RunProjection> = {};
 let latestEvidenceDock: EvidenceDockState | null = null;
 let latestGraphRef: { current: WorkflowGraph } | null = null;
-let latestSourceGraph: WorkflowGraph | null = null;
 
 const submitRunnerJob = vi.fn();
 const pollSubmittedRunUntilTerminal = vi.fn();
@@ -60,7 +59,6 @@ function Harness({
   const [message, setMessage] = useState('');
   const [tasks, setTasks] = useState<WorkbenchTask[]>([workbenchTask()]);
   const [runsById, setRunsById] = useState<Record<string, RunProjection>>({});
-  const [sourceGraph, setSourceGraph] = useState<WorkflowGraph>(workflowGraph({ id: 'initial_source' }));
   const [evidenceDock, setEvidenceDock] = useState<EvidenceDockState>({
     open: false,
     title: '运行证据',
@@ -86,7 +84,6 @@ function Harness({
     setRunsById,
     updateRunProjection,
     graphRef,
-    setSourceGraph,
     ensureBoundaryTransfersValid,
     reportTemporaryResourceIssue,
     onChanged,
@@ -96,7 +93,6 @@ function Harness({
   latestRunsById = runsById;
   latestEvidenceDock = evidenceDock;
   latestGraphRef = graphRef;
-  latestSourceGraph = sourceGraph;
 
   return <output>{message}</output>;
 }
@@ -125,7 +121,6 @@ describe('useWorkflowRunSubmitActions', () => {
     latestRunsById = {};
     latestEvidenceDock = null;
     latestGraphRef = null;
-    latestSourceGraph = null;
     vi.useRealTimers();
     vi.clearAllMocks();
   });
@@ -168,7 +163,6 @@ describe('useWorkflowRunSubmitActions', () => {
       runId,
     });
     expect(latestGraphRef?.current).toBe(graph);
-    expect(latestSourceGraph).toBe(graph);
     expect(onChanged).toHaveBeenCalledTimes(1);
   });
 

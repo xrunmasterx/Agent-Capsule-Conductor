@@ -86,6 +86,49 @@ def test_workbench_canvas_strip_preserves_output_schema_status_property() -> Non
     assert workflow["outputSchema"]["properties"]["status"] == {"type": "string"}
 
 
+def test_workbench_canvas_strip_preserves_inline_workflow_authoring_projection() -> None:
+    canvas = {
+        "canonical_graph": {
+            "nodes": [
+                {
+                    "id": "New_Workflow",
+                    "ui": {
+                        "semantic_kind": "workflow_container",
+                        "internal_nodes": [
+                            {
+                                "id": "writer",
+                                "kind": "Agent",
+                                "callableId": "writer.codex",
+                                "status": "success",
+                                "runId": "run_old",
+                                "inputPorts": [{"id": "main"}],
+                                "outputPorts": [{"id": "main"}],
+                                "outputSchema": {
+                                    "type": "object",
+                                    "properties": {"status": {"type": "string"}},
+                                },
+                            }
+                        ],
+                        "internal_edges": [
+                            {"id": "input_writer", "from": "New_Workflow__workflow_inputs", "to": "writer"}
+                        ],
+                    },
+                }
+            ]
+        }
+    }
+
+    stripped = strip_canvas_runtime_state(canvas)
+    internal_node = stripped["canonical_graph"]["nodes"][0]["ui"]["internal_nodes"][0]
+
+    assert internal_node["id"] == "writer"
+    assert "status" not in internal_node
+    assert "runId" not in internal_node
+    assert internal_node["inputPorts"] == [{"id": "main"}]
+    assert internal_node["outputSchema"]["properties"]["status"] == {"type": "string"}
+    assert stripped["canonical_graph"]["nodes"][0]["ui"]["internal_edges"][0]["to"] == "writer"
+
+
 def test_outputs_properties_project_to_main_and_named_ports() -> None:
     ports = project_output_port_metadata(_schema())
 

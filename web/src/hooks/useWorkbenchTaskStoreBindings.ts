@@ -16,6 +16,7 @@ import { normalizeCanvasEdges } from '../workbench/model/canvasEdgeOps';
 export type WorkbenchTaskStoreBindings = {
   tasks: WorkbenchTask[];
   activeTaskId: string;
+  canvasRevision: number;
   setActiveTaskId: (id: string) => void;
   connectionMode: ConnectionMode;
   setConnectionMode: (mode: ConnectionMode) => void;
@@ -56,6 +57,9 @@ export function useWorkbenchTaskStoreBindings(): WorkbenchTaskStoreBindings {
     [taskOrder, tasksById],
   );
   const activeTaskId = useWorkbenchStore((state) => state.activeTaskId);
+  const canvasRevision = useWorkbenchStore(
+    (state) => state.canvasRevisionsByTaskId[state.activeTaskId] ?? 0,
+  );
   const setActiveTaskId = useWorkbenchStore((state) => state.setActiveTaskId);
   const setStoreTasks = useWorkbenchStore((state) => state.setTasks);
   const setStoreCanvas = useWorkbenchStore((state) => state.updateCanvas);
@@ -108,6 +112,7 @@ export function useWorkbenchTaskStoreBindings(): WorkbenchTaskStoreBindings {
   return {
     tasks,
     activeTaskId,
+    canvasRevision,
     setActiveTaskId,
     connectionMode,
     setConnectionMode,

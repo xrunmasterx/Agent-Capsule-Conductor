@@ -185,7 +185,7 @@ describe('useRunProjectionActions', () => {
     render(<Harness />);
 
     act(() => {
-      latestActions?.appendNodeLogDelta(logDelta());
+      latestActions?.appendNodeLogDeltas('run_1', [logDelta()]);
     });
 
     expect(latestRunLogsById.run_1.workflow_1__internal__agent_1.stdout).toBe('hello');
@@ -193,12 +193,27 @@ describe('useRunProjectionActions', () => {
     expect(latestRunLogsById.run_1.agent_1.stdout).toBe('hello');
   });
 
+  test('ignores duplicate and backwards node log offsets', () => {
+    render(<Harness />);
+
+    act(() => {
+      latestActions?.appendNodeLogDeltas('run_1', [
+        logDelta({ offset: 0, next_offset: 5, text: 'hello' }),
+        logDelta({ offset: 0, next_offset: 5, text: 'hello' }),
+        logDelta({ offset: 2, next_offset: 7, text: 'llo!!' }),
+        logDelta({ offset: 5, next_offset: 11, text: ' world' }),
+      ]);
+    });
+
+    expect(latestRunLogsById.run_1.agent_1.stdout).toBe('hello world');
+    expect(latestRunLogsById.run_1.agent_1.stdoutOffset).toBe(11);
+  });
+
   test('merges agent events into the selected run projection', () => {
     render(<Harness />);
 
     act(() => {
-      latestActions?.appendRunAgentEventToProjection('run_1', agentEvent());
-      latestActions?.appendRunAgentEventToProjection('run_1', agentEvent());
+      latestActions?.appendRunAgentEventsToProjection('run_1', [agentEvent(), agentEvent()]);
     });
 
     expect(latestRunsById.run_1.events).toHaveLength(1);
@@ -209,8 +224,10 @@ describe('useRunProjectionActions', () => {
     render(<Harness />);
 
     act(() => {
-      latestActions?.appendRunLiveEvent('run_1', liveEvent());
-      latestActions?.appendRunLiveEvent('run_1', liveEvent({ event_id: 'live_2', seq: 2 }));
+      latestActions?.appendRunLiveEvents('run_1', [
+        liveEvent(),
+        liveEvent({ event_id: 'live_2', seq: 2 }),
+      ]);
     });
 
     expect(latestLiveEventsByRunId.run_1.map((event) => event.event_id)).toEqual(['live_1', 'live_2']);

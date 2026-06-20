@@ -21,7 +21,6 @@ export type UseWorkbenchTaskActionsOptions = {
   graphRef: MutableRefObject<WorkflowGraph>;
   setTasks: Dispatch<SetStateAction<WorkbenchTask[]>>;
   setActiveTaskId: (taskId: string) => void;
-  setSourceGraph: Dispatch<SetStateAction<WorkflowGraph>>;
   setCanvas: Dispatch<SetStateAction<WorkspaceCanvasModel>>;
   setSelection: Dispatch<SetStateAction<CanvasSelection>>;
   setFocusedWorkflowId: Dispatch<SetStateAction<string | null>>;
@@ -51,7 +50,6 @@ export function useWorkbenchTaskActions({
   graphRef,
   setTasks,
   setActiveTaskId,
-  setSourceGraph,
   setCanvas,
   setSelection,
   setFocusedWorkflowId,
@@ -70,11 +68,10 @@ export function useWorkbenchTaskActions({
       const normalizedCanvas = normalizeCanvasEdges(canvas);
       const nextGraph = canvasToWorkflowGraph(normalizedCanvas);
       graphRef.current = nextGraph;
-      setSourceGraph(nextGraph);
       setCanvas(normalizedCanvas);
       return normalizedCanvas;
     },
-    [graphRef, setCanvas, setSourceGraph],
+    [graphRef, setCanvas],
   );
 
   const createDemo = useCallback(() => {
@@ -200,7 +197,6 @@ export function useWorkbenchTaskActions({
       const nextCanvas = normalizeCanvasEdges(layoutWorkspaceCanvas(current));
       const nextGraph = canvasToWorkflowGraph(nextCanvas);
       graphRef.current = nextGraph;
-      setSourceGraph(nextGraph);
       setTasks((currentTasks) =>
         currentTasks.map((task) =>
           task.taskId === activeTaskId
@@ -209,10 +205,10 @@ export function useWorkbenchTaskActions({
         ),
       );
       return nextCanvas;
-    });
+  });
     setLayoutSyncVersion((current) => current + 1);
     setMessage('已按连接关系重新布局整个任务');
-  }, [activeTaskId, graphRef, setCanvas, setLayoutSyncVersion, setMessage, setSourceGraph, setTasks]);
+  }, [activeTaskId, graphRef, setCanvas, setLayoutSyncVersion, setMessage, setTasks]);
 
   return {
     createDemo,

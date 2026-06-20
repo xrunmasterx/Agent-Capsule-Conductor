@@ -36,7 +36,6 @@ import {
   useBoundaryTransferValidation,
 } from '../../hooks/useBoundaryTransferPreview';
 import {
-  applyRunOverlayToCanvas,
   workflowRunFailureText,
 } from './runState';
 
@@ -129,6 +128,7 @@ export function WorkflowViewerController({
   const {
     tasks,
     activeTaskId,
+    canvasRevision,
     setActiveTaskId,
     connectionMode,
     setConnectionMode,
@@ -157,12 +157,10 @@ export function WorkflowViewerController({
   );
   const canvas = currentTask?.canvas || initialTask.canvas;
   const {
-    sourceGraph,
-    setSourceGraph,
     graphRef,
     layoutSyncVersion,
     setLayoutSyncVersion,
-  } = useWorkflowViewerGraphState(initialTask.canvas);
+  } = useWorkflowViewerGraphState(canvas, canvasRevision);
   const [message, setMessage] = useState('已加载工作台');
   const [durableTasksReady, setDurableTasksReady] = useState(false);
   const {
@@ -233,6 +231,7 @@ export function WorkflowViewerController({
     assistantApplyUndo,
   } = assistantTaskState;
   const selectedRunId = currentTask?.activeRunId || currentTask?.latestRunId || null;
+  const selectedLiveRunId = currentTask?.activeRunId || null;
   const selectedRunProjection = selectedRunId ? runsById[selectedRunId] : undefined;
   const { artifactCacheByPath, ensureArtifactContent, readArtifactContent } =
     useArtifactContentCache({
@@ -326,9 +325,10 @@ export function WorkflowViewerController({
 
   const {
     updateRunProjection,
-    appendNodeLogDelta,
-    appendRunAgentEventToProjection,
-    appendRunLiveEvent,
+    appendNodeLogDeltas,
+    appendRunAgentEventsToProjection,
+    appendRunLiveEvents,
+    applyRunSummary,
     refreshRunProjection,
   } = useRunProjectionActions({
     runsById,
@@ -359,7 +359,6 @@ export function WorkflowViewerController({
     setTasks,
     setActiveTaskId,
     setCanvas,
-    setSourceGraph,
     setSelection,
     setMessage,
     setDurableTasksReady,
@@ -395,11 +394,9 @@ export function WorkflowViewerController({
     handleWorkflowBindingFolderOpened,
   } = useCanvasGraphStateActions({
     activeTaskId,
-    sourceGraph,
     graphRef,
     setCanvas,
     setTasks,
-    setSourceGraph,
     setMessage,
   });
 
@@ -431,14 +428,13 @@ export function WorkflowViewerController({
     workflowId: selectedWorkflowId,
     workflowRun,
     graphRef,
-    setSourceGraph,
     setCanvas,
     setSelection,
     setMessage,
     closeEvidenceDock,
   });
 
-  const displayCanvas = useMemo(() => applyRunOverlayToCanvas(canvas, runOverlay), [canvas, runOverlay]);
+  const displayCanvas = canvas;
   const selectedLiveLogs = selectedRunId ? runLogsById[selectedRunId] || {} : {};
   const selectedRunLiveEvents = selectedRunId ? runLiveEventsById[selectedRunId] || [] : [];
   const {
@@ -469,19 +465,19 @@ export function WorkflowViewerController({
     workflowBindings,
     currentTask,
   });
-  const appendRunAgentEvent = useCallback(
-    (runId: string, event: RunEvent) => {
-      appendRunAgentEventToProjection(runId, event);
-      appendRunAgentEventToSession(runId, event);
+  const appendRunAgentEvents = useCallback(
+    (runId: string, events: RunEvent[]) => {
+      appendRunAgentEventsToProjection(runId, events);
+      events.forEach((event) => appendRunAgentEventToSession(runId, event));
     },
-    [appendRunAgentEventToProjection, appendRunAgentEventToSession],
+    [appendRunAgentEventsToProjection, appendRunAgentEventToSession],
   );
 
-  useRunStream(selectedRunId, {
-    appendNodeLogDelta,
-    appendRunAgentEvent,
-    appendRunLiveEvent,
-    updateRunProjection,
+  useRunStream(selectedLiveRunId, {
+    appendNodeLogDeltas,
+    appendRunAgentEvents,
+    appendRunLiveEvents,
+    applyRunSummary,
   });
   const assistantLiveScope = useMemo<WorkbenchLiveStreamScope | null>(
     () =>
@@ -563,7 +559,6 @@ export function WorkflowViewerController({
     graphRef,
     setTasks,
     setActiveTaskId,
-    setSourceGraph,
     setCanvas,
     setSelection,
     setFocusedWorkflowId,
@@ -592,7 +587,6 @@ export function WorkflowViewerController({
     callables,
     workflows,
     graphRef,
-    setSourceGraph,
     setCanvas,
     setTasks,
     setSelection,
@@ -612,7 +606,6 @@ export function WorkflowViewerController({
     temporaryResources: currentAuthoringState.temporaryResources,
     graphRef,
     graphOps: graphOpsPersistence,
-    setSourceGraph,
     setCanvas,
     setTasks,
     setAssistantRequiredActions,
@@ -725,7 +718,6 @@ export function WorkflowViewerController({
     saveWorkflowDialog,
     setSaveWorkflowDialog,
     graphRef,
-    setSourceGraph,
     setMessage,
     setEvidenceDock,
     saveWorkflowGraph,
@@ -748,7 +740,6 @@ export function WorkflowViewerController({
     setRunsById,
     updateRunProjection,
     graphRef,
-    setSourceGraph,
     ensureBoundaryTransfersValid,
     reportTemporaryResourceIssue,
     onChanged,
@@ -809,6 +800,7 @@ export function WorkflowViewerController({
         selection,
         connectionMode,
         edgeViewMode,
+        runOverlay,
         workflowRun,
         focusedWorkflowId,
         callables,

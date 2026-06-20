@@ -8,7 +8,7 @@
 import { useEffect } from 'react';
 import { api } from '../api';
 import type { NodeLogDelta, RunEvent, RunSummary, WorkbenchLiveEvent } from '../types';
-import type { RunProjection, WorkflowStatus } from '../types/workbench';
+import type { WorkflowStatus } from '../types/workbench';
 
 // ---------------------------------------------------------------------------
 // Re-exported local types
@@ -23,13 +23,10 @@ export type { WorkflowStatus };
 // ---------------------------------------------------------------------------
 
 export type RunStreamCallbacks = {
-  appendNodeLogDelta: (delta: NodeLogDelta) => void;
-  updateRunProjection: (
-    runId: string,
-    update: (current: RunProjection) => RunProjection,
-  ) => void;
-  appendRunAgentEvent: (runId: string, event: RunEvent) => void;
-  appendRunLiveEvent: (runId: string, event: WorkbenchLiveEvent) => void;
+  appendNodeLogDeltas: (runId: string, deltas: NodeLogDelta[]) => void;
+  appendRunAgentEvents: (runId: string, events: RunEvent[]) => void;
+  appendRunLiveEvents: (runId: string, events: WorkbenchLiveEvent[]) => void;
+  applyRunSummary: (runId: string, summary: RunSummary) => void;
 };
 
 /**
@@ -49,19 +46,91 @@ export function useRunStream(
   selectedRunId: string | null,
   callbacks: RunStreamCallbacks,
 ): void {
-  const { appendNodeLogDelta, updateRunProjection, appendRunAgentEvent, appendRunLiveEvent } = callbacks;
+  const { appendNodeLogDeltas, appendRunAgentEvents, appendRunLiveEvents, applyRunSummary } = callbacks;
 
   useEffect(() => {
     if (!selectedRunId || typeof EventSource === 'undefined') {
       return undefined;
     }
-    const source = new EventSource(api.runStreamUrl(selectedRunId));
+    const source = new EventSource(api.runStreamUrl(selectedRunId, { history: 'none' }));
+    const buffer: {
+      nodeLogDeltas: NodeLogDelta[];
+      agentEvents: RunEvent[];
+      liveEvents: WorkbenchLiveEvent[];
+      summary: RunSummary | null;
+    } = {
+      nodeLogDeltas: [],
+      agentEvents: [],
+      liveEvents: [],
+      summary: null,
+    };
+    let rafHandle: number | null = null;
+    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+    let closed = false;
+
+    const clearScheduledFlush = () => {
+      if (rafHandle !== null && typeof cancelAnimationFrame !== 'undefined') {
+        cancelAnimationFrame(rafHandle);
+      }
+      rafHandle = null;
+      if (timeoutHandle !== null) {
+        clearTimeout(timeoutHandle);
+      }
+      timeoutHandle = null;
+    };
+
+    const flush = () => {
+      rafHandle = null;
+      if (timeoutHandle !== null) {
+        clearTimeout(timeoutHandle);
+        timeoutHandle = null;
+      }
+      const nodeLogDeltas = buffer.nodeLogDeltas;
+      const agentEvents = buffer.agentEvents;
+      const liveEvents = buffer.liveEvents;
+      const summary = buffer.summary;
+      buffer.nodeLogDeltas = [];
+      buffer.agentEvents = [];
+      buffer.liveEvents = [];
+      buffer.summary = null;
+      if (nodeLogDeltas.length > 0) {
+        appendNodeLogDeltas(selectedRunId, nodeLogDeltas);
+      }
+      if (agentEvents.length > 0) {
+        appendRunAgentEvents(selectedRunId, agentEvents);
+      }
+      if (liveEvents.length > 0) {
+        appendRunLiveEvents(selectedRunId, liveEvents);
+      }
+      if (summary) {
+        applyRunSummary(selectedRunId, summary);
+        source.close();
+        closed = true;
+      }
+    };
+
+    const scheduleFlush = () => {
+      if (closed) {
+        return;
+      }
+      if (rafHandle === null) {
+        if (typeof requestAnimationFrame !== 'undefined') {
+          rafHandle = requestAnimationFrame(flush);
+        } else {
+          rafHandle = window.setTimeout(flush, 0);
+        }
+      }
+      if (timeoutHandle === null) {
+        timeoutHandle = setTimeout(flush, 100);
+      }
+    };
 
     const onLogDelta = (event: MessageEvent<string>) => {
       try {
         const payload = JSON.parse(event.data) as NodeLogDelta;
         if (payload.type === 'node_log_delta') {
-          appendNodeLogDelta(payload);
+          buffer.nodeLogDeltas.push(payload);
+          scheduleFlush();
         }
       } catch {
         // Ignore malformed stream chunks; polling still owns durable run state.
@@ -72,11 +141,8 @@ export function useRunStream(
       try {
         const payload = JSON.parse(event.data) as { type?: string; summary?: RunSummary };
         if (payload.type === 'summary' && payload.summary) {
-          updateRunProjection(selectedRunId, (current) => ({
-            ...current,
-            summary: payload.summary,
-            status: (payload.summary as RunSummary & { status?: string })?.status as WorkflowStatus,
-          }));
+          buffer.summary = payload.summary;
+          scheduleFlush();
         }
       } catch {
         // Keep the stream best-effort; existing run polling remains the fallback.
@@ -86,7 +152,8 @@ export function useRunStream(
     const onAgentEvent = (event: MessageEvent<string>) => {
       try {
         const payload = JSON.parse(event.data) as RunEvent;
-        appendRunAgentEvent(selectedRunId, payload);
+        buffer.agentEvents.push(payload);
+        scheduleFlush();
       } catch {
         // Durable node event reads refresh the timeline if a live frame is malformed.
       }
@@ -94,7 +161,8 @@ export function useRunStream(
     const onLiveEvent = (event: MessageEvent<string>) => {
       try {
         const payload = JSON.parse(event.data) as WorkbenchLiveEvent;
-        appendRunLiveEvent(selectedRunId, payload);
+        buffer.liveEvents.push(payload);
+        scheduleFlush();
       } catch {
         // Live output is best-effort; run evidence and polling remain the durable fallback.
       }
@@ -105,11 +173,14 @@ export function useRunStream(
     source.addEventListener('live_event', onLiveEvent as EventListener);
     source.addEventListener('summary', onSummary as EventListener);
     source.onerror = () => {
-      source.close();
+      // Keep native EventSource reconnect active. Cleanup on unmount or
+      // selectedRunId changes remains responsible for closing the source.
     };
 
     return () => {
+      flush();
+      clearScheduledFlush();
       source.close();
     };
-  }, [appendNodeLogDelta, appendRunAgentEvent, appendRunLiveEvent, selectedRunId, updateRunProjection]);
+  }, [appendNodeLogDeltas, appendRunAgentEvents, appendRunLiveEvents, applyRunSummary, selectedRunId]);
 }

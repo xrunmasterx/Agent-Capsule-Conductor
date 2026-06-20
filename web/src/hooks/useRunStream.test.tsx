@@ -8,7 +8,9 @@ import { useRunStream, type RunStreamCallbacks } from './useRunStream';
 
 vi.mock('../api', () => ({
   api: {
-    runStreamUrl: vi.fn((runId: string) => `/runs/${runId}/stream`),
+    runStreamUrl: vi.fn((runId: string, options?: { history?: string }) => (
+      `/runs/${runId}/stream?history=${options?.history || 'none'}`
+    )),
   },
 }));
 
@@ -71,6 +73,8 @@ describe('useRunStream', () => {
   beforeEach(() => {
     FakeEventSource.instances = [];
     vi.stubGlobal('EventSource', FakeEventSource);
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => window.setTimeout(callback, 0));
+    vi.stubGlobal('cancelAnimationFrame', (handle: number) => window.clearTimeout(handle));
   });
 
   afterEach(() => {
@@ -84,16 +88,16 @@ describe('useRunStream', () => {
     const liveEvents: WorkbenchLiveEvent[] = [];
     const projectedRuns: RunProjection[] = [];
     const callbacks: RunStreamCallbacks = {
-      appendNodeLogDelta: (delta) => logDeltas.push(delta),
-      appendRunAgentEvent: (_runId, event) => agentEvents.push(event),
-      appendRunLiveEvent: (_runId, event) => liveEvents.push(event),
-      updateRunProjection: (_runId, update) => {
-        projectedRuns.push(update(runProjection()));
+      appendNodeLogDeltas: (_runId, deltas) => logDeltas.push(...deltas),
+      appendRunAgentEvents: (_runId, events) => agentEvents.push(...events),
+      appendRunLiveEvents: (_runId, events) => liveEvents.push(...events),
+      applyRunSummary: (_runId, summary) => {
+        projectedRuns.push({ ...runProjection(), summary, status: summary.status as RunProjection['status'] });
       },
     };
 
     render(<Harness runId="run_1" callbacks={callbacks} />);
-    expect(FakeEventSource.instances[0].url).toBe('/runs/run_1/stream');
+    expect(FakeEventSource.instances[0].url).toBe('/runs/run_1/stream?history=none');
 
     const summary: RunSummary = {
       run_id: 'run_1',
@@ -129,6 +133,7 @@ describe('useRunStream', () => {
         timestamp: '2026-06-19T00:00:00Z',
       });
       FakeEventSource.instances[0].emit('summary', { type: 'summary', summary });
+      await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
     expect(logDeltas).toEqual([expect.objectContaining({ text: 'hello' })]);
@@ -139,10 +144,10 @@ describe('useRunStream', () => {
 
   test('does not open without a run id and closes stream on cleanup', () => {
     const callbacks: RunStreamCallbacks = {
-      appendNodeLogDelta: () => undefined,
-      appendRunAgentEvent: () => undefined,
-      appendRunLiveEvent: () => undefined,
-      updateRunProjection: (_runId, update) => update(runProjection()),
+      appendNodeLogDeltas: () => undefined,
+      appendRunAgentEvents: () => undefined,
+      appendRunLiveEvents: () => undefined,
+      applyRunSummary: () => undefined,
     };
 
     const empty = render(<Harness runId={null} callbacks={callbacks} />);
@@ -155,12 +160,30 @@ describe('useRunStream', () => {
     expect(FakeEventSource.instances[0].close).toHaveBeenCalledTimes(1);
   });
 
+  test('does not permanently close the EventSource on transient errors', () => {
+    const callbacks: RunStreamCallbacks = {
+      appendNodeLogDeltas: () => undefined,
+      appendRunAgentEvents: () => undefined,
+      appendRunLiveEvents: () => undefined,
+      applyRunSummary: () => undefined,
+    };
+
+    const active = render(<Harness runId="run_1" callbacks={callbacks} />);
+    expect(FakeEventSource.instances).toHaveLength(1);
+
+    FakeEventSource.instances[0].onerror?.();
+
+    expect(FakeEventSource.instances[0].close).not.toHaveBeenCalled();
+    active.unmount();
+    expect(FakeEventSource.instances[0].close).toHaveBeenCalledTimes(1);
+  });
+
   test('malformed chunks are ignored because polling remains durable fallback', async () => {
     const callbacks: RunStreamCallbacks = {
-      appendNodeLogDelta: vi.fn(),
-      appendRunAgentEvent: vi.fn(),
-      appendRunLiveEvent: vi.fn(),
-      updateRunProjection: vi.fn(),
+      appendNodeLogDeltas: vi.fn(),
+      appendRunAgentEvents: vi.fn(),
+      appendRunLiveEvents: vi.fn(),
+      applyRunSummary: vi.fn(),
     };
 
     render(<Harness runId="run_1" callbacks={callbacks} />);
@@ -170,6 +193,6 @@ describe('useRunStream', () => {
       listener?.({ data: '{bad json' } as MessageEvent<string>);
     });
 
-    expect(callbacks.appendRunLiveEvent).not.toHaveBeenCalled();
+    expect(callbacks.appendRunLiveEvents).not.toHaveBeenCalled();
   });
 });

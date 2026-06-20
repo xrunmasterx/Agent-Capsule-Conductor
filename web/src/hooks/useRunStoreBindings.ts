@@ -43,3 +43,30 @@ export function useRunStoreBindings(): RunStoreBindings {
     setRuntimeConfig,
   };
 }
+
+export function useRunProjection(runId: string | null): RunProjection | undefined {
+  return useRunStore((state) => (runId ? state.runsById[runId] : undefined));
+}
+
+export function useRunOverlay(runId: string | null): RunProjection['overlay'] | null {
+  return useRunStore((state) => (runId ? state.runsById[runId]?.overlay || null : null));
+}
+
+export function useNodeLiveLogs(runId: string | null, nodeKey: string | null): NodeLiveLogs | undefined {
+  return useRunStore((state) => {
+    if (!runId || !nodeKey) {
+      return undefined;
+    }
+    return state.runLogsById[runId]?.[nodeKey];
+  });
+}
+
+export function useRunLiveEvents(
+  runId: string | null,
+  filter?: (event: WorkbenchLiveEvent) => boolean,
+): WorkbenchLiveEvent[] {
+  return useRunStore((state) => {
+    const events = runId ? state.liveEventsByRunId[runId] || [] : [];
+    return filter ? events.filter(filter) : events;
+  });
+}

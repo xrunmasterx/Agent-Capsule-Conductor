@@ -3511,10 +3511,10 @@ describe('Agent Callable Workbench editable UI', () => {
     expect(saveCall).toBeTruthy();
     const savedPayload = JSON.parse(String(saveCall?.[1]?.body));
     expect(savedPayload.graph.nodes).toHaveLength(7);
-    expect(savedPayload.graph.nodes.some((node: { id?: string }) => node.id === 'Research_Brief_Agent')).toBe(true);
-    expect(savedPayload.graph.nodes.some((node: { id?: string }) => node.id === 'Source_Data_Workflow')).toBe(true);
-    expect(savedPayload.graph.nodes.some((node: { id?: string }) => node.id === 'Market_Context_Agent')).toBe(false);
-    expect(savedPayload.graph.nodes.some((node: { id?: string }) => node.id === 'Target_Profile_Agent')).toBe(false);
+    expect(savedPayload.graph.nodes.some((node: { id?: string }) => node.id === 'Market_Context_Agent')).toBe(true);
+    expect(savedPayload.graph.nodes.some((node: { id?: string }) => node.id === 'Target_Profile_Agent')).toBe(true);
+    expect(savedPayload.graph.nodes.some((node: { id?: string }) => node.id === 'Research_Brief_Agent')).toBe(false);
+    expect(savedPayload.graph.nodes.some((node: { id?: string }) => node.id === 'Source_Data_Workflow')).toBe(false);
     expect(savedPayload.graph.nodes.some((node: { kind?: string }) => node.kind === 'agent_session')).toBe(true);
     expect(savedPayload.graph.nodes.some((node: { kind?: string }) => node.kind === 'workflow')).toBe(true);
     expect(savedPayload.graph.nodes.every((node: { input_ports?: unknown[] }) => (node.input_ports || []).length > 0)).toBe(
@@ -3527,19 +3527,23 @@ describe('Agent Callable Workbench editable UI', () => {
     expect(savedPayload.graph.data_edges).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          from: { node: 'Research_Brief_Agent', port: 'target_profile' },
-          to: { node: 'Source_Data_Workflow', port: 'target' },
+          from: { node: 'Market_Context_Agent', port: 'main' },
+          to: { node: 'Target_Profile_Agent', port: 'context' },
         }),
         expect.objectContaining({
-          from: { node: 'Source_Data_Workflow', port: 'verified_data_pack' },
-          to: { node: demoWorkflowNodeId, port: 'verified_data' },
+          from: { node: 'Target_Profile_Agent', port: 'main' },
+          to: { node: demoWorkflowNodeId, port: 'target' },
         }),
         expect.objectContaining({
-          from: { node: 'Research_Brief_Agent', port: 'constraints' },
+          from: { node: 'Market_Context_Agent', port: 'main' },
+          to: { node: demoWorkflowNodeId, port: 'context' },
+        }),
+        expect.objectContaining({
+          from: { node: 'Target_Profile_Agent', port: 'constraints' },
           to: { node: 'Valuation_Workflow', port: 'constraints' },
         }),
         expect.objectContaining({
-          from: { node: 'Research_Brief_Agent', port: 'watchlist_seed' },
+          from: { node: 'Market_Context_Agent', port: 'watchlist' },
           to: { node: 'Risk_Catalyst_Workflow', port: 'watchlist' },
         }),
         expect.objectContaining({
@@ -3547,7 +3551,7 @@ describe('Agent Callable Workbench editable UI', () => {
           to: { node: 'Report_Workflow', port: 'fundamentals' },
         }),
         expect.objectContaining({
-          from: { node: 'Report_Workflow', port: 'report' },
+          from: { node: 'Report_Workflow', port: 'main' },
           to: { node: 'Final_Review_Agent', port: 'report' },
         }),
       ]),
@@ -3567,10 +3571,7 @@ describe('Agent Callable Workbench editable UI', () => {
     );
     expect(evidenceMapper.inputPorts).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ id: 'main' }),
         expect.objectContaining({ id: 'evidence_pack' }),
-        expect.objectContaining({ id: 'valuation' }),
-        expect.objectContaining({ id: 'source_register' }),
       ]),
     );
     const valuationWorkflow = savedPayload.graph.nodes.find(
@@ -3580,42 +3581,23 @@ describe('Agent Callable Workbench editable UI', () => {
       (node: { id?: string }) => node.id === 'valuation_synthesis_agent',
     );
     expect(valuationSynthesis.outputSchema.required).toEqual(
-      expect.arrayContaining(['valuation_conclusion', 'base_case', 'bull_case', 'bear_case', 'risk_reward_view']),
+      expect.arrayContaining(['valuation_range', 'risk_reward']),
     );
     const reportCompiler = reportWorkflow.ui.internal_nodes.find(
       (node: { id?: string }) => node.id === 'report_compiler_agent',
     );
-    expect(reportCompiler.outputSchema.properties.report.required).toEqual(
-      expect.arrayContaining(['executive_summary', 'investment_stance', 'valuation_conclusion', 'risk_reward', 'monitoring_plan']),
+    expect(reportCompiler.outputSchema.required).toEqual(
+      expect.arrayContaining(['report_sections', 'evidence_map']),
     );
-    expect(reportWorkflow.ui.internal_edges).not.toEqual(
+    expect(reportWorkflow.ui.internal_edges).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          from: { node: 'investment_thesis_agent', port: 'main' },
-          to: { node: 'evidence_mapper_agent', port: 'thesis' },
+          from: { node: 'thesis_writer_agent', port: 'main' },
+          to: { node: 'report_compiler_agent', port: 'thesis' },
         }),
       ]),
     );
-    expect(savedPayload.graph.workflow_output_bindings).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          source: { node: 'Report_Workflow', port: 'report' },
-          target_port: 'main',
-        }),
-        expect.objectContaining({
-          source: { node: 'Final_Review_Agent', port: 'main' },
-          target_port: 'review',
-        }),
-        expect.objectContaining({
-          source: { node: 'Source_Data_Workflow', port: 'source_register' },
-          target_port: 'source_register',
-        }),
-        expect.objectContaining({
-          source: { node: 'Valuation_Workflow', port: 'main' },
-          target_port: 'valuation',
-        }),
-      ]),
-    );
+    expect(savedPayload.graph.workflow_output_bindings).toBeUndefined();
     expect(savedPayload.graph.metadata.directory_display_only).toBe(true);
     expect(savedPayload.graph.nodes.every((node: { relative_cwd?: string }) => !node.relative_cwd)).toBe(true);
     expect(savedPayload.graph.workspace_policy).toEqual({
@@ -3632,19 +3614,19 @@ describe('Agent Callable Workbench editable UI', () => {
     const rootControl = canvas.edges.find(
       (edge: any) =>
         edge.kind === 'control' &&
-        edge.source.workflowId === 'Research_Brief_Agent' &&
-        edge.target.workflowId === 'Source_Data_Workflow',
+        edge.source.workflowId === 'Market_Context_Agent' &&
+        edge.target.workflowId === 'Target_Profile_Agent',
     );
-    const sourceDataWorkflow = canvas.workflows.find((workflow: any) => workflow.id === 'Source_Data_Workflow');
-    const internalControl = sourceDataWorkflow.internalEdges.find(
+    const fundamentalsWorkflow = canvas.workflows.find((workflow: any) => workflow.id === demoWorkflowNodeId);
+    const internalControl = fundamentalsWorkflow.internalEdges.find(
       (edge: any) =>
         edge.kind === 'control' &&
-        edge.source.workflowId === 'company_disclosure_agent' &&
-        edge.target.workflowId === 'data_quality_synthesis_agent',
+        edge.source.workflowId === 'fundamentals_synthesis_agent' &&
+        edge.target.workflowId === 'fundamentals_evidence_agent',
     );
 
     expect(controlEdgeMainTransferMode(canvas, null, rootControl).label).toBe('仅控制顺序');
-    expect(controlEdgeMainTransferMode(canvas, 'Source_Data_Workflow', internalControl).label).toBe('传递 main');
+    expect(controlEdgeMainTransferMode(canvas, demoWorkflowNodeId, internalControl).label).toBe('仅控制顺序');
   });
 
   test('Workflow binding dialog fills workspace root from native directory selection', async () => {
@@ -3994,7 +3976,7 @@ describe('Agent Callable Workbench editable UI', () => {
         }),
       ]),
     );
-    expect(researchFlow.ui.internal_edges).not.toEqual(
+    expect(researchFlow.ui.internal_edges).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           from: { node: 'business_model_agent', port: 'main' },
@@ -4007,7 +3989,9 @@ describe('Agent Callable Workbench editable UI', () => {
     );
     expect(researchSynthesis.inputPorts).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ id: 'main' }),
+        expect.objectContaining({ id: 'business' }),
+        expect.objectContaining({ id: 'financials' }),
+        expect.objectContaining({ id: 'industry' }),
       ]),
     );
   });
@@ -4277,12 +4261,14 @@ describe('Agent Callable Workbench editable UI', () => {
     const savedPayload = JSON.parse(String(saveCall?.[1]?.body));
     const runPayload = JSON.parse(String(runCall?.[1]?.body));
     expect(savedPayload.graph.nodes).toHaveLength(7);
-    expect(savedPayload.graph.nodes.some((node: { id?: string }) => node.id === 'Source_Data_Workflow')).toBe(true);
-    expect(savedPayload.graph.workflow_output_bindings).toEqual(
+    expect(savedPayload.graph.nodes.some((node: { id?: string }) => node.id === 'Market_Context_Agent')).toBe(true);
+    expect(savedPayload.graph.nodes.some((node: { id?: string }) => node.id === 'Target_Profile_Agent')).toBe(true);
+    expect(savedPayload.graph.nodes.some((node: { id?: string }) => node.id === 'Source_Data_Workflow')).toBe(false);
+    expect(savedPayload.graph.data_edges).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          source: { node: 'Report_Workflow', port: 'report' },
-          target_port: 'main',
+          from: { node: 'Report_Workflow', port: 'main' },
+          to: { node: 'Final_Review_Agent', port: 'report' },
         }),
       ]),
     );

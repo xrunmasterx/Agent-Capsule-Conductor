@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict
 
+from acc.app.workbench_boundary_transfer import preview_boundary_transfer_for_canvas_snapshot
 from acc.app.workbench_snapshots import WorkbenchCanvasSnapshotService
 from acc.app.workbench_tasks import WorkbenchTaskService
 from acc.server.context import get_project_root
@@ -52,6 +53,13 @@ class WorkbenchTaskCanvasRequest(BaseModel):
     selection: dict[str, Any] | None = None
     temporary_resources: dict[str, Any] | None = None
     base_canvas_hash: str | None = None
+
+
+class WorkbenchBoundaryTransferPreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    canvas_snapshot: dict[str, Any]
+    edge_id: str | None = None
 
 
 @router.get("/tasks")
@@ -102,14 +110,18 @@ def put_task_canvas(
     payload: WorkbenchTaskCanvasRequest,
     request: Request,
     if_match: str | None = Header(default=None, alias="If-Match"),
+    include_snapshot: bool = Query(default=False),
 ) -> dict[str, Any]:
     base_canvas_hash = payload.base_canvas_hash or normalized_if_match(if_match)
     try:
-        return task_service_for(request).put_canvas(
+        saved = task_service_for(request).put_canvas(
             task_id,
             payload.model_dump(),
             base_canvas_hash=base_canvas_hash,
         )
+        if include_snapshot:
+            return saved
+        return slim_canvas_save_ack(saved)
     except AccError as exc:
         status = 409 if "stale" in str(exc).lower() else 400
         raise HTTPException(status_code=status, detail=str(exc)) from exc
@@ -121,6 +133,16 @@ def get_task_canvas(task_id: str, request: Request) -> dict[str, Any]:
         return task_service_for(request).get_canvas(task_id)
     except AccError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/boundary-transfer/preview")
+def preview_boundary_transfer(
+    payload: WorkbenchBoundaryTransferPreviewRequest,
+) -> dict[str, Any]:
+    return preview_boundary_transfer_for_canvas_snapshot(
+        payload.canvas_snapshot,
+        edge_id=payload.edge_id,
+    )
 
 
 @router.post("/canvas-snapshots")
@@ -157,3 +179,11 @@ def normalized_if_match(value: str | None) -> str | None:
     if len(text) >= 2 and text[0] == '"' and text[-1] == '"':
         return text[1:-1]
     return text
+
+
+def slim_canvas_save_ack(saved: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "task_id": saved["task_id"],
+        "canvas_hash": saved["canvas_hash"],
+        "saved_at": saved.get("published_at") or saved.get("updated_at"),
+    }

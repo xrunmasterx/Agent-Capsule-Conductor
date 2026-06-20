@@ -30,7 +30,6 @@ export type UseAssistantProposalApplyActionsOptions = {
   callables: CallableSummary[];
   workflows: WorkflowSummary[];
   graphRef: MutableRefObject<WorkflowGraph>;
-  setSourceGraph: Dispatch<SetStateAction<WorkflowGraph>>;
   setCanvas: Dispatch<SetStateAction<WorkspaceCanvasModel>>;
   setTasks: Dispatch<SetStateAction<WorkbenchTask[]>>;
   setSelection: Dispatch<SetStateAction<CanvasSelection>>;
@@ -59,7 +58,6 @@ export function useAssistantProposalApplyActions({
   callables,
   workflows,
   graphRef,
-  setSourceGraph,
   setCanvas,
   setTasks,
   setSelection,
@@ -89,7 +87,6 @@ export function useAssistantProposalApplyActions({
       const nextGraph = canvasToWorkflowGraph(result.canvas);
       const afterCanvasHash = canvasAuthoringHash(activeTaskId, stripRuntimeStateFromCanvas(result.canvas));
       graphRef.current = nextGraph;
-      setSourceGraph(nextGraph);
       setCanvas(result.canvas);
       setTasks((currentTasks) =>
         currentTasks.map((task) =>
@@ -152,7 +149,6 @@ export function useAssistantProposalApplyActions({
     setCanvas,
     setMessage,
     setSelection,
-    setSourceGraph,
     setTasks,
     temporaryResources,
     workflows,
@@ -165,7 +161,6 @@ export function useAssistantProposalApplyActions({
     const nextCanvas = stripRuntimeStateFromCanvas(assistantApplyUndo.beforeCanvas);
     const nextGraph = canvasToWorkflowGraph(nextCanvas);
     graphRef.current = nextGraph;
-    setSourceGraph(nextGraph);
     setCanvas(nextCanvas);
     setTasks((currentTasks) =>
       currentTasks.map((task) =>
@@ -197,7 +192,6 @@ export function useAssistantProposalApplyActions({
     setCanvas,
     setMessage,
     setSelection,
-    setSourceGraph,
     setTasks,
   ]);
 

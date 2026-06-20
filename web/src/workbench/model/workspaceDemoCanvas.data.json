@@ -1,0 +1,2898 @@
+{
+  "id": "core_v2_stock_research_canvas",
+  "name": "Core v2 股市调研分析示例",
+  "layout": "workspace-canvas",
+  "rootWorkflowId": "core_v2_stock_research_canvas",
+  "workflows": [
+    {
+      "callableId": "stock-research-analyst.codex",
+      "codexExecutionMode": "default",
+      "directory": "workflows/demo/Market_Context_Agent",
+      "id": "Market_Context_Agent",
+      "inputPorts": [
+        {
+          "artifactTypes": [
+            "artifact"
+          ],
+          "cardinality": "one",
+          "direction": "input",
+          "id": "main",
+          "label": "用户主题",
+          "required": false
+        }
+      ],
+      "internalEdges": [],
+      "internalNodes": [],
+      "outputPorts": [
+        {
+          "artifactTypes": [
+            "artifact"
+          ],
+          "cardinality": "one",
+          "direction": "output",
+          "id": "main",
+          "label": "市场上下文",
+          "required": true
+        },
+        {
+          "artifactTypes": [
+            "artifact"
+          ],
+          "cardinality": "one",
+          "direction": "output",
+          "id": "watchlist",
+          "label": "候选关注点",
+          "required": true
+        }
+      ],
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence": {
+            "description": "用户输入、假设和需外部验证的信息",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "findings": {
+            "description": "市场主题、候选行业和调研边界",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "status": {
+            "description": "success 或 failed",
+            "type": "string"
+          },
+          "summary": {
+            "description": "面向下游节点的简明结论",
+            "type": "string"
+          },
+          "watchlist": {
+            "description": "后续风险与催化剂 workflow 需要持续关注的事项",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "status",
+          "summary",
+          "findings",
+          "evidence",
+          "watchlist"
+        ],
+        "type": "object"
+      },
+      "position": {
+        "x": -23.420804625706978,
+        "y": 246.41461261796508
+      },
+      "size": {
+        "height": 150,
+        "width": 310
+      },
+      "sourceInput": {
+        "user_prompt": "读取用户关注的市场主题，输出研究范围、候选行业、数据口径和约束。\n你需要深度研究SOXL这个美股"
+      },
+      "sourceKind": "agent_session",
+      "title": "市场上下文采集",
+      "warnings": [],
+      "status": "not_run"
+    },
+    {
+      "callableId": "stock-research-analyst.codex",
+      "codexExecutionMode": "default",
+      "directory": "workflows/demo/Target_Profile_Agent",
+      "id": "Target_Profile_Agent",
+      "inputPorts": [
+        {
+          "artifactTypes": [
+            "artifact"
+          ],
+          "cardinality": "one",
+          "direction": "input",
+          "id": "context",
+          "label": "市场上下文",
+          "required": true
+        }
+      ],
+      "internalEdges": [],
+      "internalNodes": [],
+      "outputPorts": [
+        {
+          "artifactTypes": [
+            "artifact"
+          ],
+          "cardinality": "one",
+          "direction": "output",
+          "id": "main",
+          "label": "标的画像",
+          "required": true
+        },
+        {
+          "artifactTypes": [
+            "artifact"
+          ],
+          "cardinality": "one",
+          "direction": "output",
+          "id": "constraints",
+          "label": "研究约束",
+          "required": true
+        }
+      ],
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "company_name": {
+            "description": "公司名称",
+            "type": "string"
+          },
+          "constraints": {
+            "description": "研究范围、数据边界和下游限制条件",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "status": {
+            "description": "success 或 failed",
+            "type": "string"
+          },
+          "summary": {
+            "description": "面向下游节点的简明结论",
+            "type": "string"
+          },
+          "ticker": {
+            "description": "股票代码",
+            "type": "string"
+          },
+          "verification_gaps": {
+            "description": "需要外部数据源验证的信息",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "status",
+          "summary",
+          "ticker",
+          "company_name",
+          "verification_gaps"
+        ],
+        "type": "object"
+      },
+      "position": {
+        "x": 399.6355061372228,
+        "y": 218
+      },
+      "size": {
+        "height": 150,
+        "width": 310
+      },
+      "sourceInput": {
+        "user_prompt": "基于市场上下文确认一个可研究的美股标的，并输出公司身份、业务边界和验证缺口。"
+      },
+      "sourceKind": "agent_session",
+      "title": "标的画像确认",
+      "warnings": [],
+      "status": "not_run"
+    },
+    {
+      "directory": "workflows/demo/core_v2/fundamentals",
+      "id": "Fundamentals_Workflow",
+      "inputPorts": [
+        {
+          "artifactTypes": [
+            "artifact"
+          ],
+          "cardinality": "one",
+          "direction": "input",
+          "id": "target",
+          "label": "标的画像",
+          "required": true
+        },
+        {
+          "artifactTypes": [
+            "artifact"
+          ],
+          "cardinality": "one",
+          "direction": "input",
+          "id": "context",
+          "label": "市场上下文",
+          "required": true
+        }
+      ],
+      "internalEdges": [
+        {
+          "id": "data_Fundamentals_Workflow__workflow_inputs_target_business_model_agent_target",
+          "kind": "data",
+          "materialization": "copy",
+          "source": {
+            "portId": "target",
+            "workflowId": "Fundamentals_Workflow__workflow_inputs"
+          },
+          "target": {
+            "portId": "target",
+            "workflowId": "business_model_agent"
+          }
+        },
+        {
+          "id": "data_Fundamentals_Workflow__workflow_inputs_context_business_model_agent_context",
+          "kind": "data",
+          "materialization": "copy",
+          "source": {
+            "portId": "context",
+            "workflowId": "Fundamentals_Workflow__workflow_inputs"
+          },
+          "target": {
+            "portId": "context",
+            "workflowId": "business_model_agent"
+          }
+        },
+        {
+          "id": "data_Fundamentals_Workflow__workflow_inputs_target_financial_quality_agent_target",
+          "kind": "data",
+          "materialization": "copy",
+          "source": {
+            "portId": "target",
+            "workflowId": "Fundamentals_Workflow__workflow_inputs"
+          },
+          "target": {
+            "portId": "target",
+            "workflowId": "financial_quality_agent"
+          }
+        },
+        {
+          "id": "data_Fundamentals_Workflow__workflow_inputs_target_industry_position_agent_target",
+          "kind": "data",
+          "materialization": "copy",
+          "source": {
+            "portId": "target",
+            "workflowId": "Fundamentals_Workflow__workflow_inputs"
+          },
+          "target": {
+            "portId": "target",
+            "workflowId": "industry_position_agent"
+          }
+        },
+        {
+          "id": "data_Fundamentals_Workflow__workflow_inputs_context_industry_position_agent_context",
+          "kind": "data",
+          "materialization": "copy",
+          "source": {
+            "portId": "context",
+            "workflowId": "Fundamentals_Workflow__workflow_inputs"
+          },
+          "target": {
+            "portId": "context",
+            "workflowId": "industry_position_agent"
+          }
+        },
+        {
+          "condition": null,
+          "context": "none",
+          "id": "control_business_model_agent_fundamentals_synthesis_agent",
+          "kind": "control",
+          "source": {
+            "workflowId": "business_model_agent"
+          },
+          "target": {
+            "workflowId": "fundamentals_synthesis_agent"
+          }
+        },
+        {
+          "condition": null,
+          "context": "none",
+          "id": "control_financial_quality_agent_fundamentals_synthesis_agent",
+          "kind": "control",
+          "source": {
+            "workflowId": "financial_quality_agent"
+          },
+          "target": {
+            "workflowId": "fundamentals_synthesis_agent"
+          }
+        },
+        {
+          "condition": null,
+          "context": "none",
+          "id": "control_industry_position_agent_fundamentals_synthesis_agent",
+          "kind": "control",
+          "source": {
+            "workflowId": "industry_position_agent"
+          },
+          "target": {
+            "workflowId": "fundamentals_synthesis_agent"
+          }
+        },
+        {
+          "id": "data_business_model_agent_main_fundamentals_synthesis_agent_business",
+          "kind": "data",
+          "materialization": "copy",
+          "source": {
+            "portId": "main",
+            "workflowId": "business_model_agent"
+          },
+          "target": {
+            "portId": "business",
+            "workflowId": "fundamentals_synthesis_agent"
+          }
+        },
+        {
+          "id": "data_financial_quality_agent_main_fundamentals_synthesis_agent_financials",
+          "kind": "data",
+          "materialization": "copy",
+          "source": {
+            "portId": "main",
+            "workflowId": "financial_quality_agent"
+          },
+          "target": {
+            "portId": "financials",
+            "workflowId": "fundamentals_synthesis_agent"
+          }
+        },
+        {
+          "id": "data_industry_position_agent_main_fundamentals_synthesis_agent_industry",
+          "kind": "data",
+          "materialization": "copy",
+          "source": {
+            "portId": "main",
+            "workflowId": "industry_position_agent"
+          },
+          "target": {
+            "portId": "industry",
+            "workflowId": "fundamentals_synthesis_agent"
+          }
+        },
+        {
+          "condition": null,
+          "context": "none",
+          "id": "control_fundamentals_synthesis_agent_fundamentals_evidence_agent",
+          "kind": "control",
+          "source": {
+            "workflowId": "fundamentals_synthesis_agent"
+          },
+          "target": {
+            "workflowId": "fundamentals_evidence_agent"
+          }
+        },
+        {
+          "id": "data_fundamentals_synthesis_agent_main_fundamentals_evidence_agent_main",
+          "kind": "data",
+          "materialization": "copy",
+          "source": {
+            "portId": "main",
+            "workflowId": "fundamentals_synthesis_agent"
+          },
+          "target": {
+            "portId": "main",
+            "workflowId": "fundamentals_evidence_agent"
+          }
+        },
+        {
+          "id": "data_fundamentals_synthesis_agent_main_Fundamentals_Workflow__workflow_outputs_main",
+          "kind": "data",
+          "materialization": "copy",
+          "source": {
+            "portId": "main",
+            "workflowId": "fundamentals_synthesis_agent"
+          },
+          "target": {
+            "portId": "main",
+            "workflowId": "Fundamentals_Workflow__workflow_outputs"
+          }
+        },
+        {
+          "id": "data_fundamentals_evidence_agent_main_Fundamentals_Workflow__workflow_outputs_evidence_pack",
+          "kind": "data",
+          "materialization": "copy",
+          "source": {
+            "portId": "main",
+            "workflowId": "fundamentals_evidence_agent"
+          },
+          "target": {
+            "portId": "evidence_pack",
+            "workflowId": "Fundamentals_Workflow__workflow_outputs"
+          }
+        },
+        {
+          "condition": null,
+          "context": "none",
+          "id": "control_Fundamentals_Workflow__workflow_inputs_business_model_agent",
+          "kind": "control",
+          "source": {
+            "workflowId": "Fundamentals_Workflow__workflow_inputs"
+          },
+          "target": {
+            "workflowId": "business_model_agent"
+          }
+        },
+        {
+          "condition": null,
+          "context": "none",
+          "id": "control_Fundamentals_Workflow__workflow_inputs_financial_quality_agent",
+          "kind": "control",
+          "source": {
+            "workflowId": "Fundamentals_Workflow__workflow_inputs"
+          },
+          "target": {
+            "workflowId": "financial_quality_agent"
+          }
+        },
+        {
+          "condition": null,
+          "context": "none",
+          "id": "control_Fundamentals_Workflow__workflow_inputs_industry_position_agent",
+          "kind": "control",
+          "source": {
+            "workflowId": "Fundamentals_Workflow__workflow_inputs"
+          },
+          "target": {
+            "workflowId": "industry_position_agent"
+          }
+        },
+        {
+          "condition": null,
+          "context": "none",
+          "id": "control_fundamentals_evidence_agent_Fundamentals_Workflow__workflow_outputs",
+          "kind": "control",
+          "source": {
+            "workflowId": "fundamentals_evidence_agent"
+          },
+          "target": {
+            "workflowId": "Fundamentals_Workflow__workflow_outputs"
+          }
+        }
+      ],
+      "internalNodes": [
+        {
+          "callableId": "stock-research-analyst.codex",
+          "id": "business_model_agent",
+          "input": {
+            "user_prompt": "分析收入来源、客户、产品线和商业模式韧性。"
+          },
+          "inputPorts": [
+            {
+              "artifactTypes": [
+                "artifact"
+              ],
+              "cardinality": "one",
+              "direction": "input",
+              "id": "target",
+              "label": "标的画像",
+              "required": true
+            },
+            {
+              "artifactTypes": [
+                "artifact"
+              ],
+              "cardinality": "one",
+              "direction": "input",
+              "id": "context",
+              "label": "市场上下文",
+              "required": true
+            }
+          ],
+          "kind": "Agent",
+          "name": "业务模式分析",
+          "outputPorts": [
+            {
+              "artifactTypes": [
+                "artifact"
+              ],
+              "cardinality": "one",
+              "direction": "output",
+              "id": "main",
+              "label": "输出产物",
+              "required": true
+            }
+          ],
+          "outputSchema": {
+            "additionalProperties": false,
+            "properties": {
+              "evidence": {
+                "description": "证据、假设和需要后续验证的信息",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "findings": {
+                "description": "业务模式分析 的关键发现",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "status": {
+                "description": "success 或 failed",
+                "type": "string"
+              },
+              "summary": {
+                "description": "面向下游节点的简明结论",
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "summary",
+              "findings",
+              "evidence"
+            ],
+            "type": "object"
+          },
+          "position": {
+            "x": 137,
+            "y": 145.99999999999994
+          },
+          "task": "分析收入来源、客户、产品线和商业模式韧性。",
+          "status": "not_run"
+        },
+        {
+          "callableId": "stock-research-analyst.codex",
+          "id": "financial_quality_agent",
+          "input": {
+            "user_prompt": "分析收入质量、利润率、现金流、资产负债表和需验证的财报数据。"
+          },
+          "inputPorts": [
+            {
+              "artifactTypes": [
+                "artifact"
+              ],
+              "cardinality": "one",
+              "direction": "input",
+              "id": "target",
+              "label": "标的画像",
+              "required": true
+            }
+          ],
+          "kind": "Agent",
+          "name": "财务质量分析",
+          "outputPorts": [
+            {
+              "artifactTypes": [
+                "artifact"
+              ],
+              "cardinality": "one",
+              "direction": "output",
+              "id": "main",
+              "label": "输出产物",
+              "required": true
+            }
+          ],
+          "outputSchema": {
+            "additionalProperties": false,
+            "properties": {
+              "evidence": {
+                "description": "证据、假设和需要后续验证的信息",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "findings": {
+                "description": "财务质量分析 的关键发现",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "status": {
+                "description": "success 或 failed",
+                "type": "string"
+              },
+              "summary": {
+                "description": "面向下游节点的简明结论",
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "summary",
+              "findings",
+              "evidence"
+            ],
+            "type": "object"
+          },
+          "position": {
+            "x": 137,
+            "y": 331.99999999999994
+          },
+          "task": "分析收入质量、利润率、现金流、资产负债表和需验证的财报数据。",
+          "status": "not_run"
+        },
+        {
+          "callableId": "stock-research-analyst.codex",
+          "id": "industry_position_agent",
+          "input": {
+            "user_prompt": "分析行业结构、竞争对手、增长驱动和公司相对位置。"
+          },
+          "inputPorts": [
+            {
+              "artifactTypes": [
+                "artifact"
+              ],
+              "cardinality": "one",
+              "direction": "input",
+              "id": "target",
+              "label": "标的画像",
+              "required": true
+            },
+            {
+              "artifactTypes": [
+                "artifact"
+              ],
+              "cardinality": "one",
+              "direction": "input",
+              "id": "context",
+              "label": "市场上下文",
+              "required": true
+            }
+          ],
+          "kind": "Agent",
+          "name": "行业位置分析",
+          "outputPorts": [
+            {
+              "artifactTypes": [
+                "artifact"
+              ],
+              "cardinality": "one",
+              "direction": "output",
+              "id": "main",
+              "label": "输出产物",
+              "required": true
+            }
+          ],
+          "outputSchema": {
+            "additionalProperties": false,
+            "properties": {
+              "evidence": {
+                "description": "证据、假设和需要后续验证的信息",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "findings": {
+                "description": "行业位置分析 的关键发现",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "status": {
+                "description": "success 或 failed",
+                "type": "string"
+              },
+              "summary": {
+                "description": "面向下游节点的简明结论",
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "summary",
+              "findings",
+              "evidence"
+            ],
+            "type": "object"
+          },
+          "position": {
+            "x": 125.070268859223,
+            "y": 523.1127419174759
+          },
+          "task": "分析行业结构、竞争对手、增长驱动和公司相对位置。",
+          "status": "not_run"
+        },
+        {
+          "callableId": "stock-research-synthesis.codex",
+          "id": "fundamentals_synthesis_agent",
+          "input": {
+            "user_prompt": "并行汇总业务、财务、行业三路结果，形成下游估值和风险可消费的结论。"
+          },
+          "inputPorts": [
+            {
+              "artifactTypes": [
+                "artifact"
+              ],
+              "cardinality": "one",
+              "direction": "input",
+              "id": "business",
+              "label": "业务模式分析",
+              "required": true
+            },
+            {
+              "artifactTypes": [
+                "artifact"
+              ],
+              "cardinality": "one",
+              "direction": "input",
+              "id": "financials",
+              "label": "财务质量分析",
+              "required": true
+            },
+            {
+              "artifactTypes": [
+                "artifact"
+              ],
+              "cardinality": "one",
+              "direction": "input",
+              "id": "industry",
+              "label": "行业位置分析",
+              "required": true
+            }
+          ],
+          "kind": "Agent",
+          "name": "基本面汇总",
+          "outputPorts": [
+            {
+              "artifactTypes": [
+                "artifact"
+              ],
+              "cardinality": "one",
+              "direction": "output",
+              "id": "main",
+              "label": "输出产物",
+              "required": true
+            }
+          ],
+          "outputSchema": {
+            "additionalProperties": false,
+            "properties": {
+              "decision_factors": {
+                "description": "基本面汇总 输出给下游 workflow 的判断因子",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "open_questions": {
+                "description": "下游仍需处理的不确定性",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "status": {
+                "description": "success 或 failed",
+                "type": "string"
+              },
+              "summary": {
+                "description": "面向下游节点的简明结论",
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "summary",
+              "decision_factors",
+              "open_questions"
+            ],
+            "type": "object"
+          },
+          "position": {
+            "x": 485,
+            "y": 331.99999999999994
+          },
+          "task": "并行汇总业务、财务、行业三路结果，形成下游估值和风险可消费的结论。",
+          "status": "not_run"
+        },
+        {
+          "callableId": "stock-research-synthesis.codex",
+          "id": "fundamentals_evidence_agent",
+          "input": {
+            "user_prompt": "从基本面汇总中整理证据、假设和验证缺口，供最终报告追踪。"
+          },
+          "inputPorts": [
+            {
+              "artifactTypes": [
+                "artifact"
+              ],
+              "cardinality": "one",
+              "direction": "input",
+              "id": "main",
+              "label": "基本面汇总",
+              "required": true
+            }
+          ],
+          "kind": "Agent",
+          "name": "证据包整理",
+          "outputPorts": [
+            {
+              "artifactTypes": [
+                "artifact"
+              ],
+              "cardinality": "one",
+              "direction": "output",
+              "id": "main",
+              "label": "输出产物",
+              "required": true
+            }
+          ],
+          "outputSchema": {
+            "additionalProperties": false,
+            "properties": {
+              "decision_factors": {
+                "description": "证据包整理 输出给下游 workflow 的判断因子",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "open_questions": {
+                "description": "下游仍需处理的不确定性",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "status": {
+                "description": "success 或 failed",
+                "type": "string"
+              },
+              "summary": {
+                "description": "面向下游节点的简明结论",
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "summary",
+              "decision_factors",
+              "open_questions"
+            ],
+            "type": "object"
+          },
+          "position": {
+            "x": 833,
+            "y": 383.99999999999994
+          },
+          "task": "从基本面汇总中整理证据、假设和验证缺口，供最终报告追踪。",
+          "status": "not_run"
+        }
+      ],
+      "outputPorts": [
+        {
+          "artifactTypes": [
+            "artifact"
+          ],
+          "cardinality": "one",
+          "direction": "output",
+          "id": "main",
+          "label": "基本面结论",
+          "required": true
+        },
+        {
+          "artifactTypes": [
+            "artifact"
+          ],
+          "cardinality": "one",
+          "direction": "output",
+          "id": "evidence_pack",
+          "label": "基本面证据包",
+          "required": true
+        }
+      ],
+      "position": {
+        "x": 815.1047244959361,
+        "y": 343.2094489918725
+      },
+      "size": {
+        "height": 732,
+        "width": 1173
+      },
+      "title": "基本面工作流",
+      "warnings": [],
+      "workflowBodyKind": "inline_container",
+      "status": "not_run"
+    },
+    {
+      "directory": "workflows/demo/core_v2/valuation",
+      "id": "Valuation_Workflow",
+      "inputPorts": [
+        {
+          "artifactTypes": [
+            "artifact"
+          ],
+          "cardinality": "one",
+          "direction": "input",
+          "id": "fundamentals",
+          "label": "基本面结论",
+          "required": true
+        },
+        {
+          "artifactTypes": [
+            "artifact"
+          ],
+          "cardinality": "one",
+          "direction": "input",
+          "id": "constraints",
+          "label": "研究约束",
+          "required": true
+        }
+      ],
+      "internalEdges": [
+        {
+          "id": "data_Valuation_Workflow__workflow_inputs_fundamentals_valuation_model_agent_fundamentals",
+          "kind": "data",
+          "materialization": "copy",
+          "source": {
+            "portId": "fundamentals",
+            "workflowId": "Valuation_Workflow__workflow_inputs"
+          },
+          "target": {
+            "portId": "fundamentals",
+            "workflowId": "valuation_model_agent"
+          }
+        },
+        {
+          "id": "data_Valuation_Workflow__workflow_inputs_fundamentals_scenario_agent_fundamentals",
+          "kind": "data",
+          "materialization": "copy",
+          "source": {
+            "portId": "fundamentals",
+            "workflowId": "Valuation_Workflow__workflow_inputs"
+          },
+          "target": {
+            "portId": "fundamentals",
+            "workflowId": "scenario_agent"
+          }
+        },
+        {
+          "id": "data_Valuation_Workflow__workflow_inputs_constraints_scenario_agent_constraints",
+          "kind": "data",
+          "materialization": "copy",
+          "source": {
+            "portId": "constraints",
+            "workflowId": "Valuation_Workflow__workflow_inputs"
+          },
+          "target": {
+            "portId": "constraints",
+            "workflowId": "scenario_agent"
+          }
+        },
+        {
+          "condition": null,
+          "context": "none",
+          "id": "control_valuation_model_agent_valuation_synthesis_agent",
+          "kind": "control",
+          "source": {
+            "workflowId": "valuation_model_agent"
+          },
+          "target": {
+            "workflowId": "valuation_synthesis_agent"
+          }
+        },
+        {
+          "condition": null,
+          "context": "none",
+          "id": "control_scenario_agent_valuation_synthesis_agent",
+          "kind": "control",
+          "source": {
+            "workflowId": "scenario_agent"
+          },
+          "target": {
+            "workflowId": "valuation_synthesis_agent"
+          }
+        },
+        {
+          "id": "data_valuation_model_agent_main_valuation_synthesis_agent_valuation_model",
+          "kind": "data",
+          "materialization": "copy",
+          "source": {
+            "portId": "main",
+            "workflowId": "valuation_model_agent"
+          },
+          "target": {
+            "portId": "valuation_model",
+            "workflowId": "valuation_synthesis_agent"
+          }
+        },
+        {
+          "id": "data_scenario_agent_main_valuation_synthesis_agent_scenario_analysis",
+          "kind": "data",
+          "materialization": "copy",
+          "source": {
+            "portId": "main",
+            "workflowId": "scenario_agent"
+          },
+          "target": {
+            "portId": "scenario_analysis",
+            "workflowId": "valuation_synthesis_agent"
+          }
+        },
+        {
+          "id": "data_valuation_synthesis_agent_main_Valuation_Workflow__workflow_outputs_main",
+          "kind": "data",
+          "materialization": "copy",
+          "source": {
+            "portId": "main",
+            "workflowId": "valuation_synthesis_agent"
+          },
+          "target": {
+            "portId": "main",
+            "workflowId": "Valuation_Workflow__workflow_outputs"
+          }
+        },
+        {
+          "id": "data_scenario_agent_main_Valuation_Workflow__workflow_outputs_scenario_table",
+          "kind": "data",
+          "materialization": "copy",
+          "source": {
+            "portId": "main",
+            "workflowId": "scenario_agent"
+          },
+          "target": {
+            "portId": "scenario_table",
+            "workflowId": "Valuation_Workflow__workflow_outputs"
+          }
+        },
+        {
+          "condition": null,
+          "context": "none",
+          "id": "control_Valuation_Workflow__workflow_inputs_valuation_model_agent",
+          "kind": "control",
+          "source": {
+            "workflowId": "Valuation_Workflow__workflow_inputs"
+          },
+          "target": {
+            "workflowId": "valuation_model_agent"
+          }
+        },
+        {
+          "condition": null,
+          "context": "none",
+          "id": "control_Valuation_Workflow__workflow_inputs_scenario_agent",
+          "kind": "control",
+          "source": {
+            "workflowId": "Valuation_Workflow__workflow_inputs"
+          },
+          "target": {
+            "workflowId": "scenario_agent"
+          }
+        },
+        {
+          "condition": null,
+          "context": "none",
+          "id": "control_valuation_synthesis_agent_Valuation_Workflow__workflow_outputs",
+          "kind": "control",
+          "source": {
+            "workflowId": "valuation_synthesis_agent"
+          },
+          "target": {
+            "workflowId": "Valuation_Workflow__workflow_outputs"
+          }
+        }
+      ],
+      "internalNodes": [
+        {
+          "callableId": "stock-research-analyst.codex",
+          "id": "valuation_model_agent",
+          "input": {
+            "user_prompt": "基于基本面结论选择估值框架、关键假设和敏感变量。"
+          },
+          "inputPorts": [
+            {
+              "artifactTypes": [
+                "artifact"
+              ],
+              "cardinality": "one",
+              "direction": "input",
+              "id": "fundamentals",
+              "label": "基本面结论",
+              "required": true
+            }
+          ],
+          "kind": "Agent",
+          "name": "估值框架",
+          "outputPorts": [
+            {
+              "artifactTypes": [
+                "artifact"
+              ],
+              "cardinality": "one",
+              "direction": "output",
+              "id": "main",
+              "label": "输出产物",
+              "required": true
+            }
+          ],
+          "outputSchema": {
+            "additionalProperties": false,
+            "properties": {
+              "assumptions": {
+                "description": "估值或情景假设",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "sensitivities": {
+                "description": "关键敏感变量",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "status": {
+                "description": "success 或 failed",
+                "type": "string"
+              },
+              "summary": {
+                "description": "面向下游节点的简明结论",
+                "type": "string"
+              },
+              "valuation_view": {
+                "description": "估值或情景判断",
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "summary",
+              "assumptions",
+              "valuation_view"
+            ],
+            "type": "object"
+          },
+          "position": {
+            "x": 137,
+            "y": 146
+          },
+          "task": "基于基本面结论选择估值框架、关键假设和敏感变量。",
+          "status": "not_run"
+        },
+        {
+          "callableId": "stock-research-analyst.codex",
+          "id": "scenario_agent",
+          "input": {
+            "user_prompt": "并行构造 bull/base/bear 情景，说明每个情景成立条件。"
+          },
+          "inputPorts": [
+            {
+              "artifactTypes": [
+                "artifact"
+              ],
+              "cardinality": "one",
+              "direction": "input",
+              "id": "fundamentals",
+              "label": "基本面结论",
+              "required": true
+            },
+            {
+              "artifactTypes": [
+                "artifact"
+              ],
+              "cardinality": "one",
+              "direction": "input",
+              "id": "constraints",
+              "label": "研究约束",
+              "required": true
+            }
+          ],
+          "kind": "Agent",
+          "name": "情景分析",
+          "outputPorts": [
+            {
+              "artifactTypes": [
+                "artifact"
+              ],
+              "cardinality": "one",
+              "direction": "output",
+              "id": "main",
+              "label": "输出产物",
+              "required": true
+            }
+          ],
+          "outputSchema": {
+            "additionalProperties": false,
+            "properties": {
+              "assumptions": {
+                "description": "估值或情景假设",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "sensitivities": {
+                "description": "关键敏感变量",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "status": {
+                "description": "success 或 failed",
+                "type": "string"
+              },
+              "summary": {
+                "description": "面向下游节点的简明结论",
+                "type": "string"
+              },
+              "valuation_view": {
+                "description": "估值或情景判断",
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "summary",
+              "assumptions",
+              "valuation_view"
+            ],
+            "type": "object"
+          },
+          "position": {
+            "x": 137,
+            "y": 332
+          },
+          "task": "并行构造 bull/base/bear 情景，说明每个情景成立条件。",
+          "status": "not_run"
+        },
+        {
+          "callableId": "stock-research-synthesis.codex",
+          "id": "valuation_synthesis_agent",
+          "input": {
+            "user_prompt": "串行整合估值框架和情景分析，输出风险收益判断。"
+          },
+          "inputPorts": [
+            {
+              "artifactTypes": [
+                "artifact"
+              ],
+              "cardinality": "one",
+              "direction": "input",
+              "id": "valuation_model",
+              "label": "估值框架",
+              "required": true
+            },
+            {
+              "artifactTypes": [
+                "artifact"
+              ],
+              "cardinality": "one",
+              "direction": "input",
+              "id": "scenario_analysis",
+              "label": "情景分析",
+              "required": true
+            }
+          ],
+          "kind": "Agent",
+          "name": "估值汇总",
+          "outputPorts": [
+            {
+              "artifactTypes": [
+                "artifact"
+              ],
+              "cardinality": "one",
+              "direction": "output",
+              "id": "main",
+              "label": "输出产物",
+              "required": true
+            }
+          ],
+          "outputSchema": {
+            "additionalProperties": false,
+            "properties": {
+              "risk_reward": {
+                "description": "风险收益比判断",
+                "type": "string"
+              },
+              "status": {
+                "description": "success 或 failed",
+                "type": "string"
+              },
+              "summary": {
+                "description": "面向下游节点的简明结论",
+                "type": "string"
+              },
+              "uncertainty": {
+                "description": "主要不确定性",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "valuation_range": {
+                "description": "估值区间或相对估值判断",
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "summary",
+              "valuation_range",
+              "risk_reward"
+            ],
+            "type": "object"
+          },
+          "position": {
+            "x": 485,
+            "y": 156
+          },
+          "task": "串行整合估值框架和情景分析，输出风险收益判断。",
+          "status": "not_run"
+        }
+      ],
+      "outputPorts": [
+        {
+          "artifactTypes": [
+            "artifact"
+          ],
+          "cardinality": "one",
+          "direction": "output",
+          "id": "main",
+          "label": "估值结论",
+          "required": true
+        },
+        {
+          "artifactTypes": [
+            "artifact"
+          ],
+          "cardinality": "one",
+          "direction": "output",
+          "id": "scenario_table",
+          "label": "情景表",
+          "required": true
+        }
+      ],
+      "position": {
+        "x": 2081,
+        "y": 0
+      },
+      "size": {
+        "height": 546,
+        "width": 825
+      },
+      "title": "估值与情景工作流",
+      "warnings": [],
+      "workflowBodyKind": "inline_container",
+      "status": "not_run"
+    },
+    {
+      "directory": "workflows/demo/core_v2/risk_catalyst",
+      "id": "Risk_Catalyst_Workflow",
+      "inputPorts": [
+        {
+          "artifactTypes": [
+            "artifact"
+          ],
+          "cardinality": "one",
+          "direction": "input",
+          "id": "fundamentals",
+          "label": "基本面结论",
+          "required": true
+        },
+        {
+          "artifactTypes": [
+            "artifact"
+          ],
+          "cardinality": "one",
+          "direction": "input",
+          "id": "watchlist",
+          "label": "候选关注点",
+          "required": true
+        }
+      ],
+      "internalEdges": [
+        {
+          "id": "data_Risk_Catalyst_Workflow__workflow_inputs_fundamentals_macro_risk_agent_fundamentals",
+          "kind": "data",
+          "materialization": "copy",
+          "source": {
+            "portId": "fundamentals",
+            "workflowId": "Risk_Catalyst_Workflow__workflow_inputs"
+          },
+          "target": {
+            "portId": "fundamentals",
+            "workflowId": "macro_risk_agent"
+          }
+        },
+        {
+          "id": "data_Risk_Catalyst_Workflow__workflow_inputs_fundamentals_company_risk_agent_fundamentals",
+          "kind": "data",
+          "materialization": "copy",
+          "source": {
+            "portId": "fundamentals",
+            "workflowId": "Risk_Catalyst_Workflow__workflow_inputs"
+          },
+          "target": {
+            "portId": "fundamentals",
+            "workflowId": "company_risk_agent"
+          }
+        },
+        {
+          "id": "data_Risk_Catalyst_Workflow__workflow_inputs_fundamentals_catalyst_agent_fundamentals",
+          "kind": "data",
+          "materialization": "copy",
+          "source": {
+            "portId": "fundamentals",
+            "workflowId": "Risk_Catalyst_Workflow__workflow_inputs"
+          },
+          "target": {
+            "portId": "fundamentals",
+            "workflowId": "catalyst_agent"
+          }
+        },
+        {
+          "id": "data_Risk_Catalyst_Workflow__workflow_inputs_watchlist_catalyst_agent_watchlist",
+          "kind": "data",
+          "materialization": "copy",
+          "source": {
+            "portId": "watchlist",
+            "workflowId": "Risk_Catalyst_Workflow__workflow_inputs"
+          },
+          "target": {
+            "portId": "watchlist",
+            "workflowId": "catalyst_agent"
+          }
+        },
+        {
+          "condition": null,
+          "context": "none",
+          "id": "control_macro_risk_agent_risk_synthesis_agent",
+          "kind": "control",
+          "source": {
+            "workflowId": "macro_risk_agent"
+          },
+          "target": {
+            "workflowId": "risk_synthesis_agent"
+          }
+        },
+        {
+          "condition": null,
+          "context": "none",
+          "id": "control_company_risk_agent_risk_synthesis_agent",
+          "kind": "control",
+          "source": {
+            "workflowId": "company_risk_agent"
+          },
+          "target": {
+            "workflowId": "risk_synthesis_agent"
+          }
+        },
+        {
+          "condition": null,
+          "context": "none",
+          "id": "control_catalyst_agent_risk_synthesis_agent",
+          "kind": "control",
+          "source": {
+            "workflowId": "catalyst_agent"
+          },
+          "target": {
+            "workflowId": "risk_synthesis_agent"
+          }
+        },
+        {
+          "id": "data_macro_risk_agent_main_risk_synthesis_agent_macro_risks",
+          "kind": "data",
+          "materialization": "copy",
+          "source": {
+            "portId": "main",
+            "workflowId": "macro_risk_agent"
+          },
+          "target": {
+            "portId": "macro_risks",
+            "workflowId": "risk_synthesis_agent"
+          }
+        },
+        {
+          "id": "data_company_risk_agent_main_risk_synthesis_agent_company_risks",
+          "kind": "data",
+          "materialization": "copy",
+          "source": {
+            "portId": "main",
+            "workflowId": "company_risk_agent"
+          },
+          "target": {
+            "portId": "company_risks",
+            "workflowId": "risk_synthesis_agent"
+          }
+        },
+        {
+          "id": "data_catalyst_agent_main_risk_synthesis_agent_catalysts",
+          "kind": "data",
+          "materialization": "copy",
+          "source": {
+            "portId": "main",
+            "workflowId": "catalyst_agent"
+          },
+          "target": {
+            "portId": "catalysts",
+            "workflowId": "risk_synthesis_agent"
+          }
+        },
+        {
+          "id": "data_risk_synthesis_agent_main_Risk_Catalyst_Workflow__workflow_outputs_main",
+          "kind": "data",
+          "materialization": "copy",
+          "source": {
+            "portId": "main",
+            "workflowId": "risk_synthesis_agent"
+          },
+          "target": {
+            "portId": "main",
+            "workflowId": "Risk_Catalyst_Workflow__workflow_outputs"
+          }
+        },
+        {
+          "id": "data_catalyst_agent_main_Risk_Catalyst_Workflow__workflow_outputs_watchlist",
+          "kind": "data",
+          "materialization": "copy",
+          "source": {
+            "portId": "main",
+            "workflowId": "catalyst_agent"
+          },
+          "target": {
+            "portId": "watchlist",
+            "workflowId": "Risk_Catalyst_Workflow__workflow_outputs"
+          }
+        },
+        {
+          "condition": null,
+          "context": "none",
+          "id": "control_Risk_Catalyst_Workflow__workflow_inputs_macro_risk_agent",
+          "kind": "control",
+          "source": {
+            "workflowId": "Risk_Catalyst_Workflow__workflow_inputs"
+          },
+          "target": {
+            "workflowId": "macro_risk_agent"
+          }
+        },
+        {
+          "condition": null,
+          "context": "none",
+          "id": "control_Risk_Catalyst_Workflow__workflow_inputs_company_risk_agent",
+          "kind": "control",
+          "source": {
+            "workflowId": "Risk_Catalyst_Workflow__workflow_inputs"
+          },
+          "target": {
+            "workflowId": "company_risk_agent"
+          }
+        },
+        {
+          "condition": null,
+          "context": "none",
+          "id": "control_Risk_Catalyst_Workflow__workflow_inputs_catalyst_agent",
+          "kind": "control",
+          "source": {
+            "workflowId": "Risk_Catalyst_Workflow__workflow_inputs"
+          },
+          "target": {
+            "workflowId": "catalyst_agent"
+          }
+        },
+        {
+          "condition": null,
+          "context": "none",
+          "id": "control_risk_synthesis_agent_Risk_Catalyst_Workflow__workflow_outputs",
+          "kind": "control",
+          "source": {
+            "workflowId": "risk_synthesis_agent"
+          },
+          "target": {
+            "workflowId": "Risk_Catalyst_Workflow__workflow_outputs"
+          }
+        }
+      ],
+      "internalNodes": [
+        {
+          "callableId": "stock-research-analyst.codex",
+          "id": "macro_risk_agent",
+          "input": {
+            "user_prompt": "并行识别利率、监管、汇率、政策和周期风险。"
+          },
+          "inputPorts": [
+            {
+              "artifactTypes": [
+                "artifact"
+              ],
+              "cardinality": "one",
+              "direction": "input",
+              "id": "fundamentals",
+              "label": "基本面结论",
+              "required": true
+            }
+          ],
+          "kind": "Agent",
+          "name": "宏观与监管风险",
+          "outputPorts": [
+            {
+              "artifactTypes": [
+                "artifact"
+              ],
+              "cardinality": "one",
+              "direction": "output",
+              "id": "main",
+              "label": "输出产物",
+              "required": true
+            }
+          ],
+          "outputSchema": {
+            "additionalProperties": false,
+            "properties": {
+              "risks": {
+                "description": "风险项",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "severity_notes": {
+                "description": "风险严重程度或触发条件",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "status": {
+                "description": "success 或 failed",
+                "type": "string"
+              },
+              "summary": {
+                "description": "面向下游节点的简明结论",
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "summary",
+              "risks"
+            ],
+            "type": "object"
+          },
+          "position": {
+            "x": 137,
+            "y": 146
+          },
+          "task": "并行识别利率、监管、汇率、政策和周期风险。",
+          "status": "not_run"
+        },
+        {
+          "callableId": "stock-research-analyst.codex",
+          "id": "company_risk_agent",
+          "input": {
+            "user_prompt": "并行识别竞争、执行、客户集中度、管理层和资本配置风险。"
+          },
+          "inputPorts": [
+            {
+              "artifactTypes": [
+                "artifact"
+              ],
+              "cardinality": "one",
+              "direction": "input",
+              "id": "fundamentals",
+              "label": "基本面结论",
+              "required": true
+            }
+          ],
+          "kind": "Agent",
+          "name": "公司特有风险",
+          "outputPorts": [
+            {
+              "artifactTypes": [
+                "artifact"
+              ],
+              "cardinality": "one",
+              "direction": "output",
+              "id": "main",
+              "label": "输出产物",
+              "required": true
+            }
+          ],
+          "outputSchema": {
+            "additionalProperties": false,
+            "properties": {
+              "risks": {
+                "description": "风险项",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "severity_notes": {
+                "description": "风险严重程度或触发条件",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "status": {
+                "description": "success 或 failed",
+                "type": "string"
+              },
+              "summary": {
+                "description": "面向下游节点的简明结论",
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "summary",
+              "risks"
+            ],
+            "type": "object"
+          },
+          "position": {
+            "x": 137,
+            "y": 332
+          },
+          "task": "并行识别竞争、执行、客户集中度、管理层和资本配置风险。",
+          "status": "not_run"
+        },
+        {
+          "callableId": "stock-research-analyst.codex",
+          "id": "catalyst_agent",
+          "input": {
+            "user_prompt": "并行识别未来 6-12 个月可能改变预期的正负催化剂。"
+          },
+          "inputPorts": [
+            {
+              "artifactTypes": [
+                "artifact"
+              ],
+              "cardinality": "one",
+              "direction": "input",
+              "id": "fundamentals",
+              "label": "基本面结论",
+              "required": true
+            },
+            {
+              "artifactTypes": [
+                "artifact"
+              ],
+              "cardinality": "one",
+              "direction": "input",
+              "id": "watchlist",
+              "label": "候选关注点",
+              "required": true
+            }
+          ],
+          "kind": "Agent",
+          "name": "催化剂扫描",
+          "outputPorts": [
+            {
+              "artifactTypes": [
+                "artifact"
+              ],
+              "cardinality": "one",
+              "direction": "output",
+              "id": "main",
+              "label": "输出产物",
+              "required": true
+            }
+          ],
+          "outputSchema": {
+            "additionalProperties": false,
+            "properties": {
+              "negative_catalysts": {
+                "description": "负向催化剂",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "positive_catalysts": {
+                "description": "正向催化剂",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "status": {
+                "description": "success 或 failed",
+                "type": "string"
+              },
+              "summary": {
+                "description": "面向下游节点的简明结论",
+                "type": "string"
+              },
+              "watchlist": {
+                "description": "需要持续跟踪的事件",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "status",
+              "summary",
+              "positive_catalysts",
+              "negative_catalysts"
+            ],
+            "type": "object"
+          },
+          "position": {
+            "x": 137,
+            "y": 518
+          },
+          "task": "并行识别未来 6-12 个月可能改变预期的正负催化剂。",
+          "status": "not_run"
+        },
+        {
+          "callableId": "stock-research-synthesis.codex",
+          "id": "risk_synthesis_agent",
+          "input": {
+            "user_prompt": "汇总风险与催化剂，形成最终报告需要的风险矩阵。"
+          },
+          "inputPorts": [
+            {
+              "artifactTypes": [
+                "artifact"
+              ],
+              "cardinality": "one",
+              "direction": "input",
+              "id": "macro_risks",
+              "label": "宏观风险",
+              "required": true
+            },
+            {
+              "artifactTypes": [
+                "artifact"
+              ],
+              "cardinality": "one",
+              "direction": "input",
+              "id": "company_risks",
+              "label": "公司风险",
+              "required": true
+            },
+            {
+              "artifactTypes": [
+                "artifact"
+              ],
+              "cardinality": "one",
+              "direction": "input",
+              "id": "catalysts",
+              "label": "催化剂",
+              "required": true
+            }
+          ],
+          "kind": "Agent",
+          "name": "风险催化剂汇总",
+          "outputPorts": [
+            {
+              "artifactTypes": [
+                "artifact"
+              ],
+              "cardinality": "one",
+              "direction": "output",
+              "id": "main",
+              "label": "输出产物",
+              "required": true
+            }
+          ],
+          "outputSchema": {
+            "additionalProperties": false,
+            "properties": {
+              "catalyst_watchlist": {
+                "description": "催化剂跟踪清单",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "mitigation_notes": {
+                "description": "风险缓释或验证方式",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "risk_matrix": {
+                "description": "整合后的风险矩阵",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "status": {
+                "description": "success 或 failed",
+                "type": "string"
+              },
+              "summary": {
+                "description": "面向下游节点的简明结论",
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "summary",
+              "risk_matrix",
+              "catalyst_watchlist"
+            ],
+            "type": "object"
+          },
+          "position": {
+            "x": 485,
+            "y": 332
+          },
+          "task": "汇总风险与催化剂，形成最终报告需要的风险矩阵。",
+          "status": "not_run"
+        }
+      ],
+      "outputPorts": [
+        {
+          "artifactTypes": [
+            "artifact"
+          ],
+          "cardinality": "one",
+          "direction": "output",
+          "id": "main",
+          "label": "风险结论",
+          "required": true
+        },
+        {
+          "artifactTypes": [
+            "artifact"
+          ],
+          "cardinality": "one",
+          "direction": "output",
+          "id": "watchlist",
+          "label": "催化剂跟踪清单",
+          "required": true
+        }
+      ],
+      "position": {
+        "x": 2081,
+        "y": 757
+      },
+      "size": {
+        "height": 732,
+        "width": 825
+      },
+      "title": "风险与催化剂工作流",
+      "warnings": [],
+      "workflowBodyKind": "inline_container",
+      "status": "not_run"
+    },
+    {
+      "directory": "workflows/demo/core_v2/report",
+      "id": "Report_Workflow",
+      "inputPorts": [
+        {
+          "artifactTypes": [
+            "artifact"
+          ],
+          "cardinality": "one",
+          "direction": "input",
+          "id": "fundamentals",
+          "label": "基本面结论",
+          "required": true
+        },
+        {
+          "artifactTypes": [
+            "artifact"
+          ],
+          "cardinality": "one",
+          "direction": "input",
+          "id": "valuation",
+          "label": "估值结论",
+          "required": true
+        },
+        {
+          "artifactTypes": [
+            "artifact"
+          ],
+          "cardinality": "one",
+          "direction": "input",
+          "id": "risk",
+          "label": "风险结论",
+          "required": true
+        },
+        {
+          "artifactTypes": [
+            "artifact"
+          ],
+          "cardinality": "one",
+          "direction": "input",
+          "id": "evidence_pack",
+          "label": "证据包",
+          "required": true
+        }
+      ],
+      "internalEdges": [
+        {
+          "id": "data_Report_Workflow__workflow_inputs_fundamentals_thesis_writer_agent_fundamentals",
+          "kind": "data",
+          "materialization": "copy",
+          "source": {
+            "portId": "fundamentals",
+            "workflowId": "Report_Workflow__workflow_inputs"
+          },
+          "target": {
+            "portId": "fundamentals",
+            "workflowId": "thesis_writer_agent"
+          }
+        },
+        {
+          "id": "data_Report_Workflow__workflow_inputs_valuation_thesis_writer_agent_valuation",
+          "kind": "data",
+          "materialization": "copy",
+          "source": {
+            "portId": "valuation",
+            "workflowId": "Report_Workflow__workflow_inputs"
+          },
+          "target": {
+            "portId": "valuation",
+            "workflowId": "thesis_writer_agent"
+          }
+        },
+        {
+          "id": "data_Report_Workflow__workflow_inputs_risk_thesis_writer_agent_risk",
+          "kind": "data",
+          "materialization": "copy",
+          "source": {
+            "portId": "risk",
+            "workflowId": "Report_Workflow__workflow_inputs"
+          },
+          "target": {
+            "portId": "risk",
+            "workflowId": "thesis_writer_agent"
+          }
+        },
+        {
+          "id": "data_Report_Workflow__workflow_inputs_evidence_pack_evidence_mapper_agent_evidence_pack",
+          "kind": "data",
+          "materialization": "copy",
+          "source": {
+            "portId": "evidence_pack",
+            "workflowId": "Report_Workflow__workflow_inputs"
+          },
+          "target": {
+            "portId": "evidence_pack",
+            "workflowId": "evidence_mapper_agent"
+          }
+        },
+        {
+          "condition": null,
+          "context": "none",
+          "id": "control_thesis_writer_agent_report_compiler_agent",
+          "kind": "control",
+          "source": {
+            "workflowId": "thesis_writer_agent"
+          },
+          "target": {
+            "workflowId": "report_compiler_agent"
+          }
+        },
+        {
+          "condition": null,
+          "context": "none",
+          "id": "control_evidence_mapper_agent_report_compiler_agent",
+          "kind": "control",
+          "source": {
+            "workflowId": "evidence_mapper_agent"
+          },
+          "target": {
+            "workflowId": "report_compiler_agent"
+          }
+        },
+        {
+          "id": "data_thesis_writer_agent_main_report_compiler_agent_thesis",
+          "kind": "data",
+          "materialization": "copy",
+          "source": {
+            "portId": "main",
+            "workflowId": "thesis_writer_agent"
+          },
+          "target": {
+            "portId": "thesis",
+            "workflowId": "report_compiler_agent"
+          }
+        },
+        {
+          "id": "data_evidence_mapper_agent_main_report_compiler_agent_evidence",
+          "kind": "data",
+          "materialization": "copy",
+          "source": {
+            "portId": "main",
+            "workflowId": "evidence_mapper_agent"
+          },
+          "target": {
+            "portId": "evidence",
+            "workflowId": "report_compiler_agent"
+          }
+        },
+        {
+          "id": "data_report_compiler_agent_main_Report_Workflow__workflow_outputs_main",
+          "kind": "data",
+          "materialization": "copy",
+          "source": {
+            "portId": "main",
+            "workflowId": "report_compiler_agent"
+          },
+          "target": {
+            "portId": "main",
+            "workflowId": "Report_Workflow__workflow_outputs"
+          }
+        },
+        {
+          "id": "data_evidence_mapper_agent_main_Report_Workflow__workflow_outputs_appendix",
+          "kind": "data",
+          "materialization": "copy",
+          "source": {
+            "portId": "main",
+            "workflowId": "evidence_mapper_agent"
+          },
+          "target": {
+            "portId": "appendix",
+            "workflowId": "Report_Workflow__workflow_outputs"
+          }
+        },
+        {
+          "condition": null,
+          "context": "none",
+          "id": "control_Report_Workflow__workflow_inputs_thesis_writer_agent",
+          "kind": "control",
+          "source": {
+            "workflowId": "Report_Workflow__workflow_inputs"
+          },
+          "target": {
+            "workflowId": "thesis_writer_agent"
+          }
+        },
+        {
+          "condition": null,
+          "context": "none",
+          "id": "control_Report_Workflow__workflow_inputs_evidence_mapper_agent",
+          "kind": "control",
+          "source": {
+            "workflowId": "Report_Workflow__workflow_inputs"
+          },
+          "target": {
+            "workflowId": "evidence_mapper_agent"
+          }
+        },
+        {
+          "condition": null,
+          "context": "none",
+          "id": "control_report_compiler_agent_Report_Workflow__workflow_outputs",
+          "kind": "control",
+          "source": {
+            "workflowId": "report_compiler_agent"
+          },
+          "target": {
+            "workflowId": "Report_Workflow__workflow_outputs"
+          }
+        }
+      ],
+      "internalNodes": [
+        {
+          "callableId": "stock-report-writer.codex",
+          "id": "thesis_writer_agent",
+          "input": {
+            "user_prompt": "整合基本面、估值和风险，撰写核心投资论点。"
+          },
+          "inputPorts": [
+            {
+              "artifactTypes": [
+                "artifact"
+              ],
+              "cardinality": "one",
+              "direction": "input",
+              "id": "fundamentals",
+              "label": "基本面结论",
+              "required": true
+            },
+            {
+              "artifactTypes": [
+                "artifact"
+              ],
+              "cardinality": "one",
+              "direction": "input",
+              "id": "valuation",
+              "label": "估值结论",
+              "required": true
+            },
+            {
+              "artifactTypes": [
+                "artifact"
+              ],
+              "cardinality": "one",
+              "direction": "input",
+              "id": "risk",
+              "label": "风险结论",
+              "required": true
+            }
+          ],
+          "kind": "Agent",
+          "name": "投资论点撰写",
+          "outputPorts": [
+            {
+              "artifactTypes": [
+                "artifact"
+              ],
+              "cardinality": "one",
+              "direction": "output",
+              "id": "main",
+              "label": "输出产物",
+              "required": true
+            }
+          ],
+          "outputSchema": {
+            "additionalProperties": false,
+            "properties": {
+              "evidence_gaps": {
+                "description": "证据缺口和免责声明",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "report_sections": {
+                "description": "最终报告章节摘要",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "status": {
+                "description": "success 或 failed",
+                "type": "string"
+              },
+              "summary": {
+                "description": "面向下游节点的简明结论",
+                "type": "string"
+              },
+              "thesis": {
+                "description": "投资论点",
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "summary",
+              "thesis",
+              "report_sections"
+            ],
+            "type": "object"
+          },
+          "position": {
+            "x": 137,
+            "y": 146
+          },
+          "task": "整合基本面、估值和风险，撰写核心投资论点。",
+          "status": "not_run"
+        },
+        {
+          "callableId": "stock-report-writer.codex",
+          "id": "evidence_mapper_agent",
+          "input": {
+            "user_prompt": "并行整理证据包和报告章节之间的追踪关系。"
+          },
+          "inputPorts": [
+            {
+              "artifactTypes": [
+                "artifact"
+              ],
+              "cardinality": "one",
+              "direction": "input",
+              "id": "evidence_pack",
+              "label": "证据包",
+              "required": true
+            }
+          ],
+          "kind": "Agent",
+          "name": "证据追踪整理",
+          "outputPorts": [
+            {
+              "artifactTypes": [
+                "artifact"
+              ],
+              "cardinality": "one",
+              "direction": "output",
+              "id": "main",
+              "label": "输出产物",
+              "required": true
+            }
+          ],
+          "outputSchema": {
+            "additionalProperties": false,
+            "properties": {
+              "action_items": {
+                "description": "发布前行动项",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "evidence_map": {
+                "description": "章节到上游产物的追踪关系",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "report_sections": {
+                "description": "最终报告章节",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "status": {
+                "description": "success 或 failed",
+                "type": "string"
+              },
+              "summary": {
+                "description": "面向下游节点的简明结论",
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "summary",
+              "report_sections",
+              "evidence_map"
+            ],
+            "type": "object"
+          },
+          "position": {
+            "x": 137,
+            "y": 332
+          },
+          "task": "并行整理证据包和报告章节之间的追踪关系。",
+          "status": "not_run"
+        },
+        {
+          "callableId": "stock-report-writer.codex",
+          "id": "report_compiler_agent",
+          "input": {
+            "user_prompt": "串行合成投资论点和证据追踪，输出可评审报告。"
+          },
+          "inputPorts": [
+            {
+              "artifactTypes": [
+                "artifact"
+              ],
+              "cardinality": "one",
+              "direction": "input",
+              "id": "thesis",
+              "label": "投资论点",
+              "required": true
+            },
+            {
+              "artifactTypes": [
+                "artifact"
+              ],
+              "cardinality": "one",
+              "direction": "input",
+              "id": "evidence",
+              "label": "证据追踪",
+              "required": true
+            }
+          ],
+          "kind": "Agent",
+          "name": "报告合成",
+          "outputPorts": [
+            {
+              "artifactTypes": [
+                "artifact"
+              ],
+              "cardinality": "one",
+              "direction": "output",
+              "id": "main",
+              "label": "输出产物",
+              "required": true
+            }
+          ],
+          "outputSchema": {
+            "additionalProperties": false,
+            "properties": {
+              "action_items": {
+                "description": "发布前行动项",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "evidence_map": {
+                "description": "章节到上游产物的追踪关系",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "report_sections": {
+                "description": "最终报告章节",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "status": {
+                "description": "success 或 failed",
+                "type": "string"
+              },
+              "summary": {
+                "description": "面向下游节点的简明结论",
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "summary",
+              "report_sections",
+              "evidence_map"
+            ],
+            "type": "object"
+          },
+          "position": {
+            "x": 485,
+            "y": 156
+          },
+          "task": "串行合成投资论点和证据追踪，输出可评审报告。",
+          "status": "not_run"
+        }
+      ],
+      "outputPorts": [
+        {
+          "artifactTypes": [
+            "artifact"
+          ],
+          "cardinality": "one",
+          "direction": "output",
+          "id": "main",
+          "label": "投资调研报告",
+          "required": true
+        },
+        {
+          "artifactTypes": [
+            "artifact"
+          ],
+          "cardinality": "one",
+          "direction": "output",
+          "id": "appendix",
+          "label": "证据附录",
+          "required": true
+        }
+      ],
+      "position": {
+        "x": 3002,
+        "y": 220
+      },
+      "size": {
+        "height": 546,
+        "width": 825
+      },
+      "title": "报告生成工作流",
+      "warnings": [],
+      "workflowBodyKind": "inline_container",
+      "status": "not_run"
+    },
+    {
+      "callableId": "stock-publication-reviewer.codex",
+      "codexExecutionMode": "default",
+      "directory": "workflows/demo/Final_Review_Agent",
+      "id": "Final_Review_Agent",
+      "inputPorts": [
+        {
+          "artifactTypes": [
+            "artifact"
+          ],
+          "cardinality": "one",
+          "direction": "input",
+          "id": "report",
+          "label": "投资调研报告",
+          "required": true
+        },
+        {
+          "artifactTypes": [
+            "artifact"
+          ],
+          "cardinality": "one",
+          "direction": "input",
+          "id": "valuation",
+          "label": "估值结论",
+          "required": true
+        },
+        {
+          "artifactTypes": [
+            "artifact"
+          ],
+          "cardinality": "one",
+          "direction": "input",
+          "id": "risk_watchlist",
+          "label": "风险催化剂清单",
+          "required": true
+        },
+        {
+          "artifactTypes": [
+            "artifact"
+          ],
+          "cardinality": "one",
+          "direction": "input",
+          "id": "evidence_appendix",
+          "label": "证据附录",
+          "required": true
+        }
+      ],
+      "internalEdges": [],
+      "internalNodes": [],
+      "outputPorts": [
+        {
+          "artifactTypes": [
+            "artifact"
+          ],
+          "cardinality": "one",
+          "direction": "output",
+          "id": "main",
+          "label": "发布评审结论",
+          "required": true
+        },
+        {
+          "artifactTypes": [
+            "artifact"
+          ],
+          "cardinality": "one",
+          "direction": "output",
+          "id": "action_items",
+          "label": "后续行动项",
+          "required": true
+        }
+      ],
+      "outputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "action_items": {
+            "description": "发布前后需要执行的行动项",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "readiness": {
+            "description": "报告是否可发布，以及原因",
+            "type": "string"
+          },
+          "required_followups": {
+            "description": "发布前仍需补充的检查项",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "status": {
+            "description": "success 或 failed",
+            "type": "string"
+          },
+          "summary": {
+            "description": "面向下游节点的简明结论",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "summary",
+          "readiness",
+          "required_followups"
+        ],
+        "type": "object"
+      },
+      "position": {
+        "x": 3923,
+        "y": 791.5
+      },
+      "size": {
+        "height": 150,
+        "width": 310
+      },
+      "sourceInput": {
+        "user_prompt": "接收多个 workflow 输出，检查报告、估值、风险和证据链是否一致。"
+      },
+      "sourceKind": "agent_session",
+      "title": "最终发布评审",
+      "warnings": [],
+      "status": "not_run"
+    }
+  ],
+  "edges": [
+    {
+      "condition": null,
+      "context": "none",
+      "id": "control_Market_Context_Agent_Target_Profile_Agent",
+      "kind": "control",
+      "source": {
+        "workflowId": "Market_Context_Agent"
+      },
+      "target": {
+        "workflowId": "Target_Profile_Agent"
+      }
+    },
+    {
+      "id": "data_Market_Context_Agent_main_Target_Profile_Agent_context",
+      "kind": "data",
+      "materialization": "copy",
+      "source": {
+        "portId": "main",
+        "workflowId": "Market_Context_Agent"
+      },
+      "target": {
+        "portId": "context",
+        "workflowId": "Target_Profile_Agent"
+      }
+    },
+    {
+      "condition": null,
+      "context": "none",
+      "id": "control_Target_Profile_Agent_Fundamentals_Workflow",
+      "kind": "control",
+      "source": {
+        "workflowId": "Target_Profile_Agent"
+      },
+      "target": {
+        "workflowId": "Fundamentals_Workflow"
+      }
+    },
+    {
+      "id": "data_Target_Profile_Agent_main_Fundamentals_Workflow_target",
+      "kind": "data",
+      "materialization": "copy",
+      "source": {
+        "portId": "main",
+        "workflowId": "Target_Profile_Agent"
+      },
+      "target": {
+        "portId": "target",
+        "workflowId": "Fundamentals_Workflow"
+      }
+    },
+    {
+      "id": "data_Market_Context_Agent_main_Fundamentals_Workflow_context",
+      "kind": "data",
+      "materialization": "copy",
+      "source": {
+        "portId": "main",
+        "workflowId": "Market_Context_Agent"
+      },
+      "target": {
+        "portId": "context",
+        "workflowId": "Fundamentals_Workflow"
+      }
+    },
+    {
+      "condition": null,
+      "context": "none",
+      "id": "control_Fundamentals_Workflow_Valuation_Workflow",
+      "kind": "control",
+      "source": {
+        "workflowId": "Fundamentals_Workflow"
+      },
+      "target": {
+        "workflowId": "Valuation_Workflow"
+      }
+    },
+    {
+      "condition": null,
+      "context": "none",
+      "id": "control_Fundamentals_Workflow_Risk_Catalyst_Workflow",
+      "kind": "control",
+      "source": {
+        "workflowId": "Fundamentals_Workflow"
+      },
+      "target": {
+        "workflowId": "Risk_Catalyst_Workflow"
+      }
+    },
+    {
+      "id": "data_Fundamentals_Workflow_main_Valuation_Workflow_fundamentals",
+      "kind": "data",
+      "materialization": "copy",
+      "source": {
+        "portId": "main",
+        "workflowId": "Fundamentals_Workflow"
+      },
+      "target": {
+        "portId": "fundamentals",
+        "workflowId": "Valuation_Workflow"
+      }
+    },
+    {
+      "id": "data_Target_Profile_Agent_constraints_Valuation_Workflow_constraints",
+      "kind": "data",
+      "materialization": "copy",
+      "source": {
+        "portId": "constraints",
+        "workflowId": "Target_Profile_Agent"
+      },
+      "target": {
+        "portId": "constraints",
+        "workflowId": "Valuation_Workflow"
+      }
+    },
+    {
+      "id": "data_Fundamentals_Workflow_main_Risk_Catalyst_Workflow_fundamentals",
+      "kind": "data",
+      "materialization": "copy",
+      "source": {
+        "portId": "main",
+        "workflowId": "Fundamentals_Workflow"
+      },
+      "target": {
+        "portId": "fundamentals",
+        "workflowId": "Risk_Catalyst_Workflow"
+      }
+    },
+    {
+      "id": "data_Market_Context_Agent_watchlist_Risk_Catalyst_Workflow_watchlist",
+      "kind": "data",
+      "materialization": "copy",
+      "source": {
+        "portId": "watchlist",
+        "workflowId": "Market_Context_Agent"
+      },
+      "target": {
+        "portId": "watchlist",
+        "workflowId": "Risk_Catalyst_Workflow"
+      }
+    },
+    {
+      "condition": null,
+      "context": "none",
+      "id": "control_Valuation_Workflow_Report_Workflow",
+      "kind": "control",
+      "source": {
+        "workflowId": "Valuation_Workflow"
+      },
+      "target": {
+        "workflowId": "Report_Workflow"
+      }
+    },
+    {
+      "condition": null,
+      "context": "none",
+      "id": "control_Risk_Catalyst_Workflow_Report_Workflow",
+      "kind": "control",
+      "source": {
+        "workflowId": "Risk_Catalyst_Workflow"
+      },
+      "target": {
+        "workflowId": "Report_Workflow"
+      }
+    },
+    {
+      "id": "data_Fundamentals_Workflow_main_Report_Workflow_fundamentals",
+      "kind": "data",
+      "materialization": "copy",
+      "source": {
+        "portId": "main",
+        "workflowId": "Fundamentals_Workflow"
+      },
+      "target": {
+        "portId": "fundamentals",
+        "workflowId": "Report_Workflow"
+      }
+    },
+    {
+      "id": "data_Fundamentals_Workflow_evidence_pack_Report_Workflow_evidence_pack",
+      "kind": "data",
+      "materialization": "copy",
+      "source": {
+        "portId": "evidence_pack",
+        "workflowId": "Fundamentals_Workflow"
+      },
+      "target": {
+        "portId": "evidence_pack",
+        "workflowId": "Report_Workflow"
+      }
+    },
+    {
+      "id": "data_Valuation_Workflow_main_Report_Workflow_valuation",
+      "kind": "data",
+      "materialization": "copy",
+      "source": {
+        "portId": "main",
+        "workflowId": "Valuation_Workflow"
+      },
+      "target": {
+        "portId": "valuation",
+        "workflowId": "Report_Workflow"
+      }
+    },
+    {
+      "id": "data_Risk_Catalyst_Workflow_main_Report_Workflow_risk",
+      "kind": "data",
+      "materialization": "copy",
+      "source": {
+        "portId": "main",
+        "workflowId": "Risk_Catalyst_Workflow"
+      },
+      "target": {
+        "portId": "risk",
+        "workflowId": "Report_Workflow"
+      }
+    },
+    {
+      "condition": null,
+      "context": "none",
+      "id": "control_Report_Workflow_Final_Review_Agent",
+      "kind": "control",
+      "source": {
+        "workflowId": "Report_Workflow"
+      },
+      "target": {
+        "workflowId": "Final_Review_Agent"
+      }
+    },
+    {
+      "id": "data_Report_Workflow_main_Final_Review_Agent_report",
+      "kind": "data",
+      "materialization": "copy",
+      "source": {
+        "portId": "main",
+        "workflowId": "Report_Workflow"
+      },
+      "target": {
+        "portId": "report",
+        "workflowId": "Final_Review_Agent"
+      }
+    },
+    {
+      "id": "data_Valuation_Workflow_main_Final_Review_Agent_valuation",
+      "kind": "data",
+      "materialization": "copy",
+      "source": {
+        "portId": "main",
+        "workflowId": "Valuation_Workflow"
+      },
+      "target": {
+        "portId": "valuation",
+        "workflowId": "Final_Review_Agent"
+      }
+    },
+    {
+      "id": "data_Risk_Catalyst_Workflow_watchlist_Final_Review_Agent_risk_watchlist",
+      "kind": "data",
+      "materialization": "copy",
+      "source": {
+        "portId": "watchlist",
+        "workflowId": "Risk_Catalyst_Workflow"
+      },
+      "target": {
+        "portId": "risk_watchlist",
+        "workflowId": "Final_Review_Agent"
+      }
+    },
+    {
+      "id": "data_Report_Workflow_appendix_Final_Review_Agent_evidence_appendix",
+      "kind": "data",
+      "materialization": "copy",
+      "source": {
+        "portId": "appendix",
+        "workflowId": "Report_Workflow"
+      },
+      "target": {
+        "portId": "evidence_appendix",
+        "workflowId": "Final_Review_Agent"
+      }
+    }
+  ]
+}

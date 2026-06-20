@@ -16,7 +16,6 @@ type HarnessState = {
   tasks: WorkbenchTask[];
   activeTaskId: string;
   canvas: WorkspaceCanvasModel;
-  sourceGraph: WorkflowGraph;
   selection: CanvasSelection;
   focusedWorkflowId: string | null;
   openedExternalWorkflow: boolean;
@@ -43,7 +42,6 @@ function Harness({ initialTasks }: { initialTasks: WorkbenchTask[] }) {
   const [tasks, setTasks] = useState(initialTasks);
   const [activeTaskId, setActiveTaskId] = useState(initialTasks[0].taskId);
   const [canvas, setCanvas] = useState(initialTasks[0].canvas);
-  const [sourceGraph, setSourceGraph] = useState(() => canvasToWorkflowGraph(initialTasks[0].canvas));
   const [selection, setSelection] = useState<CanvasSelection>({
     type: 'task_canvas',
     taskId: initialTasks[0].taskId,
@@ -52,7 +50,7 @@ function Harness({ initialTasks }: { initialTasks: WorkbenchTask[] }) {
   const [openedExternalWorkflow, setOpenedExternalWorkflow] = useState(false);
   const [message, setMessage] = useState('');
   const [layoutSyncVersion, setLayoutSyncVersion] = useState(0);
-  const graphRef = useRef(sourceGraph);
+  const graphRef = useRef(canvasToWorkflowGraph(initialTasks[0].canvas));
 
   latestActions = useWorkbenchTaskActions({
     tasks,
@@ -60,7 +58,6 @@ function Harness({ initialTasks }: { initialTasks: WorkbenchTask[] }) {
     graphRef,
     setTasks,
     setActiveTaskId,
-    setSourceGraph,
     setCanvas,
     setSelection,
     setFocusedWorkflowId,
@@ -78,7 +75,6 @@ function Harness({ initialTasks }: { initialTasks: WorkbenchTask[] }) {
     tasks,
     activeTaskId,
     canvas,
-    sourceGraph,
     selection,
     focusedWorkflowId,
     openedExternalWorkflow,

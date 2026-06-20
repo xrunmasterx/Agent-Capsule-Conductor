@@ -330,6 +330,62 @@ describe('flowProjection', () => {
     );
   });
 
+  test('projects run overlay statuses without mutating canvas state', () => {
+    const canvas = canvasFixture();
+    const nodes = toFlowNodes(
+      canvas,
+      taskSelection,
+      {},
+      () => {},
+      () => {},
+      () => {},
+      () => {},
+      () => {},
+      () => {},
+      true,
+      true,
+      false,
+      () => {},
+      () => {},
+      () => {},
+      'control',
+      'all',
+      null,
+      () => {},
+      {
+        runId: 'run_1',
+        scope: 'task',
+        targetId: 'source_flow',
+        status: 'running',
+        nodeStatusById: {
+          source_flow__internal__codex: 'success',
+          source_agent: 'running',
+        },
+        workflowStatusById: {},
+      },
+    );
+
+    const sourceFlowNode = nodes.find((node) => node.id === 'source_flow') as
+      | { data: { workflow: { status: string } } }
+      | undefined;
+    const codexNode = nodes.find((node) => node.id === 'source_flow__internal__codex') as
+      | { data: { status: string } }
+      | undefined;
+    const sourceAgentNode = nodes.find((node) => node.id === 'source_agent') as
+      | { data: { status: string } }
+      | undefined;
+
+    expect(sourceFlowNode?.data.workflow.status).toBe('running');
+    expect(codexNode?.data.status).toBe('success');
+    expect(sourceAgentNode?.data.status).toBe('running');
+    expect(canvas.workflows.find((workflow) => workflow.id === 'source_flow')?.status).toBe('not_run');
+    expect(
+      canvas.workflows
+        .find((workflow) => workflow.id === 'source_flow')
+        ?.internalNodes.find((node) => node.id === 'codex')?.status,
+    ).toBe('not_run');
+  });
+
   test('projects executable root agent workflows as agent tool nodes', () => {
     const canvas: WorkspaceCanvasModel = {
       ...canvasFixture(),

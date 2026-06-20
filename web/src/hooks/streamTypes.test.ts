@@ -6,10 +6,10 @@ import type {
   AssistantChatMessage,
   CanvasAuthoringValidationResult,
   NodeLiveLogs,
-  RunProjection,
   RunProjectionSlim,
   WorkflowStatus,
 } from '../types/workbench';
+import type { RunSummary } from '../types';
 
 describe('stream hook shared type contracts', () => {
   test('run stream callback contracts accept shared workflow status and log types', () => {
@@ -21,14 +21,22 @@ describe('stream hook shared type contracts', () => {
       status,
       pollState: 'polling',
     };
+    const summary: RunSummary = {
+      run_id: run.runId,
+      status: 'success',
+      run_dir: 'runs/run_stream_1',
+      node_count: 0,
+      failed_nodes: [],
+      nodes: [],
+    };
     const callbacks: RunStreamCallbacks = {
-      appendNodeLogDelta: () => undefined,
-      updateRunProjection: (_runId, update) => update(run as unknown as RunProjection),
-      appendRunAgentEvent: () => undefined,
-      appendRunLiveEvent: () => undefined,
+      appendNodeLogDeltas: () => undefined,
+      appendRunAgentEvents: () => undefined,
+      appendRunLiveEvents: () => undefined,
+      applyRunSummary: () => undefined,
     };
 
-    callbacks.updateRunProjection(run.runId, (current) => ({ ...current, status: 'success' }));
+    callbacks.applyRunSummary(run.runId, summary);
     expect(logs.stdoutOffset).toBe(3);
   });
 

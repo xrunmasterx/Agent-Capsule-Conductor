@@ -41,6 +41,7 @@ import { focusCanvas } from './canvasFocus';
 import { addInternalNodeFromPaletteWithConnection, commitDraggedNodeToCanvas, moveInternalNode, resizeWorkflowContainer, resolvePaletteDropTarget, selectionForDraggedNodeCommit } from './canvasMutation';
 import { isNodeDetailDoubleClickIgnored, isTextEditingKeyboardTarget } from './canvasDomGuards';
 import { createDataEdgeToNodeBodyCommand, inputPortIdForDataBodyPreview, prepareDataEdgeToNodeBodyCommand } from './canvasDataDrop';
+import type { RunOverlayState } from '../workflow-viewer/runState';
 
 type NodeCreateMenuState = {
   x: number;
@@ -65,6 +66,7 @@ export function WorkspaceCanvas({
   selection,
   connectionMode,
   edgeViewMode,
+  runOverlay = null,
   workflowRun,
   focusedWorkflowId,
   callables,
@@ -86,6 +88,7 @@ export function WorkspaceCanvas({
   selection: CanvasSelection;
   connectionMode: ConnectionMode;
   edgeViewMode: EdgeViewMode;
+  runOverlay?: RunOverlayState | null;
   workflowRun: WorkflowRunResult | null;
   focusedWorkflowId: string | null;
   callables: CallableSummary[];
@@ -337,6 +340,7 @@ export function WorkspaceCanvas({
         edgeViewMode,
         dataDropTargetPreview,
         (address, altKey = false) => dispatchCanvasInteraction({ type: 'edge-click', address, altKey }),
+        runOverlay,
       );
     },
     [
@@ -353,6 +357,7 @@ export function WorkspaceCanvas({
       handleControlHandleMouseDown,
       edgeViewMode,
       dataDropTargetPreview,
+      runOverlay,
     ],
   );
   const projectedIdentityKey = useMemo(

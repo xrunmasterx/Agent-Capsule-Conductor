@@ -38,7 +38,6 @@ export type UseAssistantGraphOpsPersistenceActionsOptions = {
   temporaryResources: Record<string, TemporaryResourceDraft>;
   graphRef: MutableRefObject<WorkflowGraph>;
   graphOps: UseGraphOpsPersistenceResult;
-  setSourceGraph: Dispatch<SetStateAction<WorkflowGraph>>;
   setCanvas: Dispatch<SetStateAction<WorkspaceCanvasModel>>;
   setTasks: Dispatch<SetStateAction<WorkbenchTask[]>>;
   setAssistantRequiredActions: Dispatch<SetStateAction<AuthoringRequiredAction[]>>;
@@ -60,7 +59,6 @@ export function useAssistantGraphOpsPersistenceActions({
   temporaryResources,
   graphRef,
   graphOps,
-  setSourceGraph,
   setCanvas,
   setTasks,
   setAssistantRequiredActions,
@@ -164,7 +162,6 @@ export function useAssistantGraphOpsPersistenceActions({
         );
         const nextGraph = canvasToWorkflowGraph(nextCanvas);
         graphRef.current = nextGraph;
-        setSourceGraph(nextGraph);
         setCanvas(nextCanvas);
         setTasks((currentTasks) =>
           currentTasks.map((task) =>
@@ -218,7 +215,6 @@ export function useAssistantGraphOpsPersistenceActions({
       setAssistantRequiredActions,
       setCanvas,
       setMessage,
-      setSourceGraph,
       setTasks,
       temporaryResources,
     ],

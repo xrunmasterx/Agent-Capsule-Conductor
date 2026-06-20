@@ -12,7 +12,6 @@ import {
 let latestActions: UseCanvasGraphStateActionsResult | null = null;
 let latestCanvas: WorkspaceCanvasModel | null = null;
 let latestTasks: WorkbenchTask[] = [];
-let latestSourceGraph: WorkflowGraph | null = null;
 let latestGraphRef: { current: WorkflowGraph } | null = null;
 let latestMessage = '';
 
@@ -88,21 +87,17 @@ function Harness() {
   const graphRef = useRef<WorkflowGraph>(graph('initial_ref'));
   const [currentCanvas, setCanvas] = useState<WorkspaceCanvasModel>(canvas());
   const [tasks, setTasks] = useState<WorkbenchTask[]>([task()]);
-  const [sourceGraph, setSourceGraph] = useState<WorkflowGraph>(graph('source_graph'));
   const [message, setMessage] = useState('');
 
   latestActions = useCanvasGraphStateActions({
     activeTaskId: 'task_1',
-    sourceGraph,
     graphRef,
     setCanvas,
     setTasks,
-    setSourceGraph,
     setMessage,
   });
   latestCanvas = currentCanvas;
   latestTasks = tasks;
-  latestSourceGraph = sourceGraph;
   latestGraphRef = graphRef;
   latestMessage = message;
 
@@ -110,7 +105,7 @@ function Harness() {
 }
 
 describe('useCanvasGraphStateActions', () => {
-  test('updates canvas and stores a runtime-stripped task canvas copy', () => {
+  test('updates canvas through the canvas owner without writing the task mirror', () => {
     render(<Harness />);
 
     act(() => {
@@ -122,12 +117,12 @@ describe('useCanvasGraphStateActions', () => {
     });
 
     expect(latestCanvas?.name).toBe('Renamed Task');
-    expect(latestTasks[0].title).toBe('Renamed Task');
-    expect(latestTasks[0].canvas.workflows[0].status).toBe('not_run');
-    expect(latestTasks[0].canvas.workflows[0].internalNodes[0].status).toBe('not_run');
+    expect(latestTasks[0].title).toBe('Task 1');
+    expect(latestTasks[0].canvas.workflows[0].status).toBe('success');
+    expect(latestTasks[0].canvas.workflows[0].internalNodes[0].status).toBe('success');
   });
 
-  test('updates canvas, source graph, and graph ref together', () => {
+  test('updates canvas and graph ref together', () => {
     render(<Harness />);
 
     act(() => {
@@ -138,15 +133,8 @@ describe('useCanvasGraphStateActions', () => {
     });
 
     expect(latestCanvas?.name).toBe('Graph Backed Task');
-    expect(latestSourceGraph?.id).toBe('task_1');
-    expect(latestSourceGraph?.name).toBe('Graph Backed Task');
-    expect(latestGraphRef?.current).toBe(latestSourceGraph);
-  });
-
-  test('syncs graph ref when source graph changes externally', () => {
-    render(<Harness />);
-
-    expect(latestGraphRef?.current).toBe(latestSourceGraph);
+    expect(latestGraphRef?.current.id).toBe('task_1');
+    expect(latestGraphRef?.current.name).toBe('Graph Backed Task');
   });
 
   test('updates workflow binding metadata and success message', () => {

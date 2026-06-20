@@ -1,4 +1,4 @@
-import { useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
+import { useEffect, useMemo, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 
 import type { WorkflowGraph } from '../../types';
 import type { WorkspaceCanvasModel } from '../../types/workbench';
@@ -6,20 +6,25 @@ import { canvasToWorkflowGraph } from '../../workbench/model/workflowGraphProjec
 
 export type WorkflowViewerGraphState = {
   sourceGraph: WorkflowGraph;
-  setSourceGraph: Dispatch<SetStateAction<WorkflowGraph>>;
   graphRef: MutableRefObject<WorkflowGraph>;
   layoutSyncVersion: number;
   setLayoutSyncVersion: Dispatch<SetStateAction<number>>;
 };
 
-export function useWorkflowViewerGraphState(initialCanvas: WorkspaceCanvasModel): WorkflowViewerGraphState {
-  const [sourceGraph, setSourceGraph] = useState<WorkflowGraph>(() => canvasToWorkflowGraph(initialCanvas));
+export function useWorkflowViewerGraphState(
+  canvas: WorkspaceCanvasModel,
+  canvasRevision: number,
+): WorkflowViewerGraphState {
+  const sourceGraph = useMemo(() => canvasToWorkflowGraph(canvas), [canvas, canvasRevision]);
   const graphRef = useRef(sourceGraph);
   const [layoutSyncVersion, setLayoutSyncVersion] = useState(0);
 
+  useEffect(() => {
+    graphRef.current = sourceGraph;
+  }, [sourceGraph]);
+
   return {
     sourceGraph,
-    setSourceGraph,
     graphRef,
     layoutSyncVersion,
     setLayoutSyncVersion,
