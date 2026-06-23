@@ -1,0 +1,1109 @@
+{
+  "schema_version": "acc.core.v2",
+  "id": "core_v2_stock_research_canvas__Coverage_Model_Workflow",
+  "version": "0.1.0",
+  "name": "Coverage and Model Input Workflow",
+  "description": "Child workflow compiled from Workbench container Coverage_Model_Workflow.",
+  "nodes": [
+    {
+      "id": "coverage_gate_agent",
+      "callable_ref": {
+        "kind": "agent_class",
+        "id": "stock-research-synthesis.codex"
+      },
+      "ports": {
+        "inputs": {
+          "target": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "evidence_pack": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "blocking_gaps": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "source_quality_gate": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "constraints": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          }
+        },
+        "outputs": {
+          "main": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "coverage_scorecard": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "blocking_gaps": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "evidence_pack": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "data_gaps": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "quality_gate": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          }
+        }
+      },
+      "overrides": {
+        "static_input": {}
+      },
+      "prompt_policy": {
+        "user_prompt": "Evaluate whether registry evidence can support financial quality, valuation, risk/catalyst work, and price guidance. Mark each domain sufficient/partial/blocked with missing source_id/metric_id requirements."
+      },
+      "metadata": {
+        "label": "覆盖度门禁",
+        "ui_label": "覆盖度门禁",
+        "workbench_kind": "agent_session"
+      },
+      "invocation_policy": {
+        "permission_profile": {
+          "workspace_access": "writes_workspace",
+          "network": true,
+          "shell": true,
+          "dangerous": true
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "status",
+          "summary",
+          "as_of_date",
+          "data_gaps",
+          "quality",
+          "quality_gate",
+          "outputs"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "success",
+              "partial",
+              "blocked",
+              "failed"
+            ]
+          },
+          "summary": {
+            "type": "string"
+          },
+          "as_of_date": {
+            "type": "string"
+          },
+          "handoff_summary": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "evidence_pack": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "sources",
+              "metrics",
+              "claims"
+            ],
+            "properties": {
+              "sources": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "source_id",
+                    "title",
+                    "url",
+                    "source_type"
+                  ],
+                  "properties": {
+                    "source_id": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "source_type": {
+                      "type": "string"
+                    },
+                    "retrieved_at": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "metrics": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "metric_id",
+                    "name",
+                    "period",
+                    "value",
+                    "unit",
+                    "source_ids"
+                  ],
+                  "properties": {
+                    "metric_id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "period": {
+                      "type": "string"
+                    },
+                    "value": {},
+                    "unit": {
+                      "type": "string"
+                    },
+                    "currency": {
+                      "type": "string"
+                    },
+                    "source_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              },
+              "claims": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "claim_id",
+                    "statement",
+                    "source_ids",
+                    "metric_ids"
+                  ],
+                  "properties": {
+                    "claim_id": {
+                      "type": "string"
+                    },
+                    "statement": {
+                      "type": "string"
+                    },
+                    "source_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "metric_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "confidence": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "blocking_gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "data_gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "quality_gate": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "quality": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "outputs": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "main",
+              "coverage_scorecard",
+              "blocking_gaps",
+              "evidence_pack",
+              "data_gaps",
+              "quality_gate"
+            ],
+            "properties": {
+              "main": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "coverage_scorecard": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "blocking_gaps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "evidence_pack": {
+                "type": "object",
+                "additionalProperties": true,
+                "required": [
+                  "sources",
+                  "metrics",
+                  "claims"
+                ],
+                "properties": {
+                  "sources": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "source_id",
+                        "title",
+                        "url",
+                        "source_type"
+                      ],
+                      "properties": {
+                        "source_id": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "url": {
+                          "type": "string"
+                        },
+                        "source_type": {
+                          "type": "string"
+                        },
+                        "retrieved_at": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "metrics": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "metric_id",
+                        "name",
+                        "period",
+                        "value",
+                        "unit",
+                        "source_ids"
+                      ],
+                      "properties": {
+                        "metric_id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "period": {
+                          "type": "string"
+                        },
+                        "value": {},
+                        "unit": {
+                          "type": "string"
+                        },
+                        "currency": {
+                          "type": "string"
+                        },
+                        "source_ids": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "claims": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "claim_id",
+                        "statement",
+                        "source_ids",
+                        "metric_ids"
+                      ],
+                      "properties": {
+                        "claim_id": {
+                          "type": "string"
+                        },
+                        "statement": {
+                          "type": "string"
+                        },
+                        "source_ids": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "metric_ids": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "confidence": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "data_gaps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "quality_gate": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          },
+          "main": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "coverage_scorecard": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    {
+      "id": "model_input_builder_agent",
+      "callable_ref": {
+        "kind": "agent_class",
+        "id": "stock-research-synthesis.codex"
+      },
+      "ports": {
+        "inputs": {
+          "target": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "evidence_pack": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "coverage_scorecard": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "blocking_gaps": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "constraints": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          }
+        },
+        "outputs": {
+          "main": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "model_input_pack": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "evidence_pack": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "blocking_gaps": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "data_gaps": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "quality_gate": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          }
+        }
+      },
+      "overrides": {
+        "static_input": {}
+      },
+      "prompt_policy": {
+        "user_prompt": "Build model_input_pack from the registry: financial statement table, operating metrics, market data, FX, shares, net cash/debt, peer set, assumptions, and explicit blocking gaps. Do not invent missing values."
+      },
+      "metadata": {
+        "label": "模型输入包构建",
+        "ui_label": "模型输入包构建",
+        "workbench_kind": "agent_session"
+      },
+      "invocation_policy": {
+        "permission_profile": {
+          "workspace_access": "writes_workspace",
+          "network": true,
+          "shell": true,
+          "dangerous": true
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "status",
+          "summary",
+          "as_of_date",
+          "data_gaps",
+          "quality",
+          "quality_gate",
+          "outputs"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "success",
+              "partial",
+              "blocked",
+              "failed"
+            ]
+          },
+          "summary": {
+            "type": "string"
+          },
+          "as_of_date": {
+            "type": "string"
+          },
+          "handoff_summary": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "evidence_pack": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "sources",
+              "metrics",
+              "claims"
+            ],
+            "properties": {
+              "sources": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "source_id",
+                    "title",
+                    "url",
+                    "source_type"
+                  ],
+                  "properties": {
+                    "source_id": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "source_type": {
+                      "type": "string"
+                    },
+                    "retrieved_at": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "metrics": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "metric_id",
+                    "name",
+                    "period",
+                    "value",
+                    "unit",
+                    "source_ids"
+                  ],
+                  "properties": {
+                    "metric_id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "period": {
+                      "type": "string"
+                    },
+                    "value": {},
+                    "unit": {
+                      "type": "string"
+                    },
+                    "currency": {
+                      "type": "string"
+                    },
+                    "source_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              },
+              "claims": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "claim_id",
+                    "statement",
+                    "source_ids",
+                    "metric_ids"
+                  ],
+                  "properties": {
+                    "claim_id": {
+                      "type": "string"
+                    },
+                    "statement": {
+                      "type": "string"
+                    },
+                    "source_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "metric_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "confidence": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "blocking_gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "data_gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "quality_gate": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "quality": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "outputs": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "main",
+              "model_input_pack",
+              "evidence_pack",
+              "blocking_gaps",
+              "data_gaps",
+              "quality_gate"
+            ],
+            "properties": {
+              "main": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "model_input_pack": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "evidence_pack": {
+                "type": "object",
+                "additionalProperties": true,
+                "required": [
+                  "sources",
+                  "metrics",
+                  "claims"
+                ],
+                "properties": {
+                  "sources": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "source_id",
+                        "title",
+                        "url",
+                        "source_type"
+                      ],
+                      "properties": {
+                        "source_id": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "url": {
+                          "type": "string"
+                        },
+                        "source_type": {
+                          "type": "string"
+                        },
+                        "retrieved_at": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "metrics": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "metric_id",
+                        "name",
+                        "period",
+                        "value",
+                        "unit",
+                        "source_ids"
+                      ],
+                      "properties": {
+                        "metric_id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "period": {
+                          "type": "string"
+                        },
+                        "value": {},
+                        "unit": {
+                          "type": "string"
+                        },
+                        "currency": {
+                          "type": "string"
+                        },
+                        "source_ids": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "claims": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "claim_id",
+                        "statement",
+                        "source_ids",
+                        "metric_ids"
+                      ],
+                      "properties": {
+                        "claim_id": {
+                          "type": "string"
+                        },
+                        "statement": {
+                          "type": "string"
+                        },
+                        "source_ids": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "metric_ids": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "confidence": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "blocking_gaps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "data_gaps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "quality_gate": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          },
+          "main": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "model_input_pack": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      }
+    }
+  ],
+  "control_edges": [
+    {
+      "from": "coverage_gate_agent",
+      "to": "model_input_builder_agent",
+      "context": "none"
+    }
+  ],
+  "data_edges": [
+    {
+      "source": {
+        "node": "coverage_gate_agent",
+        "port": "coverage_scorecard"
+      },
+      "target": {
+        "node": "model_input_builder_agent",
+        "port": "coverage_scorecard"
+      },
+      "materialization": "copy"
+    },
+    {
+      "source": {
+        "node": "coverage_gate_agent",
+        "port": "blocking_gaps"
+      },
+      "target": {
+        "node": "model_input_builder_agent",
+        "port": "blocking_gaps"
+      },
+      "materialization": "copy"
+    },
+    {
+      "source": {
+        "node": "coverage_gate_agent",
+        "port": "evidence_pack"
+      },
+      "target": {
+        "node": "model_input_builder_agent",
+        "port": "evidence_pack"
+      },
+      "materialization": "copy"
+    }
+  ],
+  "metadata": {
+    "canonical_format": "accflow",
+    "compiled_from_workbench_container": "Coverage_Model_Workflow",
+    "compiled_child_path": "core_v2_stock_research_canvas__Coverage_Model_Workflow.accflow.json",
+    "workbench_draft": true,
+    "ui_layout": {
+      "layout": null,
+      "root_workflow_id": null,
+      "nodes": [
+        {
+          "id": "coverage_gate_agent",
+          "position": {
+            "x": 140.0,
+            "y": 150.0
+          },
+          "label": "覆盖度门禁"
+        },
+        {
+          "id": "model_input_builder_agent",
+          "position": {
+            "x": 480.0,
+            "y": 300.0
+          },
+          "label": "模型输入包构建"
+        }
+      ]
+    }
+  },
+  "exposed_inputs": {
+    "target": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "evidence_pack": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "blocking_gaps": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "source_quality_gate": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "constraints": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    }
+  },
+  "exposed_outputs": {
+    "coverage_scorecard": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "model_input_pack": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "blocking_gaps": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "evidence_pack": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "data_gaps": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "quality_gate": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    }
+  },
+  "workflow_input_bindings": [
+    {
+      "source_port": "target",
+      "target": {
+        "node": "coverage_gate_agent",
+        "port": "target"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "evidence_pack",
+      "target": {
+        "node": "coverage_gate_agent",
+        "port": "evidence_pack"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "blocking_gaps",
+      "target": {
+        "node": "coverage_gate_agent",
+        "port": "blocking_gaps"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "source_quality_gate",
+      "target": {
+        "node": "coverage_gate_agent",
+        "port": "source_quality_gate"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "constraints",
+      "target": {
+        "node": "coverage_gate_agent",
+        "port": "constraints"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "target",
+      "target": {
+        "node": "model_input_builder_agent",
+        "port": "target"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "constraints",
+      "target": {
+        "node": "model_input_builder_agent",
+        "port": "constraints"
+      },
+      "materialization": "copy",
+      "required": false
+    }
+  ],
+  "workflow_output_bindings": [
+    {
+      "source": {
+        "node": "coverage_gate_agent",
+        "port": "coverage_scorecard"
+      },
+      "target_port": "coverage_scorecard",
+      "materialization": "copy",
+      "required": true
+    },
+    {
+      "source": {
+        "node": "model_input_builder_agent",
+        "port": "model_input_pack"
+      },
+      "target_port": "model_input_pack",
+      "materialization": "copy",
+      "required": true
+    },
+    {
+      "source": {
+        "node": "model_input_builder_agent",
+        "port": "blocking_gaps"
+      },
+      "target_port": "blocking_gaps",
+      "materialization": "copy",
+      "required": true
+    },
+    {
+      "source": {
+        "node": "model_input_builder_agent",
+        "port": "evidence_pack"
+      },
+      "target_port": "evidence_pack",
+      "materialization": "copy",
+      "required": true
+    },
+    {
+      "source": {
+        "node": "model_input_builder_agent",
+        "port": "data_gaps"
+      },
+      "target_port": "data_gaps",
+      "materialization": "copy",
+      "required": true
+    },
+    {
+      "source": {
+        "node": "model_input_builder_agent",
+        "port": "quality_gate"
+      },
+      "target_port": "quality_gate",
+      "materialization": "copy",
+      "required": true
+    }
+  ],
+  "policies": {
+    "failure_mode": "fail_fast",
+    "max_concurrency": 8
+  }
+}

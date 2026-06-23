@@ -1,7 +1,7 @@
 import { useCallback, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 
 import type { WorkflowGraph } from '../types';
-import type { CanvasSelection, WorkbenchTask, WorkspaceCanvasModel } from '../types/workbench';
+import type { CanvasSelection, WorkbenchTask, WorkbenchTaskSummary, WorkspaceCanvasModel } from '../types/workbench';
 import { DEFAULT_TASK_ID } from '../workbench/constants';
 import { normalizeCanvasEdges } from '../workbench/model/canvasEdgeOps';
 import { layoutWorkspaceCanvas } from '../workbench/model/canvasLayout';
@@ -14,9 +14,10 @@ import {
   nextTaskTitle,
 } from '../workbench/model/taskModel';
 import { stripRuntimeStateFromCanvas } from '../components/workflow-viewer/runState';
+import { useWorkbenchStore } from '../stores/workbenchStore';
 
 export type UseWorkbenchTaskActionsOptions = {
-  tasks: WorkbenchTask[];
+  tasks: WorkbenchTaskSummary[];
   activeTaskId: string;
   graphRef: MutableRefObject<WorkflowGraph>;
   setTasks: Dispatch<SetStateAction<WorkbenchTask[]>>;
@@ -112,7 +113,9 @@ export function useWorkbenchTaskActions({
 
   const switchTask = useCallback(
     (taskId: string) => {
-      const task = tasks.find((item) => item.taskId === taskId);
+      const task =
+        useWorkbenchStore.getState().tasksById[taskId] ||
+        (tasks as WorkbenchTask[]).find((item) => item.taskId === taskId && 'canvas' in item);
       if (!task) {
         return;
       }
@@ -130,13 +133,12 @@ export function useWorkbenchTaskActions({
       setFocusedWorkflowId,
       setSelection,
       syncCanvasGraph,
-      tasks,
     ],
   );
 
   const newTask = useCallback(() => {
     const taskId = `task_canvas_${Date.now()}`;
-    const task = createEmptyTask(taskId, nextTaskTitle(tasks));
+    const task = createEmptyTask(taskId, nextTaskTitle(Object.values(useWorkbenchStore.getState().tasksById)));
     const normalizedCanvas = normalizeCanvasEdges(task.canvas);
     setTasks((current) => [...current, { ...task, canvas: normalizedCanvas }]);
     setActiveTaskId(task.taskId);
@@ -160,13 +162,20 @@ export function useWorkbenchTaskActions({
 
   const deleteTask = useCallback(
     (taskId: string) => {
-      const targetTask = tasks.find((task) => task.taskId === taskId);
-      if (targetTask && isActiveTaskStatus(targetTask.status)) {
-        setMessage('任务正在运行，请先停止后再删除。');
-        return;
-      }
-      const remaining = tasks.filter((task) => task.taskId !== taskId);
-      const nextTasks = remaining.length > 0 ? remaining : [createEmptyTask(DEFAULT_TASK_ID, '任务 1')];
+    const taskMap = useWorkbenchStore.getState().tasksById;
+    const legacyTasks = tasks as WorkbenchTask[];
+    const targetTask = taskMap[taskId] || legacyTasks.find((task) => task.taskId === taskId && 'canvas' in task);
+    if (targetTask && isActiveTaskStatus(targetTask.status)) {
+      setMessage('任务正在运行，请先停止后再删除。');
+      return;
+    }
+    const remaining = useWorkbenchStore
+      .getState()
+      .taskOrder
+      .filter((candidateTaskId) => candidateTaskId !== taskId)
+      .map((candidateTaskId) => taskMap[candidateTaskId])
+      .filter((task): task is WorkbenchTask => Boolean(task));
+    const nextTasks = remaining.length > 0 ? remaining : [createEmptyTask(DEFAULT_TASK_ID, '任务 1')];
       const nextActiveTask =
         taskId === activeTaskId
           ? nextTasks[0]
@@ -188,7 +197,6 @@ export function useWorkbenchTaskActions({
       setSelection,
       setTasks,
       syncCanvasGraph,
-      tasks,
     ],
   );
 

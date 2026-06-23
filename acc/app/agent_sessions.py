@@ -48,11 +48,6 @@ from acc.models import (
     ScopeFrame,
     SessionInstance,
 )
-from acc.utils import (
-    read_jsonl,
-    update_runtime_json,
-    validate_agent_session_id,
-)
 from acc.runtime.policy import (
     HERMETIC_RUN_MODE,
     acc_run_mode,
@@ -63,6 +58,11 @@ from acc.session import utc_now_iso
 from acc.storage import append_jsonl_locked, write_text_atomic
 from acc.store import load_json, write_json
 from acc.store.control_ledger import append_control_event, append_decision_record
+from acc.utils import (
+    read_jsonl,
+    update_runtime_json,
+    validate_agent_session_id,
+)
 
 AGENT_SESSION_SCHEMA_VERSION = "acc.agent_session.v1"
 AGENT_TURN_SCHEMA_VERSION = "acc.agent_turn.v1"
@@ -704,7 +704,9 @@ class AgentTurnService:
         input_payload = {"message": message, "reason": reason}
         prompt = message
         primary_channel = PRIMARY_CHANNEL_DRAFT if expects_output_draft else PRIMARY_CHANNEL_TEXT
-        if should_clear_provider_session_before_turn(state, expects_output_draft=expects_output_draft):
+        if should_clear_provider_session_before_turn(
+            state, expects_output_draft=expects_output_draft
+        ):
             state = {
                 **state,
                 "provider_session_id": None,
@@ -919,9 +921,7 @@ class AgentTurnService:
                 turn_id,
                 result.error or result.summary,
                 status=terminal_status,
-                stage="provider_cancelled"
-                if result.status == "cancelled"
-                else "provider_result",
+                stage="provider_cancelled" if result.status == "cancelled" else "provider_result",
                 provider_session_id=result.provider_session_id,
             )
             if result.status == "cancelled":
@@ -981,7 +981,12 @@ class AgentTurnService:
         write_json(
             session_dir / "session.json",
             clear_session_failure_state(
-                {**next_state, "status": "ready", "updated_at": utc_now_iso(), "last_turn_id": turn_id}
+                {
+                    **next_state,
+                    "status": "ready",
+                    "updated_at": utc_now_iso(),
+                    "last_turn_id": turn_id,
+                }
             ),
         )
         return {**self._turn_payload(turn_dir), "session_id": session_id}
@@ -1060,7 +1065,9 @@ class AgentTurnService:
             return
         state = require_object(load_json(session_dir / "session.json"), "session.json")
         input_payload = load_optional_object(turn_dir / "input.json")
-        reason = str(input_payload.get("reason") or self._turn_payload(turn_dir).get("reason") or "")
+        reason = str(
+            input_payload.get("reason") or self._turn_payload(turn_dir).get("reason") or ""
+        )
         current_provider_session_id = (
             provider_session_id
             if provider_session_id is not None
@@ -1243,9 +1250,7 @@ class AgentTurnService:
                 turn_dir.name,
                 result.error or result.summary,
                 status="cancelled" if result.status == "cancelled" else "failed",
-                stage="provider_cancelled"
-                if result.status == "cancelled"
-                else "provider_result",
+                stage="provider_cancelled" if result.status == "cancelled" else "provider_result",
                 provider_session_id=result.provider_session_id,
             )
             raise AccError(result.error or result.summary)
@@ -1554,7 +1559,11 @@ class AgentTurnService:
                 "updated_at": payload.get("updated_at"),
             }
         owner_sessions = index.setdefault("owner_sessions", {})
-        if isinstance(owner_ref, str) and isinstance(node_id, str) and isinstance(owner_sessions, dict):
+        if (
+            isinstance(owner_ref, str)
+            and isinstance(node_id, str)
+            and isinstance(owner_sessions, dict)
+        ):
             owner_sessions[owner_key(owner_ref, node_id)] = session_id
         index["updated_at"] = utc_now_iso()
         write_json(self.project_root / ACC_SESSION_INDEX, index)
@@ -2042,13 +2051,14 @@ def normalize_workbench_authoring_output(payload: dict[str, Any]) -> dict[str, A
     normalized = dict(payload)
     for key, default_value in WORKBENCH_AUTHORING_METADATA_DEFAULTS.items():
         if key not in normalized:
-            normalized[key] = list(default_value) if isinstance(default_value, list) else default_value
+            normalized[key] = (
+                list(default_value) if isinstance(default_value, list) else default_value
+            )
     return normalized
 
 
 def append_message(session_dir: Path, payload: dict[str, Any]) -> None:
     append_jsonl_locked(session_dir / "messages.jsonl", payload)
-
 
 
 def require_object(value: Any, context: str) -> dict[str, Any]:

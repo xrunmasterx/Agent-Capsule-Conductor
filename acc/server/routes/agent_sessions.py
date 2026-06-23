@@ -98,7 +98,8 @@ def create_agent_session(payload: AgentSessionCreateRequest, request: Request) -
             node_id=payload.node_id,
             callable_ref=payload.callable_ref,
             runtime=payload.runtime,
-            workspace_ref=payload.workspace_ref or workspace_ref_for_alias(request, payload.workspace_alias),
+            workspace_ref=payload.workspace_ref
+            or workspace_ref_for_alias(request, payload.workspace_alias),
             output_schema=payload.output_schema,
         )
     except RunnerCapabilityError as exc:
@@ -238,10 +239,7 @@ def stream_agent_turn_events(
                     }
                     if terminal_live_event["seq"] > after_seq:
                         yield sse_event("live_event", terminal_live_event)
-                    yield (
-                        "event: terminal\n"
-                        f"data: {json.dumps(terminal_payload)}\n\n"
-                    )
+                    yield (f"event: terminal\ndata: {json.dumps(terminal_payload)}\n\n")
                     return
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")

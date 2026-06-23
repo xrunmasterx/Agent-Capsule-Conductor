@@ -97,8 +97,13 @@ def update_project_run_index(run_dir: Path) -> None:
     runs_root.mkdir(parents=True, exist_ok=True)
     write_json(runs_root / "index.json", index.model_dump())
     from acc.storage_refresh import request_storage_index_refresh
+    from acc.storage_refs import make_run_ref
 
-    request_storage_index_refresh(runs_root.parent, reason="run_index_updated")
+    request_storage_index_refresh(
+        runs_root.parent,
+        reason="run_index_updated",
+        object_ref=make_run_ref(run_dir.name),
+    )
 
 
 def load_or_rebuild_run_index(runs_root: Path = Path("runs")) -> RunIndex:

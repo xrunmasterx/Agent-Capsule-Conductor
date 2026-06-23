@@ -18,18 +18,16 @@ from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-from acc.app.human_gate import create_pending_human_gate, node_requires_human_approval
+from acc.app.human_gate import create_pending_human_gate
 from acc.app.run_lifecycle import write_run_summary_status
 from acc.models import (
     AccError,
     DecisionRecord,
     DispatchEnvelope,
-    DispatchTransitionRecord,
     FunctionInvocation,
     NodeInvocationSpec,
     PlanStep,
     PlanStepStatus,
-    PlanStepTransitionRecord,
     RunPlan,
     RunPlanStatus,
     ScopeFrame,

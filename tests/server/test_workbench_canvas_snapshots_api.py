@@ -31,19 +31,14 @@ def test_workbench_canvas_snapshot_publish_and_get(client, project_root) -> None
     assert payload["canvas_hash"] == "canvas_hash_v1:abc123"
     assert payload["canvas_snapshot"]["workflows"][0].get("runtime") is None
     assert (
-        project_root
-        / ".acc"
-        / "tasks"
-        / "task_canvas_default"
-        / "canvas_snapshot.json"
+        project_root / ".acc" / "tasks" / "task_canvas_default" / "canvas_snapshot.json"
     ).exists()
 
     get_response = client.get("/api/workbench/canvas-snapshots/task_canvas_default")
 
     assert get_response.status_code == 200, get_response.text
     assert (
-        get_response.json()["temporary_resources"]["tmp_agent_test"]["draft_id"]
-        == "tmp_agent_test"
+        get_response.json()["temporary_resources"]["tmp_agent_test"]["draft_id"] == "tmp_agent_test"
     )
 
 
@@ -143,7 +138,12 @@ def test_task_canvas_put_strips_runtime_state_and_checks_base_hash(client, proje
         json={
             "canvas_hash": "hash_b",
             "base_canvas_hash": "hash_old",
-            "canvas_snapshot": {"id": "task_canvas_default", "name": "Canvas", "workflows": [], "edges": []},
+            "canvas_snapshot": {
+                "id": "task_canvas_default",
+                "name": "Canvas",
+                "workflows": [],
+                "edges": [],
+            },
         },
     )
     assert stale.status_code == 409
@@ -153,7 +153,12 @@ def test_task_canvas_put_strips_runtime_state_and_checks_base_hash(client, proje
         headers={"If-Match": '"hash_a"'},
         json={
             "canvas_hash": "hash_b",
-            "canvas_snapshot": {"id": "task_canvas_default", "name": "Canvas", "workflows": [], "edges": []},
+            "canvas_snapshot": {
+                "id": "task_canvas_default",
+                "name": "Canvas",
+                "workflows": [],
+                "edges": [],
+            },
         },
     )
     assert next_response.status_code == 200, next_response.text

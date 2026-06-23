@@ -5,9 +5,17 @@ import contextlib
 import json
 import os
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from acc.adapters.process_utils import (
+    append_bytes,
+    terminate_process_tree,
+)
+from acc.adapters.process_utils import (
+    capture_stream_bytes as capture_stream_text,
+)
 from acc.adapters.streaming import (
     AgentApprovalDecision,
     StreamingAgentTurnRequest,
@@ -15,7 +23,7 @@ from acc.adapters.streaming import (
 )
 from acc.agent_events import append_agent_event, append_provider_event
 from acc.runtime.codex_models import normalize_codex_model, normalize_codex_reasoning_effort
-from acc.storage import append_bytes_locked, write_text_atomic
+from acc.storage import write_text_atomic
 from acc.utils import AccError
 
 APPROVAL_METHODS = frozenset(
@@ -29,6 +37,13 @@ APPROVAL_METHODS = frozenset(
 )
 
 CODEX_APP_SERVER_STREAM_LIMIT_BYTES = 16 * 1024 * 1024
+
+
+@dataclass(frozen=True)
+class JsonObjectExtraction:
+    payload: dict[str, Any]
+    repaired: bool = False
+    repair_kind: str | None = None
 
 
 class CodexAppServerAdapter:
@@ -182,13 +197,42 @@ async def run_codex_turn(
         },
     )
     await client.completed.wait()
-    output = None
+    extraction = None
     if request.response_mode != "chat_optional_output":
-        output = latest_json_object(client.agent_messages)
-    if output is None and request.response_mode != "chat_optional_output":
+        extraction = latest_json_object_extraction(client.agent_messages)
+    if extraction is None and request.response_mode != "chat_optional_output":
+        append_agent_event(
+            request.events_log_path,
+            "agent_output_contract_issue",
+            session_id=request.session_id,
+            turn_id=request.turn_id,
+            run_id=request.run_id,
+            node_id=request.node_id,
+            payload={
+                "summary": "Agent returned text that could not be parsed as a JSON object.",
+                "issue_kind": "json_parse_failed",
+            },
+        )
         raise AccError("Codex app-server did not produce a JSON object agent message")
+    output = extraction.payload if extraction is not None else None
     output_json_path = None
     if output is not None:
+        if extraction is not None and extraction.repaired:
+            append_agent_event(
+                request.events_log_path,
+                "agent_output_repaired",
+                session_id=request.session_id,
+                turn_id=request.turn_id,
+                run_id=request.run_id,
+                node_id=request.node_id,
+                payload={
+                    "summary": (
+                        "Agent output was not exact JSON; ACC repaired it before "
+                        "publishing the draft."
+                    ),
+                    "repair_kind": extraction.repair_kind or "json_repair",
+                },
+            )
         write_text_atomic(
             request.output_json_path,
             json.dumps(output, ensure_ascii=False, indent=2, sort_keys=True),
@@ -598,14 +642,24 @@ def extract_thread_id(result: Any) -> str | None:
 
 
 def latest_json_object(messages: list[str]) -> dict[str, Any] | None:
+    extraction = latest_json_object_extraction(messages)
+    return extraction.payload if extraction is not None else None
+
+
+def latest_json_object_extraction(messages: list[str]) -> JsonObjectExtraction | None:
     for text in reversed(messages):
-        payload = extract_json_object(text)
-        if payload is not None:
-            return payload
+        extraction = extract_json_object_with_repair(text)
+        if extraction is not None:
+            return extraction
     return None
 
 
 def extract_json_object(text: str) -> dict[str, Any] | None:
+    extraction = extract_json_object_with_repair(text)
+    return extraction.payload if extraction is not None else None
+
+
+def extract_json_object_with_repair(text: str) -> JsonObjectExtraction | None:
     stripped = text.strip()
     candidates = [stripped]
     if "```" in stripped:
@@ -622,17 +676,65 @@ def extract_json_object(text: str) -> dict[str, Any] | None:
         except json.JSONDecodeError:
             payload = None
         if isinstance(payload, dict):
-            return payload
+            return JsonObjectExtraction(payload=payload)
+        repaired = repair_json_object(candidate)
+        if repaired is not None:
+            return repaired
         for offset, char in enumerate(candidate):
             if char != "{":
                 continue
+            suffix = candidate[offset:]
             try:
-                payload, _end = decoder.raw_decode(candidate[offset:])
+                payload, end = decoder.raw_decode(suffix)
             except json.JSONDecodeError:
+                repaired = repair_json_object(suffix)
+                if repaired is not None:
+                    return repaired
                 continue
             if isinstance(payload, dict):
-                return payload
+                trailing = suffix[end:].strip()
+                return JsonObjectExtraction(
+                    payload=payload,
+                    repaired=bool(trailing),
+                    repair_kind="json_prefix" if trailing else None,
+                )
     return None
+
+
+def repair_json_object(candidate: str) -> JsonObjectExtraction | None:
+    repaired = remove_stray_object_brace_before_array_close(candidate)
+    if repaired == candidate:
+        return None
+    try:
+        payload = json.loads(repaired)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return JsonObjectExtraction(
+        payload=payload,
+        repaired=True,
+        repair_kind="stray_object_brace",
+    )
+
+
+def remove_stray_object_brace_before_array_close(candidate: str) -> str:
+    text = candidate
+    for _attempt in range(2):
+        try:
+            json.loads(text)
+            return text
+        except json.JSONDecodeError as exc:
+            pos = exc.pos
+            if pos < 0 or pos >= len(text) or text[pos] != "}":
+                return text
+            next_index = pos + 1
+            while next_index < len(text) and text[next_index].isspace():
+                next_index += 1
+            if next_index >= len(text) or text[next_index] not in "],":
+                return text
+            text = text[:pos] + text[pos + 1 :]
+    return text
 
 
 async def wait_for_cancel_marker(path: Path) -> None:
@@ -713,44 +815,6 @@ def failed_result(
         error=error,
     )
 
-
-async def capture_stream_text(stream: asyncio.StreamReader, path: Path) -> bytes:
-    chunks: list[bytes] = []
-    while True:
-        chunk = await stream.read(4096)
-        if not chunk:
-            break
-        chunks.append(chunk)
-        append_bytes(path, chunk)
-    return b"".join(chunks)
-
-
-def append_bytes(path: Path, payload: bytes) -> None:
-    append_bytes_locked(path, payload)
-
-
-async def terminate_process_tree(process: asyncio.subprocess.Process) -> None:
-    pid = getattr(process, "pid", None)
-    if os.name == "nt" and isinstance(pid, int):
-        try:
-            killer = await asyncio.create_subprocess_exec(
-                "taskkill",
-                "/PID",
-                str(pid),
-                "/T",
-                "/F",
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            await asyncio.wait_for(killer.wait(), timeout=5)
-            return
-        except (OSError, TimeoutError):
-            pass
-    try:
-        process.kill()
-        await asyncio.wait_for(process.wait(), timeout=5)
-    except (ProcessLookupError, TimeoutError):
-        return
 
 
 async def gather_cancelled(*tasks: asyncio.Task[Any]) -> None:

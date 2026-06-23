@@ -2,6 +2,14 @@ from __future__ import annotations
 
 import pytest
 
+from acc.engine.supervisor import (
+    compile_supervisor_plan_to_steps,
+    expand_data_driven_instances,
+    parse_dynamic_invocation_intent,
+    parse_supervisor_decision,
+    parse_supervisor_plan,
+    validate_intent_against_roster,
+)
 from acc.models import (
     AccError,
     AgentCapabilities,
@@ -11,14 +19,6 @@ from acc.models import (
     PlanStep,
     RunPlan,
     SupervisorRoster,
-)
-from acc.engine.supervisor import (
-    compile_supervisor_plan_to_steps,
-    expand_data_driven_instances,
-    parse_dynamic_invocation_intent,
-    parse_supervisor_decision,
-    parse_supervisor_plan,
-    validate_intent_against_roster,
 )
 
 
@@ -134,9 +134,59 @@ def test_compile_approved_supervisor_plan_to_steps_and_decision() -> None:
     assert compiled.steps[0].input_snapshot_refs == (
         "supervisor_plans/plan1/intents/c1.json",
     )
+    assert compiled.steps[0].metadata["typed_input_refs"] == [
+        {
+            "kind": "supervisor_intent_snapshot",
+            "source": "supervisor",
+            "path": "supervisor_plans/plan1/intents/c1.json",
+            "payload_key": "input_payload",
+            "correlation_id": "c1",
+        }
+    ]
+    assert "supervisor_plans/plan1/intents/c1.json" in compiled.decision.input_evidence_refs
 
 
-def test_compile_supervisor_plan_rejects_unapproved_plan() -> None:
+def test_compile_supervisor_plan_rejects_unsafe_snapshot_path_segments() -> None:
+    unsafe_cases = [
+        ("../plan", "c1"),
+        ("plan/one", "c1"),
+        ("plan\\one", "c1"),
+        ("C:plan", "c1"),
+        ("plan1", "../c1"),
+        ("plan1", "c/1"),
+        ("plan1", "c\\1"),
+        ("plan1", "C:c1"),
+    ]
+    for plan_id, correlation_id in unsafe_cases:
+        plan = parse_supervisor_plan(
+            {
+                "plan_id": plan_id,
+                "supervisor_node_id": "sup",
+                "created_at": "2026-06-03T00:00:00Z",
+                "status": "approved",
+                "intents": [
+                    {
+                        "target_callable_ref": {"kind": "agent_class", "id": "worker"},
+                        "input_payload": {"task": "go"},
+                        "rationale": "need worker",
+                        "correlation_id": correlation_id,
+                    }
+                ],
+            }
+        )
+
+        with pytest.raises(AccError, match="safe path segment|path separators|drive"):
+            compile_supervisor_plan_to_steps(
+                plan,
+                _roster("worker"),
+                _policy(allowed_targets=(CallableRef(kind="agent_class", id="worker"),)),
+                _run_plan(),
+                existing_steps=(_supervisor_step(),),
+                timestamp="2026-06-03T00:00:01Z",
+            )
+
+
+
     plan = parse_supervisor_plan(
         {
             "plan_id": "plan1",

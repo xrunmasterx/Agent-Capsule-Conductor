@@ -20,6 +20,8 @@ import {
   type RunOverlayState,
 } from '../components/workflow-viewer/runState';
 import { textArtifact } from '../workbench/model/workflowViewerShell';
+import { useRunStore } from '../stores/runStore';
+import { useWorkbenchStore } from '../stores/workbenchStore';
 import { bindingPathOf, bindingRefOfPath } from './useWorkflowBindings';
 import type { EvidenceDockState } from './useEvidenceDockActions';
 import type { StartSubmittedRunPollingOptions } from './useSubmittedRunPolling';
@@ -39,8 +41,8 @@ export type UseWorkflowRunSubmitActionsOptions = {
   pollSubmittedRunUntilTerminal: (options: StartSubmittedRunPollingOptions) => void;
   setMessage: Dispatch<SetStateAction<string>>;
   setEvidenceDock: Dispatch<SetStateAction<EvidenceDockState>>;
-  setTasks: Dispatch<SetStateAction<WorkbenchTask[]>>;
-  setRunsById: Dispatch<SetStateAction<Record<string, RunProjection>>>;
+  setTasks?: Dispatch<SetStateAction<WorkbenchTask[]>>;
+  setRunsById?: Dispatch<SetStateAction<Record<string, RunProjection>>>;
   updateRunProjection: (runId: string, update: (current: RunProjection) => RunProjection) => void;
   graphRef: MutableRefObject<WorkflowGraph>;
   ensureBoundaryTransfersValid: () => Promise<void>;
@@ -104,29 +106,40 @@ export function useWorkflowRunSubmitActions({
           { ...initialRun, status: 'queued' },
           { runId, scope, targetId },
         );
-        setRunsById((current) => ({
-          ...current,
-          [runId]: {
-            runId,
-            taskId,
+        const initialProjection: RunProjection = {
+          runId,
+          taskId,
+          status: 'queued',
+          scope,
+          targetId,
+          graph: runnableGraph,
+          runDir,
+          run: { ...initialRun, status: 'queued' },
+          events: [],
+          overlay: initialOverlay,
+          pollState: 'idle',
+        };
+        if (setRunsById) {
+          setRunsById((current) => ({ ...current, [runId]: initialProjection }));
+        } else {
+          useRunStore.getState().upsertRun(initialProjection);
+        }
+        if (setTasks) {
+          setTasks((current) =>
+            current.map((task) =>
+              task.taskId === taskId
+                ? { ...task, status: 'queued', activeRunId: runId, latestRunId: runId }
+                : task,
+            ),
+          );
+        } else {
+          useWorkbenchStore.getState().updateTask(taskId, (task) => ({
+            ...task,
             status: 'queued',
-            scope,
-            targetId,
-            graph: runnableGraph,
-            runDir,
-            run: { ...initialRun, status: 'queued' },
-            events: [],
-            overlay: initialOverlay,
-            pollState: 'idle',
-          },
-        }));
-        setTasks((current) =>
-          current.map((task) =>
-            task.taskId === taskId
-              ? { ...task, status: 'queued', activeRunId: runId, latestRunId: runId }
-              : task,
-          ),
-        );
+            activeRunId: runId,
+            latestRunId: runId,
+          }));
+        }
         setMessage(`运行 ${graph.id}: 已提交，等待节点事件...`);
         setEvidenceDock((current) => ({
           open: current.open,
@@ -139,18 +152,27 @@ export function useWorkflowRunSubmitActions({
           taskId,
           ...(bindingPath ? { bindingRef: bindingRefOfPath(bindingPath) } : {}),
         });
-        setTasks((current) =>
-          current.map((task) =>
-            task.taskId === taskId
-              ? {
-                  ...task,
-                  status: taskStatusFromRunStatus(submitted.status),
-                  activeRunId: runId,
-                  latestRunId: runId,
-                }
-              : task,
-          ),
-        );
+        if (setTasks) {
+          setTasks((current) =>
+            current.map((task) =>
+              task.taskId === taskId
+                ? {
+                    ...task,
+                    status: taskStatusFromRunStatus(submitted.status),
+                    activeRunId: runId,
+                    latestRunId: runId,
+                  }
+                : task,
+            ),
+          );
+        } else {
+          useWorkbenchStore.getState().updateTask(taskId, (task) => ({
+            ...task,
+            status: taskStatusFromRunStatus(submitted.status),
+            activeRunId: runId,
+            latestRunId: runId,
+          }));
+        }
         pollSubmittedRunUntilTerminal({
           runId,
           foreground: selectedRunId === runId,
@@ -164,37 +186,53 @@ export function useWorkflowRunSubmitActions({
             );
             const runStatus = normalizeTaskRunStatus(summary.status || liveRun.status);
             const overlay = runOverlayFromRun({ ...liveRun, status: runStatus }, { runId, scope, targetId });
-            setRunsById((current) => ({
-              ...current,
-              [runId]: {
-                ...(current[runId] || {
-                  runId,
-                  taskId,
-                  scope,
-                  targetId,
-                  graph: runnableGraph,
-                  runDir,
-                }),
+            const nextProjection: RunProjection = {
+              ...((setRunsById ? undefined : useRunStore.getState().runsById[runId]) || {
+                runId,
+                taskId,
+                scope,
+                targetId,
+                graph: runnableGraph,
+                runDir,
                 status: runStatus,
-                summary,
-                run: { ...liveRun, status: runStatus },
-                events,
-                overlay,
-                pollState: 'polling',
-              },
-            }));
-            setTasks((current) =>
-              current.map((task) =>
-                task.taskId === taskId
-                  ? {
-                      ...task,
-                      status: taskStatusFromRunStatus(runStatus),
-                      activeRunId: isActiveRunStatus(runStatus) ? runId : undefined,
-                      latestRunId: runId,
-                    }
-                  : task,
-              ),
-            );
+                run: null,
+                events: [],
+                overlay: null,
+                pollState: 'idle',
+              }),
+              status: runStatus,
+              summary,
+              run: { ...liveRun, status: runStatus },
+              events,
+              overlay,
+              pollState: 'polling',
+            };
+            if (setRunsById) {
+              setRunsById((current) => ({ ...current, [runId]: { ...(current[runId] || nextProjection), ...nextProjection } }));
+            } else {
+              useRunStore.getState().upsertRun(nextProjection);
+            }
+            if (setTasks) {
+              setTasks((current) =>
+                current.map((task) =>
+                  task.taskId === taskId
+                    ? {
+                        ...task,
+                        status: taskStatusFromRunStatus(runStatus),
+                        activeRunId: isActiveRunStatus(runStatus) ? runId : undefined,
+                        latestRunId: runId,
+                      }
+                    : task,
+                ),
+              );
+            } else {
+              useWorkbenchStore.getState().updateTask(taskId, (task) => ({
+                ...task,
+                status: taskStatusFromRunStatus(runStatus),
+                activeRunId: isActiveRunStatus(runStatus) ? runId : undefined,
+                latestRunId: runId,
+              }));
+            }
             if (isActiveRunStatus(runStatus)) {
               return true;
             }
@@ -218,13 +256,22 @@ export function useWorkflowRunSubmitActions({
           owner: { kind: 'run', taskId, runId, createdAt: new Date().toISOString() },
         });
         updateRunProjection(runId, (current) => ({ ...current, status: 'failed', pollState: 'error' }));
-        setTasks((current) =>
-          current.map((task) =>
-            task.taskId === taskId
-              ? { ...task, status: 'failed', activeRunId: undefined, latestRunId: runId }
-              : task,
-          ),
-        );
+        if (setTasks) {
+          setTasks((current) =>
+            current.map((task) =>
+              task.taskId === taskId
+                ? { ...task, status: 'failed', activeRunId: undefined, latestRunId: runId }
+                : task,
+            ),
+          );
+        } else {
+          useWorkbenchStore.getState().updateTask(taskId, (task) => ({
+            ...task,
+            status: 'failed',
+            activeRunId: undefined,
+            latestRunId: runId,
+          }));
+        }
       }
     },
     [

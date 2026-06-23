@@ -87,7 +87,13 @@ import { useCanvasGraphStateActions } from '../../hooks/useCanvasGraphStateActio
 import { useRunRestorationActions } from '../../hooks/useRunRestorationActions';
 import { useAssistantTaskStoreBindings } from '../../hooks/useAssistantTaskStoreBindings';
 import { useWorkbenchTaskStoreBindings } from '../../hooks/useWorkbenchTaskStoreBindings';
-import { useRunStoreBindings } from '../../hooks/useRunStoreBindings';
+import {
+  useRunLiveEvents,
+  useRunLogsForRun,
+  useRunProjection,
+  useRunStoreActions,
+  useRuntimeConfig,
+} from '../../hooks/useRunStoreBindings';
 import { useWorkbenchStoreInitialization } from '../../hooks/useWorkbenchStoreInitialization';
 import { useWorkflowViewerAssistantDerivedState } from './useWorkflowViewerAssistantDerivedState';
 import { useWorkflowViewerCanvasGuards } from './useWorkflowViewerCanvasGuards';
@@ -126,7 +132,9 @@ export function WorkflowViewerController({
     [initialTaskStore],
   );
   const {
-    tasks,
+    taskSummaries,
+    currentTask,
+    canvas: activeCanvas,
     activeTaskId,
     canvasRevision,
     setActiveTaskId,
@@ -145,17 +153,15 @@ export function WorkflowViewerController({
     selection,
     focusedWorkflowId,
     setTasks,
+    updateTask,
+    updateActiveTask,
     setCanvas,
     setSelection,
     setFocusedWorkflowId,
   } = useWorkbenchTaskStoreBindings();
   const callablesRef = useRef(callables);
   const workflowsRef = useRef(workflows);
-  const currentTask = useMemo(
-    () => tasks.find((task) => task.taskId === activeTaskId) || tasks[0],
-    [activeTaskId, tasks],
-  );
-  const canvas = currentTask?.canvas || initialTask.canvas;
+  const canvas = activeCanvas || currentTask?.canvas || initialTask.canvas;
   const {
     graphRef,
     layoutSyncVersion,
@@ -163,16 +169,8 @@ export function WorkflowViewerController({
   } = useWorkflowViewerGraphState(canvas, canvasRevision);
   const [message, setMessage] = useState('已加载工作台');
   const [durableTasksReady, setDurableTasksReady] = useState(false);
-  const {
-    runsById,
-    setRunsById,
-    runLogsById,
-    setRunLogsById,
-    runLiveEventsById,
-    setRunLiveEventsById,
-    runtimeConfig,
-    setRuntimeConfig,
-  } = useRunStoreBindings();
+  const runtimeConfig = useRuntimeConfig();
+  const { setRuntimeConfig } = useRunStoreActions();
   const [openedExternalWorkflow, setOpenedExternalWorkflow] = useState(false);
   const [dataConnectionDraft, setDataConnectionDraft] = useState<DataConnectionDraft>(null);
 
@@ -232,7 +230,7 @@ export function WorkflowViewerController({
   } = assistantTaskState;
   const selectedRunId = currentTask?.activeRunId || currentTask?.latestRunId || null;
   const selectedLiveRunId = currentTask?.activeRunId || null;
-  const selectedRunProjection = selectedRunId ? runsById[selectedRunId] : undefined;
+  const selectedRunProjection = useRunProjection(selectedRunId);
   const { artifactCacheByPath, ensureArtifactContent, readArtifactContent } =
     useArtifactContentCache({
       runId: selectedRunId,
@@ -249,6 +247,8 @@ export function WorkflowViewerController({
   const workflowRun = selectedRunProjection?.run || null;
   const workflowEvents = selectedRunProjection?.events || [];
   const runOverlay = selectedRunProjection?.overlay || null;
+  const selectedLiveLogs = useRunLogsForRun(selectedRunId);
+  const selectedRunLiveEvents = useRunLiveEvents(selectedRunId);
   const isRunning = currentTask ? isActiveTaskStatus(currentTask.status) : false;
   const {
     viewProjection,
@@ -330,12 +330,7 @@ export function WorkflowViewerController({
     appendRunLiveEvents,
     applyRunSummary,
     refreshRunProjection,
-  } = useRunProjectionActions({
-    runsById,
-    setRunsById,
-    setRunLogsById,
-    setRunLiveEventsById,
-  });
+  } = useRunProjectionActions();
 
   const { loadWorkbenchTaskCanvas, saveWorkbenchTaskCanvas } = useWorkbenchTaskCanvasPersistence();
   const { validateBoundaryTransfers } = useBoundaryTransferValidation();
@@ -418,9 +413,6 @@ export function WorkflowViewerController({
 
   useRunRestorationActions({
     currentTask,
-    runsById,
-    setRunsById,
-    setTasks,
   });
 
   useOpenedWorkflowCanvas({
@@ -435,8 +427,6 @@ export function WorkflowViewerController({
   });
 
   const displayCanvas = canvas;
-  const selectedLiveLogs = selectedRunId ? runLogsById[selectedRunId] || {} : {};
-  const selectedRunLiveEvents = selectedRunId ? runLiveEventsById[selectedRunId] || [] : [];
   const {
     selectedWorkflow,
     selectedPort,
@@ -460,7 +450,7 @@ export function WorkflowViewerController({
     workflowRun,
     workflowEvents,
     selectedLiveLogs,
-    selectedRunLiveEvents,
+    selectedRunLiveEvents: [...selectedRunLiveEvents],
     runtimeConfig,
     workflowBindings,
     currentTask,
@@ -554,7 +544,7 @@ export function WorkflowViewerController({
     deleteTask,
     autoLayout,
   } = useWorkbenchTaskActions({
-    tasks,
+    tasks: taskSummaries,
     activeTaskId,
     graphRef,
     setTasks,
@@ -619,7 +609,6 @@ export function WorkflowViewerController({
   useWorkflowViewerTaskPersistence({
     durableTasksReady,
     activeTaskId,
-    tasks,
     currentTask,
     canvas,
     selection,
@@ -736,8 +725,6 @@ export function WorkflowViewerController({
     pollSubmittedRunUntilTerminal,
     setMessage,
     setEvidenceDock,
-    setTasks,
-    setRunsById,
     updateRunProjection,
     graphRef,
     ensureBoundaryTransfersValid,
@@ -790,7 +777,7 @@ export function WorkflowViewerController({
       mainStageProps={{
         taskWorkspaceView,
         onTaskWorkspaceViewChange: setTaskWorkspaceView,
-        tasks,
+        tasks: taskSummaries,
         activeTaskId,
         onSelectTask: switchTask,
         onNewTask: newTask,
@@ -839,7 +826,7 @@ export function WorkflowViewerController({
         runtimeConfig,
         liveLogs: selectedLiveLogs,
         workflowRun: enrichedWorkflowRun,
-        workflowEvents: selectedRunLiveEvents,
+        workflowEvents: [...selectedRunLiveEvents],
         workflows,
         workflowBindings,
         onResizeStart: startInspectorResize,

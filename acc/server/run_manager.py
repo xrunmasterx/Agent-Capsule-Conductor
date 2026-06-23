@@ -8,12 +8,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from acc.app.run_lifecycle import (
+from acc.run_index import NodeRunSummary, RunSummary, rebuild_run_index, write_json
+from acc.run_status import (
     is_active_run_status,
     is_restart_interrupted_run_status,
     is_terminal_run_status,
 )
-from acc.run_index import NodeRunSummary, RunSummary, rebuild_run_index, write_json
 from acc.session import utc_now_iso
 from acc.storage import write_json_atomic, write_text_atomic
 from acc.utils import AccError
@@ -232,19 +232,24 @@ class WorkbenchRunManager:
             self._write_run_lease(summary.run_id, summary.status)
         elif is_terminal_run_status(summary.status):
             self._release_run_lease(summary.run_id)
-        self._write_index()
+        self._write_index(summary)
 
-    def _write_index(self) -> None:
+    def _write_index(self, summary: RunSummary | None = None) -> None:
         self.runs_root.mkdir(parents=True, exist_ok=True)
         write_json(self.runs_root / "index.json", rebuild_run_index(self.runs_root).model_dump())
+        from acc.storage_refs import make_run_ref
+
+        object_ref = make_run_ref(summary.run_id) if summary is not None else None
+        reason = "workbench_run_summary_updated" if object_ref else "repair_rebuild"
         if self.storage_refresh_trigger is not None:
-            self.storage_refresh_trigger(reason="workbench_run_summary_updated")
+            self.storage_refresh_trigger(reason=reason, object_ref=object_ref)
             return
         from acc.storage_refresh import request_storage_index_refresh
 
         request_storage_index_refresh(
             self.runs_root.parent,
-            reason="workbench_run_summary_updated",
+            reason=reason,
+            object_ref=object_ref,
         )
 
     def _load_existing_summary(self, run_dir: Path) -> RunSummary | None:

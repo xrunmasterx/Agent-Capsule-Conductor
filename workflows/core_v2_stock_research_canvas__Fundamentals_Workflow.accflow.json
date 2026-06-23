@@ -1,561 +1,2019 @@
 {
-  "control_edges": [
-    {
-      "context": "none",
-      "from": "business_model_agent",
-      "to": "fundamentals_synthesis_agent"
-    },
-    {
-      "context": "none",
-      "from": "financial_quality_agent",
-      "to": "fundamentals_synthesis_agent"
-    },
-    {
-      "context": "none",
-      "from": "industry_position_agent",
-      "to": "fundamentals_synthesis_agent"
-    },
-    {
-      "context": "none",
-      "from": "fundamentals_synthesis_agent",
-      "to": "fundamentals_evidence_agent"
-    }
-  ],
-  "data_edges": [],
-  "description": "Child workflow compiled from Workbench container Fundamentals_Workflow.",
-  "exposed_inputs": {
-    "target": {
-      "cardinality": "one",
-      "required": true,
-      "type": "artifact"
-    },
-    "verified_data": {
-      "cardinality": "one",
-      "required": true,
-      "type": "artifact"
-    }
-  },
-  "exposed_outputs": {
-    "evidence_pack": {
-      "cardinality": "one",
-      "required": true,
-      "type": "artifact"
-    },
-    "main": {
-      "cardinality": "one",
-      "required": true,
-      "type": "artifact"
-    }
-  },
+  "schema_version": "acc.core.v2",
   "id": "core_v2_stock_research_canvas__Fundamentals_Workflow",
-  "metadata": {
-    "canonical_format": "accflow",
-    "compiled_child_path": "core_v2_stock_research_canvas__Fundamentals_Workflow.accflow.json",
-    "compiled_from_workbench_container": "Fundamentals_Workflow",
-    "ui_layout": {
-      "layout": null,
-      "nodes": [
-        {
-          "id": "business_model_agent",
-          "label": "业务模式分析",
-          "position": {
-            "x": 137,
-            "y": 146
-          }
-        },
-        {
-          "id": "financial_quality_agent",
-          "label": "财务质量分析",
-          "position": {
-            "x": 137,
-            "y": 332
-          }
-        },
-        {
-          "id": "industry_position_agent",
-          "label": "行业位置分析",
-          "position": {
-            "x": 137,
-            "y": 518
-          }
-        },
-        {
-          "id": "fundamentals_synthesis_agent",
-          "label": "基本面汇总",
-          "position": {
-            "x": 485,
-            "y": 332
-          }
-        },
-        {
-          "id": "fundamentals_evidence_agent",
-          "label": "证据包整理",
-          "position": {
-            "x": 833,
-            "y": 611
-          }
-        }
-      ],
-      "root_workflow_id": null
-    },
-    "workbench_draft": true
-  },
-  "name": "基本面工作流",
+  "version": "0.1.0",
+  "name": "Fundamentals Workflow",
+  "description": "Child workflow compiled from Workbench container Fundamentals_Workflow.",
   "nodes": [
     {
-      "callable_ref": {
-        "id": "stock-research-analyst.codex",
-        "kind": "agent_class"
-      },
       "id": "business_model_agent",
-      "metadata": {
-        "label": "业务模式分析",
-        "ui_label": "业务模式分析",
-        "workbench_kind": "agent_session"
-      },
-      "output_schema": {
-        "additionalProperties": false,
-        "properties": {
-          "evidence": {
-            "description": "证据、假设和需要后续验证的信息",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "findings": {
-            "description": "业务模式分析 的关键发现",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "status": {
-            "description": "success 或 failed",
-            "type": "string"
-          },
-          "summary": {
-            "description": "面向下游节点的简明结论",
-            "type": "string"
-          }
-        },
-        "required": [
-          "status",
-          "summary",
-          "findings",
-          "evidence"
-        ],
-        "type": "object"
-      },
-      "overrides": {
-        "static_input": {}
+      "callable_ref": {
+        "kind": "agent_class",
+        "id": "stock-research-analyst.codex"
       },
       "ports": {
         "inputs": {
           "target": {
-            "cardinality": "one",
+            "type": "artifact",
             "required": true,
-            "type": "artifact"
+            "cardinality": "one"
           },
-          "verified_data": {
-            "cardinality": "one",
+          "evidence_pack": {
+            "type": "artifact",
             "required": true,
-            "type": "artifact"
+            "cardinality": "one"
+          },
+          "model_input_pack": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "coverage_scorecard": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
           }
         },
         "outputs": {
           "main": {
-            "cardinality": "one",
+            "type": "artifact",
             "required": true,
-            "type": "artifact"
+            "cardinality": "one"
+          },
+          "business_model_handoff": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "data_gaps": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "quality_gate": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
           }
         }
       },
+      "overrides": {
+        "static_input": {}
+      },
       "prompt_policy": {
-        "user_prompt": "分析收入来源、客户、产品线和商业模式韧性。"
+        "user_prompt": "Analyze business model, revenue streams, segments, unit economics drivers, and strategic position using evidence_pack and model_input_pack only. Every conclusion cites source_id/metric_id/claim_id."
+      },
+      "metadata": {
+        "label": "商业模式分析",
+        "ui_label": "商业模式分析",
+        "workbench_kind": "agent_session"
+      },
+      "invocation_policy": {
+        "permission_profile": {
+          "workspace_access": "writes_workspace",
+          "network": true,
+          "shell": true,
+          "dangerous": true
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "status",
+          "summary",
+          "as_of_date",
+          "data_gaps",
+          "quality",
+          "quality_gate",
+          "outputs"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "success",
+              "partial",
+              "blocked",
+              "failed"
+            ]
+          },
+          "summary": {
+            "type": "string"
+          },
+          "as_of_date": {
+            "type": "string"
+          },
+          "handoff_summary": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "evidence_pack": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "sources",
+              "metrics",
+              "claims"
+            ],
+            "properties": {
+              "sources": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "source_id",
+                    "title",
+                    "url",
+                    "source_type"
+                  ],
+                  "properties": {
+                    "source_id": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "source_type": {
+                      "type": "string"
+                    },
+                    "retrieved_at": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "metrics": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "metric_id",
+                    "name",
+                    "period",
+                    "value",
+                    "unit",
+                    "source_ids"
+                  ],
+                  "properties": {
+                    "metric_id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "period": {
+                      "type": "string"
+                    },
+                    "value": {},
+                    "unit": {
+                      "type": "string"
+                    },
+                    "currency": {
+                      "type": "string"
+                    },
+                    "source_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              },
+              "claims": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "claim_id",
+                    "statement",
+                    "source_ids",
+                    "metric_ids"
+                  ],
+                  "properties": {
+                    "claim_id": {
+                      "type": "string"
+                    },
+                    "statement": {
+                      "type": "string"
+                    },
+                    "source_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "metric_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "confidence": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "blocking_gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "data_gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "quality_gate": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "quality": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "outputs": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "main",
+              "business_model_handoff",
+              "data_gaps",
+              "quality_gate"
+            ],
+            "properties": {
+              "main": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "business_model_handoff": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "data_gaps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "quality_gate": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          },
+          "main": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "business_model_handoff": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
       }
     },
     {
-      "callable_ref": {
-        "id": "stock-research-analyst.codex",
-        "kind": "agent_class"
-      },
       "id": "financial_quality_agent",
+      "callable_ref": {
+        "kind": "agent_class",
+        "id": "stock-research-analyst.codex"
+      },
+      "ports": {
+        "inputs": {
+          "target": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "evidence_pack": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "model_input_pack": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "coverage_scorecard": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          }
+        },
+        "outputs": {
+          "main": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "financial_quality_scorecard": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "data_gaps": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "quality_gate": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          }
+        }
+      },
+      "overrides": {
+        "static_input": {}
+      },
+      "prompt_policy": {
+        "user_prompt": "Deeply analyze historical and current financial quality: revenue growth, margins, cash flow, working capital, balance sheet, profitability, segment economics, and data reliability. Use exact metrics from model_input_pack and cite every metric_id/source_id."
+      },
       "metadata": {
         "label": "财务质量分析",
         "ui_label": "财务质量分析",
         "workbench_kind": "agent_session"
       },
+      "invocation_policy": {
+        "permission_profile": {
+          "workspace_access": "writes_workspace",
+          "network": true,
+          "shell": true,
+          "dangerous": true
+        }
+      },
       "output_schema": {
-        "additionalProperties": false,
-        "properties": {
-          "evidence": {
-            "description": "证据、假设和需要后续验证的信息",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "findings": {
-            "description": "财务质量分析 的关键发现",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "status": {
-            "description": "success 或 failed",
-            "type": "string"
-          },
-          "summary": {
-            "description": "面向下游节点的简明结论",
-            "type": "string"
-          }
-        },
+        "type": "object",
+        "additionalProperties": true,
         "required": [
           "status",
           "summary",
-          "findings",
-          "evidence"
+          "as_of_date",
+          "data_gaps",
+          "quality",
+          "quality_gate",
+          "outputs"
         ],
-        "type": "object"
-      },
-      "overrides": {
-        "static_input": {}
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "success",
+              "partial",
+              "blocked",
+              "failed"
+            ]
+          },
+          "summary": {
+            "type": "string"
+          },
+          "as_of_date": {
+            "type": "string"
+          },
+          "handoff_summary": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "evidence_pack": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "sources",
+              "metrics",
+              "claims"
+            ],
+            "properties": {
+              "sources": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "source_id",
+                    "title",
+                    "url",
+                    "source_type"
+                  ],
+                  "properties": {
+                    "source_id": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "source_type": {
+                      "type": "string"
+                    },
+                    "retrieved_at": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "metrics": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "metric_id",
+                    "name",
+                    "period",
+                    "value",
+                    "unit",
+                    "source_ids"
+                  ],
+                  "properties": {
+                    "metric_id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "period": {
+                      "type": "string"
+                    },
+                    "value": {},
+                    "unit": {
+                      "type": "string"
+                    },
+                    "currency": {
+                      "type": "string"
+                    },
+                    "source_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              },
+              "claims": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "claim_id",
+                    "statement",
+                    "source_ids",
+                    "metric_ids"
+                  ],
+                  "properties": {
+                    "claim_id": {
+                      "type": "string"
+                    },
+                    "statement": {
+                      "type": "string"
+                    },
+                    "source_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "metric_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "confidence": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "blocking_gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "data_gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "quality_gate": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "quality": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "outputs": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "main",
+              "financial_quality_scorecard",
+              "data_gaps",
+              "quality_gate"
+            ],
+            "properties": {
+              "main": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "financial_quality_scorecard": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "data_gaps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "quality_gate": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          },
+          "main": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "financial_quality_scorecard": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    {
+      "id": "segment_economics_agent",
+      "callable_ref": {
+        "kind": "agent_class",
+        "id": "stock-research-analyst.codex"
       },
       "ports": {
         "inputs": {
           "target": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          },
-          "verified_data": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          }
-        },
-        "outputs": {
-          "main": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          }
-        }
-      },
-      "prompt_policy": {
-        "user_prompt": "分析收入质量、利润率、现金流、资产负债表和需验证的财报数据。"
-      }
-    },
-    {
-      "callable_ref": {
-        "id": "stock-research-analyst.codex",
-        "kind": "agent_class"
-      },
-      "id": "industry_position_agent",
-      "metadata": {
-        "label": "行业位置分析",
-        "ui_label": "行业位置分析",
-        "workbench_kind": "agent_session"
-      },
-      "output_schema": {
-        "additionalProperties": false,
-        "properties": {
-          "evidence": {
-            "description": "证据、假设和需要后续验证的信息",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "findings": {
-            "description": "行业位置分析 的关键发现",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "status": {
-            "description": "success 或 failed",
-            "type": "string"
-          },
-          "summary": {
-            "description": "面向下游节点的简明结论",
-            "type": "string"
-          }
-        },
-        "required": [
-          "status",
-          "summary",
-          "findings",
-          "evidence"
-        ],
-        "type": "object"
-      },
-      "overrides": {
-        "static_input": {}
-      },
-      "ports": {
-        "inputs": {
-          "target": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          },
-          "verified_data": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          }
-        },
-        "outputs": {
-          "main": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          }
-        }
-      },
-      "prompt_policy": {
-        "user_prompt": "分析行业结构、竞争对手、增长驱动和公司相对位置。"
-      }
-    },
-    {
-      "callable_ref": {
-        "id": "stock-research-synthesis.codex",
-        "kind": "agent_class"
-      },
-      "control": {
-        "forward_main_output_on_control": true
-      },
-      "id": "fundamentals_synthesis_agent",
-      "metadata": {
-        "label": "基本面汇总",
-        "ui_label": "基本面汇总",
-        "workbench_kind": "agent_session"
-      },
-      "output_schema": {
-        "additionalProperties": false,
-        "properties": {
-          "decision_factors": {
-            "description": "基本面汇总 输出给下游 workflow 的判断因子",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "open_questions": {
-            "description": "下游仍需处理的不确定性",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "status": {
-            "description": "success 或 failed",
-            "type": "string"
-          },
-          "summary": {
-            "description": "面向下游节点的简明结论",
-            "type": "string"
-          }
-        },
-        "required": [
-          "status",
-          "summary",
-          "decision_factors",
-          "open_questions"
-        ],
-        "type": "object"
-      },
-      "overrides": {
-        "static_input": {}
-      },
-      "ports": {
-        "inputs": {
-          "main": {
-            "cardinality": "one",
-            "required": true,
             "type": "artifact",
-            "description": "三路基本面分析聚合"
+            "required": true,
+            "cardinality": "one"
+          },
+          "evidence_pack": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "model_input_pack": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "coverage_scorecard": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
           }
         },
         "outputs": {
           "main": {
-            "cardinality": "one",
+            "type": "artifact",
             "required": true,
-            "type": "artifact"
+            "cardinality": "one"
+          },
+          "segment_economics_table": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "data_gaps": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "quality_gate": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
           }
         }
-      },
-      "prompt_policy": {
-        "user_prompt": "从 main 控制聚合输入中读取业务、财务、行业三路结果，形成下游估值和风险可消费的结论。"
-      }
-    },
-    {
-      "callable_ref": {
-        "id": "stock-research-synthesis.codex",
-        "kind": "agent_class"
-      },
-      "id": "fundamentals_evidence_agent",
-      "metadata": {
-        "label": "证据包整理",
-        "ui_label": "证据包整理",
-        "workbench_kind": "agent_session"
-      },
-      "output_schema": {
-        "additionalProperties": false,
-        "properties": {
-          "decision_factors": {
-            "description": "证据包整理 输出给下游 workflow 的判断因子",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "open_questions": {
-            "description": "下游仍需处理的不确定性",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "status": {
-            "description": "success 或 failed",
-            "type": "string"
-          },
-          "summary": {
-            "description": "面向下游节点的简明结论",
-            "type": "string"
-          }
-        },
-        "required": [
-          "status",
-          "summary",
-          "decision_factors",
-          "open_questions"
-        ],
-        "type": "object"
       },
       "overrides": {
         "static_input": {}
       },
+      "prompt_policy": {
+        "user_prompt": "Build a segment-level economics table and explain contribution, margin structure, growth drivers, cyclicality, and missing segment data. Cite metric_id/source_id for every row."
+      },
+      "metadata": {
+        "label": "分部经济分析",
+        "ui_label": "分部经济分析",
+        "workbench_kind": "agent_session"
+      },
+      "invocation_policy": {
+        "permission_profile": {
+          "workspace_access": "writes_workspace",
+          "network": true,
+          "shell": true,
+          "dangerous": true
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "status",
+          "summary",
+          "as_of_date",
+          "data_gaps",
+          "quality",
+          "quality_gate",
+          "outputs"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "success",
+              "partial",
+              "blocked",
+              "failed"
+            ]
+          },
+          "summary": {
+            "type": "string"
+          },
+          "as_of_date": {
+            "type": "string"
+          },
+          "handoff_summary": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "evidence_pack": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "sources",
+              "metrics",
+              "claims"
+            ],
+            "properties": {
+              "sources": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "source_id",
+                    "title",
+                    "url",
+                    "source_type"
+                  ],
+                  "properties": {
+                    "source_id": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "source_type": {
+                      "type": "string"
+                    },
+                    "retrieved_at": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "metrics": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "metric_id",
+                    "name",
+                    "period",
+                    "value",
+                    "unit",
+                    "source_ids"
+                  ],
+                  "properties": {
+                    "metric_id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "period": {
+                      "type": "string"
+                    },
+                    "value": {},
+                    "unit": {
+                      "type": "string"
+                    },
+                    "currency": {
+                      "type": "string"
+                    },
+                    "source_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              },
+              "claims": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "claim_id",
+                    "statement",
+                    "source_ids",
+                    "metric_ids"
+                  ],
+                  "properties": {
+                    "claim_id": {
+                      "type": "string"
+                    },
+                    "statement": {
+                      "type": "string"
+                    },
+                    "source_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "metric_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "confidence": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "blocking_gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "data_gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "quality_gate": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "quality": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "outputs": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "main",
+              "segment_economics_table",
+              "data_gaps",
+              "quality_gate"
+            ],
+            "properties": {
+              "main": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "segment_economics_table": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "data_gaps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "quality_gate": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          },
+          "main": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "segment_economics_table": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    {
+      "id": "industry_position_agent",
+      "callable_ref": {
+        "kind": "agent_class",
+        "id": "stock-research-analyst.codex"
+      },
       "ports": {
         "inputs": {
-          "main": {
-            "cardinality": "one",
+          "target": {
+            "type": "artifact",
             "required": true,
-            "type": "artifact"
+            "cardinality": "one"
           },
-          "verified_data": {
-            "cardinality": "one",
+          "evidence_pack": {
+            "type": "artifact",
             "required": true,
-            "type": "artifact"
+            "cardinality": "one"
+          },
+          "model_input_pack": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "coverage_scorecard": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
           }
         },
         "outputs": {
           "main": {
-            "cardinality": "one",
+            "type": "artifact",
             "required": true,
-            "type": "artifact"
+            "cardinality": "one"
+          },
+          "competitive_position_matrix": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "data_gaps": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "quality_gate": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
           }
         }
       },
+      "overrides": {
+        "static_input": {}
+      },
       "prompt_policy": {
-        "user_prompt": "从基本面汇总中整理证据、假设和验证缺口，供最终报告追踪。"
+        "user_prompt": "Analyze industry structure, peers, market share, competitive advantages, and threats using registry evidence and peer metrics. Separate verified facts from assumptions."
+      },
+      "metadata": {
+        "label": "行业竞争分析",
+        "ui_label": "行业竞争分析",
+        "workbench_kind": "agent_session"
+      },
+      "invocation_policy": {
+        "permission_profile": {
+          "workspace_access": "writes_workspace",
+          "network": true,
+          "shell": true,
+          "dangerous": true
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "status",
+          "summary",
+          "as_of_date",
+          "data_gaps",
+          "quality",
+          "quality_gate",
+          "outputs"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "success",
+              "partial",
+              "blocked",
+              "failed"
+            ]
+          },
+          "summary": {
+            "type": "string"
+          },
+          "as_of_date": {
+            "type": "string"
+          },
+          "handoff_summary": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "evidence_pack": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "sources",
+              "metrics",
+              "claims"
+            ],
+            "properties": {
+              "sources": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "source_id",
+                    "title",
+                    "url",
+                    "source_type"
+                  ],
+                  "properties": {
+                    "source_id": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "source_type": {
+                      "type": "string"
+                    },
+                    "retrieved_at": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "metrics": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "metric_id",
+                    "name",
+                    "period",
+                    "value",
+                    "unit",
+                    "source_ids"
+                  ],
+                  "properties": {
+                    "metric_id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "period": {
+                      "type": "string"
+                    },
+                    "value": {},
+                    "unit": {
+                      "type": "string"
+                    },
+                    "currency": {
+                      "type": "string"
+                    },
+                    "source_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              },
+              "claims": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "claim_id",
+                    "statement",
+                    "source_ids",
+                    "metric_ids"
+                  ],
+                  "properties": {
+                    "claim_id": {
+                      "type": "string"
+                    },
+                    "statement": {
+                      "type": "string"
+                    },
+                    "source_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "metric_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "confidence": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "blocking_gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "data_gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "quality_gate": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "quality": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "outputs": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "main",
+              "competitive_position_matrix",
+              "data_gaps",
+              "quality_gate"
+            ],
+            "properties": {
+              "main": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "competitive_position_matrix": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "data_gaps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "quality_gate": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          },
+          "main": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "competitive_position_matrix": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
       }
+    },
+    {
+      "id": "fundamentals_synthesis_agent",
+      "callable_ref": {
+        "kind": "agent_class",
+        "id": "stock-research-synthesis.codex"
+      },
+      "ports": {
+        "inputs": {
+          "business_model": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "financial_quality_scorecard": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "segment_economics_table": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "competitive_position_matrix": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "evidence_pack": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "coverage_scorecard": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          }
+        },
+        "outputs": {
+          "main": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "fundamentals_handoff": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "evidence_pack": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "financial_quality_scorecard": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "segment_economics_table": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "competitive_position_matrix": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "data_gaps": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "quality_gate": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          }
+        }
+      },
+      "overrides": {
+        "static_input": {}
+      },
+      "prompt_policy": {
+        "user_prompt": "Synthesize fundamentals into an evidence-dense handoff. Keep financial quality scorecard, segment table, competitive matrix, evidence_pack, and registry references intact."
+      },
+      "metadata": {
+        "label": "基本面证据综合",
+        "ui_label": "基本面证据综合",
+        "workbench_kind": "agent_session"
+      },
+      "invocation_policy": {
+        "permission_profile": {
+          "workspace_access": "writes_workspace",
+          "network": true,
+          "shell": true,
+          "dangerous": true
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "status",
+          "summary",
+          "as_of_date",
+          "data_gaps",
+          "quality",
+          "quality_gate",
+          "outputs"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "success",
+              "partial",
+              "blocked",
+              "failed"
+            ]
+          },
+          "summary": {
+            "type": "string"
+          },
+          "as_of_date": {
+            "type": "string"
+          },
+          "handoff_summary": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "evidence_pack": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "sources",
+              "metrics",
+              "claims"
+            ],
+            "properties": {
+              "sources": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "source_id",
+                    "title",
+                    "url",
+                    "source_type"
+                  ],
+                  "properties": {
+                    "source_id": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "source_type": {
+                      "type": "string"
+                    },
+                    "retrieved_at": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "metrics": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "metric_id",
+                    "name",
+                    "period",
+                    "value",
+                    "unit",
+                    "source_ids"
+                  ],
+                  "properties": {
+                    "metric_id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "period": {
+                      "type": "string"
+                    },
+                    "value": {},
+                    "unit": {
+                      "type": "string"
+                    },
+                    "currency": {
+                      "type": "string"
+                    },
+                    "source_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              },
+              "claims": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "claim_id",
+                    "statement",
+                    "source_ids",
+                    "metric_ids"
+                  ],
+                  "properties": {
+                    "claim_id": {
+                      "type": "string"
+                    },
+                    "statement": {
+                      "type": "string"
+                    },
+                    "source_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "metric_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "confidence": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "blocking_gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "data_gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "quality_gate": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "quality": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "outputs": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "main",
+              "fundamentals_handoff",
+              "evidence_pack",
+              "financial_quality_scorecard",
+              "segment_economics_table",
+              "competitive_position_matrix",
+              "data_gaps",
+              "quality_gate"
+            ],
+            "properties": {
+              "main": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "fundamentals_handoff": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "evidence_pack": {
+                "type": "object",
+                "additionalProperties": true,
+                "required": [
+                  "sources",
+                  "metrics",
+                  "claims"
+                ],
+                "properties": {
+                  "sources": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "source_id",
+                        "title",
+                        "url",
+                        "source_type"
+                      ],
+                      "properties": {
+                        "source_id": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "url": {
+                          "type": "string"
+                        },
+                        "source_type": {
+                          "type": "string"
+                        },
+                        "retrieved_at": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "metrics": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "metric_id",
+                        "name",
+                        "period",
+                        "value",
+                        "unit",
+                        "source_ids"
+                      ],
+                      "properties": {
+                        "metric_id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "period": {
+                          "type": "string"
+                        },
+                        "value": {},
+                        "unit": {
+                          "type": "string"
+                        },
+                        "currency": {
+                          "type": "string"
+                        },
+                        "source_ids": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "claims": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "claim_id",
+                        "statement",
+                        "source_ids",
+                        "metric_ids"
+                      ],
+                      "properties": {
+                        "claim_id": {
+                          "type": "string"
+                        },
+                        "statement": {
+                          "type": "string"
+                        },
+                        "source_ids": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "metric_ids": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "confidence": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "financial_quality_scorecard": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "segment_economics_table": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "competitive_position_matrix": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "data_gaps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "quality_gate": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          },
+          "main": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "fundamentals_handoff": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "financial_quality_scorecard": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "segment_economics_table": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "competitive_position_matrix": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      }
+    }
+  ],
+  "control_edges": [
+    {
+      "from": "business_model_agent",
+      "to": "fundamentals_synthesis_agent",
+      "context": "none"
+    },
+    {
+      "from": "financial_quality_agent",
+      "to": "fundamentals_synthesis_agent",
+      "context": "none"
+    },
+    {
+      "from": "segment_economics_agent",
+      "to": "fundamentals_synthesis_agent",
+      "context": "none"
+    },
+    {
+      "from": "industry_position_agent",
+      "to": "fundamentals_synthesis_agent",
+      "context": "none"
+    }
+  ],
+  "data_edges": [
+    {
+      "source": {
+        "node": "business_model_agent",
+        "port": "business_model_handoff"
+      },
+      "target": {
+        "node": "fundamentals_synthesis_agent",
+        "port": "business_model"
+      },
+      "materialization": "copy"
+    },
+    {
+      "source": {
+        "node": "financial_quality_agent",
+        "port": "financial_quality_scorecard"
+      },
+      "target": {
+        "node": "fundamentals_synthesis_agent",
+        "port": "financial_quality_scorecard"
+      },
+      "materialization": "copy"
+    },
+    {
+      "source": {
+        "node": "segment_economics_agent",
+        "port": "segment_economics_table"
+      },
+      "target": {
+        "node": "fundamentals_synthesis_agent",
+        "port": "segment_economics_table"
+      },
+      "materialization": "copy"
+    },
+    {
+      "source": {
+        "node": "industry_position_agent",
+        "port": "competitive_position_matrix"
+      },
+      "target": {
+        "node": "fundamentals_synthesis_agent",
+        "port": "competitive_position_matrix"
+      },
+      "materialization": "copy"
+    }
+  ],
+  "metadata": {
+    "canonical_format": "accflow",
+    "compiled_from_workbench_container": "Fundamentals_Workflow",
+    "compiled_child_path": "core_v2_stock_research_canvas__Fundamentals_Workflow.accflow.json",
+    "workbench_draft": true,
+    "ui_layout": {
+      "layout": null,
+      "root_workflow_id": null,
+      "nodes": [
+        {
+          "id": "business_model_agent",
+          "position": {
+            "x": 110.0,
+            "y": 120.0
+          },
+          "label": "商业模式分析"
+        },
+        {
+          "id": "financial_quality_agent",
+          "position": {
+            "x": 380.0,
+            "y": 120.0
+          },
+          "label": "财务质量分析"
+        },
+        {
+          "id": "segment_economics_agent",
+          "position": {
+            "x": 650.0,
+            "y": 120.0
+          },
+          "label": "分部经济分析"
+        },
+        {
+          "id": "industry_position_agent",
+          "position": {
+            "x": 920.0,
+            "y": 120.0
+          },
+          "label": "行业竞争分析"
+        },
+        {
+          "id": "fundamentals_synthesis_agent",
+          "position": {
+            "x": 470.0,
+            "y": 390.0
+          },
+          "label": "基本面证据综合"
+        }
+      ]
+    }
+  },
+  "exposed_inputs": {
+    "target": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "evidence_pack": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "model_input_pack": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "coverage_scorecard": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    }
+  },
+  "exposed_outputs": {
+    "fundamentals_handoff": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "evidence_pack": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "financial_quality_scorecard": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "segment_economics_table": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "competitive_position_matrix": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "data_gaps": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "quality_gate": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    }
+  },
+  "workflow_input_bindings": [
+    {
+      "source_port": "target",
+      "target": {
+        "node": "business_model_agent",
+        "port": "target"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "evidence_pack",
+      "target": {
+        "node": "business_model_agent",
+        "port": "evidence_pack"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "model_input_pack",
+      "target": {
+        "node": "business_model_agent",
+        "port": "model_input_pack"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "coverage_scorecard",
+      "target": {
+        "node": "business_model_agent",
+        "port": "coverage_scorecard"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "target",
+      "target": {
+        "node": "financial_quality_agent",
+        "port": "target"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "evidence_pack",
+      "target": {
+        "node": "financial_quality_agent",
+        "port": "evidence_pack"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "model_input_pack",
+      "target": {
+        "node": "financial_quality_agent",
+        "port": "model_input_pack"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "coverage_scorecard",
+      "target": {
+        "node": "financial_quality_agent",
+        "port": "coverage_scorecard"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "target",
+      "target": {
+        "node": "segment_economics_agent",
+        "port": "target"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "evidence_pack",
+      "target": {
+        "node": "segment_economics_agent",
+        "port": "evidence_pack"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "model_input_pack",
+      "target": {
+        "node": "segment_economics_agent",
+        "port": "model_input_pack"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "coverage_scorecard",
+      "target": {
+        "node": "segment_economics_agent",
+        "port": "coverage_scorecard"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "target",
+      "target": {
+        "node": "industry_position_agent",
+        "port": "target"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "evidence_pack",
+      "target": {
+        "node": "industry_position_agent",
+        "port": "evidence_pack"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "model_input_pack",
+      "target": {
+        "node": "industry_position_agent",
+        "port": "model_input_pack"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "coverage_scorecard",
+      "target": {
+        "node": "industry_position_agent",
+        "port": "coverage_scorecard"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "evidence_pack",
+      "target": {
+        "node": "fundamentals_synthesis_agent",
+        "port": "evidence_pack"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "coverage_scorecard",
+      "target": {
+        "node": "fundamentals_synthesis_agent",
+        "port": "coverage_scorecard"
+      },
+      "materialization": "copy",
+      "required": false
+    }
+  ],
+  "workflow_output_bindings": [
+    {
+      "source": {
+        "node": "fundamentals_synthesis_agent",
+        "port": "fundamentals_handoff"
+      },
+      "target_port": "fundamentals_handoff",
+      "materialization": "copy",
+      "required": true
+    },
+    {
+      "source": {
+        "node": "fundamentals_synthesis_agent",
+        "port": "evidence_pack"
+      },
+      "target_port": "evidence_pack",
+      "materialization": "copy",
+      "required": true
+    },
+    {
+      "source": {
+        "node": "fundamentals_synthesis_agent",
+        "port": "financial_quality_scorecard"
+      },
+      "target_port": "financial_quality_scorecard",
+      "materialization": "copy",
+      "required": true
+    },
+    {
+      "source": {
+        "node": "fundamentals_synthesis_agent",
+        "port": "segment_economics_table"
+      },
+      "target_port": "segment_economics_table",
+      "materialization": "copy",
+      "required": true
+    },
+    {
+      "source": {
+        "node": "fundamentals_synthesis_agent",
+        "port": "competitive_position_matrix"
+      },
+      "target_port": "competitive_position_matrix",
+      "materialization": "copy",
+      "required": true
+    },
+    {
+      "source": {
+        "node": "fundamentals_synthesis_agent",
+        "port": "evidence_pack"
+      },
+      "target_port": "evidence_pack",
+      "materialization": "copy",
+      "required": true
+    },
+    {
+      "source": {
+        "node": "fundamentals_synthesis_agent",
+        "port": "data_gaps"
+      },
+      "target_port": "data_gaps",
+      "materialization": "copy",
+      "required": true
+    },
+    {
+      "source": {
+        "node": "fundamentals_synthesis_agent",
+        "port": "quality_gate"
+      },
+      "target_port": "quality_gate",
+      "materialization": "copy",
+      "required": true
     }
   ],
   "policies": {
     "failure_mode": "fail_fast",
     "max_concurrency": 8
-  },
-  "schema_version": "acc.core.v2",
-  "version": "0.1.0",
-  "workflow_input_bindings": [
-    {
-      "materialization": "copy",
-      "required": false,
-      "source_port": "target",
-      "target": {
-        "node": "business_model_agent",
-        "port": "target"
-      }
-    },
-    {
-      "materialization": "copy",
-      "required": false,
-      "source_port": "verified_data",
-      "target": {
-        "node": "business_model_agent",
-        "port": "verified_data"
-      }
-    },
-    {
-      "materialization": "copy",
-      "required": false,
-      "source_port": "target",
-      "target": {
-        "node": "financial_quality_agent",
-        "port": "target"
-      }
-    },
-    {
-      "materialization": "copy",
-      "required": false,
-      "source_port": "verified_data",
-      "target": {
-        "node": "financial_quality_agent",
-        "port": "verified_data"
-      }
-    },
-    {
-      "materialization": "copy",
-      "required": false,
-      "source_port": "target",
-      "target": {
-        "node": "industry_position_agent",
-        "port": "target"
-      }
-    },
-    {
-      "materialization": "copy",
-      "required": false,
-      "source_port": "verified_data",
-      "target": {
-        "node": "industry_position_agent",
-        "port": "verified_data"
-      }
-    },
-    {
-      "materialization": "copy",
-      "required": false,
-      "source_port": "verified_data",
-      "target": {
-        "node": "fundamentals_evidence_agent",
-        "port": "verified_data"
-      }
-    }
-  ],
-  "workflow_output_bindings": [
-    {
-      "materialization": "copy",
-      "required": true,
-      "source": {
-        "node": "fundamentals_synthesis_agent",
-        "port": "main"
-      },
-      "target_port": "main"
-    },
-    {
-      "materialization": "copy",
-      "required": true,
-      "source": {
-        "node": "fundamentals_evidence_agent",
-        "port": "main"
-      },
-      "target_port": "evidence_pack"
-    }
-  ]
+  }
 }

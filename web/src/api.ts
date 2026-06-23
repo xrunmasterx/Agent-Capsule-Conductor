@@ -504,16 +504,6 @@ export const api = {
   diffRuns: (runA: string, runB: string) =>
     sendJson<RunDiffPayload>('POST', '/api/debugger/diff', { run_a: runA, run_b: runB }),
   graphopsExamples: () => getJson<{ patches: GraphOpsExample[] }>('/api/graphops/examples'),
-  graphopsValidate: (patchPath: string, semantic = true) =>
-    sendJson<Record<string, unknown>>('POST', '/api/graphops/validate', {
-      patch_path: patchPath,
-      semantic,
-    }),
-  graphopsDryRun: (patchPath: string, semantic = true) =>
-    sendJson<Record<string, unknown>>('POST', '/api/graphops/dry-run', {
-      patch_path: patchPath,
-      semantic,
-    }),
   createGraphOpsProposal: (proposal: GraphOpsTransactionProposal) =>
     sendJson<GraphOpsProposalPayload>('POST', '/api/graphops/proposals', { proposal }),
   validateGraphOpsProposal: (proposalId: string) =>

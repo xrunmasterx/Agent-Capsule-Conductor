@@ -2,6 +2,12 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+## Current audit status (2026-06-22)
+
+Status: **partially complete**. Store selectors, canvas revisions, a dedicated selector test file, derived graph coverage, and runtime overlay helpers are present. Remaining blockers are writable graph-reference compatibility and remaining hot-path projection compatibility that is narrower than the original broad `tasks[]`/run-store wording. Do not treat the plan as fully closed until those cleanup gates are either completed or explicitly deferred by an amended plan.
+
+See `docs/superpowers/plans/STATUS.md` for the cross-plan audit summary.
+
 **Goal:** Make the Workbench canvas and run overlay lightweight by replacing broad `tasks[]` and full-run subscriptions with selector-based ownership and derived graph state.
 
 **Architecture:** `workbenchStore` owns durable task/canvas state by task id. `WorkflowGraph` is derived from `canvasRevision` and never written as a second source of truth. Runtime status is passed as small maps to node renderers instead of cloning canvas objects.
@@ -61,9 +67,9 @@ describe('workbenchStore selectors', () => {
 
 - [x] **Step 2: Run selector tests**
 
-Run: `cd web; npm run test -- src/stores/workbenchStore.selectors.test.ts --run`
+Run: `npm --prefix web run test -- src/stores/workbenchStore.selectors.test.ts --run`
 
-Expected: fail because selectors do not exist.
+Expected: pass.
 
 - [x] **Step 3: Implement selectors**
 
@@ -91,7 +97,7 @@ export function selectActiveTaskMeta(state: WorkbenchStoreState): ActiveTaskMeta
 
 - [x] **Step 4: Run selector tests**
 
-Run: `cd web; npm run test -- src/stores/workbenchStore.selectors.test.ts --run`
+Run: `npm --prefix web run test -- src/stores/workbenchStore.selectors.test.ts --run`
 
 Expected: pass.
 
@@ -134,7 +140,7 @@ Expected: fail because the hook exposes writable graph state.
 
 - [x] **Step 3: Implement revision-derived graph**
 
-Use `useMemo(() => canvasToWorkflowGraph(canvas), [canvasRevision])` and remove `setSourceGraph`/`graphRef` writes from action hooks.
+Use `useMemo(() => canvasToWorkflowGraph(canvas), [canvas, canvasRevision])` and remove the exposed `setSourceGraph` setter. Writable `graphRef.current` compatibility in action hooks remains intentionally deferred/open and must not be counted as retired by this checked step.
 
 - [x] **Step 4: Run focused tests**
 

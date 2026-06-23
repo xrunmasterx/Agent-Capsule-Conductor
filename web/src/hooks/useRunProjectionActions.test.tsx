@@ -1,9 +1,9 @@
 import { act, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { useState } from 'react';
 
 import type { NodeLogDelta, RunEvent, RunSummary, WorkbenchLiveEvent, WorkflowGraph, WorkflowRunResult } from '../types';
-import type { NodeLiveLogs, RunProjection } from '../types/workbench';
+import type { RunProjection } from '../types/workbench';
+import { useRunStore } from '../stores/runStore';
 import {
   useRunProjectionActions,
   type UseRunProjectionActionsResult,
@@ -16,9 +16,12 @@ vi.mock('./useRunRefreshLoader', () => ({
 }));
 
 let latestActions: UseRunProjectionActionsResult | null = null;
-let latestRunsById: Record<string, RunProjection> = {};
-let latestRunLogsById: Record<string, Record<string, NodeLiveLogs>> = {};
-let latestLiveEventsByRunId: Record<string, WorkbenchLiveEvent[]> = {};
+
+function resetStore(): void {
+  act(() => {
+    useRunStore.setState(useRunStore.getInitialState(), true);
+  });
+}
 
 function workflowGraph(): WorkflowGraph {
   return {
@@ -133,40 +136,27 @@ function agentEvent(partial: Partial<RunEvent> = {}): RunEvent {
   };
 }
 
-function Harness({ initialRuns = { run_1: runProjection() } }: { initialRuns?: Record<string, RunProjection> }) {
-  const [runsById, setRunsById] = useState<Record<string, RunProjection>>(initialRuns);
-  const [runLogsById, setRunLogsById] = useState<Record<string, Record<string, NodeLiveLogs>>>({});
-  const [liveEventsByRunId, setRunLiveEventsById] = useState<Record<string, WorkbenchLiveEvent[]>>({});
-
-  latestActions = useRunProjectionActions({
-    runsById,
-    setRunsById,
-    setRunLogsById,
-    setRunLiveEventsById,
-  });
-  latestRunsById = runsById;
-  latestRunLogsById = runLogsById;
-  latestLiveEventsByRunId = liveEventsByRunId;
-
+function Harness() {
+  latestActions = useRunProjectionActions();
   return <output>run-projection-actions</output>;
 }
 
 describe('useRunProjectionActions', () => {
   beforeEach(() => {
+    resetStore();
     latestActions = null;
-    latestRunsById = {};
-    latestRunLogsById = {};
-    latestLiveEventsByRunId = {};
     loadRunRefresh.mockResolvedValue({
       runId: 'run_1',
       summary: runSummary('success'),
       stateSnapshot: workflowRun('success'),
       events: [agentEvent({ type: 'workflow_completed' })],
     });
+    useRunStore.setState({ runsById: { run_1: runProjection() } });
   });
 
   afterEach(() => {
     vi.clearAllMocks();
+    resetStore();
   });
 
   test('updates an existing run projection and ignores missing runs', () => {
@@ -177,8 +167,8 @@ describe('useRunProjectionActions', () => {
       latestActions?.updateRunProjection('missing_run', (current) => ({ ...current, status: 'failed' }));
     });
 
-    expect(latestRunsById.run_1.status).toBe('success');
-    expect(latestRunsById.missing_run).toBeUndefined();
+    expect(useRunStore.getState().runsById.run_1.status).toBe('success');
+    expect(useRunStore.getState().runsById.missing_run).toBeUndefined();
   });
 
   test('appends node log deltas to every selectable node log key', () => {
@@ -188,9 +178,10 @@ describe('useRunProjectionActions', () => {
       latestActions?.appendNodeLogDeltas('run_1', [logDelta()]);
     });
 
-    expect(latestRunLogsById.run_1.workflow_1__internal__agent_1.stdout).toBe('hello');
-    expect(latestRunLogsById.run_1['runs/run_1/nodes/agent_1'].stdout).toBe('hello');
-    expect(latestRunLogsById.run_1.agent_1.stdout).toBe('hello');
+    const logs = useRunStore.getState().runLogsById.run_1;
+    expect(logs.workflow_1__internal__agent_1.stdout).toBe('hello');
+    expect(logs['runs/run_1/nodes/agent_1'].stdout).toBe('hello');
+    expect(logs.agent_1.stdout).toBe('hello');
   });
 
   test('ignores duplicate and backwards node log offsets', () => {
@@ -205,8 +196,8 @@ describe('useRunProjectionActions', () => {
       ]);
     });
 
-    expect(latestRunLogsById.run_1.agent_1.stdout).toBe('hello world');
-    expect(latestRunLogsById.run_1.agent_1.stdoutOffset).toBe(11);
+    expect(useRunStore.getState().runLogsById.run_1.agent_1.stdout).toBe('hello world');
+    expect(useRunStore.getState().runLogsById.run_1.agent_1.stdoutOffset).toBe(11);
   });
 
   test('merges agent events into the selected run projection', () => {
@@ -216,8 +207,8 @@ describe('useRunProjectionActions', () => {
       latestActions?.appendRunAgentEventsToProjection('run_1', [agentEvent(), agentEvent()]);
     });
 
-    expect(latestRunsById.run_1.events).toHaveLength(1);
-    expect(latestRunsById.run_1.events[0]).toMatchObject({ type: 'node_started', node_id: 'agent_1' });
+    expect(useRunStore.getState().runsById.run_1.events).toHaveLength(1);
+    expect(useRunStore.getState().runsById.run_1.events[0]).toMatchObject({ type: 'node_started', node_id: 'agent_1' });
   });
 
   test('appends bounded live events by run id', () => {
@@ -230,7 +221,7 @@ describe('useRunProjectionActions', () => {
       ]);
     });
 
-    expect(latestLiveEventsByRunId.run_1.map((event) => event.event_id)).toEqual(['live_1', 'live_2']);
+    expect(useRunStore.getState().liveEventsByRunId.run_1.map((event) => event.event_id)).toEqual(['live_1', 'live_2']);
   });
 
   test('refreshes a run projection from durable run state', async () => {
@@ -240,10 +231,11 @@ describe('useRunProjectionActions', () => {
       await latestActions?.refreshRunProjection('run_1');
     });
 
+    const run = useRunStore.getState().runsById.run_1;
     expect(loadRunRefresh).toHaveBeenCalledWith('run_1');
-    expect(latestRunsById.run_1.status).toBe('success');
-    expect(latestRunsById.run_1.run?.status).toBe('success');
-    expect(latestRunsById.run_1.overlay?.status).toBe('success');
-    expect(latestRunsById.run_1.events).toEqual([expect.objectContaining({ type: 'workflow_completed' })]);
+    expect(run.status).toBe('success');
+    expect(run.run?.status).toBe('success');
+    expect(run.overlay?.status).toBe('success');
+    expect(run.events).toEqual([expect.objectContaining({ type: 'workflow_completed' })]);
   });
 });

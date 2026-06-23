@@ -164,6 +164,10 @@ async def run_structured_mode_rejects_plain_message(tmp_path: Path) -> None:
     assert result.output_json_path is None
     assert "did not produce a JSON object" in (result.error or result.summary)
     assert not request.output_json_path.exists()
+    assert any(
+        event["type"] == "agent_output_contract_issue"
+        for event in read_jsonl(request.events_log_path)
+    )
 
 
 def test_codex_app_server_extracts_json_object_from_markdown_message(tmp_path: Path) -> None:
@@ -187,6 +191,32 @@ async def run_extracts_json_object_from_markdown_message(tmp_path: Path) -> None
         "schema_version": "test.output.v1",
         "summary": "from fenced json",
     }
+
+
+def test_codex_app_server_repairs_extra_trailing_object_brace(tmp_path: Path) -> None:
+    asyncio.run(run_repairs_extra_trailing_object_brace(tmp_path))
+
+
+async def run_repairs_extra_trailing_object_brace(tmp_path: Path) -> None:
+    message = (
+        '{"schema_version":"test.output.v1","summary":"done",'
+        '"verification_gaps":["extra brace"}]}'
+    )
+    command = fake_codex_command(tmp_path, message=message)
+    request = make_request(tmp_path, command, response_mode="structured_required")
+
+    result = await CodexAppServerAdapter().run_turn(request)
+
+    assert result.status == "success"
+    assert json.loads(request.output_json_path.read_text(encoding="utf-8")) == {
+        "schema_version": "test.output.v1",
+        "summary": "done",
+        "verification_gaps": ["extra brace"],
+    }
+    events = read_jsonl(request.events_log_path)
+    repair_events = [event for event in events if event["type"] == "agent_output_repaired"]
+    assert repair_events
+    assert repair_events[0]["payload"]["repair_kind"] == "stray_object_brace"
 
 
 def test_codex_app_server_cancel_marker_cancels_turn(tmp_path: Path) -> None:
@@ -407,7 +437,10 @@ for line in sys.stdin:
         .replace("__WAIT_FOREVER_LITERAL__", "True" if wait_forever else "False")
         .replace("__REQUEST_APPROVAL_LITERAL__", "True" if request_approval else "False")
         .replace("__EMIT_DELTA_LITERAL__", "True" if emit_delta else "False")
-        .replace("__EMIT_LARGE_PROVIDER_ITEM_LITERAL__", "True" if emit_large_provider_item else "False"),
+        .replace(
+            "__EMIT_LARGE_PROVIDER_ITEM_LITERAL__",
+            "True" if emit_large_provider_item else "False",
+        ),
         encoding="utf-8",
     )
     if sys.platform.startswith("win"):

@@ -4,7 +4,6 @@ from pathlib import Path
 
 from fastapi import FastAPI
 
-from acc.storage_refresh import StorageIndexRefreshService
 from acc.server.routes import (
     agent_sessions,
     artifacts,
@@ -21,6 +20,7 @@ from acc.server.routes import (
     workflows,
 )
 from acc.server.security import local_runner_security_middleware
+from acc.storage_refresh import StorageIndexRefreshService
 
 
 def create_app(project_root: Path | str | None = None) -> FastAPI:

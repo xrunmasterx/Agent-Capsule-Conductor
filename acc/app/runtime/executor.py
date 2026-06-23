@@ -8,18 +8,20 @@ from __future__ import annotations
 import hashlib
 import json
 import sys
+from collections.abc import Mapping
 from dataclasses import asdict
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
-from acc.app.agent_sessions import AgentTurnService
-from acc.app.workflow_refs import WorkflowCatalog
+from acc.app.runtime.context import ExecutionContext
+from acc.app.runtime.invocation_port import CallableInvocationPort, NodeExecutionEnvelope
+from acc.app.runtime.repository import NodeExecutionRecorder
+from acc.app.runtime.results import NodeExecutionResult
 from acc.callable_registry import CallableRegistry
 from acc.hermetic_callables import HERMETIC_AGENT_CLASS_IDS, HERMETIC_TOOL_CLASS_IDS
 from acc.models import (
     AccError,
     ArtifactBundle,
-    CallableOverride,
     FailureRecord,
     FunctionInvocation,
     NodeInvocationSpec,
@@ -31,6 +33,8 @@ from acc.models import (
 from acc.result_store.filesystem import FilesystemResultStore
 from acc.result_store.types import (
     ArtifactBundle as StoredArtifactBundle,
+)
+from acc.result_store.types import (
     NodeId,
     NodeResult,
     PortId,
@@ -43,17 +47,9 @@ from acc.runtime.node_payload import (
     output_value_for_port,
     resolve_node_payload,
 )
-from acc.runtime.io import (
-    append_event,
-    append_runtime_error_to_stderr_log,
-    artifact_bundle_payload,
-    failure_record_payload,
-    session_instance_payload,
-)
 from acc.runtime.policy import acc_run_mode
 from acc.session import utc_now_iso
-from acc.storage import write_text_atomic
-from acc.store import load_clean_environment_binding, load_json, write_json
+from acc.store import load_clean_environment_binding
 
 
 async def execute_core_v2_node(
@@ -62,17 +58,19 @@ async def execute_core_v2_node(
     invocation: FunctionInvocation,
     scope: ScopeFrame,
     result_store: FilesystemResultStore,
-    outputs: dict[tuple[str, str], Any],
     event_log_path: Path,
     callable_registry: CallableRegistry | None,
-) -> None:
-    node_dir = scope.environment_root / "nodes" / node.id
-    for path in (node_dir, node_dir / "artifacts"):
-        path.mkdir(parents=True, exist_ok=True)
-    write_text_atomic(node_dir / "events.jsonl", "")
-    for log_name in ("stdout.log", "stderr.log", "stdout.txt", "stderr.txt"):
-        write_text_atomic(node_dir / log_name, "")
-    append_event(event_log_path, invocation.run_id, "node_started", node_id=node.id)
+    *,
+    execution_context: ExecutionContext | None = None,
+    upstream_outputs: Mapping[tuple[str, str], Any] | None = None,
+) -> NodeExecutionResult:
+    recorder = NodeExecutionRecorder(
+        scope=scope,
+        event_log_path=event_log_path,
+        invocation=invocation,
+    )
+    node_dir = recorder.prepare_node_dir(node.id)
+    recorder.append_event("node_started", node_id=node.id)
 
     started_at = utc_now_iso()
     session = SessionInstance(
@@ -91,13 +89,13 @@ async def execute_core_v2_node(
         event_log_path=node_dir / "events.jsonl",
         started_at=started_at,
     )
-    write_json(node_dir / "session_instance_manifest.json", session_instance_payload(session))
+    recorder.write_session(node.id, session)
     try:
         resolved_payload = resolve_node_payload(
             template,
             node,
             invocation.input_payload,
-            outputs,
+            dict(upstream_outputs or {}),
             run_dir=scope.environment_root,
         )
         agent_payload = resolved_payload.payload
@@ -110,33 +108,30 @@ async def execute_core_v2_node(
             "execution_mode": acc_run_mode(),
             "binding_materializations": resolved_payload.binding_records,
         }
-        write_json(node_dir / "agent_payload.json", agent_payload)
-        write_json(node_dir / "input.json", agent_payload)
-        write_json(node_dir / "runtime_payload.json", runtime_payload)
-        write_json(node_dir / "runtime.json", runtime_payload)
-        write_json(
-            node_dir / "binding_manifest.json",
-            {
-                "inputs": sorted(agent_payload),
-                "bindings": resolved_payload.binding_records,
-            },
+        recorder.write_payloads(
+            node.id,
+            agent_payload=agent_payload,
+            runtime_payload=runtime_payload,
+        )
+        binding_manifest_path = recorder.write_binding_manifest(
+            node.id,
+            inputs=sorted(agent_payload),
+            bindings=resolved_payload.binding_records,
         )
         for record in resolved_payload.binding_records:
-            append_event(
-                event_log_path,
-                invocation.run_id,
+            recorder.append_event(
                 "input_materialized",
                 node_id=node.id,
                 payload=record,
             )
-        if node.metadata.get("empty_input_policy") == "block" and is_empty_runtime_input(agent_payload):
+        if node.metadata.get("empty_input_policy") == "block" and is_empty_runtime_input(
+            agent_payload
+        ):
             message = (
                 f"Node {node.id} requires runtime input, but input.json is empty. "
                 "Provide ticker, theme, main input, or switch empty_input_policy to allow."
             )
-            append_event(
-                event_log_path,
-                invocation.run_id,
+            recorder.append_event(
                 "node_input_blocked",
                 node_id=node.id,
                 payload={"reason": "empty_input_policy", "message": message},
@@ -154,18 +149,20 @@ async def execute_core_v2_node(
             session,
             resolved_payload.binding_records,
             callable_registry,
+            execution_context,
         )
-        write_json(node_dir / "output.json", output)
-        write_json(node_dir / "artifacts" / "payload.json", output)
+        recorder.write_output(node.id, output)
         validate_artifact_contract(node, node_dir)
 
         materialized_ports = materialized_output_port_ids(node, output)
+        node_outputs: dict[str, Any] = {}
+        result_addresses: dict[str, ResultStoreAddress] = {}
         for port_id in materialized_ports:
             value = output_value_for_port(output, port_id)
             if value is MISSING_PORT_VALUE:
                 raise AccError(f"Required output port missing for node {node.id}: {port_id}")
-            outputs[(node.id, port_id)] = value
-            put_result_store_value(
+            node_outputs[port_id] = value
+            result_addresses[port_id] = put_result_store_value(
                 result_store,
                 invocation.run_id,
                 node.id,
@@ -177,12 +174,12 @@ async def execute_core_v2_node(
             bundle_id=f"bundle_{invocation.run_id}_{node.id}",
             node_id=node.id,
             run_id=invocation.run_id,
-            outputs={port_id: outputs[(node.id, port_id)] for port_id in materialized_ports},
+            outputs=dict(node_outputs),
             files=[],
             created_at=utc_now_iso(),
             provenance={"workflow_function_id": template.id},
         )
-        write_json(node_dir / "artifact_bundle.json", artifact_bundle_payload(bundle))
+        artifact_bundle_path = recorder.write_artifact_bundle(node.id, bundle)
 
         ended_at = utc_now_iso()
         completed_session = SessionInstance(
@@ -192,11 +189,17 @@ async def execute_core_v2_node(
                 "ended_at": ended_at,
             }
         )
-        write_json(
-            node_dir / "session_instance_manifest.json",
-            session_instance_payload(completed_session),
+        recorder.write_session(node.id, completed_session)
+        recorder.append_event("node_completed", node_id=node.id)
+        return NodeExecutionResult.success(
+            node_id=node.id,
+            outputs=node_outputs,
+            result_addresses=result_addresses,
+            artifact_bundle_path=artifact_bundle_path,
+            binding_manifest_path=binding_manifest_path,
+            started_at=started_at,
+            ended_at=ended_at,
         )
-        append_event(event_log_path, invocation.run_id, "node_completed", node_id=node.id)
     except Exception as exc:
         ended_at = utc_now_iso()
         failed_session = SessionInstance(
@@ -207,10 +210,7 @@ async def execute_core_v2_node(
                 "error": str(exc),
             }
         )
-        write_json(
-            node_dir / "session_instance_manifest.json",
-            session_instance_payload(failed_session),
-        )
+        recorder.write_session(node.id, failed_session)
         failure = FailureRecord(
             failure_id=f"failure_{invocation.run_id}_{node.id}",
             run_id=invocation.run_id,
@@ -222,15 +222,8 @@ async def execute_core_v2_node(
                 node_dir / "stderr.txt",
             ),
         )
-        write_json(
-            scope.environment_root / "failures" / f"{failure.failure_id}.json",
-            failure_record_payload(failure),
-        )
-        write_text_atomic(node_dir / "stderr.txt", str(exc))
-        append_runtime_error_to_stderr_log(node_dir / "stderr.log", str(exc))
-        append_event(
-            event_log_path,
-            invocation.run_id,
+        recorder.write_failure(node.id, failure, str(exc))
+        recorder.append_event(
             "node_failed",
             node_id=node.id,
             payload={"failure_id": failure.failure_id, "error": str(exc)},
@@ -247,39 +240,29 @@ async def execute_core_v2_callable(
     session: SessionInstance,
     binding_materializations: list[dict[str, Any]],
     callable_registry: CallableRegistry | None,
+    execution_context: ExecutionContext | None = None,
 ) -> dict[str, Any]:
-    if node.callable_ref.kind == "workflow_function":
-        from acc.app.runtime.nested_workflow import execute_workflow_function_callable
-
-        return await execute_workflow_function_callable(
-            template,
-            node,
-            payload,
-            node_dir,
-            scope,
-            session,
-            callable_registry,
-        )
-    if callable_registry is not None and node.callable_ref.kind == "agent_class":
-        try:
-            asset = callable_registry.resolve(node.callable_ref)
-        except AccError:
-            pass
-        else:
-            service = AgentTurnService(project_root_for_agent_sessions(scope))
-            return await service.run_workflow_node_turn(
-                asset,
-                payload,
-                node_dir,
-                node=node,
-                scope=scope,
-                session=session,
-                binding_materializations=binding_materializations,
-            )
-    return execute_hermetic_callable(node, payload, scope, callable_registry)
+    envelope = NodeExecutionEnvelope(
+        template=template,
+        node=node,
+        payload=payload,
+        node_dir=node_dir,
+        scope=scope,
+        session=session,
+        binding_materializations=binding_materializations,
+        callable_registry=callable_registry,
+        execution_context=execution_context,
+    )
+    return await CallableInvocationPort().invoke(envelope)
 
 
-def project_root_for_agent_sessions(scope: ScopeFrame) -> Path:
+def project_root_for_agent_sessions(
+    scope: ScopeFrame,
+    *,
+    execution_context: ExecutionContext | None = None,
+) -> Path:
+    if execution_context is not None:
+        return execution_context.project.project_root
     run_dir = scope.environment_root.resolve()
     if run_dir.parent.name == "runs":
         return run_dir.parent.parent
@@ -406,11 +389,18 @@ def resolve_node_workflow_binding(
     node: NodeInvocationSpec,
     *,
     callable_registry: CallableRegistry | None,
+    execution_context: ExecutionContext | None = None,
 ) -> tuple[Path | None, Path | None]:
     binding_ref = node.metadata.get("binding_ref")
     if not isinstance(binding_ref, str) or not binding_ref.strip():
         return None, None
-    project_root = callable_registry.project_root if callable_registry is not None else None
+    project_root = (
+        execution_context.project.project_root
+        if execution_context is not None
+        else callable_registry.project_root
+        if callable_registry is not None
+        else None
+    )
     if project_root is None:
         project_root = Path.cwd()
     candidate = (project_root / binding_ref).resolve()

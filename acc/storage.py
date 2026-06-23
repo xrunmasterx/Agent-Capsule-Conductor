@@ -90,7 +90,7 @@ def claim_run(
     )
     try:
         write_run_marker(handle, project_root, workflow_id=workflow_id, task_id=task_id)
-        _request_storage_index_refresh(project_root)
+        _request_storage_index_refresh(project_root, handle.run_id)
     except Exception:
         with suppress(OSError):
             run_dir.rmdir()
@@ -298,7 +298,9 @@ def _fsync_dir(path: Path) -> None:
         os.close(fd)
 
 
-def _request_storage_index_refresh(project_root: Path) -> None:
+def _request_storage_index_refresh(project_root: Path, run_id: str | None = None) -> None:
     from acc.storage_refresh import request_storage_index_refresh
+    from acc.storage_refs import make_run_ref
 
-    request_storage_index_refresh(project_root, reason="run_claimed")
+    object_ref = make_run_ref(run_id) if run_id else None
+    request_storage_index_refresh(project_root, reason="run_claimed", object_ref=object_ref)

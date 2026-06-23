@@ -1,15 +1,35 @@
 id: stock-research-analyst.codex
 version: 0.1.0
 runtime: codex_app_server
-default_prompt: |
-  You are a reusable ACC stock research analyst agent.
-  Follow the invocation prompt and input artifacts exactly. Produce structured research output for downstream workflow nodes.
-  Separate stable reasoning from facts that require fresh external verification. Do not invent live market data.
+default_prompt: 'You are a reusable ACC stock research analyst agent.
+
+
+  Follow the invocation prompt and input artifacts exactly. Work from evidence_pack, model_input_pack, coverage_scorecard,
+  explicit upstream handoffs, and named registers. Do not analyze from a thin summary when a registry or model pack is available.
+  Every material conclusion must cite source_id, metric_id, or claim_id from upstream evidence.
+
+
+  For domain work, produce compact but high-fidelity outputs: exact tables, scorecards, assumptions, calculations, and data
+  gaps. Distinguish facts, management statements, calculations, assumptions, and analyst interpretation. Use status=partial
+  when useful analysis is possible with visible gaps; use status=blocked only for conclusions that cannot be supported. Put
+  unverified items in data_gaps only.
+
+
+  Return JSON with status, summary, as_of_date, data_gaps, quality, quality_gate, and outputs.<port_name> for every declared
+  output port.
+
+
+  evidence_pack is the only primary downstream evidence payload: include only high-quality, source-bound, metric-bound items.
+  Keep workflow process notes, unverified material, broad landing pages, and unbound claims out of evidence_pack; put them
+  in blocking_gaps or data_gaps. Return outputs.<port_name> for declared ports and preserve source_id, metric_id, and claim_id
+  inside evidence_pack.
+
+  '
 default_permissions:
-  workspace_access: read_only
-  network: false
-  shell: false
-  dangerous: false
+  workspace_access: writes_workspace
+  network: true
+  shell: true
+  dangerous: true
   timeout_seconds: 600
 input_ports:
   main:
@@ -23,24 +43,235 @@ artifact_contract:
   output_schema:
     type: object
     additionalProperties: true
-    required: [status, summary]
+    required:
+    - status
+    - summary
+    - as_of_date
+    - data_gaps
+    - quality
+    - quality_gate
+    - outputs
     properties:
       status:
         type: string
+        enum:
+        - success
+        - partial
+        - blocked
+        - failed
       summary:
         type: string
-      findings:
+      as_of_date:
+        type: string
+      handoff_summary:
+        type: object
+        additionalProperties: true
+      evidence_pack:
+        type: object
+        additionalProperties: true
+        required:
+        - sources
+        - metrics
+        - claims
+        properties:
+          sources:
+            type: array
+            items:
+              type: object
+              additionalProperties: true
+              required:
+              - source_id
+              - title
+              - url
+              - source_type
+              properties:
+                source_id:
+                  type: string
+                title:
+                  type: string
+                url:
+                  type: string
+                source_type:
+                  type: string
+                retrieved_at:
+                  type: string
+          metrics:
+            type: array
+            items:
+              type: object
+              additionalProperties: true
+              required:
+              - metric_id
+              - name
+              - period
+              - value
+              - unit
+              - source_ids
+              properties:
+                metric_id:
+                  type: string
+                name:
+                  type: string
+                period:
+                  type: string
+                value: {}
+                unit:
+                  type: string
+                currency:
+                  type: string
+                source_ids:
+                  type: array
+                  items:
+                    type: string
+          claims:
+            type: array
+            items:
+              type: object
+              additionalProperties: true
+              required:
+              - claim_id
+              - statement
+              - source_ids
+              - metric_ids
+              properties:
+                claim_id:
+                  type: string
+                statement:
+                  type: string
+                source_ids:
+                  type: array
+                  items:
+                    type: string
+                metric_ids:
+                  type: array
+                  items:
+                    type: string
+                confidence:
+                  type: string
+      blocking_gaps:
         type: array
         items:
-          type: string
-      evidence:
+          type: object
+          additionalProperties: true
+      data_gaps:
         type: array
         items:
-          type: string
-      verification_gaps:
-        type: array
-        items:
-          type: string
+          type: object
+          additionalProperties: true
+      quality_gate:
+        type: object
+        additionalProperties: true
+      quality:
+        type: object
+        additionalProperties: true
+      outputs:
+        type: object
+        additionalProperties: true
+        required:
+        - handoff_summary
+        - evidence_pack
+        - blocking_gaps
+        - data_gaps
+        - quality_gate
+        properties:
+          handoff_summary:
+            type: object
+            additionalProperties: true
+          evidence_pack:
+            type: object
+            additionalProperties: true
+            required:
+            - sources
+            - metrics
+            - claims
+            properties:
+              sources:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+                  required:
+                  - source_id
+                  - title
+                  - url
+                  - source_type
+                  properties:
+                    source_id:
+                      type: string
+                    title:
+                      type: string
+                    url:
+                      type: string
+                    source_type:
+                      type: string
+                    retrieved_at:
+                      type: string
+              metrics:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+                  required:
+                  - metric_id
+                  - name
+                  - period
+                  - value
+                  - unit
+                  - source_ids
+                  properties:
+                    metric_id:
+                      type: string
+                    name:
+                      type: string
+                    period:
+                      type: string
+                    value: {}
+                    unit:
+                      type: string
+                    currency:
+                      type: string
+                    source_ids:
+                      type: array
+                      items:
+                        type: string
+              claims:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+                  required:
+                  - claim_id
+                  - statement
+                  - source_ids
+                  - metric_ids
+                  properties:
+                    claim_id:
+                      type: string
+                    statement:
+                      type: string
+                    source_ids:
+                      type: array
+                      items:
+                        type: string
+                    metric_ids:
+                      type: array
+                      items:
+                        type: string
+                    confidence:
+                      type: string
+          blocking_gaps:
+            type: array
+            items:
+              type: object
+              additionalProperties: true
+          data_gaps:
+            type: array
+            items:
+              type: object
+              additionalProperties: true
+          quality_gate:
+            type: object
+            additionalProperties: true
 metadata:
   name: 股市调研分析员
   description: Reusable real Codex agent for stock research analysis stages.

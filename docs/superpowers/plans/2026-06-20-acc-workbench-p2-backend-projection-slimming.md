@@ -2,6 +2,12 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+## Current audit status (2026-06-22)
+
+Status: **complete for the named backend-slimming slice**. JSONL offset streaming, heartbeat behavior, slim canvas save responses, and the current async submit compile flow are implemented. The compile-count regression now patches the current `WorkflowSubmissionService` app-layer boundary and passes. Broader backend/projection cleanup remains tracked by later status/submission and projection/storage plans.
+
+See `docs/superpowers/plans/STATUS.md` for the cross-plan audit summary.
+
 **Goal:** Make backend run streaming and Workbench persistence scale with appended data and changed snapshots instead of full run/canvas size.
 
 **Architecture:** Run streaming uses per-connection file offsets plus heartbeat frames and avoids repeatedly reading full JSONL files. Workbench canvas save returns a slim acknowledgement by default. Workflow run submit performs one compile/normalize pass before handing work to the runtime manager.
@@ -160,7 +166,7 @@ Expected: pass.
 
 - [x] **Step 1: Add compile count regression test**
 
-Patch `acc.server.routes.workflows.compile_workbench_workflow_bundle` with a counter, call `/api/workflows/run-graph/submit`, and assert the compile count is `1`.
+Patch `acc.app.workflow_submission.compile_runtime_graph` with a counter, call `/api/workflows/run-graph/submit`, and assert the compile count is `1`.
 
 - [x] **Step 2: Run test**
 
@@ -183,7 +189,7 @@ Expected: pass.
 - `uv run pytest tests/unit/test_run_events_tail.py -q` -> 3 passed.
 - `uv run pytest tests/server/test_runs_projection_api.py -q` -> 13 passed.
 - `uv run pytest tests/server/test_workbench_canvas_snapshots_api.py -q` -> 7 passed.
-- `uv run pytest tests/server/test_workbench_core_v2_api.py -q` -> 24 passed.
+- `uv run pytest tests/server/test_workbench_core_v2_api.py::test_submit_workbench_container_compiles_once -q` -> 1 passed.
 - `uv run pytest tests/unit/test_run_events_tail.py tests/server/test_runs_projection_api.py tests/server/test_workbench_canvas_snapshots_api.py tests/server/test_workbench_core_v2_api.py -q` -> 47 passed.
 - `uv run pytest -q --ignore=tests/integration` -> 660 passed.
 

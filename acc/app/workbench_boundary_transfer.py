@@ -172,9 +172,7 @@ def expand_boundary_transfer_bindings(
             == edge_id
         ]
         diagnostics = [
-            diagnostic
-            for diagnostic in diagnostics
-            if diagnostic.get("edge_id") in {edge_id, None}
+            diagnostic for diagnostic in diagnostics if diagnostic.get("edge_id") in {edge_id, None}
         ]
 
     has_errors = any(diagnostic.get("severity") == "error" for diagnostic in diagnostics)
@@ -211,8 +209,12 @@ def preview_boundary_transfer_for_canvas_snapshot(
         ui = node.get("ui")
         if not isinstance(ui, dict) or ui.get("semantic_kind") != "workflow_container":
             continue
-        internal_nodes = ui.get("internal_nodes") if isinstance(ui.get("internal_nodes"), list) else []
-        internal_edges = ui.get("internal_edges") if isinstance(ui.get("internal_edges"), list) else []
+        internal_nodes = (
+            ui.get("internal_nodes") if isinstance(ui.get("internal_nodes"), list) else []
+        )
+        internal_edges = (
+            ui.get("internal_edges") if isinstance(ui.get("internal_edges"), list) else []
+        )
         expansion = expand_boundary_transfer_bindings(
             workflow_id=str(node.get("id") or ""),
             edges=[edge for edge in internal_edges if isinstance(edge, dict)],
@@ -377,8 +379,9 @@ def append_output_bindings_for_control(
     )
     materialization = boundary_transfer_materialization(transfer or {})
     already_bound_sources = {source_port for node, source_port, _ in seen if node == source_node}
+    already_bound_targets = {target_port for node, _, target_port in seen if node == source_node}
     for source_port, target_port in pairs:
-        if source_port in already_bound_sources:
+        if source_port in already_bound_sources or target_port in already_bound_targets:
             continue
         if not validate_port_pair(
             diagnostics,
@@ -429,8 +432,7 @@ def explicit_or_inferred_pairs(
                     source_ports=source_ports,
                     target_ports=target_ports,
                     message=(
-                        "边界传输映射重复: "
-                        f"{source_port} -> {target_port}。请删除重复 mapping。"
+                        f"边界传输映射重复: {source_port} -> {target_port}。请删除重复 mapping。"
                     ),
                 )
             )
@@ -513,9 +515,7 @@ def has_direction_mismatch(
             target_node=target_node,
             source_ports=source_ports,
             target_ports=target_ports,
-            message=(
-                f"边界传输方向为 {direction!r}，但该控制线需要 {expected!r}。"
-            ),
+            message=(f"边界传输方向为 {direction!r}，但该控制线需要 {expected!r}。"),
         )
     )
     return True
@@ -631,7 +631,12 @@ def boundary_transfer_mappings(transfer: dict[str, Any]) -> list[dict[str, str]]
             continue
         source_port = item.get("source_port") or item.get("sourcePort")
         target_port = item.get("target_port") or item.get("targetPort")
-        if isinstance(source_port, str) and source_port and isinstance(target_port, str) and target_port:
+        if (
+            isinstance(source_port, str)
+            and source_port
+            and isinstance(target_port, str)
+            and target_port
+        ):
             mappings.append({"source_port": source_port, "target_port": target_port})
     return mappings
 
@@ -683,7 +688,9 @@ def internal_node_port_ids_by_direction(
             continue
         raw_ports = node.get("inputPorts") if direction == "input" else node.get("outputPorts")
         if raw_ports is None:
-            raw_ports = node.get("input_ports") if direction == "input" else node.get("output_ports")
+            raw_ports = (
+                node.get("input_ports") if direction == "input" else node.get("output_ports")
+            )
         result[node_id] = port_ids_from_ui_ports(raw_ports)
     return result
 

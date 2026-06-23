@@ -27,6 +27,12 @@ def build_node_run_projection(
     binding_manifest = load_optional_json(run_dir / "binding_manifest.json")
     payload["runtime"] = runtime_payload
     payload["binding_manifest"] = binding_manifest
+    payload["binding_summary"] = build_binding_summary_projection(binding_manifest)
+    payload["node_inspector"] = build_node_inspector_projection(
+        node,
+        runtime_payload=runtime_payload,
+        binding_manifest=binding_manifest,
+    )
     if isinstance(runtime_payload, dict):
         payload["execution_mode"] = runtime_payload.get("execution_mode")
         payload["adapter"] = runtime_payload.get("adapter")
@@ -41,6 +47,61 @@ def build_node_run_projection(
     if project_root is not None and payload.get("transcript_ref"):
         payload["transcript_ref"] = _relative_or_keep(project_root, payload["transcript_ref"])
     return payload
+
+
+def build_node_inspector_projection(
+    node: NodeRunSummary,
+    *,
+    runtime_payload: Any,
+    binding_manifest: Any,
+) -> dict[str, Any]:
+    runtime = runtime_payload if isinstance(runtime_payload, dict) else {}
+    return {
+        "schema_version": "acc.projection.node_inspector.v1",
+        "node_id": node.node_id,
+        "callable_id": node.callable_id,
+        "status": node.status,
+        "summary": node.summary,
+        "execution": {
+            "execution_mode": runtime.get("execution_mode"),
+            "adapter": runtime.get("adapter"),
+            "session_id": node.session_id,
+        },
+        "evidence_refs": {
+            "run_dir": node.run_dir,
+            "input_path": node.input_path,
+            "prompt_path": node.prompt_path,
+            "output_path": node.output_path,
+            "artifact_dir": node.artifact_dir,
+            "event_log": node.event_log,
+            "stdout_log": node.stdout_log,
+            "stderr_log": node.stderr_log,
+        },
+        "binding_summary": build_binding_summary_projection(binding_manifest),
+        "raw_evidence_debug": {
+            "runtime_path": str(Path(node.run_dir) / "runtime.json"),
+            "binding_manifest_path": str(Path(node.run_dir) / "binding_manifest.json"),
+        },
+    }
+
+
+def build_binding_summary_projection(binding_manifest: Any) -> dict[str, Any]:
+    manifest = binding_manifest if isinstance(binding_manifest, dict) else {}
+    bindings = manifest.get("bindings") if isinstance(manifest.get("bindings"), list) else []
+    inputs = manifest.get("inputs") if isinstance(manifest.get("inputs"), list) else []
+    source_kinds: dict[str, int] = {}
+    for binding in bindings:
+        if not isinstance(binding, dict):
+            continue
+        source_kind = str(binding.get("source_kind") or binding.get("binding_kind") or "unknown")
+        source_kinds[source_kind] = source_kinds.get(source_kind, 0) + 1
+    return {
+        "schema_version": "acc.projection.binding_summary.v1",
+        "input_count": len(inputs),
+        "binding_count": len(bindings),
+        "inputs": [str(item) for item in inputs],
+        "source_kinds": source_kinds,
+    }
 
 
 def load_optional_json(path: Path) -> Any:
@@ -131,7 +192,12 @@ def effective_agent_turn_log(run_dir: Path, runtime_payload: Any, stream: str) -
     turn_id = runtime_payload.get("turn_id")
     if not isinstance(session_ref, str) or not isinstance(turn_id, str):
         return None
-    if turn_id in {"", ".", ".."} or Path(turn_id).name != turn_id or "/" in turn_id or "\\" in turn_id:
+    if (
+        turn_id in {"", ".", ".."}
+        or Path(turn_id).name != turn_id
+        or "/" in turn_id
+        or "\\" in turn_id
+    ):
         return None
     project_root = project_root_for_run_projection(run_dir)
     agent_sessions_root = (project_root / "runs" / "_agent_sessions").resolve()

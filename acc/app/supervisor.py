@@ -10,6 +10,15 @@ from uuid import uuid4
 from acc.app.capabilities import default_adapter_capabilities
 from acc.app.invocation import CallableInvocationService
 from acc.callable_registry import CallableRegistry
+from acc.engine.supervisor import (
+    compile_supervisor_plan_to_steps,
+    parse_dynamic_invocation_intent,
+    parse_supervisor_plan,
+    supervisor_decision_payload,
+    supervisor_plan_payload,
+    validate_intent_against_roster,
+    validate_supervisor_plan,
+)
 from acc.models import (
     CORE_V2_SCHEMA_VERSION,
     AccError,
@@ -20,7 +29,6 @@ from acc.models import (
     DynamicInvocationProposal,
     EnvironmentFrame,
     NodeInvocationSpec,
-    PlanStepTransitionRecord,
     RosterEntry,
     RunPlan,
     SupervisorDecision,
@@ -28,15 +36,6 @@ from acc.models import (
     SupervisorRoster,
 )
 from acc.serialization import control_ledger_to_dict
-from acc.engine.supervisor import (
-    compile_supervisor_plan_to_steps,
-    parse_dynamic_invocation_intent,
-    parse_supervisor_plan,
-    supervisor_decision_payload,
-    supervisor_plan_payload,
-    validate_intent_against_roster,
-    validate_supervisor_plan,
-)
 from acc.session import utc_now_iso
 from acc.state_machine import transition_plan_step_initial
 from acc.store import load_json, write_json

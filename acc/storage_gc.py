@@ -13,12 +13,8 @@ from uuid import uuid4
 
 from acc.audit import write_audit_event
 from acc.models import AccError
-from acc.run_index import (
-    RunSummary,
-    load_or_rebuild_run_index,
-    load_run_summary,
-    rebuild_run_index,
-)
+from acc.run_index import RunSummary, load_or_rebuild_run_index, load_run_summary, rebuild_run_index
+from acc.run_status import ACTIVE_RUN_STATUSES, TERMINAL_RUN_STATUSES
 from acc.session import utc_now_iso
 from acc.storage import RUN_MARKER_FILENAME, validate_run_id, write_json_atomic
 from acc.storage_index import StorageIndex, rebuild_storage_index
@@ -31,14 +27,6 @@ RETENTION_SCHEMA_VERSION = "acc.retention.v1"
 TOMBSTONE_SCHEMA_VERSION = "acc.tombstone.v1"
 TRASH_ENTRY_SCHEMA_VERSION = "acc.trash.entry.v1"
 
-ACTIVE_RUN_STATUSES = {
-    "queued",
-    "running",
-    "waiting_interaction",
-    "resuming",
-    "cancel_requested",
-}
-TERMINAL_RUN_STATUSES = {"success", "failed", "cancelled", "crashed", "timeout"}
 PROTECTED_GRAPHOPS_STATUSES = {
     "drafted",
     "validated",

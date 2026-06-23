@@ -1,563 +1,1680 @@
 {
-  "control_edges": [
+  "schema_version": "acc.core.v2",
+  "id": "core_v2_stock_research_canvas__Report_Workflow",
+  "version": "0.1.0",
+  "name": "Report Workflow",
+  "description": "Child workflow compiled from Workbench container Report_Workflow.",
+  "nodes": [
     {
-      "context": "none",
-      "from": "investment_thesis_agent",
-      "to": "evidence_mapper_agent"
+      "id": "investment_thesis_agent",
+      "callable_ref": {
+        "kind": "agent_class",
+        "id": "stock-report-writer.codex"
+      },
+      "ports": {
+        "inputs": {
+          "model_input_pack": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "coverage_scorecard": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "fundamentals": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "evidence_pack": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "valuation": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "price_guidance": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "fair_value_range": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "risk_matrix": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "catalyst_calendar": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "monitoring_triggers": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "watchlist_verified": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "watchlist_unverified": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          }
+        },
+        "outputs": {
+          "main": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "investment_thesis": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "thesis_handoff": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "data_gaps": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "quality_gate": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          }
+        }
+      },
+      "overrides": {
+        "static_input": {}
+      },
+      "prompt_policy": {
+        "user_prompt": "Create an investment thesis from fundamentals, valuation, price_guidance, risk, catalysts, coverage_scorecard, and registry evidence. Do not create claims that cannot map to evidence ids."
+      },
+      "metadata": {
+        "label": "投资论点生成",
+        "ui_label": "投资论点生成",
+        "workbench_kind": "agent_session"
+      },
+      "invocation_policy": {
+        "permission_profile": {
+          "workspace_access": "writes_workspace",
+          "network": true,
+          "shell": true,
+          "dangerous": true
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "status",
+          "summary",
+          "as_of_date",
+          "data_gaps",
+          "quality",
+          "quality_gate",
+          "outputs"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "success",
+              "partial",
+              "blocked",
+              "failed"
+            ]
+          },
+          "summary": {
+            "type": "string"
+          },
+          "as_of_date": {
+            "type": "string"
+          },
+          "handoff_summary": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "evidence_pack": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "sources",
+              "metrics",
+              "claims"
+            ],
+            "properties": {
+              "sources": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "source_id",
+                    "title",
+                    "url",
+                    "source_type"
+                  ],
+                  "properties": {
+                    "source_id": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "source_type": {
+                      "type": "string"
+                    },
+                    "retrieved_at": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "metrics": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "metric_id",
+                    "name",
+                    "period",
+                    "value",
+                    "unit",
+                    "source_ids"
+                  ],
+                  "properties": {
+                    "metric_id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "period": {
+                      "type": "string"
+                    },
+                    "value": {},
+                    "unit": {
+                      "type": "string"
+                    },
+                    "currency": {
+                      "type": "string"
+                    },
+                    "source_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              },
+              "claims": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "claim_id",
+                    "statement",
+                    "source_ids",
+                    "metric_ids"
+                  ],
+                  "properties": {
+                    "claim_id": {
+                      "type": "string"
+                    },
+                    "statement": {
+                      "type": "string"
+                    },
+                    "source_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "metric_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "confidence": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "blocking_gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "data_gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "quality_gate": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "quality": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "outputs": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "main",
+              "investment_thesis",
+              "thesis_handoff",
+              "data_gaps",
+              "quality_gate"
+            ],
+            "properties": {
+              "main": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "investment_thesis": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "thesis_handoff": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "data_gaps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "quality_gate": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          },
+          "main": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "investment_thesis": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "thesis_handoff": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      }
     },
     {
-      "context": "none",
+      "id": "evidence_mapper_agent",
+      "callable_ref": {
+        "kind": "agent_class",
+        "id": "stock-report-writer.codex"
+      },
+      "ports": {
+        "inputs": {
+          "investment_thesis": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "evidence_pack": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "coverage_scorecard": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "fundamentals": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "valuation": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "risk_matrix": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "price_guidance": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          }
+        },
+        "outputs": {
+          "main": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "claim_to_evidence_map": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "appendix": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "data_gaps": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "quality_gate": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          }
+        }
+      },
+      "overrides": {
+        "static_input": {}
+      },
+      "prompt_policy": {
+        "user_prompt": "Map every material thesis/report/price claim to source_id, metric_id, claim_id, valuation scenario, or risk trigger. Unsupported claims must become data_gaps or required follow-ups."
+      },
+      "metadata": {
+        "label": "证据映射",
+        "ui_label": "证据映射",
+        "workbench_kind": "agent_session"
+      },
+      "invocation_policy": {
+        "permission_profile": {
+          "workspace_access": "writes_workspace",
+          "network": true,
+          "shell": true,
+          "dangerous": true
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "status",
+          "summary",
+          "as_of_date",
+          "data_gaps",
+          "quality",
+          "quality_gate",
+          "outputs"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "success",
+              "partial",
+              "blocked",
+              "failed"
+            ]
+          },
+          "summary": {
+            "type": "string"
+          },
+          "as_of_date": {
+            "type": "string"
+          },
+          "handoff_summary": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "evidence_pack": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "sources",
+              "metrics",
+              "claims"
+            ],
+            "properties": {
+              "sources": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "source_id",
+                    "title",
+                    "url",
+                    "source_type"
+                  ],
+                  "properties": {
+                    "source_id": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "source_type": {
+                      "type": "string"
+                    },
+                    "retrieved_at": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "metrics": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "metric_id",
+                    "name",
+                    "period",
+                    "value",
+                    "unit",
+                    "source_ids"
+                  ],
+                  "properties": {
+                    "metric_id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "period": {
+                      "type": "string"
+                    },
+                    "value": {},
+                    "unit": {
+                      "type": "string"
+                    },
+                    "currency": {
+                      "type": "string"
+                    },
+                    "source_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              },
+              "claims": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "claim_id",
+                    "statement",
+                    "source_ids",
+                    "metric_ids"
+                  ],
+                  "properties": {
+                    "claim_id": {
+                      "type": "string"
+                    },
+                    "statement": {
+                      "type": "string"
+                    },
+                    "source_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "metric_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "confidence": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "blocking_gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "data_gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "quality_gate": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "quality": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "outputs": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "main",
+              "claim_to_evidence_map",
+              "appendix",
+              "data_gaps",
+              "quality_gate"
+            ],
+            "properties": {
+              "main": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "claim_to_evidence_map": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "appendix": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "data_gaps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "quality_gate": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          },
+          "main": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "claim_to_evidence_map": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "appendix": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    {
+      "id": "report_compiler_agent",
+      "callable_ref": {
+        "kind": "agent_class",
+        "id": "stock-report-writer.codex"
+      },
+      "ports": {
+        "inputs": {
+          "investment_thesis": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "claim_to_evidence_map": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "evidence_pack": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "coverage_scorecard": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "price_guidance": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "fair_value_range": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "risk_matrix": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "catalyst_calendar": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "monitoring_triggers": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "watchlist_verified": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "watchlist_unverified": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "appendix": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          }
+        },
+        "outputs": {
+          "main": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "investment_thesis": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "report": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "decision_summary": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "appendix": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "claim_to_evidence_map": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "evidence_pack": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "data_gaps": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "quality_gate": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          }
+        }
+      },
+      "overrides": {
+        "static_input": {}
+      },
+      "prompt_policy": {
+        "user_prompt": "Compile a complete evidence-backed stock research report. Include stance, why, fair value, entry/sell ranges only when price_guidance is sufficient; otherwise clearly state insufficient evidence and blocking gaps."
+      },
+      "metadata": {
+        "label": "报告编写",
+        "ui_label": "报告编写",
+        "workbench_kind": "agent_session"
+      },
+      "invocation_policy": {
+        "permission_profile": {
+          "workspace_access": "writes_workspace",
+          "network": true,
+          "shell": true,
+          "dangerous": true
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "status",
+          "summary",
+          "as_of_date",
+          "data_gaps",
+          "quality",
+          "quality_gate",
+          "outputs"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "success",
+              "partial",
+              "blocked",
+              "failed"
+            ]
+          },
+          "summary": {
+            "type": "string"
+          },
+          "as_of_date": {
+            "type": "string"
+          },
+          "handoff_summary": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "evidence_pack": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "sources",
+              "metrics",
+              "claims"
+            ],
+            "properties": {
+              "sources": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "source_id",
+                    "title",
+                    "url",
+                    "source_type"
+                  ],
+                  "properties": {
+                    "source_id": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "source_type": {
+                      "type": "string"
+                    },
+                    "retrieved_at": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "metrics": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "metric_id",
+                    "name",
+                    "period",
+                    "value",
+                    "unit",
+                    "source_ids"
+                  ],
+                  "properties": {
+                    "metric_id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "period": {
+                      "type": "string"
+                    },
+                    "value": {},
+                    "unit": {
+                      "type": "string"
+                    },
+                    "currency": {
+                      "type": "string"
+                    },
+                    "source_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              },
+              "claims": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "claim_id",
+                    "statement",
+                    "source_ids",
+                    "metric_ids"
+                  ],
+                  "properties": {
+                    "claim_id": {
+                      "type": "string"
+                    },
+                    "statement": {
+                      "type": "string"
+                    },
+                    "source_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "metric_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "confidence": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "blocking_gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "data_gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "quality_gate": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "quality": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "outputs": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "main",
+              "investment_thesis",
+              "report",
+              "decision_summary",
+              "appendix",
+              "claim_to_evidence_map",
+              "evidence_pack",
+              "data_gaps",
+              "quality_gate"
+            ],
+            "properties": {
+              "main": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "investment_thesis": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "report": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "decision_summary": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "appendix": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "claim_to_evidence_map": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "evidence_pack": {
+                "type": "object",
+                "additionalProperties": true,
+                "required": [
+                  "sources",
+                  "metrics",
+                  "claims"
+                ],
+                "properties": {
+                  "sources": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "source_id",
+                        "title",
+                        "url",
+                        "source_type"
+                      ],
+                      "properties": {
+                        "source_id": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "url": {
+                          "type": "string"
+                        },
+                        "source_type": {
+                          "type": "string"
+                        },
+                        "retrieved_at": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "metrics": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "metric_id",
+                        "name",
+                        "period",
+                        "value",
+                        "unit",
+                        "source_ids"
+                      ],
+                      "properties": {
+                        "metric_id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "period": {
+                          "type": "string"
+                        },
+                        "value": {},
+                        "unit": {
+                          "type": "string"
+                        },
+                        "currency": {
+                          "type": "string"
+                        },
+                        "source_ids": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "claims": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "claim_id",
+                        "statement",
+                        "source_ids",
+                        "metric_ids"
+                      ],
+                      "properties": {
+                        "claim_id": {
+                          "type": "string"
+                        },
+                        "statement": {
+                          "type": "string"
+                        },
+                        "source_ids": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "metric_ids": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "confidence": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "data_gaps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "quality_gate": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          },
+          "main": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "investment_thesis": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "report": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "decision_summary": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "appendix": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "claim_to_evidence_map": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      }
+    }
+  ],
+  "control_edges": [
+    {
+      "from": "investment_thesis_agent",
+      "to": "evidence_mapper_agent",
+      "context": "none"
+    },
+    {
       "from": "evidence_mapper_agent",
-      "to": "report_compiler_agent"
+      "to": "report_compiler_agent",
+      "context": "none"
+    },
+    {
+      "from": "investment_thesis_agent",
+      "to": "report_compiler_agent",
+      "context": "none"
     }
   ],
   "data_edges": [
     {
-      "materialization": "copy",
       "source": {
         "node": "investment_thesis_agent",
-        "port": "main"
+        "port": "investment_thesis"
+      },
+      "target": {
+        "node": "evidence_mapper_agent",
+        "port": "investment_thesis"
+      },
+      "materialization": "copy"
+    },
+    {
+      "source": {
+        "node": "investment_thesis_agent",
+        "port": "investment_thesis"
       },
       "target": {
         "node": "report_compiler_agent",
-        "port": "thesis"
-      }
+        "port": "investment_thesis"
+      },
+      "materialization": "copy"
+    },
+    {
+      "source": {
+        "node": "evidence_mapper_agent",
+        "port": "claim_to_evidence_map"
+      },
+      "target": {
+        "node": "report_compiler_agent",
+        "port": "claim_to_evidence_map"
+      },
+      "materialization": "copy"
+    },
+    {
+      "source": {
+        "node": "evidence_mapper_agent",
+        "port": "appendix"
+      },
+      "target": {
+        "node": "report_compiler_agent",
+        "port": "appendix"
+      },
+      "materialization": "copy"
     }
   ],
-  "description": "Child workflow compiled from Workbench container Report_Workflow.",
-  "exposed_inputs": {
-    "evidence_pack": {
-      "cardinality": "one",
-      "required": true,
-      "type": "artifact"
-    },
-    "fundamentals": {
-      "cardinality": "one",
-      "required": true,
-      "type": "artifact"
-    },
-    "risk": {
-      "cardinality": "one",
-      "required": true,
-      "type": "artifact"
-    },
-    "source_register": {
-      "cardinality": "one",
-      "required": true,
-      "type": "artifact"
-    },
-    "valuation": {
-      "cardinality": "one",
-      "required": true,
-      "type": "artifact"
-    },
-    "verified_data": {
-      "cardinality": "one",
-      "required": true,
-      "type": "artifact"
-    }
-  },
-  "exposed_outputs": {
-    "appendix": {
-      "cardinality": "one",
-      "required": true,
-      "type": "artifact"
-    },
-    "report": {
-      "cardinality": "one",
-      "required": true,
-      "type": "artifact"
-    }
-  },
-  "id": "core_v2_stock_research_canvas__Report_Workflow",
   "metadata": {
     "canonical_format": "accflow",
-    "compiled_child_path": "core_v2_stock_research_canvas__Report_Workflow.accflow.json",
     "compiled_from_workbench_container": "Report_Workflow",
+    "compiled_child_path": "core_v2_stock_research_canvas__Report_Workflow.accflow.json",
+    "workbench_draft": true,
     "ui_layout": {
       "layout": null,
+      "root_workflow_id": null,
       "nodes": [
         {
           "id": "investment_thesis_agent",
-          "label": "投资论点撰写",
           "position": {
-            "x": 137,
-            "y": 249
-          }
+            "x": 130.0,
+            "y": 140.0
+          },
+          "label": "投资论点生成"
         },
         {
           "id": "evidence_mapper_agent",
-          "label": "证据追踪整理",
           "position": {
-            "x": 485,
-            "y": 146
-          }
+            "x": 470.0,
+            "y": 260.0
+          },
+          "label": "证据映射"
         },
         {
           "id": "report_compiler_agent",
-          "label": "报告合成",
           "position": {
-            "x": 833,
-            "y": 146
-          }
+            "x": 810.0,
+            "y": 410.0
+          },
+          "label": "报告编写"
         }
-      ],
-      "root_workflow_id": null
-    },
-    "workbench_draft": true
+      ]
+    }
   },
-  "name": "报告生成工作流",
-  "nodes": [
+  "exposed_inputs": {
+    "evidence_pack": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "model_input_pack": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "coverage_scorecard": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "fundamentals": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "valuation": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "price_guidance": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "fair_value_range": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "risk_matrix": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "catalyst_calendar": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "monitoring_triggers": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "watchlist_verified": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "watchlist_unverified": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    }
+  },
+  "exposed_outputs": {
+    "investment_thesis": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "report": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "decision_summary": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "appendix": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "claim_to_evidence_map": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "data_gaps": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "quality_gate": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    }
+  },
+  "workflow_input_bindings": [
     {
-      "callable_ref": {
-        "id": "stock-report-writer.codex",
-        "kind": "agent_class"
+      "source_port": "evidence_pack",
+      "target": {
+        "node": "investment_thesis_agent",
+        "port": "evidence_pack"
       },
-      "id": "investment_thesis_agent",
-      "metadata": {
-        "label": "投资论点撰写",
-        "ui_label": "投资论点撰写",
-        "workbench_kind": "agent_session"
-      },
-      "output_schema": {
-        "additionalProperties": false,
-        "properties": {
-          "confidence": {
-            "description": "高/中/低置信度及原因",
-            "type": "string"
-          },
-          "investment_stance": {
-            "description": "研究建议口径的投资观点，例如偏正面/中性/偏谨慎及原因",
-            "type": "string"
-          },
-          "key_thesis": {
-            "description": "支撑投资观点的核心论点",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "status": {
-            "description": "success 或 failed",
-            "type": "string"
-          },
-          "summary": {
-            "description": "面向下游节点的简明结论",
-            "type": "string"
-          },
-          "thesis_risks": {
-            "description": "可能推翻投资观点的关键风险",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "status",
-          "summary",
-          "investment_stance",
-          "confidence",
-          "key_thesis"
-        ],
-        "type": "object"
-      },
-      "overrides": {
-        "static_input": {}
-      },
-      "ports": {
-        "inputs": {
-          "fundamentals": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          },
-          "risk": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          },
-          "valuation": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          }
-        },
-        "outputs": {
-          "main": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          }
-        }
-      },
-      "prompt_policy": {
-        "user_prompt": "整合基本面、估值和风险，输出投资观点、置信度和关键论点；不得只输出报告写作框架。"
-      }
+      "materialization": "copy",
+      "required": false
     },
     {
-      "callable_ref": {
-        "id": "stock-report-writer.codex",
-        "kind": "agent_class"
+      "source_port": "model_input_pack",
+      "target": {
+        "node": "investment_thesis_agent",
+        "port": "model_input_pack"
       },
-      "id": "evidence_mapper_agent",
-      "metadata": {
-        "label": "证据追踪整理",
-        "ui_label": "证据追踪整理",
-        "workbench_kind": "agent_session"
-      },
-      "output_schema": {
-        "additionalProperties": false,
-        "properties": {
-          "action_items": {
-            "description": "补充证据的行动项",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "evidence_gaps": {
-            "description": "发布前必须补齐或在报告中披露的证据缺口",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "evidence_map": {
-            "description": "报告结论到上游证据和来源的映射",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "source_coverage": {
-            "description": "披露、市场、新闻政策和同业数据的覆盖情况",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "status": {
-            "description": "success 或 failed",
-            "type": "string"
-          },
-          "summary": {
-            "description": "面向下游节点的简明结论",
-            "type": "string"
-          }
-        },
-        "required": [
-          "status",
-          "summary",
-          "evidence_map",
-          "source_coverage",
-          "evidence_gaps"
-        ],
-        "type": "object"
-      },
-      "overrides": {
-        "static_input": {}
-      },
-      "ports": {
-        "inputs": {
-          "main": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact",
-            "description": "投资论点"
-          },
-          "evidence_pack": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact",
-            "description": "证据包"
-          },
-          "valuation": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact",
-            "description": "估值结论"
-          },
-          "source_register": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact",
-            "description": "来源登记表"
-          }
-        },
-        "outputs": {
-          "main": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          }
-        }
-      },
-      "prompt_policy": {
-        "user_prompt": "从 main 控制输入读取投资论点，并结合证据包、估值结论和来源登记表整理证据映射；不要生成报告章节正文。"
-      }
+      "materialization": "copy",
+      "required": false
     },
     {
-      "callable_ref": {
-        "id": "stock-report-writer.codex",
-        "kind": "agent_class"
+      "source_port": "coverage_scorecard",
+      "target": {
+        "node": "investment_thesis_agent",
+        "port": "coverage_scorecard"
       },
-      "id": "report_compiler_agent",
-      "metadata": {
-        "label": "报告合成",
-        "ui_label": "报告合成",
-        "workbench_kind": "agent_session"
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "fundamentals",
+      "target": {
+        "node": "investment_thesis_agent",
+        "port": "fundamentals"
       },
-      "output_schema": {
-        "additionalProperties": false,
-        "properties": {
-          "action_items": {
-            "description": "后续行动项",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "report": {
-            "additionalProperties": false,
-            "properties": {
-              "business_quality": {
-                "description": "业务质量结论",
-                "type": "string"
-              },
-              "catalysts": {
-                "description": "正负催化剂",
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "executive_summary": {
-                "description": "一页式核心摘要",
-                "type": "string"
-              },
-              "financial_quality": {
-                "description": "财务质量结论",
-                "type": "string"
-              },
-              "industry_position": {
-                "description": "行业位置结论",
-                "type": "string"
-              },
-              "investment_stance": {
-                "description": "研究建议口径投资观点，不输出绝对化买卖指令",
-                "type": "string"
-              },
-              "key_risks": {
-                "description": "关键风险",
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "limitations": {
-                "description": "限制、免责声明和不可发布条件",
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "monitoring_plan": {
-                "description": "后续跟踪指标",
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "risk_reward": {
-                "description": "风险收益判断",
-                "type": "string"
-              },
-              "source_notes": {
-                "description": "关键来源说明",
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "valuation_conclusion": {
-                "description": "估值结论",
-                "type": "string"
-              }
-            },
-            "required": [
-              "executive_summary",
-              "investment_stance",
-              "business_quality",
-              "financial_quality",
-              "industry_position",
-              "valuation_conclusion",
-              "risk_reward",
-              "key_risks",
-              "catalysts",
-              "monitoring_plan",
-              "source_notes",
-              "limitations"
-            ],
-            "type": "object"
-          },
-          "status": {
-            "description": "success 或 failed",
-            "type": "string"
-          },
-          "summary": {
-            "description": "面向下游节点的简明结论",
-            "type": "string"
-          }
-        },
-        "required": [
-          "status",
-          "summary",
-          "report"
-        ],
-        "type": "object"
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "evidence_pack",
+      "target": {
+        "node": "investment_thesis_agent",
+        "port": "evidence_pack"
       },
-      "overrides": {
-        "static_input": {}
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "valuation",
+      "target": {
+        "node": "investment_thesis_agent",
+        "port": "valuation"
       },
-      "ports": {
-        "inputs": {
-          "main": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact",
-            "description": "证据追踪"
-          },
-          "thesis": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact",
-            "description": "投资论点"
-          },
-          "verified_data": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact",
-            "description": "核验数据包"
-          },
-          "source_register": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact",
-            "description": "来源登记表"
-          }
-        },
-        "outputs": {
-          "main": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          }
-        }
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "price_guidance",
+      "target": {
+        "node": "investment_thesis_agent",
+        "port": "price_guidance"
       },
-      "prompt_policy": {
-        "user_prompt": "合成完整 NVIDIA 单股深研报告，必须输出 executive summary、investment stance、估值结论、风险收益和监控计划；不得只输出方法论或待办清单。"
-      }
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "fair_value_range",
+      "target": {
+        "node": "investment_thesis_agent",
+        "port": "fair_value_range"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "risk_matrix",
+      "target": {
+        "node": "investment_thesis_agent",
+        "port": "risk_matrix"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "catalyst_calendar",
+      "target": {
+        "node": "investment_thesis_agent",
+        "port": "catalyst_calendar"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "monitoring_triggers",
+      "target": {
+        "node": "investment_thesis_agent",
+        "port": "monitoring_triggers"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "watchlist_verified",
+      "target": {
+        "node": "investment_thesis_agent",
+        "port": "watchlist_verified"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "watchlist_unverified",
+      "target": {
+        "node": "investment_thesis_agent",
+        "port": "watchlist_unverified"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "evidence_pack",
+      "target": {
+        "node": "evidence_mapper_agent",
+        "port": "evidence_pack"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "coverage_scorecard",
+      "target": {
+        "node": "evidence_mapper_agent",
+        "port": "coverage_scorecard"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "fundamentals",
+      "target": {
+        "node": "evidence_mapper_agent",
+        "port": "fundamentals"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "valuation",
+      "target": {
+        "node": "evidence_mapper_agent",
+        "port": "valuation"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "risk_matrix",
+      "target": {
+        "node": "evidence_mapper_agent",
+        "port": "risk_matrix"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "price_guidance",
+      "target": {
+        "node": "evidence_mapper_agent",
+        "port": "price_guidance"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "evidence_pack",
+      "target": {
+        "node": "report_compiler_agent",
+        "port": "evidence_pack"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "coverage_scorecard",
+      "target": {
+        "node": "report_compiler_agent",
+        "port": "coverage_scorecard"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "price_guidance",
+      "target": {
+        "node": "report_compiler_agent",
+        "port": "price_guidance"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "fair_value_range",
+      "target": {
+        "node": "report_compiler_agent",
+        "port": "fair_value_range"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "risk_matrix",
+      "target": {
+        "node": "report_compiler_agent",
+        "port": "risk_matrix"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "catalyst_calendar",
+      "target": {
+        "node": "report_compiler_agent",
+        "port": "catalyst_calendar"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "monitoring_triggers",
+      "target": {
+        "node": "report_compiler_agent",
+        "port": "monitoring_triggers"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "watchlist_verified",
+      "target": {
+        "node": "report_compiler_agent",
+        "port": "watchlist_verified"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "watchlist_unverified",
+      "target": {
+        "node": "report_compiler_agent",
+        "port": "watchlist_unverified"
+      },
+      "materialization": "copy",
+      "required": false
+    }
+  ],
+  "workflow_output_bindings": [
+    {
+      "source": {
+        "node": "report_compiler_agent",
+        "port": "investment_thesis"
+      },
+      "target_port": "investment_thesis",
+      "materialization": "copy",
+      "required": true
+    },
+    {
+      "source": {
+        "node": "report_compiler_agent",
+        "port": "report"
+      },
+      "target_port": "report",
+      "materialization": "copy",
+      "required": true
+    },
+    {
+      "source": {
+        "node": "report_compiler_agent",
+        "port": "decision_summary"
+      },
+      "target_port": "decision_summary",
+      "materialization": "copy",
+      "required": true
+    },
+    {
+      "source": {
+        "node": "report_compiler_agent",
+        "port": "appendix"
+      },
+      "target_port": "appendix",
+      "materialization": "copy",
+      "required": true
+    },
+    {
+      "source": {
+        "node": "report_compiler_agent",
+        "port": "claim_to_evidence_map"
+      },
+      "target_port": "claim_to_evidence_map",
+      "materialization": "copy",
+      "required": true
+    },
+    {
+      "source": {
+        "node": "report_compiler_agent",
+        "port": "data_gaps"
+      },
+      "target_port": "data_gaps",
+      "materialization": "copy",
+      "required": true
+    },
+    {
+      "source": {
+        "node": "report_compiler_agent",
+        "port": "quality_gate"
+      },
+      "target_port": "quality_gate",
+      "materialization": "copy",
+      "required": true
     }
   ],
   "policies": {
     "failure_mode": "fail_fast",
     "max_concurrency": 8
-  },
-  "schema_version": "acc.core.v2",
-  "version": "0.1.0",
-  "workflow_input_bindings": [
-    {
-      "materialization": "copy",
-      "required": false,
-      "source_port": "fundamentals",
-      "target": {
-        "node": "investment_thesis_agent",
-        "port": "fundamentals"
-      }
-    },
-    {
-      "materialization": "copy",
-      "required": false,
-      "source_port": "valuation",
-      "target": {
-        "node": "investment_thesis_agent",
-        "port": "valuation"
-      }
-    },
-    {
-      "materialization": "copy",
-      "required": false,
-      "source_port": "risk",
-      "target": {
-        "node": "investment_thesis_agent",
-        "port": "risk"
-      }
-    },
-    {
-      "materialization": "copy",
-      "required": false,
-      "source_port": "evidence_pack",
-      "target": {
-        "node": "evidence_mapper_agent",
-        "port": "evidence_pack"
-      }
-    },
-    {
-      "materialization": "copy",
-      "required": false,
-      "source_port": "valuation",
-      "target": {
-        "node": "evidence_mapper_agent",
-        "port": "valuation"
-      }
-    },
-    {
-      "materialization": "copy",
-      "required": false,
-      "source_port": "source_register",
-      "target": {
-        "node": "evidence_mapper_agent",
-        "port": "source_register"
-      }
-    },
-    {
-      "materialization": "copy",
-      "required": false,
-      "source_port": "verified_data",
-      "target": {
-        "node": "report_compiler_agent",
-        "port": "verified_data"
-      }
-    },
-    {
-      "materialization": "copy",
-      "required": false,
-      "source_port": "source_register",
-      "target": {
-        "node": "report_compiler_agent",
-        "port": "source_register"
-      }
-    }
-  ],
-  "workflow_output_bindings": [
-    {
-      "materialization": "copy",
-      "required": true,
-      "source": {
-        "node": "report_compiler_agent",
-        "port": "main"
-      },
-      "target_port": "report"
-    },
-    {
-      "materialization": "copy",
-      "required": true,
-      "source": {
-        "node": "evidence_mapper_agent",
-        "port": "main"
-      },
-      "target_port": "appendix"
-    }
-  ]
+  }
 }

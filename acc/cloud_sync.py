@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from acc.control_plane import SecretLikePathError, reject_secret_like_path
 from acc.run_index import load_run_summary, load_run_summary_by_id
+from acc.run_status import is_terminal_run_status
 from acc.runner import (
     LocalRunnerService,
     RunnerCapabilityError,
@@ -30,7 +31,6 @@ CLOUD_ARTIFACT_MANIFEST_SCHEMA_VERSION = "acc.cloud.artifact_manifest.v1"
 CLOUD_RUNNER_REGISTRATION_SCHEMA_VERSION = "acc.cloud.runner_registration.v1"
 
 UPLOAD_POLICIES = {"local_only", "preview", "on_demand", "always"}
-TERMINAL_RUN_STATUSES = {"success", "failed", "cancelled", "crashed"}
 
 
 class CloudSyncError(AccError):
@@ -214,7 +214,7 @@ class LocalCloudSyncService:
         if isinstance(run_id, str) and run_id:
             run_dir = self.project_root / "runs" / validate_run_id(run_id)
             summary = load_run_summary(run_dir)
-            if summary is not None and summary.status in TERMINAL_RUN_STATUSES:
+            if summary is not None and is_terminal_run_status(summary.status):
                 cancel["state"] = "terminal_synced"
                 receipt["status"] = summary.status
             else:

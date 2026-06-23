@@ -11,8 +11,8 @@ from fastapi.testclient import TestClient
 
 from acc.adapters.streaming import StreamingAgentTurnRequest, StreamingAgentTurnResult
 from acc.agent_events import append_agent_event
-from acc.app.authoring import AUTHORING_OUTPUT_SCHEMA_VERSION
 from acc.app.agent_sessions import AgentTurnService, AgentTurnTaskManager
+from acc.app.authoring import AUTHORING_OUTPUT_SCHEMA_VERSION
 from acc.models import AccError
 from acc.server.live_events import WorkbenchLiveBus
 
@@ -342,9 +342,7 @@ async def run_agent_turn_task_manager_does_not_duplicate_failure_event(tmp_path:
         await asyncio.sleep(0.05)
 
     final_turn = service.get_turn(session["session_id"], turn["turn_id"])
-    events = read_jsonl(
-        Path(session["session_dir"]) / "turns" / turn["turn_id"] / "events.jsonl"
-    )
+    events = read_jsonl(Path(session["session_dir"]) / "turns" / turn["turn_id"] / "events.jsonl")
 
     assert final_turn["status"] == "failed"
     assert [event["type"] for event in events].count("agent_turn_failed") == 1
@@ -590,7 +588,9 @@ async def run_workbench_assistant_chat_text_does_not_create_draft(tmp_path: Path
     assert final_session["current_output_turn_id"] is None
     assert not Path(session["session_dir"], "current_output.json").exists()
     assert not Path(turn_dir, "output_draft.json").exists()
-    assert any(item["role"] == "assistant" and item["content"] == assistant_text for item in messages)
+    assert any(
+        item["role"] == "assistant" and item["content"] == assistant_text for item in messages
+    )
 
 
 def test_workbench_assistant_canvas_revision_requires_draft(

@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from acc.callable_registry import CallableRegistry
-from acc.models import AccError, WorkflowFunctionTemplate
 from acc.hermetic_callables import HERMETIC_CALLABLE_REFS
+from acc.models import AccError, WorkflowFunctionTemplate
 from acc.utils import load_json
 
 

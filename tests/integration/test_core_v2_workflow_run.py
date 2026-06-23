@@ -7,8 +7,11 @@ from pathlib import Path
 import pytest
 
 from acc.app import WorkflowAppService
+from acc.app.runtime.context import build_execution_context
 from acc.app.runtime.orchestrator import run_core_v2_workflow_path
+from acc.callable_registry import CallableRegistry
 from acc.models import CORE_V2_SCHEMA_VERSION
+from acc.runtime.node_payload import sha256_json
 
 
 def write_v2(path: Path, payload: dict) -> None:
@@ -1340,6 +1343,52 @@ def test_control_edge_forwards_main_output_by_default(tmp_path: Path) -> None:
     assert record.status == "success"
     assert consume_output["input"]["main"]["producer_node_id"] == "produce"
     assert bindings["bindings"][0]["binding_kind"] == "control_main_default"
+    assert bindings["bindings"][0]["source_kind"] == "control_edge_compat"
+    assert "compatibility_warning" in bindings["bindings"][0]
+
+
+def test_strict_explicit_dataflow_does_not_forward_control_main(tmp_path: Path) -> None:
+    workflow_path = tmp_path / "strict_control_no_dataflow.accflow.json"
+    write_v2(
+        workflow_path,
+        {
+            "schema_version": CORE_V2_SCHEMA_VERSION,
+            "id": "strict_control_no_dataflow",
+            "version": "0.1.0",
+            "policies": {"dataflow": "strict"},
+            "nodes": [
+                {
+                    "id": "produce",
+                    "callable_ref": {"kind": "tool_class", "id": "fake_producer"},
+                    "ports": {"outputs": {"main": {"type": "json"}}},
+                },
+                {
+                    "id": "consume",
+                    "callable_ref": {"kind": "agent_class", "id": "generic_fake_agent"},
+                    "ports": {"inputs": {"main": {"type": "json", "required": False}}},
+                },
+            ],
+            "control_edges": [{"from": "produce", "to": "consume"}],
+        },
+    )
+
+    record = asyncio.run(run_core_v2_workflow_path(workflow_path, tmp_path / "run"))
+    consume_output = json.loads(
+        (tmp_path / "run" / "nodes" / "consume" / "output.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    bindings = json.loads(
+        (tmp_path / "run" / "nodes" / "consume" / "binding_manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert record.status == "success"
+    assert "main" not in consume_output["input"]
+    assert bindings["schema_version"] == "acc.binding_manifest.v2"
+    assert bindings["inputs"] == []
+    assert bindings["bindings"] == []
 
 
 def test_control_edge_does_not_forward_main_when_same_pair_has_data_edge(tmp_path: Path) -> None:
@@ -1447,7 +1496,11 @@ def test_multiple_control_edges_aggregate_main_outputs(tmp_path: Path) -> None:
         "control_main_default",
         "control_main_aggregate",
     ]
+    assert all("target_key" not in binding for binding in bindings["bindings"][:2])
+    assert all(binding["source_only"] is True for binding in bindings["bindings"][:2])
     assert bindings["bindings"][2]["aggregate_order"] == ["left", "right"]
+    assert bindings["bindings"][2]["target_key"] == "main"
+    assert bindings["bindings"][2]["materialized_sha256"] == sha256_json(aggregate)
 
 
 def test_control_main_aggregate_excludes_sources_suppressed_by_data_edge(tmp_path: Path) -> None:
@@ -1745,6 +1798,98 @@ artifact_contract:
             encoding="utf-8"
         )
     )
-
     assert record.status == "success"
     assert consume_output["input"]["risk_table"] == [{"risk": "structured"}]
+
+
+def test_execution_context_keeps_two_project_roots_independent(tmp_path: Path) -> None:
+    def write_project(project_root: Path, label: str) -> Path:
+        workflows_dir = project_root / "workflows"
+        runs_dir = project_root / "runs"
+        workflows_dir.mkdir(parents=True)
+        runs_dir.mkdir()
+        child_path = workflows_dir / "child.accflow.json"
+        parent_path = workflows_dir / "parent.accflow.json"
+        write_v2(
+            child_path,
+            {
+                "schema_version": CORE_V2_SCHEMA_VERSION,
+                "id": f"child_{label}",
+                "version": "0.1.0",
+                "exposed_inputs": {"topic": {"direction": "input", "type": "json"}},
+                "exposed_outputs": {"report": {"direction": "output", "type": "json"}},
+                "nodes": [
+                    {
+                        "id": "produce",
+                        "callable_ref": {"kind": "tool_class", "id": "fake_producer"},
+                        "ports": {"inputs": {"topic": {}}, "outputs": {"main": {}}},
+                    }
+                ],
+                "workflow_input_bindings": [
+                    {"source_port": "topic", "target": {"node": "produce", "port": "topic"}}
+                ],
+                "workflow_output_bindings": [
+                    {"source": {"node": "produce", "port": "main"}, "target_port": "report"}
+                ],
+            },
+        )
+        write_v2(
+            parent_path,
+            {
+                "schema_version": CORE_V2_SCHEMA_VERSION,
+                "id": f"parent_{label}",
+                "version": "0.1.0",
+                "nodes": [
+                    {
+                        "id": "subflow",
+                        "callable_ref": {"kind": "workflow_function", "id": "child.accflow.json"},
+                        "input_bindings": [
+                            {"target_port": "topic", "static_value": {"project": label}}
+                        ],
+                        "ports": {"outputs": {"report": {"type": "json"}}},
+                    }
+                ],
+            },
+        )
+        return parent_path
+
+    parent_a = write_project(tmp_path / "project_a", "a")
+    parent_b = write_project(tmp_path / "project_b", "b")
+
+    for parent_path, project_root, label in (
+        (parent_a, tmp_path / "project_a", "a"),
+        (parent_b, tmp_path / "project_b", "b"),
+    ):
+        run_dir = project_root / "runs" / f"run_{label}"
+        registry = CallableRegistry.from_project_root(project_root)
+        context = build_execution_context(
+            workflow_path=parent_path,
+            run_dir=run_dir,
+            project_root=project_root,
+            callable_registry=registry,
+        )
+
+        record = asyncio.run(
+            run_core_v2_workflow_path(
+                parent_path,
+                run_dir,
+                callable_registry=registry,
+                execution_context=context,
+            )
+        )
+        parent_output = read_json(run_dir / "nodes" / "subflow" / "output.json")
+        nested_scope = read_json(
+            run_dir
+            / "nodes"
+            / "subflow"
+            / "nested_workflow"
+            / "scope_frame.json"
+        )
+
+        assert record.status == "success"
+        assert parent_output["child_workflow_id"] == f"child_{label}"
+        assert parent_output["workflow_outputs"]["report"]["input"]["topic"] == {
+            "project": label
+        }
+        assert Path(nested_scope["workspace_root"]) == run_dir.resolve()
+        assert Path(nested_scope["environment_root"]).is_relative_to(run_dir.resolve())

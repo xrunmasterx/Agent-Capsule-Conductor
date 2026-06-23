@@ -1,60 +1,54 @@
 # ACC Documentation Map
 
-## Current Entry Points
+## Active Architecture Authority
 
-- `AGENTS.md`: project contract, module layout, stable invariants.
-- `docs/CURRENT_ARCHITECTURE.md`: data flow, runtime boundaries, callable concepts, evidence files.
-- `docs/concepts/`: first principles, capsule/template/session model, GraphOps control plane.
+Read these first:
 
-## Refactoring (2026-06)
+1. `docs/architecture/00-constitution.md`
+2. `docs/architecture/01-core-object-model.md`
+3. `docs/architecture/02-runtime-kernel.md`
+4. `docs/architecture/03-control-modes.md`
+5. `docs/architecture/04-data-plane-and-evidence.md`
+6. `docs/architecture/05-api-ui-boundaries.md`
+7. `docs/architecture/06-graphops-governance.md`
+8. `docs/architecture/07-compatibility-and-migration.md`
+9. `docs/architecture/08-architecture-proof-obligations.md`
 
-- `docs/refactoring-plan/`: 7 feature plans + master plan, executed 2026-06-11.
-- `docs/ACC_Architecture_Audit_2026.md`: full audit report with verification results.
+## Active Entry Points
 
-## Current Goal Packages
+- `AGENTS.md`: concise project contract and authority ladder.
+- `README.md`: project introduction and operating commands.
+- `docs/CURRENT_ARCHITECTURE.md`: short summary of the active architecture.
 
-These describe work reflected in the current architecture:
+If an entry point conflicts with `docs/architecture/*`, the architecture docs win.
 
-- `docs/codex_goal_callable_semantics/`: callable domain model, runtime evidence, migration boundary.
-  Prefer `DESIGN.md`, `DOMAIN_MODEL.md`, `EXECUTION_BOUNDARIES.md`.
-- `docs/codex_goal_visual_workbench_ux_refactor/`: Workbench UX, task persistence, resource/class
-  vs node/instance boundary. Prefer `SPEC.md`, `DESIGN.md`.
+## Audits
 
-## Strategic Planning
+- `docs/audits/2026-06-21-superpower-architecture-debt-audit.md`: current code-grounded architecture debt audit generated from the Superpower architecture analysis.
 
-- `docs/codex_goals_next_stage/`: next-phase goal definitions.
-- `docs/requirements/`: supervisor and platform evolution phases.
-- `docs/workbench_authoring_agent/`: authoring agent roadmap (Phase 1-4).
+Audits identify debt and evidence. They do not override the architecture specs.
 
-## Reference Material
+## Implementation Roadmaps
 
-- `docs/human/`: plain-language explanations of callable semantics, workflow orchestration comparison.
-- `docs/research/`: agent orchestration comparison research.
-- `docs/concepts/`: architectural first principles.
-- `docs/Design/`: strategic design directions (runtime control ledger, dispatch, lifecycle, etc.).
-- `docs/problem/`: pre-refactoring architectural debt inventory. Many items resolved by 2026-06
-  refactoring — see `docs/refactoring-plan/` for completion status.
+- `docs/implementation/2026-06-21-acc-runtime-refactor-roadmap.md`: staged migration plan derived from the Superpower architecture reset.
+
+Roadmaps are subordinate to the architecture specs.
+
+## Superpower Goal Package
+
+- `docs/superpower_acc_architecture/`: Superpower-style SPEC/DESIGN/FINDINGS/IMPLEMENTATION_ORDER/TEST_PLAN/ACCEPTANCE package for converging ACC toward a lightweight, stateless, low-coupling orchestration kernel.
 
 ## Historical Archive
 
-`docs/historical/` contains archived material that is no longer current:
+- `docs/historical/archived-2026-06-20/`: documents moved during the 2026-06-20 architecture authority reset.
+- Older `docs/historical/*` material remains historical context.
 
-- `codex_goals_completed/`: 10 completed goal packages (codex_goal, clean_core_refactor,
-  editable_workbench, environment_kernel, graph_workbench, ideal_layering, quality_audit,
-  workbench, workflow_kernel, workflow_message_routing).
-- `refactor_core_v2_phase0/`: pre-refactoring specs superseded by `docs/refactoring-plan/`.
-- `CONTROL_ARCHITECTURE_GAP_REVIEW.md`: pre-refactoring gap analysis (stale line numbers).
-- `ACC_WORKBENCH_PRODUCT_UI_ARCHITECTURE_BRANDKIT.md`: pre-refactoring UI architecture (stale refs).
-- `dev_v1_architecture_robustness_findings.md`: v1 baseline findings.
-- Legacy capsules, schemas, workflows, test fixtures, examples.
+Archived documents are not current architecture authority. They may contain stale module names, old file names, phase-era assumptions, or pre-reset priorities.
 
-Historical docs remain useful for rationale and migration context, but their phase-specific
-constraints do not override `AGENTS.md` or `CURRENT_ARCHITECTURE.md`.
+## Current Runtime Facts
 
-## Workbench Runtime Facts
-
-- Edits task canvases and saves Core v2 workflow templates through server APIs.
-- Submits async runs: `POST /api/workflows/run-graph/submit`.
-- Observes runs: `GET /api/runs/{run_id}`, `GET /api/runs/{run_id}/events`.
-- Cancels runs: `POST /api/runs/{run_id}/cancel`.
-- UI task state is a browser-local projection; run directories are evidence truth.
+- ACC is local-first.
+- ACC owns orchestration, data movement, evidence, and governance.
+- External agents/tools own internal reasoning and execution behavior.
+- Runtime evidence is durable truth; server and frontend projections are derived.
+- GraphOps governs persistent callable/workflow mutation.

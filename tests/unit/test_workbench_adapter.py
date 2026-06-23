@@ -6,16 +6,16 @@ from pathlib import Path
 import pytest
 
 from acc.app import WorkflowAppService
-from acc.app.workbench_boundary_transfer import (
-    expand_boundary_transfer_bindings,
-    normalize_boundary_transfer_metadata,
-)
 from acc.app.workbench_adapter import (
     canonicalize_workbench_workflow_payload,
     compile_workbench_workflow_bundle,
     merge_workbench_codex_execution_modes,
     merge_workbench_snapshot_projection,
     normalize_workbench_canvas_snapshot,
+)
+from acc.app.workbench_boundary_transfer import (
+    expand_boundary_transfer_bindings,
+    normalize_boundary_transfer_metadata,
 )
 from acc.callable_registry import CallableRegistry
 from acc.engine import parse_workflow_function_template
@@ -107,6 +107,22 @@ def test_workbench_draft_canonicalizes_to_core_v2_payload(tmp_path: Path) -> Non
         assert node["metadata"]["ui_label"] == node["metadata"]["label"]
 
     parse_workflow_function_template(payload, source_path=path)
+
+
+def test_workbench_draft_defaults_agent_nodes_to_full_local_capabilities(tmp_path: Path) -> None:
+    path = tmp_path / "stock_report_flow.accflow.json"
+
+    payload = canonicalize_workbench_workflow_payload(stock_workbench_draft(), source_path=path)
+
+    first_node = payload["nodes"][0]
+    assert first_node["invocation_policy"] == {
+        "permission_profile": {
+            "workspace_access": "writes_workspace",
+            "network": True,
+            "shell": True,
+            "dangerous": True,
+        }
+    }
 
 
 def test_workbench_root_node_outputs_promote_to_workflow_outputs(tmp_path: Path) -> None:
@@ -1322,6 +1338,56 @@ def test_boundary_control_data_edge_priority_skips_duplicate_control_binding() -
             "target": {"node": "business_model_agent", "port": "context"},
             "materialization": "copy",
             "required": False,
+        },
+    ]
+
+
+def test_boundary_control_data_edge_priority_skips_same_source_output_target() -> None:
+    result = expand_boundary_transfer_bindings(
+        workflow_id="Report_Workflow",
+        exposed_inputs=[{"id": "main"}],
+        exposed_outputs=[{"id": "report"}, {"id": "appendix"}],
+        internal_nodes=[
+            {
+                "id": "report_compiler_agent",
+                "inputPorts": [{"id": "main"}],
+                "outputPorts": [
+                    {"id": "main"},
+                    {"id": "report"},
+                    {"id": "appendix"},
+                ],
+            }
+        ],
+        edges=[
+            {
+                "id": "explicit_report",
+                "kind": "data",
+                "from": {"node": "report_compiler_agent", "port": "main"},
+                "to": {"node": "Report_Workflow__workflow_outputs", "port": "report"},
+                "materialization": "copy",
+            },
+            {
+                "id": "control_output",
+                "kind": "control",
+                "from": "report_compiler_agent",
+                "to": "Report_Workflow__workflow_outputs",
+            },
+        ],
+    )
+
+    assert result["status"] == "valid"
+    assert result["bindings"]["workflow_output_bindings"] == [
+        {
+            "source": {"node": "report_compiler_agent", "port": "main"},
+            "target_port": "report",
+            "materialization": "copy",
+            "required": True,
+        },
+        {
+            "source": {"node": "report_compiler_agent", "port": "appendix"},
+            "target_port": "appendix",
+            "materialization": "copy",
+            "required": True,
         },
     ]
 

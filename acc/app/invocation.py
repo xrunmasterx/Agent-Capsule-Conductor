@@ -5,6 +5,7 @@ from typing import Any
 
 from acc.callable_registry import CallableAsset, CallableRegistry
 from acc.callable_runner import CallableClassRunner
+from acc.hermetic_callables import HERMETIC_AGENT_CLASS_IDS
 from acc.models import (
     AccError,
     AgentClassTemplate,
@@ -12,7 +13,6 @@ from acc.models import (
     EnvironmentFrame,
     NodeInvocationSpec,
 )
-from acc.hermetic_callables import HERMETIC_AGENT_CLASS_IDS
 from acc.store import load_json
 
 IN_PROCESS_FAKE_AGENTS: frozenset[str] = HERMETIC_AGENT_CLASS_IDS

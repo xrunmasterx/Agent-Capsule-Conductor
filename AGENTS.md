@@ -2,176 +2,137 @@
 
 ## Current Project Contract
 
-Agent Capsule Conductor (`acc`) is a local-first workflow runtime and Workbench for wrapping mature
-external agents or local tools as reusable callable assets.
+Agent Callable Conductor (`acc`) is a local-first orchestration runtime and Workbench for wrapping mature external agents, local tools, and child workflows as reusable callable assets.
 
-Current architecture is Core v2 callable-only:
+ACC owns orchestration boundaries: callable/workflow definitions, runtime invocations, control decisions, explicit data movement, evidence, artifacts, projections, and governed workflow/callable mutation. External agents and tools own their internal reasoning and execution behavior. ACC does **not** implement a custom LLM reasoning loop and does **not** teach agents how to do their work.
 
-- `AgentClassTemplate` / `ToolClassTemplate`: reusable, stateless behavior definitions.
+## Documentation Authority
+
+The active architecture authority is:
+
+1. `docs/architecture/00-constitution.md` — highest architecture authority.
+2. `docs/architecture/01-core-object-model.md` through `docs/architecture/08-architecture-proof-obligations.md` — detailed topic authority.
+3. `AGENTS.md`, `README.md`, `docs/README.md`, and `docs/CURRENT_ARCHITECTURE.md` — entry points and summaries.
+4. `docs/superpower_acc_architecture/*` — Superpower-style SPEC/DESIGN/FINDINGS/IMPLEMENTATION_ORDER/TEST_PLAN/ACCEPTANCE package for architecture convergence work.
+5. `docs/implementation/*` — subordinate implementation roadmaps.
+6. `docs/audits/*` — evidence-led audit artifacts.
+7. `docs/historical/*` — historical context only.
+
+If active documents conflict, `docs/architecture/*` wins. Archived documents never override active architecture specs. Audits and Superpower goal packages identify debt and execution order, but they do not override the architecture constitution.
+
+## Superpower Architecture Package
+
+For architecture reset, debt cleanup, or runtime refactor work, read these before changing code:
+
+- `docs/superpower_acc_architecture/SPEC.md` — target architecture and non-negotiable invariants.
+- `docs/superpower_acc_architecture/DESIGN.md` — runtime/service/port decomposition.
+- `docs/superpower_acc_architecture/FINDINGS.md` — current unhealthy architecture, redundancy, low-performance paths, and boundary violations.
+- `docs/superpower_acc_architecture/IMPLEMENTATION_ORDER.md` — staged migration order.
+- `docs/superpower_acc_architecture/TEST_PLAN.md` and `docs/superpower_acc_architecture/ACCEPTANCE.md` — required proof and acceptance criteria.
+
+## Core Architecture Vocabulary
+
+- `AgentClassTemplate` / `ToolClassTemplate`: reusable, stateless callable behavior definitions.
 - `WorkflowFunctionTemplate`: reusable, stateless workflow function body.
 - `NodeInvocationSpec`: one call site inside a workflow function.
+- `CallableRef`: typed reference to a callable target.
+- `ExecutionPlan` / `OrchestrationIntent`: compiled semantic execution shape; target design keeps this pure and separate from ledger persistence.
 - `FunctionInvocation`: one runtime call of a workflow function.
-- `ScopeFrame`: the runtime scope for one invocation; owns cwd, inbox, outbox, artifacts, and
-  behavior snapshot evidence.
+- `ScopeFrame`: runtime scope for one invocation; owns workspace/environment/inbox/outbox/artifact roots and behavior snapshot evidence.
 - `SessionInstance`: one concrete agent/tool execution inside a scope frame.
-- `ArtifactBundle`: stable files produced by a session, node, or workflow invocation.
-- `GraphOps Control Plane`: proposal, validation, dry-run, human approval, then apply.
-
-## Module Layout (post-refactoring 2026-06)
-
-```text
-acc/
-  models.py            — frozen dataclass definitions (62 domain types)
-  serialization.py     — to_dict / from_dict functions
-  validation.py        — validate_core_v2_* functions
-  state_machine.py     — pure transition tables & helpers (PlanStep/Dispatch/Run)
-  ledger_writer.py     — FixedRunControlLedgerWriter (sole mutable writer)
-  graphops.py          — unified GraphOpsService with typed operation handlers
-  utils.py             — consolidated shared utilities
-  constants.py         — shared constants (no cross-module duplication)
-  engine/              — pure scheduling, normalization, dependency analysis
-  runtime/             — transfer policy, node payload, IO helpers
-  app/
-    runtime/           — orchestrator, scheduler, executor, dispatch_gate, workflow_io
-    agent_sessions.py  — session lifecycle + indexed lookup
-    authoring.py       — authoring session service
-    run_lifecycle.py   — run creation and lifecycle
-    handoff.py         — handoff execution
-    supervisor.py      — supervisor plan execution
-    decisions.py       — human gate and decision handling
-  server/              — FastAPI routes
-  cli.py               — CLI entry point
-  mcp_server/          — MCP tool server
-
-web/
-  src/
-    stores/            — Zustand (workbenchStore, runStore, assistantStore)
-    components/
-      WorkflowViewer.tsx  — thin shell importing sub-modules
-      canvas/          — ReactFlow canvas, node types, layout constants
-      authoring/       — AI authoring session, proposal review
-      assistant/       — chat drawer, turn list
-      execution/       — run dock, overlay
-      inspector/       — node detail, selection panels
-      workbench/       — shell layout, top bar, task rail, workspace switcher
-    hooks/             — useAssistantStream, useRunStream (SSE)
-    i18n/              — zh-CN.ts (UI language: Chinese)
-```
-
-## Workflow Format
-
-- **Canonical on-disk template**: `workflows/<id>.accflow.json` (Workbench/API save default).
-- **Legacy import-only**: `*.graph.json` — convert with `acc workflow import-graph <path>`.
-- **Runtime path**: canonical `.accflow.json` parses to `WorkflowFunctionTemplate`, compiles to
-  `ExecutionPlan`, executes `CallableRef` as `SessionInstance` evidence.
+- `NodeExecutionResult`: target immutable result of one node execution; scheduler should aggregate these rather than node tasks mutating shared output state.
+- `AdapterCapabilityEnvelope`: target narrow adapter-facing contract; external agents/tools should receive declared inputs/capabilities, not raw ACC topology.
+- `RunPlan`, `PlanStep`, `DispatchEnvelope`, `DecisionRecord`: control-ledger evidence for why work is authorized and dispatched.
+- `ControlModeStrategy`: target abstraction for fixed workflow, supervisor, handoff, and human gate as strategies over one runtime substrate.
+- GraphOps Control Plane: proposal, validation, dry-run, human approval, then apply for durable asset mutation only.
 
 ## Stable Invariants
 
-These rules outrank older phase docs when there is a conflict.
+1. ACC orchestrates; external agents and tools reason and act internally.
+2. Templates are reusable and stateless. Runtime identity, run dirs, workspace bindings, session ids, provider memory, conversation history, and UI selection state belong to run-scoped evidence or projections, not definitions.
+3. Control authorization is separate from data movement. Data moves through declared workflow inputs, ports, bindings, data edges, inbox/outbox materialization, result refs, artifact refs, or explicit snapshot inputs.
+4. Agent nodes are workflow-unaware. They receive declared task inputs and explicit capabilities; they should not need to know whether they are inside fixed workflow, supervisor, handoff, human gate, or nested workflow execution.
+5. Workflow, supervisor, handoff, human gate, and nested workflow are target control strategies over one execution substrate, not separate runtimes.
+6. Runtime evidence is durable truth. Server projections, UI stores, indexes, polling state, and SSE/live streams are derived views or transports.
+7. Persistent callable/workflow mutation is governed through GraphOps unless a new active architecture spec defines another governed path.
+8. Local-first filesystem evidence remains the default truth model. A database, cloud backend, distributed worker, or SaaS surface requires a new explicit architecture decision.
+9. Legacy compatibility must be explicit and bounded. `.accflow.json` is canonical for workflow templates; `.graph.json`, legacy YAML workflow shapes, schema aliases, and old shims are migration/rejection/historical concerns unless an active spec says otherwise.
+10. Architecture claims require proof obligations. New control modes, evidence schemas, compatibility exceptions, or projection contracts must add or update tests/static checks.
 
-1. **CLI machine-readable output**: `acc run ... --emit-conductor-json` / `--emit-json` stdout
-   contains exactly one JSON object. Logs go to stderr.
+## Current Code Facts and Known Deviations
 
-2. **Hermetic tests**: No default test may require real Codex, Claude, Cursor, Gemini, Hermes,
-   network, or paid services. External smoke tests are opt-in only.
+Treat the following as current reality, not target architecture:
 
-3. **No custom LLM loop**: External agents own their internal reasoning. ACC owns execution
-   boundaries, manifests, inputs, outputs, and artifacts.
+- Fixed workflow is the most mature runtime path.
+- Supervisor, handoff, and some resume flows are not fully converged into one runtime kernel yet.
+- `acc/app/runtime/dispatch_gate.py` still rehydrates persisted state and may reconstruct dynamic node/template overlays for resume/supervisor/handoff paths.
+- `acc/runtime/node_payload.py` still contains implicit control-main forwarding compatibility; this violates the target control/data separation and must not be expanded.
+- Template/node metadata and behavior overlays still have open-ended surfaces; do not add new runtime/session/workspace/provider/conversation semantics there.
+- Adapter request/env surfaces currently expose more run/workspace/session topology than the target `AdapterCapabilityEnvelope`; do not depend on this as a permanent contract.
+- `acc/app/core_v2_runtime.py` is a backward-compatibility shim. New code should import concrete runtime modules or target ports directly.
+- Storage and run projections still contain performance-debt paths such as full index rebuilds, polling streams, and repeated JSONL/manifest parsing. Optimize by incremental projection, caching, batching, or explicit repositories — not by adding hidden state truth.
 
-4. **Local-first**: No database, cloud backend, Kubernetes, or SaaS surface unless a new
-   explicit goal requires it.
+When code and target specs disagree, label the current behavior as a known deviation, add/adjust proof obligations, and migrate in the order documented by `docs/superpower_acc_architecture/IMPLEMENTATION_ORDER.md`.
 
-5. **Template ≠ runtime state**: Templates must not store run dirs, workspace bindings, session
-   ids, or conversation memory. Runtime state lives in run-scoped evidence.
+## Layer Boundaries
 
-6. **Explicit data movement**: No direct upstream→downstream workspace writes. Use ports,
-   inbox/outbox materialization, artifact references, and workflow-call bindings.
+- `acc.models`, `acc.engine`, and state-machine helpers: pure domain, planning, validation, and transition logic. No filesystem IO, subprocess, host env reads, server/UI imports, or runtime adapter dispatch.
+- `acc.runtime` and `acc.app.runtime`: data materialization, scheduling, dispatch, execution, and evidence writing. Target direction is explicit repositories/recorders/ports rather than broad transaction scripts.
+- `acc.app`: use-case coordination across engine, runtime, store, projection, and governance services.
+- `acc.graphops`: governed durable asset mutation. GraphOps must not become runtime dispatch.
+- `acc.server`: thin API layer for request parsing, app/projection/evidence service delegation, and HTTP error translation. Do not put runtime graph assembly, run claiming, subprocess, or complex event merge policy directly in routes.
+- `web/`: Workbench authoring and projection surface only. It must not become runtime truth.
 
-7. **Human-governed GraphOps**: LLM-generated changes default to proposal mode. Destructive
-   apply requires validation + dry-run + human approval.
+## Workflow and Callable Formats
 
-8. **Layer boundaries**:
-   - `acc.models`, `acc.engine`, `acc.state_machine`: pure — no IO, no subprocesses.
-   - `acc.store`: filesystem manifests, path protection.
-   - `acc.runtime`, `acc.app.runtime`: process/workspace execution.
-   - `acc.app`: use-case coordination.
-   - `acc.server`: thin API layer.
-   - `web/`: interaction state and visual projection only.
+- Canonical active workflow templates are `.accflow.json` files containing Core v2 callable references.
+- Legacy `.graph.json` files are import-only or explicit-rejection inputs.
+- Callable YAML assets are separate from workflow YAML compatibility; do not treat every YAML format as one legacy bucket.
+- Legacy compatibility in active loaders must have a migration reason, tests, and deletion condition.
 
-9. **Auditable evidence**: RunRecord, events.jsonl, and UI projections have non-overlapping
-   responsibilities. Status uses canonical names (`success`, `failed`, `cancelled`, `crashed`).
+## Before Changing Architecture-Sensitive Files
 
-10. **Centralized helpers**: No ad hoc `write_json`, `copy_path`, or JSON Schema validation
-    duplicates. Extend `acc/utils.py` or `acc/store` instead of copy-pasting.
+1. Read `docs/architecture/00-constitution.md`.
+2. Read the relevant topic spec under `docs/architecture/*`.
+3. For runtime/refactor/debt work, read `docs/superpower_acc_architecture/SPEC.md`, `FINDINGS.md`, and `IMPLEMENTATION_ORDER.md`.
+4. Check `git status --short` and avoid overwriting unrelated work.
+5. Identify the smallest architecture-consistent change.
+6. If code and docs disagree, verify current code, then update active docs or record a debt/deviation item.
+7. Do not use archived documents as current requirements.
 
-## Workbench Rules
+## Implementation Guardrails
 
-- Chinese is the default language for user-visible labels.
-- The graph canvas is the primary workflow editing surface.
-- UI task state is a projection; workflow templates and run artifacts are durable truth.
-- System prompts belong to Agent/Tool class resources. Task nodes configure invocation-scoped
-  data only (user prompt, static input, bindings).
-- Multiple concurrent runs are modeled by `run_id` + `task_id`. No global `isRunning` singleton.
-
-## Workbench Async Run Model
-
-- `/api/workflows/run-graph/submit` is the async Workbench submit path.
-- `/api/workflows/run-graph` remains for synchronous compatibility.
-- In-memory active-task maps are execution handles only, not durable facts.
-
-## Documentation Source of Truth
-
-Start here:
-
-- `AGENTS.md` (this file) — project contract and module layout
-- `docs/CURRENT_ARCHITECTURE.md` — data flow, callable concepts, evidence files
-- `docs/concepts/` — first principles, capsule/template/session, GraphOps control plane
-
-For refactoring history and completion status:
-
-- `docs/refactoring-plan/` — 7 feature plans + master plan (executed 2026-06)
-- `docs/ACC_Architecture_Audit_2026.md` — full audit with verification results
-
-For callable runtime semantics:
-
-- `docs/codex_goal_callable_semantics/DESIGN.md`
-- `docs/codex_goal_callable_semantics/DOMAIN_MODEL.md`
-
-For Workbench UX:
-
-- `docs/codex_goal_visual_workbench_ux_refactor/DESIGN.md`
-
-For strategic planning:
-
-- `docs/requirements/` — supervisor and platform evolution phases
-- `docs/codex_goals_next_stage/` — next-stage goal definitions
-
-Historical goal packages and legacy material are in `docs/historical/`.
-
-## Before Changing Files
-
-1. Inspect current implementation first. Use `rg` / `rg --files` for search.
-2. Check `git status --short` and avoid overwriting unrelated changes.
-3. Identify the smallest architecture-consistent change.
-4. If a doc says one thing and code proves another, update the doc.
+- Do not implement a custom LLM reasoning loop or tool-calling loop inside ACC.
+- Do not teach agents how to do their internal work; pass declared task input and capabilities only.
+- Do not add a second runtime for supervisor/handoff/human gate.
+- Do not add hidden data movement over control edges.
+- Do not add new executable behavior to arbitrary `metadata` or `raw` fields.
+- Do not make Workbench localStorage, canvas snapshots, polling state, or SSE state durable runtime truth.
+- Do not make GraphOps apply part of normal runtime dispatch.
+- Do not add database/cloud/distributed-worker infrastructure as a core requirement without an explicit architecture decision.
+- Prefer hermetic tests that do not require real Claude/Codex/Cursor/Gemini, network, browser credentials, cloud services, or paid external services.
 
 ## Verification
 
-```bash
-# Backend
-python -m pytest -q --ignore=tests/integration --ignore=tests/server
-# or with all deps:
-uv run pytest -q
+Full local quality gate:
 
-# Frontend
+```bash
+uv run python scripts/quality_gate.py
+```
+
+Backend checks:
+
+```bash
+uv run pytest -q
+uv run ruff check .
+```
+
+Frontend checks:
+
+```bash
 cd web
-npx tsc --noEmit
 npm run test -- --run
 npm run build
 ```
 
-## Disposable Local Assets
-
-Temporary workflow canvases, Workbench nodes, and agent/tool templates created for testing are
-disposable. They may be deleted when doing so simplifies the architecture and no production
-contract depends on them. Historical evidence belongs under `docs/historical/`.
+Documentation-only changes must at minimum verify that active docs references resolve and that active docs do not point to archived docs as current authority.

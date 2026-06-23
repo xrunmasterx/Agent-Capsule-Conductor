@@ -44,7 +44,9 @@ def test_node_log_delta_reads_agent_turn_log_when_available(client, project_root
     assert payload["next_offset"] == 23
 
 
-def test_node_log_delta_ignores_agent_session_ref_outside_project(client, project_root, tmp_path) -> None:
+def test_node_log_delta_ignores_agent_session_ref_outside_project(
+    client, project_root, tmp_path
+) -> None:
     node_dir = project_root / "runs" / "server_run" / "nodes" / "server_node"
     outside_session_dir = tmp_path / "outside_agent_session"
     outside_turn_dir = outside_session_dir / "turns" / "turn_1"

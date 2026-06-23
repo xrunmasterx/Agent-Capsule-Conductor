@@ -69,6 +69,19 @@ def port_type_check_mode(template: WorkflowFunctionTemplate) -> PortTypeCheckMod
     return "warn"
 
 
+def strict_explicit_dataflow_enabled(template: WorkflowFunctionTemplate) -> bool:
+    policies = template.policies if isinstance(template.policies, dict) else {}
+    dataflow = policies.get("dataflow")
+    if dataflow == "strict":
+        return True
+    if isinstance(dataflow, dict) and dataflow.get("mode") == "strict":
+        return True
+    explicit_dataflow = policies.get("explicit_dataflow")
+    if explicit_dataflow in {True, "strict"}:
+        return True
+    return bool(policies.get("strict_explicit_dataflow"))
+
+
 def augment_known_callable_refs(
     template: WorkflowFunctionTemplate,
     known_callable_refs: set[tuple[str, str]],
@@ -220,9 +233,10 @@ def _incoming_data_ports(template: WorkflowFunctionTemplate) -> dict[str, set[st
     incoming: dict[str, set[str]] = {node_id: set() for node_id in template.node_invocations}
     for edge in template.data_edges:
         incoming[edge.target.node].add(edge.target.port)
-    for node_id in template.node_invocations:
-        if control_main_source_nodes_for_target(template, node_id):
-            incoming[node_id].add("main")
+    if not strict_explicit_dataflow_enabled(template):
+        for node_id in template.node_invocations:
+            if control_main_source_nodes_for_target(template, node_id):
+                incoming[node_id].add("main")
     for binding in template.workflow_input_bindings:
         if binding.target.node in incoming:
             incoming[binding.target.node].add(binding.target.port)
@@ -249,7 +263,8 @@ def _collect_port_binding_issues(
     connected_targets: set[tuple[str, str]] = {
         (edge.target.node, edge.target.port) for edge in template.data_edges
     }
-    issues.extend(_collect_control_data_semantic_warnings(template))
+    if not strict_explicit_dataflow_enabled(template):
+        issues.extend(_collect_control_data_semantic_warnings(template))
 
     for edge in template.data_edges:
         if edge.source.node in template.node_invocations:
@@ -393,8 +408,7 @@ def _validate_workflow_input_binding(
             ValidationIssue(
                 code="unbound_workflow_input",
                 message=(
-                    "Workflow input binding references missing target node "
-                    f"{binding.target.node!r}"
+                    f"Workflow input binding references missing target node {binding.target.node!r}"
                 ),
                 port=binding.target.port,
                 node_id=binding.target.node,
@@ -415,11 +429,12 @@ def _validate_workflow_input_binding(
     return issues
 
 
-def _data_edge_issue_metadata(edge: Any, *, expected_schema_path: str | None = None) -> dict[str, Any]:
+def _data_edge_issue_metadata(
+    edge: Any, *, expected_schema_path: str | None = None
+) -> dict[str, Any]:
     metadata: dict[str, Any] = {
         "edge_id": (
-            f"{edge.source.node}.{edge.source.port}->"
-            f"{edge.target.node}.{edge.target.port}"
+            f"{edge.source.node}.{edge.source.port}->{edge.target.node}.{edge.target.port}"
         ),
         "source": {"node": edge.source.node, "port": edge.source.port},
         "target": {"node": edge.target.node, "port": edge.target.port},
@@ -452,11 +467,14 @@ def _available_sources_for_required_input(
                     "port": edge.source.port,
                 }
             )
-    for edge in template.control_edges:
-        if edge.target != node_id or port_id != "main":
-            continue
-        if control_edge_forwards_main(template, edge):
-            sources.append({"kind": "control_main_default", "node": edge.source, "port": "main"})
+    if not strict_explicit_dataflow_enabled(template):
+        for edge in template.control_edges:
+            if edge.target != node_id or port_id != "main":
+                continue
+            if control_edge_forwards_main(template, edge):
+                sources.append(
+                    {"kind": "control_main_default", "node": edge.source, "port": "main"}
+                )
     for binding in template.workflow_input_bindings:
         if binding.target.node == node_id and binding.target.port == port_id:
             sources.append({"kind": "workflow_input", "port": binding.source_port})
@@ -579,9 +597,7 @@ def _collect_output_schema_port_issues(
         if node.callable_ref.kind != "agent_class":
             continue
         non_main_ports = [
-            port_id
-            for port_id in node.output_ports
-            if port_id not in {"main", "default"}
+            port_id for port_id in node.output_ports if port_id not in {"main", "default"}
         ]
         if not non_main_ports:
             if node.output_schema is None:
@@ -625,9 +641,7 @@ def _collect_output_schema_port_issues(
                     node_id=node.id,
                     port=port_id,
                     severity=(
-                        "warning"
-                        if has_projected_output_ports(node.output_schema)
-                        else "error"
+                        "warning" if has_projected_output_ports(node.output_schema) else "error"
                     ),
                 )
             )

@@ -284,11 +284,18 @@ def test_nested_workflow_receives_main_from_parent_control_edge(
 
     assert record.status == "success"
     assert workflow_node_payload["main"]["input"]["seed"] == "parent-main"
+    assert workflow_binding_manifest["schema_version"] == "acc.binding_manifest.v2"
     assert workflow_binding_manifest["bindings"][0]["binding_kind"] == "control_main_default"
+    assert workflow_binding_manifest["bindings"][0]["source_kind"] == "control_edge_compat"
+    assert "compatibility_warning" in workflow_binding_manifest["bindings"][0]
     assert agent2_payload["main"] == workflow_node_payload["main"]
+    assert agent2_binding_manifest["schema_version"] == "acc.binding_manifest.v2"
     assert agent2_binding_manifest["bindings"][0]["binding_kind"] == "workflow_input"
+    assert agent2_binding_manifest["bindings"][0]["source_kind"] == "workflow_input"
     assert agent1_payload["main"]["input"]["main"] == workflow_node_payload["main"]
     assert agent1_binding_manifest["bindings"][0]["binding_kind"] == "control_main_default"
+    assert agent1_binding_manifest["bindings"][0]["source_kind"] == "control_edge_compat"
+    assert "compatibility_warning" in agent1_binding_manifest["bindings"][0]
     assert child_output == json.loads(
         (child_run / "nodes" / "agent1" / "output.json").read_text(encoding="utf-8")
     )

@@ -3,7 +3,7 @@
  */
 
 import { FileText, Trash2 } from 'lucide-react';
-import type { WorkbenchTaskSummary } from './TaskRail';
+import type { WorkbenchTaskSummary } from '../../types/workbench';
 
 function TaskArtifactsPane({ task }: { task?: WorkbenchTaskSummary }) {
   return (

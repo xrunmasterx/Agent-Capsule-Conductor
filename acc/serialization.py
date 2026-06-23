@@ -19,6 +19,7 @@ from acc.models import (
     ControlEdge,
     DataEdge,
     DataEndpoint,
+    ExecutionPlan,  # noqa: F811 – kept for clarity
     InvocationPolicy,
     NodeControlPolicy,
     NodeInputBinding,
@@ -36,8 +37,6 @@ from acc.models import (
     WorkflowInputBinding,
     WorkflowOutputBinding,
 )
-from acc.models import ExecutionPlan  # noqa: F811 – kept for clarity
-
 
 # -- Public serialization API -------------------------------------------------
 

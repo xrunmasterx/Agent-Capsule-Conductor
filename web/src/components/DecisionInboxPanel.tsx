@@ -55,14 +55,6 @@ export function DecisionInboxPanel({ onViewRun }: Props) {
       setActionResult(await api.dryRunGraphOpsProposal(item.graphops.proposal_id));
       return;
     }
-    if (!item.graphops?.patch_path) {
-      return;
-    }
-    const result =
-      actionKind === 'validate_patch'
-        ? await api.graphopsValidate(item.graphops.patch_path, true)
-        : await api.graphopsDryRun(item.graphops.patch_path, true);
-    setActionResult(result);
   }
 
   return (
@@ -136,7 +128,7 @@ function DecisionDetail({
   actionResult: Record<string, unknown> | null;
   onAction: (kind: string) => void;
 }) {
-  const graphopsId = item.graphops?.proposal_id || item.graphops?.patch_id || 'n/a';
+  const graphopsId = item.graphops?.proposal_id || 'n/a';
   return (
     <article className="decision-detail">
       <header>
@@ -177,11 +169,6 @@ function DecisionDetail({
           </article>
         ))}
       </section>
-      {item.graphops?.dry_run_only ? (
-        <div className="notice neutral">
-          GraphOps v2 patch 仍然是 proposal / validate / dry-run 优先，本页面不会直接应用补丁。
-        </div>
-      ) : null}
       {item.kind === 'graphops_persistence_proposal' ? (
         <div className="notice neutral">
           GraphOps v3 持久化提案必须先 validate / dry-run，再通过人工批准后 apply；本页面只执行非破坏性检查。

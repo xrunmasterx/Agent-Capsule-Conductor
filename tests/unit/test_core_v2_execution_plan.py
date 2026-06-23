@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from acc.models import CORE_V2_SCHEMA_VERSION
 from acc.engine import compile_execution_plan, parse_workflow_function_template
-from acc.models import AccError
+from acc.models import CORE_V2_SCHEMA_VERSION, AccError
 
 
 def plan_payload() -> dict:

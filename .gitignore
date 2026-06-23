@@ -3,6 +3,8 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .ruff_cache/
+.acc/
+.codex_runtime_logs/
 runs/
 bindings/*.binding.local.json
 acceptance_*.stdout.json

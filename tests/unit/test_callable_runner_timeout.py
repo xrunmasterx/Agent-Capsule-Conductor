@@ -21,7 +21,7 @@ def test_codex_app_server_node_uses_production_default_timeout(
         callable_ref=CallableRef(kind="agent_class", id="agent.codex"),
     )
 
-    assert effective_timeout_seconds(template, node) == 600
+    assert effective_timeout_seconds(template, node) == 1200
 
 
 def test_codex_app_server_node_explicit_timeout_wins(

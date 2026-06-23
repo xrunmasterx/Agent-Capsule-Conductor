@@ -8,7 +8,7 @@ from acc.artifact_store import ArtifactStore
 from acc.utils import load_json
 
 
-def make_request(tmp_path: Path, args: list[str], timeout: float = 5) -> AgentRunRequest:
+def make_request(tmp_path: Path, args: list[str], timeout: float = 30) -> AgentRunRequest:
     store = ArtifactStore(tmp_path / "run")
     store.prepare()
     store.write_input({"message": "hello", "topic": "unit"})

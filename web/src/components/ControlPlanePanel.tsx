@@ -1,9 +1,9 @@
-import { FileJson, ShieldCheck, Workflow } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { ShieldCheck, Workflow } from 'lucide-react';
+import { useMemo, useState } from 'react';
 
 import { api } from '../api';
 import { zhCN as t } from '../i18n/zh-CN';
-import type { GraphOpsExample, RunSummary, WorkflowSummary } from '../types';
+import type { RunSummary, WorkflowSummary } from '../types';
 import { CodeBlock } from './CodeBlock';
 
 type Props = {
@@ -14,28 +14,9 @@ type Props = {
 
 export function ControlPlanePanel({ runs, workflows, selectedRun }: Props) {
   const isDev = new URLSearchParams(window.location.search).has('dev');
-  const [patches, setPatches] = useState<GraphOpsExample[]>([]);
-  const [selectedPatch, setSelectedPatch] = useState('');
   const [message, setMessage] = useState('');
   const [resultTitle, setResultTitle] = useState('control_plane.json');
   const [resultContent, setResultContent] = useState('{}');
-
-  useEffect(() => {
-    if (!isDev) {
-      return;
-    }
-    let ignore = false;
-    api.graphopsExamples().then((payload) => {
-      if (ignore) {
-        return;
-      }
-      setPatches(payload.patches);
-      setSelectedPatch((current) => current || payload.patches[0]?.path || '');
-    });
-    return () => {
-      ignore = true;
-    };
-  }, []);
 
   const selectedWorkflow = workflows[0];
   const currentRun = selectedRun || runs[0];
@@ -77,23 +58,6 @@ export function ControlPlanePanel({ runs, workflows, selectedRun }: Props) {
     showJson(result.name, result);
   }
 
-  async function validatePatch() {
-    if (!selectedPatch) {
-      return;
-    }
-    const result = await api.graphopsValidate(selectedPatch, true);
-    setMessage(`已校验 ${selectedPatch}`);
-    showJson('graphops.validate.json', result);
-  }
-
-  async function dryRunPatch() {
-    if (!selectedPatch) {
-      return;
-    }
-    const result = await api.graphopsDryRun(selectedPatch, true);
-    setMessage(`已 dry-run ${selectedPatch}`);
-    showJson('graphops.dry-run.json', result);
-  }
 
   if (!isDev) {
     return null;
@@ -126,27 +90,10 @@ export function ControlPlanePanel({ runs, workflows, selectedRun }: Props) {
             </button>
           </div>
           <div className="control-group">
-            <h3>
-              <FileJson aria-hidden="true" size={16} />
-              {t.graphOps}
-            </h3>
-            <label>
-              示例 patch
-              <select value={selectedPatch} onChange={(event) => setSelectedPatch(event.target.value)}>
-                {patches.map((patch) => (
-                  <option key={patch.path} value={patch.path}>
-                    {patch.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button type="button" onClick={validatePatch} disabled={!selectedPatch}>
-              {t.validate} patch
-            </button>
-            <button type="button" onClick={dryRunPatch} disabled={!selectedPatch}>
-              dry-run patch
-            </button>
-            <p className="muted">{t.approvalRequired}</p>
+            <h3>{t.graphOps}</h3>
+            <p className="muted">
+              Legacy patch validate / dry-run routes have retired. Use GraphOps proposal APIs from the decision inbox or authoring flow.
+            </p>
           </div>
           {message ? <div className="notice neutral">{message}</div> : null}
         </section>

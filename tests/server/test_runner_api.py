@@ -47,6 +47,12 @@ def test_runner_capabilities_and_workspaces_hide_local_paths(
     assert payload["runner_id"].startswith("runner_")
     assert "generic_cli" in payload["available_runtimes"]
     assert "default" in payload["workspace_aliases"]
+    assert payload["permission_policy"] == {
+        "network": "allow",
+        "shell": "allow",
+        "dangerous": "allow",
+        "workspace_write": "allow",
+    }
 
     workspaces = client.get("/api/runner/workspaces")
     assert workspaces.status_code == 200, workspaces.text
@@ -179,6 +185,87 @@ def test_product_runner_submit_requires_local_approval_for_shell_permission(
     assert "permission.denied" in audit_log
 
 
+def test_product_runner_submit_checks_node_invocation_permission_override(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("ACC_SECURITY_MODE", "product_local_exe")
+    monkeypatch.setenv("ACC_LOCAL_RUNNER_TOKEN", "secret-token")
+    client = TestClient(create_app(tmp_path))
+    write_yaml(
+        tmp_path / "callables" / "agents" / "safe-agent.yaml",
+        {
+            "id": "safe-agent",
+            "version": "0.1.0",
+            "runtime": "generic_cli",
+            "default_permissions": {"workspace_access": "read_only"},
+        },
+    )
+    graph = _runner_graph("override_flow", "safe-agent")
+    graph["nodes"][0]["invocation_policy"] = {
+        "permission_profile": {
+            "workspace_access": "writes_workspace",
+            "network": True,
+            "shell": True,
+            "dangerous": True,
+        }
+    }
+
+    response = client.post(
+        "/api/runner/jobs",
+        headers={"x-acc-local-token": "secret-token"},
+        json={"graph": graph, "run_id": "override_run"},
+    )
+
+    assert response.status_code == 400, response.text
+    detail = response.json()["detail"]
+    assert detail["code"] == "permission_denied"
+    assert detail["job"]["status"] == "rejected"
+    assert not (tmp_path / "runs" / "override_run").exists()
+    assert detail["details"]["decision"]["reasons"] == [
+        "dangerous",
+        "shell",
+        "network",
+        "writes_workspace",
+    ]
+
+
+def test_dev_runner_submit_allows_full_local_callable_permissions(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("ACC_SECURITY_MODE", raising=False)
+    monkeypatch.delenv("ACC_LOCAL_RUNNER_REQUIRE_TOKEN", raising=False)
+    monkeypatch.delenv("ACC_LOCAL_RUNNER_TOKEN", raising=False)
+    client = TestClient(create_app(tmp_path))
+    write_yaml(
+        tmp_path / "callables" / "agents" / "full-local-agent.yaml",
+        {
+            "id": "full-local-agent",
+            "version": "0.1.0",
+            "runtime": "generic_cli",
+            "default_permissions": {
+                "workspace_access": "writes_workspace",
+                "network": True,
+                "shell": True,
+                "dangerous": True,
+            },
+        },
+    )
+
+    response = client.post(
+        "/api/runner/jobs",
+        json={
+            "graph": _runner_graph("full_local_flow", "full-local-agent"),
+            "run_id": "full_local_run",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] in {"queued", "running", "success"}
+    assert (tmp_path / "runs" / "full_local_run" / RUN_MARKER_FILENAME).exists()
+
+
 def test_runner_submit_returns_job_without_run_dir(
     client: TestClient,
     project_root: Path,
@@ -198,10 +285,20 @@ def test_runner_submit_returns_job_without_run_dir(
     payload = response.json()
     assert payload["job_id"] == "job_runner_submit"
     assert payload["run_id"] == "runner_submit_run"
+    assert payload["task_id"] == "task-runner"
+    assert payload["workflow_id"] == "runner_submit_flow"
     assert payload["workspace_alias"] == "default"
+    assert payload["schema_version"] == "acc.runner.job.v1"
+    assert payload["status"] in {"queued", "running", "success"}
+    assert payload["rejection"] is None
+    assert payload["stream_url"] == "/api/runner/runs/runner_submit_run/stream"
     assert "run_dir" not in payload
     assert str(project_root) not in response.text
     assert (project_root / "runs" / "runner_submit_run" / RUN_MARKER_FILENAME).exists()
+
+    persisted = client.get("/api/runner/jobs/job_runner_submit")
+    assert persisted.status_code == 200, persisted.text
+    assert persisted.json() == payload
 
 
 def test_runner_submit_updates_existing_workbench_task_run_index(

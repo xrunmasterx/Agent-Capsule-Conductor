@@ -7,9 +7,9 @@ from pathlib import Path
 import pytest
 
 from acc.app.core_v2_loader import load_workflow_function_template
-from acc.app.runtime.dispatch_gate import dispatch_ready_handoff_plan_steps
-from acc.app.runtime.orchestrator import run_core_v2_workflow_path
 from acc.app.handoff import materialize_handoff_plan_step
+from acc.app.runtime.continuation import continue_persisted_run
+from acc.app.runtime.orchestrator import run_core_v2_workflow_path
 from acc.models import (
     AccError,
     CallableRef,
@@ -61,9 +61,12 @@ def test_handoff_new_session_dispatches_target_through_core_v2_path(
     assert materialized["payload_ref"] == "handoffs/h_new/payload.json"
     assert not (run_dir / "nodes" / "handoff_worker").exists()
 
-    result = asyncio.run(dispatch_ready_handoff_plan_steps(run_dir))
+    result = asyncio.run(continue_persisted_run(run_dir, reason="handoff"))
 
     output = json.loads((run_dir / "nodes" / "handoff_worker" / "output.json").read_text())
+    binding_manifest = json.loads(
+        (run_dir / "nodes" / "handoff_worker" / "binding_manifest.json").read_text()
+    )
     steps = {step.node_id: step for step in load_plan_steps(run_dir).value}
     dispatches = load_dispatches(run_dir).value
     handoff_decision = [
@@ -73,6 +76,11 @@ def test_handoff_new_session_dispatches_target_through_core_v2_path(
     assert result["dispatched_step_ids"] == ["step_handoff_worker"]
     assert output["status"] == "success"
     assert output["input"] == {"task": "handoff only"}
+    assert binding_manifest["bindings"][0]["source_kind"] == "snapshot_input"
+    assert (
+        binding_manifest["bindings"][0]["snapshot_input_ref"]["kind"]
+        == "handoff_payload_snapshot"
+    )
     assert "producer_node_id" not in output["input"]
     assert steps["handoff_worker"].source == "handoff"
     assert steps["handoff_worker"].status == "success"

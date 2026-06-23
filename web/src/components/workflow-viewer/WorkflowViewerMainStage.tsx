@@ -12,7 +12,7 @@ import type {
   ConnectionMode,
   EdgeViewMode,
   TaskWorkspaceView,
-  WorkbenchTask,
+  WorkbenchTaskSummary,
   WorkspaceCanvasModel,
 } from '../../types/workbench';
 import { WorkspaceCanvas } from '../canvas/WorkspaceCanvas';
@@ -23,7 +23,7 @@ import type { RunOverlayState } from './runState';
 export type WorkflowViewerMainStageProps = {
   taskWorkspaceView: TaskWorkspaceView;
   onTaskWorkspaceViewChange: (view: TaskWorkspaceView) => void;
-  tasks: WorkbenchTask[];
+  tasks: WorkbenchTaskSummary[];
   activeTaskId: string;
   onSelectTask: (taskId: string) => void;
   onNewTask: () => void;

@@ -5,8 +5,9 @@ import os
 import re
 import shlex
 import sys
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from acc.models import AccError
 

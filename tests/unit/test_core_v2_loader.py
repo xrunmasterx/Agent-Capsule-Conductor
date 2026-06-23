@@ -6,14 +6,14 @@ from pathlib import Path
 import pytest
 
 from acc.app.core_v2_loader import load_workflow_function_template
+from acc.engine import parse_workflow_function_template
 from acc.models import (
     CORE_V2_SCHEMA_VERSION,
+    AccError,
     NodeInvocationSpec,
     WorkflowFunctionTemplate,
 )
 from acc.validation import validate_core_v2_workflow_function_template
-from acc.engine import parse_workflow_function_template
-from acc.models import AccError
 
 
 def v2_payload() -> dict:

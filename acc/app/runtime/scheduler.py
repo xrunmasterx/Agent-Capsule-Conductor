@@ -7,8 +7,11 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
+from acc.app.runtime.context import ExecutionContext
+from acc.app.runtime.results import NodeExecutionResult, WorkflowExecutionResult
 from acc.callable_registry import CallableRegistry
 from acc.ledger_writer import ControlLedgerAuditError, FixedRunControlLedgerWriter
 from acc.models import (
@@ -23,8 +26,6 @@ from acc.result_store.filesystem import FilesystemResultStore
 from acc.runtime.io import append_event
 from acc.scheduler.ready_set import DAGScheduler
 
-from pathlib import Path
-
 
 async def run_ready_queue_execution(
     template: WorkflowFunctionTemplate,
@@ -32,20 +33,22 @@ async def run_ready_queue_execution(
     scope: ScopeFrame,
     plan: ExecutionPlan,
     result_store: FilesystemResultStore,
-    outputs: dict[tuple[str, str], Any],
     event_log_path: Path,
     callable_registry: CallableRegistry | None,
     control_ledger: FixedRunControlLedgerWriter,
     *,
     should_cancel: Callable[[], bool] | None,
-) -> str:
+    execution_context: ExecutionContext | None = None,
+) -> WorkflowExecutionResult:
     node_by_id = {node.node_id: node.invocation for node in plan.nodes}
     scheduler = DAGScheduler(
         node_order=tuple(node.node_id for node in plan.nodes),
         dependencies={node.node_id: node.depends_on for node in plan.nodes},
     )
     max_concurrency = workflow_max_concurrency(template)
-    running: dict[asyncio.Task[str], str] = {}
+    running: dict[asyncio.Task[NodeExecutionResult], str] = {}
+    node_results: dict[str, NodeExecutionResult] = {}
+    outputs: dict[tuple[str, str], Any] = {}
     terminal_status = "success"
     stop_launching = False
     cancellation_requested = False
@@ -76,24 +79,47 @@ async def run_ready_queue_execution(
                             invocation,
                             scope,
                             result_store,
-                            outputs,
                             event_log_path,
                             callable_registry,
                             control_ledger,
+                            execution_context=execution_context,
+                            upstream_outputs=outputs,
                         )
                     )
                     running[task] = node_id
 
         if not running:
-            if terminal_status == "waiting_interaction":
-                return terminal_status
+            if terminal_status in {"waiting_interaction", "waiting_handoff", "waiting_timer"}:
+                return WorkflowExecutionResult.from_parts(
+                    status=terminal_status,
+                    outputs=outputs,
+                    node_results=node_results,
+                )
+            if terminal_status in {"cancelled", "timeout"}:
+                return WorkflowExecutionResult.from_parts(
+                    status=terminal_status,
+                    outputs=outputs,
+                    node_results=node_results,
+                )
             if cancellation_requested:
-                return "cancelled"
+                return WorkflowExecutionResult.from_parts(
+                    status="cancelled",
+                    outputs=outputs,
+                    node_results=node_results,
+                )
             if scheduler.has_failures_or_skips():
-                return "failed"
+                return WorkflowExecutionResult.from_parts(
+                    status="failed",
+                    outputs=outputs,
+                    node_results=node_results,
+                )
             if scheduler.has_pending_nodes():
                 raise AccError("Ready-queue scheduler stalled with pending nodes")
-            return "success"
+            return WorkflowExecutionResult.from_parts(
+                status="success",
+                outputs=outputs,
+                node_results=node_results,
+            )
 
         done, _ = await asyncio.wait(
             running.keys(),
@@ -112,13 +138,28 @@ async def run_ready_queue_execution(
                 terminal_status = "failed"
                 continue
 
-            if result == "waiting_interaction":
+            if result.status == "success":
+                scheduler.mark_success(node_id)
+                node_results[node_id] = result
+                for port_id, value in result.outputs.items():
+                    outputs[(node_id, port_id)] = value
+                continue
+            if result.status in {"waiting_interaction", "waiting_handoff", "waiting_timer"}:
                 scheduler.mark_waiting(node_id)
-                terminal_status = "waiting_interaction"
+                node_results[node_id] = result
+                terminal_status = result.status
                 stop_launching = True
                 continue
-            scheduler.mark_success(node_id)
-
+            if result.status in {"failed", "cancelled", "timeout"}:
+                skipped = scheduler.mark_failed_and_skip_descendants(node_id)
+                async with control_ledger.audit_lock:
+                    control_ledger.skip_steps(skipped, blocked_by_node_id=node_id)
+                node_results[node_id] = result
+                terminal_status = result.status
+                if result.status in {"cancelled", "timeout"}:
+                    stop_launching = True
+                continue
+            raise AccError(f"Unsupported node execution status for {node_id}: {result.status}")
 
 def workflow_max_concurrency(template: WorkflowFunctionTemplate) -> int | None:
     raw = template.policies.get("max_concurrency")
@@ -137,11 +178,13 @@ async def execute_core_v2_node_with_fixed_ledger(
     invocation: FunctionInvocation,
     scope: ScopeFrame,
     result_store: FilesystemResultStore,
-    outputs: dict[tuple[str, str], Any],
     event_log_path: Path,
     callable_registry: CallableRegistry | None,
     control_ledger: FixedRunControlLedgerWriter,
-) -> str:
+    *,
+    execution_context: ExecutionContext | None = None,
+    upstream_outputs: dict[tuple[str, str], Any] | None = None,
+) -> NodeExecutionResult:
     from acc.app.human_gate import node_requires_human_approval
     from acc.app.runtime.executor import execute_core_v2_node
 
@@ -150,19 +193,20 @@ async def execute_core_v2_node_with_fixed_ledger(
     ):
         async with control_ledger.audit_lock:
             control_ledger.wait_for_human_approval(node)
-        return "waiting_interaction"
+        return NodeExecutionResult.waiting_interaction(node_id=node.id)
     async with control_ledger.audit_lock:
         dispatch = control_ledger.start_dispatch(node, invocation, scope)
     try:
-        await execute_core_v2_node(
+        result = await execute_core_v2_node(
             template,
             node,
             invocation,
             scope,
             result_store,
-            outputs,
             event_log_path,
             callable_registry,
+            execution_context=execution_context,
+            upstream_outputs=upstream_outputs,
         )
     except Exception as exc:
         async with control_ledger.audit_lock:
@@ -170,4 +214,4 @@ async def execute_core_v2_node_with_fixed_ledger(
         raise
     async with control_ledger.audit_lock:
         control_ledger.complete_dispatch(node, dispatch)
-    return "success"
+    return result

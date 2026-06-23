@@ -5,6 +5,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from acc.app import workflow_submission
 from acc.app.local_directory_picker import LocalDirectorySelection
 from acc.server.routes import workflows as workflow_routes
 
@@ -459,7 +460,7 @@ def test_submit_workbench_container_compiles_once(
     monkeypatch,
 ) -> None:
     compile_count = 0
-    original_compile = workflow_routes.compile_workbench_workflow_bundle
+    original_compile = workflow_submission.compile_runtime_graph
 
     def counted_compile(*args, **kwargs):
         nonlocal compile_count
@@ -467,8 +468,8 @@ def test_submit_workbench_container_compiles_once(
         return original_compile(*args, **kwargs)
 
     monkeypatch.setattr(
-        workflow_routes,
-        "compile_workbench_workflow_bundle",
+        workflow_submission,
+        "compile_runtime_graph",
         counted_compile,
     )
 

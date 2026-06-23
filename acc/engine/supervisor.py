@@ -6,6 +6,12 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from acc.engine._ref_utils import (
+    callable_ref_key as _callable_ref_key,
+)
+from acc.engine._ref_utils import (
+    callable_ref_payload as _callable_ref_payload,
+)
 from acc.models import (
     AccError,
     CallableRef,
@@ -18,10 +24,6 @@ from acc.models import (
     SupervisorDecision,
     SupervisorPlan,
     SupervisorRoster,
-)
-from acc.engine._ref_utils import (
-    callable_ref_key as _callable_ref_key,
-    callable_ref_payload as _callable_ref_payload,
 )
 
 NODE_ID_SANITIZE_RE = re.compile(r"[^A-Za-z0-9_.-]+")
@@ -108,8 +110,30 @@ def parse_supervisor_plan(raw: dict[str, Any]) -> SupervisorPlan:
 def validate_supervisor_plan(plan: SupervisorPlan, roster: SupervisorRoster) -> None:
     if not plan.intents:
         raise AccError("SupervisorPlan must contain at least one intent")
+    _validate_safe_ref_segment(plan.plan_id, "SupervisorPlan.plan_id")
     for intent in plan.intents:
+        _validate_safe_ref_segment(
+            intent.correlation_id,
+            "DynamicInvocationIntent.correlation_id",
+        )
         validate_intent_against_roster(intent, roster)
+
+
+def supervisor_intent_snapshot_ref(plan_id: str, correlation_id: str) -> str:
+    _validate_safe_ref_segment(plan_id, "SupervisorPlan.plan_id")
+    _validate_safe_ref_segment(correlation_id, "DynamicInvocationIntent.correlation_id")
+    return f"supervisor_plans/{plan_id}/intents/{correlation_id}.json"
+
+
+def _validate_safe_ref_segment(value: str, context: str) -> None:
+    if not value:
+        raise AccError(f"{context} is required")
+    if value in {".", ".."}:
+        raise AccError(f"{context} must be a safe path segment")
+    if any(separator in value for separator in ("/", "\\")):
+        raise AccError(f"{context} must not contain path separators")
+    if ":" in value:
+        raise AccError(f"{context} must not contain drive or URI separators")
 
 
 def compile_supervisor_plan_to_steps(
@@ -140,6 +164,7 @@ def compile_supervisor_plan_to_steps(
             used_node_ids,
         )
         used_node_ids.add(node_id)
+        snapshot_ref = supervisor_intent_snapshot_ref(plan.plan_id, intent.correlation_id)
         step = PlanStep(
             plan_step_id=f"step_{node_id}",
             run_plan_id=run_plan.run_plan_id,
@@ -150,11 +175,20 @@ def compile_supervisor_plan_to_steps(
             source="supervisor",
             status="ready",
             dependency_node_ids=(plan.supervisor_node_id,) if supervisor_step_id else (),
-            input_snapshot_refs=(
-                f"supervisor_plans/{plan.plan_id}/intents/{intent.correlation_id}.json",
-            ),
+            input_snapshot_refs=(snapshot_ref,),
             created_at=timestamp,
             updated_at=timestamp,
+            metadata={
+                "typed_input_refs": [
+                    {
+                        "kind": "supervisor_intent_snapshot",
+                        "source": "supervisor",
+                        "path": snapshot_ref,
+                        "payload_key": "input_payload",
+                        "correlation_id": intent.correlation_id,
+                    }
+                ]
+            },
         )
         if step.plan_step_id in known_step_ids:
             raise AccError(f"Supervisor PlanStep id already exists: {step.plan_step_id}")
@@ -187,7 +221,11 @@ def compile_supervisor_plan_to_steps(
             ],
         },
         rationale=f"Approved SupervisorPlan {plan.plan_id} compiled to dynamic PlanStep records.",
-        input_evidence_refs=("run_plan.json", f"supervisor_plans/{plan.plan_id}.json"),
+        input_evidence_refs=(
+            "run_plan.json",
+            f"supervisor_plans/{plan.plan_id}.json",
+            *(step.input_snapshot_refs[0] for step in steps if step.input_snapshot_refs),
+        ),
         result_refs=("plan_steps.jsonl", "decisions.jsonl"),
         replay_binding={"mode": "reuse_recorded_decisions"},
         correlation_id=plan.plan_id,

@@ -24,6 +24,10 @@ from acc.engine.schema_ports import (
 from acc.models import AccError, NodeInvocationSpec, WorkflowFunctionTemplate
 
 MISSING_PORT_VALUE = object()
+LEGACY_CONTROL_MAIN_WARNING = (
+    "compatibility: control_edges currently synthesize main input data; "
+    "strict explicit-dataflow mode treats control_edges as execution order only"
+)
 
 
 @dataclass(frozen=True)
@@ -46,6 +50,27 @@ def is_empty_runtime_input(value: Any) -> bool:
     return False
 
 
+def strict_explicit_dataflow_enabled(template: WorkflowFunctionTemplate) -> bool:
+    """Return whether control edges must be dataflow-silent for this template.
+
+    The compatibility default remains false while wf-02 migrates fixtures and
+    projections. Tests and new workflows can opt in with either
+    ``policies.dataflow == "strict"``, ``policies.explicit_dataflow == "strict"``
+    or a truthy ``policies.strict_explicit_dataflow`` / ``policies.explicit_dataflow``.
+    """
+
+    policies = template.policies if isinstance(template.policies, dict) else {}
+    dataflow = policies.get("dataflow")
+    if dataflow == "strict":
+        return True
+    if isinstance(dataflow, dict) and dataflow.get("mode") == "strict":
+        return True
+    explicit_dataflow = policies.get("explicit_dataflow")
+    if explicit_dataflow in {True, "strict"}:
+        return True
+    return bool(policies.get("strict_explicit_dataflow"))
+
+
 def resolve_node_payload(
     template: WorkflowFunctionTemplate,
     node: NodeInvocationSpec,
@@ -53,16 +78,43 @@ def resolve_node_payload(
     outputs: dict[tuple[str, str], Any],
     *,
     run_dir: Path,
+    strict_dataflow: bool | None = None,
 ) -> ResolvedNodePayload:
-    payload: dict[str, Any] = dict(node.overrides.static_input)
-    records: list[dict[str, Any]] = [
-        {
-            "binding_kind": "static_input",
-            "target_node": node.id,
-            "target_port": port,
-        }
-        for port in sorted(payload)
-    ]
+    strict = (
+        strict_explicit_dataflow_enabled(template)
+        if strict_dataflow is None
+        else strict_dataflow
+    )
+    payload: dict[str, Any] = {}
+    records: list[dict[str, Any]] = []
+
+    for port, value in sorted(node.overrides.static_input.items()):
+        payload[port] = value
+        snapshot_ref = node.metadata.get("snapshot_input_ref")
+        if isinstance(snapshot_ref, dict):
+            source_kind = "snapshot_input"
+            source_ref = str(
+                snapshot_ref.get("path")
+                or snapshot_ref.get("ref")
+                or f"{snapshot_ref.get('kind', 'snapshot_input')}:{port}"
+            )
+            extra = {"snapshot_input_ref": snapshot_ref}
+        else:
+            source_kind = "static_input"
+            source_ref = f"node:{node.id}:overrides.static_input.{port}"
+            extra = None
+        records.append(
+            static_binding_record(
+                binding_kind="static_input",
+                target_node=node.id,
+                target_port=port,
+                source_ref=source_ref,
+                value=value,
+                source_kind=source_kind,
+                extra=extra,
+            )
+        )
+
     for binding in template.workflow_input_bindings:
         if binding.target.node != node.id:
             continue
@@ -70,25 +122,35 @@ def resolve_node_payload(
             if binding.required:
                 raise AccError(f"Missing workflow input: {binding.source_port}")
             continue
-        payload[binding.target.port] = workflow_input[binding.source_port]
+        value = workflow_input[binding.source_port]
+        payload[binding.target.port] = value
         records.append(
-            {
-                "binding_kind": "workflow_input",
-                "source_port": binding.source_port,
-                "target_node": node.id,
-                "target_port": binding.target.port,
-                "materialization": binding.materialization,
-            }
+            value_binding_record(
+                binding_kind="workflow_input",
+                source_kind="workflow_input",
+                source_ref=f"workflow_input:{binding.source_port}",
+                target_node=node.id,
+                target_port=binding.target.port,
+                materialization=binding.materialization,
+                value=value,
+                required=binding.required,
+                extra={"source_port": binding.source_port},
+            )
         )
     for binding in node.input_bindings:
         if binding.static_value is not None:
-            payload[binding.target_port] = binding.static_value
+            value = binding.static_value
+            payload[binding.target_port] = value
             records.append(
-                {
-                    "binding_kind": "input_binding_static",
-                    "target_node": node.id,
-                    "target_port": binding.target_port,
-                }
+                static_binding_record(
+                    binding_kind="input_binding_static",
+                    target_node=node.id,
+                    target_port=binding.target_port,
+                    source_ref=f"node:{node.id}:input_bindings.{binding.target_port}.static_value",
+                    value=value,
+                    required=binding.required,
+                    source_kind="static_value",
+                )
             )
             continue
         if binding.source is None:
@@ -100,7 +162,8 @@ def resolve_node_payload(
                     f"Missing binding source {binding.source.node}.{binding.source.port}"
                 )
             continue
-        payload[binding.target_port] = outputs[key]
+        value = outputs[key]
+        payload[binding.target_port] = value
         records.append(
             binding_record(
                 binding_kind="input_binding",
@@ -109,8 +172,9 @@ def resolve_node_payload(
                 target_node=node.id,
                 target_port=binding.target_port,
                 materialization=binding.materialization,
-                value=outputs[key],
+                value=value,
                 run_dir=run_dir,
+                required=binding.required,
             )
         )
     for edge in template.data_edges:
@@ -122,7 +186,8 @@ def resolve_node_payload(
                 f"Missing data edge source {edge.source.node}.{edge.source.port} "
                 f"for {node.id}.{edge.target.port}"
             )
-        payload[edge.target.port] = outputs[key]
+        value = outputs[key]
+        payload[edge.target.port] = value
         records.append(
             binding_record(
                 binding_kind="data_edge",
@@ -131,11 +196,12 @@ def resolve_node_payload(
                 target_node=node.id,
                 target_port=edge.target.port,
                 materialization=edge.materialization,
-                value=outputs[key],
+                value=value,
                 run_dir=run_dir,
+                required=True,
             )
         )
-    if "main" not in payload:
+    if not strict and "main" not in payload:
         control_main_sources: list[tuple[str, Any]] = []
         for source_node_id in control_main_source_nodes_for_target(template, node.id):
             key = (source_node_id, "main")
@@ -155,6 +221,9 @@ def resolve_node_payload(
                     materialization="copy",
                     value=value,
                     run_dir=run_dir,
+                    source_kind="control_edge_compat",
+                    required=False,
+                    compatibility_warning=LEGACY_CONTROL_MAIN_WARNING,
                 )
             )
         elif len(control_main_sources) > 1:
@@ -171,6 +240,10 @@ def resolve_node_payload(
                         materialization="copy",
                         value=value,
                         run_dir=run_dir,
+                        source_kind="control_edge_compat",
+                        required=False,
+                        compatibility_warning=LEGACY_CONTROL_MAIN_WARNING,
+                        materialized_target=False,
                     )
                 )
             records.append(
@@ -218,6 +291,63 @@ def output_value_for_port(output: Any, port_id: str) -> Any:
     return MISSING_PORT_VALUE
 
 
+def static_binding_record(
+    *,
+    binding_kind: str,
+    target_node: str,
+    target_port: str,
+    source_ref: str,
+    value: Any,
+    required: bool = False,
+    source_kind: str = "static_input",
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return value_binding_record(
+        binding_kind=binding_kind,
+        source_kind=source_kind,
+        source_ref=source_ref,
+        target_node=target_node,
+        target_port=target_port,
+        materialization="inline",
+        value=value,
+        required=required,
+        extra=extra,
+    )
+
+
+def value_binding_record(
+    *,
+    binding_kind: str,
+    source_kind: str,
+    source_ref: str,
+    target_node: str,
+    target_port: str,
+    materialization: str,
+    value: Any,
+    required: bool = False,
+    compatibility_warning: str | None = None,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    record: dict[str, Any] = {
+        "binding_kind": binding_kind,
+        "source_kind": source_kind,
+        "source_ref": source_ref,
+        "target_node": target_node,
+        "target_port": target_port,
+        "target_key": target_port,
+        "materialization": materialization,
+        "materialization_mode": materialization,
+        "required": required,
+        "materialized_sha256": sha256_json(value),
+        "value_sha256": sha256_json(value),
+    }
+    if compatibility_warning:
+        record["compatibility_warning"] = compatibility_warning
+    if extra:
+        record.update(extra)
+    return record
+
+
 def binding_record(
     *,
     binding_kind: str,
@@ -228,17 +358,36 @@ def binding_record(
     materialization: str,
     value: Any,
     run_dir: Path,
+    source_kind: str | None = None,
+    required: bool = True,
+    compatibility_warning: str | None = None,
+    materialized_target: bool = True,
 ) -> dict[str, Any]:
-    return {
-        "binding_kind": binding_kind,
-        "source_node": source_node,
-        "source_port": source_port,
-        "target_node": target_node,
-        "target_port": target_port,
-        "materialization": materialization,
-        "source_output_path": str((run_dir / "nodes" / source_node / "output.json").resolve()),
-        "source_result_sha256": sha256_json(value),
-    }
+    source_output_path = run_dir / "nodes" / source_node / "output.json"
+    record = value_binding_record(
+        binding_kind=binding_kind,
+        source_kind=source_kind or binding_kind,
+        source_ref=f"node:{source_node}.{source_port}",
+        target_node=target_node,
+        target_port=target_port,
+        materialization=materialization,
+        value=value,
+        required=required,
+        compatibility_warning=compatibility_warning,
+        extra={
+            "source_node": source_node,
+            "source_port": source_port,
+            "source_output_path": str(source_output_path.resolve()),
+            "source_evidence_ref": f"nodes/{source_node}/output.json",
+            "source_result_sha256": sha256_json(value),
+        },
+    )
+    if not materialized_target:
+        record["source_only"] = True
+        record.pop("target_key", None)
+        record.pop("materialized_sha256", None)
+        record.pop("value_sha256", None)
+    return record
 
 
 def control_main_aggregate_record(
@@ -251,11 +400,19 @@ def control_main_aggregate_record(
 ) -> dict[str, Any]:
     return {
         "binding_kind": "control_main_aggregate",
+        "source_kind": "control_edge_compat_aggregate",
+        "source_ref": "control_edges:" + ",".join(source_node for source_node, _ in source_values),
         "target_node": target_node,
         "target_port": target_port,
+        "target_key": target_port,
         "materialization": "copy",
+        "materialization_mode": "copy",
+        "required": False,
+        "compatibility_warning": LEGACY_CONTROL_MAIN_WARNING,
         "aggregate_order": [source_node for source_node, _ in source_values],
         "aggregate_sha256": sha256_json(aggregate),
+        "materialized_sha256": sha256_json(aggregate),
+        "value_sha256": sha256_json(aggregate),
         "sources": [
             {
                 "source_node": source_node,
@@ -263,6 +420,7 @@ def control_main_aggregate_record(
                 "source_output_path": str(
                     (run_dir / "nodes" / source_node / "output.json").resolve()
                 ),
+                "source_evidence_ref": f"nodes/{source_node}/output.json",
                 "source_result_sha256": sha256_json(value),
             }
             for source_node, value in source_values

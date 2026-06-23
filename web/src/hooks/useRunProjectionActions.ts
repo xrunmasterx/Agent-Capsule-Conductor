@@ -2,7 +2,7 @@ import { useCallback, type Dispatch, type SetStateAction } from 'react';
 
 import type { NodeLogDelta, RunEvent, RunSummary, WorkbenchLiveEvent } from '../types';
 import type { NodeLiveLogs, RunProjection } from '../types/workbench';
-import { boundedLiveEvents } from './useWorkbenchLiveStream';
+import { useRunStore } from '../stores/runStore';
 import { mergeAgentEvents } from '../workbench/model/agentEventText';
 import { normalizeTaskRunStatus } from '../workbench/model/taskModel';
 import {
@@ -16,13 +16,14 @@ import {
   runOverlayFromRun,
 } from '../components/workflow-viewer/runState';
 import { MAX_LOG_PREVIEW_LINES } from '../workbench/constants';
+import { boundedLiveEvents } from './useWorkbenchLiveStream';
 import { useRunRefreshLoader } from './useRunRefreshLoader';
 
 export type UseRunProjectionActionsOptions = {
-  runsById: Record<string, RunProjection>;
-  setRunsById: Dispatch<SetStateAction<Record<string, RunProjection>>>;
-  setRunLogsById: Dispatch<SetStateAction<Record<string, Record<string, NodeLiveLogs>>>>;
-  setRunLiveEventsById: Dispatch<SetStateAction<Record<string, WorkbenchLiveEvent[]>>>;
+  runsById?: Record<string, RunProjection>;
+  setRunsById?: Dispatch<SetStateAction<Record<string, RunProjection>>>;
+  setRunLogsById?: Dispatch<SetStateAction<Record<string, Record<string, NodeLiveLogs>>>>;
+  setRunLiveEventsById?: Dispatch<SetStateAction<Record<string, WorkbenchLiveEvent[]>>>;
 };
 
 export type UseRunProjectionActionsResult = {
@@ -65,24 +66,28 @@ function appendLogDelta(previous: NodeLiveLogs, delta: NodeLogDelta): NodeLiveLo
 }
 
 export function useRunProjectionActions({
-  runsById,
-  setRunsById,
-  setRunLogsById,
-  setRunLiveEventsById,
-}: UseRunProjectionActionsOptions): UseRunProjectionActionsResult {
+  runsById: legacyRunsById,
+  setRunsById: legacySetRunsById,
+  setRunLogsById: legacySetRunLogsById,
+  setRunLiveEventsById: legacySetRunLiveEventsById,
+}: UseRunProjectionActionsOptions = {}): UseRunProjectionActionsResult {
   const loadRunRefresh = useRunRefreshLoader();
+  const updateRun = useRunStore((state) => state.updateRun);
+  const setRunLogs = useRunStore((state) => state.setRunLogs);
+  const appendLiveEvents = useRunStore((state) => state.appendLiveEvents);
 
   const updateRunProjection = useCallback(
     (runId: string, update: (current: RunProjection) => RunProjection) => {
-      setRunsById((current) => {
-        const projection = current[runId];
-        if (!projection) {
-          return current;
-        }
-        return { ...current, [runId]: update(projection) };
-      });
+      if (legacySetRunsById) {
+        legacySetRunsById((current) => {
+          const projection = current[runId];
+          return projection ? { ...current, [runId]: update(projection) } : current;
+        });
+        return;
+      }
+      updateRun(runId, update);
     },
-    [setRunsById],
+    [legacySetRunsById, updateRun],
   );
 
   const appendNodeLogDeltas = useCallback(
@@ -90,41 +95,47 @@ export function useRunProjectionActions({
       if (deltas.length === 0) {
         return;
       }
-      setRunLogsById((current) => {
-        let runLogs = current[runId] || {};
-        let changed = false;
-        for (const delta of deltas) {
-          if (delta.run_id !== runId || !delta.text) {
-            continue;
+      if (legacySetRunLogsById) {
+        legacySetRunLogsById((current) => {
+          let runLogs = current[runId] || {};
+          let changed = false;
+          for (const delta of deltas) {
+            if (delta.run_id !== runId || !delta.text) {
+              continue;
+            }
+            const logKeys = nodeLogDeltaKeys(delta);
+            const primaryKey = logKeys[0] || delta.node_id;
+            const previous = runLogs[primaryKey] || {
+              stdout: '',
+              stderr: '',
+              stdoutOffset: 0,
+              stderrOffset: 0,
+            };
+            const nextNodeLogs = appendLogDelta(previous, delta);
+            if (nextNodeLogs === previous) {
+              continue;
+            }
+            runLogs = {
+              ...runLogs,
+              ...Object.fromEntries(logKeys.map((key) => [key, nextNodeLogs])),
+            };
+            changed = true;
           }
-          const logKeys = nodeLogDeltaKeys(delta);
-          const primaryKey = logKeys[0] || delta.node_id;
-          const previous = runLogs[primaryKey] || {
-            stdout: '',
-            stderr: '',
-            stdoutOffset: 0,
-            stderrOffset: 0,
-          };
-          const nextNodeLogs = appendLogDelta(previous, delta);
-          if (nextNodeLogs === previous) {
-            continue;
-          }
-          runLogs = {
-            ...runLogs,
-            ...Object.fromEntries(logKeys.map((key) => [key, nextNodeLogs])),
-          };
-          changed = true;
+          return changed ? { ...current, [runId]: runLogs } : current;
+        });
+        return;
+      }
+      for (const delta of deltas) {
+        if (delta.run_id !== runId || !delta.text) {
+          continue;
         }
-        if (!changed) {
-          return current;
-        }
-        return {
-          ...current,
-          [runId]: runLogs,
-        };
-      });
+        const logKeys = nodeLogDeltaKeys(delta);
+        logKeys.forEach((key) => {
+          setRunLogs(runId, key, (previous) => appendLogDelta(previous, delta));
+        });
+      }
     },
-    [setRunLogsById],
+    [legacySetRunLogsById, setRunLogs],
   );
 
   const appendRunAgentEventsToProjection = useCallback(
@@ -132,22 +143,20 @@ export function useRunProjectionActions({
       if (events.length === 0) {
         return;
       }
-      setRunsById((current) => {
-        const projection = current[runId];
-        if (!projection) {
-          return current;
-        }
-        const merged = mergeAgentEvents(projection.events, events).slice(-MAX_AGENT_EVENTS_IN_PROJECTION);
-        return {
-          ...current,
-          [runId]: {
-            ...projection,
-            events: merged,
-          },
-        };
+      const update = (projection: RunProjection) => ({
+        ...projection,
+        events: mergeAgentEvents(projection.events, events).slice(-MAX_AGENT_EVENTS_IN_PROJECTION),
       });
+      if (legacySetRunsById) {
+        legacySetRunsById((current) => {
+          const projection = current[runId];
+          return projection ? { ...current, [runId]: update(projection) } : current;
+        });
+        return;
+      }
+      updateRun(runId, update);
     },
-    [setRunsById],
+    [legacySetRunsById, updateRun],
   );
 
   const appendRunLiveEvents = useCallback(
@@ -155,41 +164,47 @@ export function useRunProjectionActions({
       if (events.length === 0) {
         return;
       }
-      setRunLiveEventsById((current) => ({
-        ...current,
-        [runId]: boundedLiveEvents(current[runId] || [], events),
-      }));
+      if (legacySetRunLiveEventsById) {
+        legacySetRunLiveEventsById((current) => ({
+          ...current,
+          [runId]: boundedLiveEvents(current[runId] || [], events),
+        }));
+        return;
+      }
+      appendLiveEvents(runId, events);
     },
-    [setRunLiveEventsById],
+    [appendLiveEvents, legacySetRunLiveEventsById],
   );
 
   const applyRunSummary = useCallback(
     (runId: string, summary: RunSummary) => {
-      setRunsById((current) => {
-        const projection = current[runId];
-        if (!projection) {
-          return current;
-        }
-        return {
-          ...current,
-          [runId]: {
-            ...projection,
-            summary,
-            status: normalizeTaskRunStatus(summary.status),
-          },
-        };
+      const update = (projection: RunProjection) => ({
+        ...projection,
+        summary,
+        status: normalizeTaskRunStatus(summary.status),
       });
+      if (legacySetRunsById) {
+        legacySetRunsById((current) => {
+          const projection = current[runId];
+          return projection ? { ...current, [runId]: update(projection) } : current;
+        });
+        return;
+      }
+      updateRun(runId, update);
     },
-    [setRunsById],
+    [legacySetRunsById, updateRun],
   );
 
   const refreshRunProjection = useCallback(
     async (runId: string) => {
-      const current = runsById[runId];
+      const current = legacyRunsById?.[runId] || useRunStore.getState().runsById[runId];
       if (!current) {
         return;
       }
       const { summary, stateSnapshot, events } = await loadRunRefresh(runId);
+      if (!legacySetRunsById && !useRunStore.getState().runsById[runId]) {
+        return;
+      }
       const snapshotRun = stateSnapshot
         ? workflowRunFromRunStateSnapshot(stateSnapshot, current.graph)
         : workflowRunFromRunSummary(summary, current.graph);
@@ -203,19 +218,21 @@ export function useRunProjectionActions({
         scope: current.scope,
         targetId: current.targetId,
       });
-      setRunsById((state) => ({
-        ...state,
-        [runId]: {
-          ...current,
-          status: runStatus,
-          summary,
-          run: { ...liveRun, status: runStatus },
-          events,
-          overlay,
-        },
-      }));
+      const update = (latest: RunProjection) => ({
+        ...latest,
+        status: runStatus,
+        summary,
+        run: { ...liveRun, status: runStatus },
+        events,
+        overlay,
+      });
+      if (legacySetRunsById) {
+        legacySetRunsById((state) => ({ ...state, [runId]: update(state[runId] || current) }));
+        return;
+      }
+      updateRun(runId, update);
     },
-    [loadRunRefresh, runsById, setRunsById],
+    [legacyRunsById, legacySetRunsById, loadRunRefresh, updateRun],
   );
 
   return {

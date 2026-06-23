@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
+import workspaceDemoCanvasData from './workspaceDemoCanvas.data.json';
 import {
   canvasToWorkflowGraph,
   edgeCanonicalPreview,
@@ -240,6 +241,9 @@ describe('workflowGraphProjection', () => {
   test('workflow invocation preview separates prompt and static input', () => {
     const workflow = {
       ...agentWorkflow('source_agent'),
+      staticInput: {
+        target: { ticker: '01810.HK', exchange: 'HKEX' },
+      },
       sourceInput: {
         user_prompt: 'Research NVDA',
         ticker: 'NVDA',
@@ -251,12 +255,102 @@ describe('workflowGraphProjection', () => {
     expect(workflowInvocationPreview(workflow)).toEqual(
       expect.objectContaining({
         prompt_policy: { user_prompt: 'Research NVDA' },
-        overrides: { static_input: { ticker: 'NVDA' } },
+        overrides: {
+          static_input: {
+            target: { ticker: '01810.HK', exchange: 'HKEX' },
+            ticker: 'NVDA',
+          },
+        },
         input_bindings: { target: 'upstream.target' },
         invocation_policy: expect.objectContaining({
           permission_profile: expect.objectContaining({ workspace_access: 'writes_workspace' }),
         }),
       }),
     );
+  });
+
+  test('projects Workbench static input into runtime graph node input', () => {
+    const workflow = {
+      ...agentWorkflow('research_brief'),
+      staticInput: {
+        target: { ticker: '01810.HK', company_name: 'Xiaomi Corporation' },
+      },
+      sourceInput: {
+        user_prompt: 'Prepare research brief.',
+      },
+    };
+
+    const graph = canvasToWorkflowGraph({
+      id: 'canvas',
+      name: 'Canvas',
+      rootWorkflowId: workflow.id,
+      workflows: [workflow],
+      edges: [],
+    });
+
+    expect(graph.nodes[0].input).toEqual({
+      target: { ticker: '01810.HK', company_name: 'Xiaomi Corporation' },
+      user_prompt: 'Prepare research brief.',
+    });
+  });
+
+  test('projects default local Workbench agent runs with full local capabilities', () => {
+    const workflow = agentWorkflow('collector_agent');
+
+    const graph = canvasToWorkflowGraph({
+      id: 'canvas',
+      name: 'Canvas',
+      rootWorkflowId: 'collector_agent',
+      workflows: [workflow],
+      edges: [],
+    });
+
+    expect(graph.nodes[0].invocation_policy).toEqual({
+      permission_profile: {
+        workspace_access: 'writes_workspace',
+        network: true,
+        shell: true,
+        dangerous: true,
+      },
+    });
+  });
+
+  test('stock research demo inline workflows project runnable boundary bindings', () => {
+    const canvas = workspaceDemoCanvasData as WorkspaceCanvasModel;
+    const inlineWorkflows = canvas.workflows.filter(
+      (workflow) => workflow.workflowBodyKind === 'inline_container',
+    );
+
+    expect(inlineWorkflows.map((workflow) => workflow.id)).toContain('Source_Data_Workflow');
+
+    inlineWorkflows.forEach((workflow) => {
+      const graph = internalWorkflowToGraph(workflow);
+      const boundInputs = new Set(
+        graph.workflow_input_bindings?.map(
+          (binding) => `${binding.target.node}.${binding.target.port}`,
+        ) || [],
+      );
+      (graph.data_edges ?? []).forEach((edge) => {
+        boundInputs.add(`${edge.to.node}.${edge.to.port}`);
+      });
+      graph.nodes.forEach((node) => {
+        (node.input_ports || []).forEach((portValue) => {
+          if (portValue.required) {
+            expect(boundInputs, `${workflow.id}.${node.id}.${portValue.id}`).toContain(
+              `${node.id}.${portValue.id}`,
+            );
+          }
+        });
+      });
+
+      const boundOutputs = new Set(
+        graph.workflow_output_bindings?.map((binding) => binding.target_port) || [],
+      );
+      (graph.exposed_outputs || []).forEach((portValue) => {
+        if (portValue.required) {
+          expect(boundOutputs, `${workflow.id}.${portValue.id}`).toContain(portValue.id);
+        }
+      });
+    });
   });
 });

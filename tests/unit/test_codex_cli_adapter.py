@@ -3,9 +3,10 @@ import json
 from pathlib import Path
 from typing import Any
 
-from acc.adapters import codex_cli
+from acc.adapters import process_utils
 from acc.adapters.base import AgentRunRequest
-from acc.adapters.codex_cli import CodexCliAdapter, build_codex_command, terminate_process_tree
+from acc.adapters.codex_cli import CodexCliAdapter, build_codex_command
+from acc.adapters.process_utils import terminate_process_tree
 from acc.artifact_store import ArtifactStore
 
 
@@ -244,8 +245,8 @@ def test_terminate_process_tree_uses_taskkill_on_windows(monkeypatch) -> None:
         captured["kwargs"] = kwargs
         return TaskkillFakeProcess()
 
-    monkeypatch.setattr(codex_cli.os, "name", "nt")
-    monkeypatch.setattr(codex_cli.asyncio, "create_subprocess_exec", fake_create)
+    monkeypatch.setattr(process_utils.os, "name", "nt")
+    monkeypatch.setattr(process_utils.asyncio, "create_subprocess_exec", fake_create)
     process = PidFakeProcess()
 
     asyncio.run(terminate_process_tree(process))

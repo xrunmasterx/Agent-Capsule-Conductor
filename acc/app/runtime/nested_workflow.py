@@ -9,6 +9,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from acc.app.runtime.context import ExecutionContext
+from acc.app.runtime.executor import resolve_node_workflow_binding
 from acc.app.workflow_refs import WorkflowCatalog
 from acc.callable_registry import CallableRegistry
 from acc.models import (
@@ -18,7 +20,6 @@ from acc.models import (
     SessionInstance,
     WorkflowFunctionTemplate,
 )
-from acc.app.runtime.executor import resolve_node_workflow_binding
 
 
 async def execute_workflow_function_callable(
@@ -29,16 +30,22 @@ async def execute_workflow_function_callable(
     scope: ScopeFrame,
     session: SessionInstance,
     callable_registry: CallableRegistry | None,
+    execution_context: ExecutionContext | None = None,
 ) -> dict[str, Any]:
     # Lazy import to avoid circular dependency
     from acc.app.runtime.orchestrator import run_core_v2_workflow_path
 
-    child_path = resolve_workflow_function_path(template, node.callable_ref.id)
+    child_path = resolve_workflow_function_path(
+        template,
+        node.callable_ref.id,
+        execution_context=execution_context,
+    )
     child_run_dir = node_dir / "nested_workflow"
     child_input_payload = resolve_workflow_call_input_payload(node, payload)
     bound_workspace, bound_binding_path = resolve_node_workflow_binding(
         node,
         callable_registry=callable_registry,
+        execution_context=execution_context,
     )
     child_workspace: Path | None
     child_binding_path: Path | None
@@ -67,6 +74,9 @@ async def execute_workflow_function_callable(
             f"Unsupported environment_policy for nested workflow node {node.id}: "
             f"{node.environment_policy}"
         )
+    child_context = (
+        execution_context.with_run_dir(child_run_dir) if execution_context is not None else None
+    )
     child_record = await run_core_v2_workflow_path(
         child_path,
         child_run_dir,
@@ -78,6 +88,7 @@ async def execute_workflow_function_callable(
         parent_invocation_id=session.invocation_id,
         parent_scope_frame_id=scope.frame_id,
         call_depth=scope.call_depth + 1,
+        execution_context=child_context,
     )
     if child_record.status != "success":
         raise AccError(
@@ -143,10 +154,19 @@ def apply_workflow_call_output_bindings(
     return mapped
 
 
-def resolve_workflow_function_path(template: WorkflowFunctionTemplate, ref_id: str) -> Path:
+def resolve_workflow_function_path(
+    template: WorkflowFunctionTemplate,
+    ref_id: str,
+    *,
+    execution_context: ExecutionContext | None = None,
+) -> Path:
     template_source_path = template.source_path
     base_dir = template_source_path.parent if template_source_path is not None else Path.cwd()
-    project_root = infer_project_root(base_dir)
+    project_root = (
+        execution_context.project.project_root
+        if execution_context is not None
+        else infer_project_root(base_dir)
+    )
     workflows_dir = project_root / "workflows"
     overlay_payloads = load_runtime_overlay_payloads(base_dir)
     catalog = WorkflowCatalog(

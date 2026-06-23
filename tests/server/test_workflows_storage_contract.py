@@ -48,6 +48,11 @@ def test_submit_accepts_run_id_and_writes_acc_marker(
     assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["run_id"] == "safe_submit_run"
+    assert payload["task_id"] == "task-storage"
+    assert payload["status"] in {"queued", "running"}
+    assert Path(payload["run_dir"]).resolve() == (
+        project_root / "runs" / "safe_submit_run"
+    ).resolve()
     marker_path = project_root / "runs" / "safe_submit_run" / RUN_MARKER_FILENAME
     marker = json.loads(marker_path.read_text(encoding="utf-8"))
     assert marker["run_id"] == "safe_submit_run"

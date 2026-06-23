@@ -11,6 +11,10 @@ import type { NodeLiveLogs, RunProjection, WorkflowStatus } from '../types/workb
 
 export type { NodeLiveLogs, RunProjection, WorkflowStatus };
 
+export const EMPTY_NODE_LIVE_LOGS: NodeLiveLogs = Object.freeze({ stdout: '', stderr: '', stdoutOffset: 0, stderrOffset: 0 });
+export const EMPTY_RUN_LOGS: Readonly<Record<string, NodeLiveLogs>> = Object.freeze({});
+export const EMPTY_RUN_LIVE_EVENTS: readonly WorkbenchLiveEvent[] = Object.freeze([]);
+
 export interface RunStoreState {
   runsById: Record<string, RunProjection>;
   runIdsByTaskId: Record<string, string[]>;
@@ -24,6 +28,7 @@ export interface RunStoreState {
   setWorkflowBindings: (bindings: Record<string, WorkflowBindingView>) => void;
   setWorkflowBinding: (workflowId: string, binding: WorkflowBindingView) => void;
   setRunsById: (updater: Record<string, RunProjection> | ((current: Record<string, RunProjection>) => Record<string, RunProjection>)) => void;
+  updateRun: (runId: string, updater: (current: RunProjection) => RunProjection) => void;
   setRunLogsById: (
     updater:
       | Record<string, Record<string, NodeLiveLogs>>
@@ -41,10 +46,11 @@ export interface RunStoreState {
   setRunLogs: (runId: string, nodeKey: string, updater: (prev: NodeLiveLogs) => NodeLiveLogs) => void;
   clearRunLogs: (runId: string) => void;
   appendLiveEvent: (runId: string, event: WorkbenchLiveEvent, limit?: number) => void;
+  appendLiveEvents: (runId: string, events: WorkbenchLiveEvent[], limit?: number) => void;
   clearRunLiveEvents: (runId: string) => void;
 }
 
-const emptyLogs: NodeLiveLogs = { stdout: '', stderr: '', stdoutOffset: 0, stderrOffset: 0 };
+const emptyLogs = EMPTY_NODE_LIVE_LOGS;
 const DEFAULT_LIVE_EVENT_LIMIT = 200;
 
 function appendUnique(values: string[], value: string): string[] {
@@ -86,6 +92,21 @@ export const useRunStore = create<RunStoreState>((set) => ({
       return {
         runsById,
         ...runIndexesFromRuns(runsById, state.activeRunIdsByTaskId),
+      };
+    }),
+
+  updateRun: (runId, updater) =>
+    set((state) => {
+      const current = state.runsById[runId];
+      if (!current) {
+        return {};
+      }
+      const nextRun = updater(current);
+      return {
+        runsById: { ...state.runsById, [runId]: nextRun },
+        ...(nextRun.taskId !== current.taskId
+          ? runIndexesFromRuns({ ...state.runsById, [runId]: nextRun }, state.activeRunIdsByTaskId)
+          : {}),
       };
     }),
 
@@ -194,6 +215,20 @@ export const useRunStore = create<RunStoreState>((set) => ({
       };
     }),
 
+  appendLiveEvents: (runId, events, limit = DEFAULT_LIVE_EVENT_LIMIT) =>
+    set((state) => {
+      if (!state.runsById[runId] || events.length === 0) {
+        return {};
+      }
+      const existing = state.liveEventsByRunId[runId] || [];
+      return {
+        liveEventsByRunId: {
+          ...state.liveEventsByRunId,
+          [runId]: [...existing, ...events].slice(-limit),
+        },
+      };
+    }),
+
   clearRunLiveEvents: (runId) =>
     set((state) => {
       const { [runId]: _removed, ...liveEventsByRunId } = state.liveEventsByRunId;
@@ -212,4 +247,20 @@ export function selectActiveRunForTask(state: RunStoreState, taskId: string): Ru
 
 export function selectRunLogs(state: RunStoreState, runId: string, nodeKey: string): NodeLiveLogs {
   return state.runLogsById[runId]?.[nodeKey] || emptyLogs;
+}
+
+export function selectRun(state: RunStoreState, runId: string | null): RunProjection | undefined {
+  return runId ? state.runsById[runId] : undefined;
+}
+
+export function selectRunLogsForRun(state: RunStoreState, runId: string | null): Readonly<Record<string, NodeLiveLogs>> {
+  return runId ? state.runLogsById[runId] || EMPTY_RUN_LOGS : EMPTY_RUN_LOGS;
+}
+
+export function selectRunLiveEventsForRun(state: RunStoreState, runId: string | null): readonly WorkbenchLiveEvent[] {
+  return runId ? state.liveEventsByRunId[runId] || EMPTY_RUN_LIVE_EVENTS : EMPTY_RUN_LIVE_EVENTS;
+}
+
+export function selectRunOverlay(state: RunStoreState, runId: string | null): RunProjection['overlay'] | null {
+  return runId ? state.runsById[runId]?.overlay || null : null;
 }

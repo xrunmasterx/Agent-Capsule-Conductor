@@ -6,10 +6,14 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict
 
-from acc.app import WorkflowAppService
-from acc.app.run_lifecycle import is_terminal_run_status
-from acc.app.workbench_tasks import WorkbenchTaskService
+from acc.app.workflow_submission import (
+    RunnerJobSubmissionRequest,
+    RunnerSubmissionRejected,
+    SubmissionError,
+    WorkflowSubmissionService,
+)
 from acc.run_index import load_run_summary_by_id
+from acc.run_status import is_terminal_run_status
 from acc.runner import (
     LOCAL_TOKEN_HEADER,
     LocalRunnerService,
@@ -18,9 +22,6 @@ from acc.runner import (
 )
 from acc.server.context import get_project_root, get_workbench_run_manager
 from acc.server.routes import runs as runs_routes
-from acc.server.routes import workflows as workflow_routes
-from acc.server.run_manager import WorkbenchRunJob
-from acc.storage import claim_run
 from acc.utils import AccError
 
 router = APIRouter(prefix="/runner", tags=["runner"])
@@ -95,66 +96,28 @@ async def submit_runner_job(
     request: Request,
 ) -> dict[str, Any]:
     project_root = get_project_root(request)
-    service = service_for(request)
-    job_id = payload.job_id or service.new_job_id()
-    workflow_id = str(payload.graph.get("id") or "")
+    runner_service = service_for(request)
+    service = WorkflowSubmissionService(
+        project_root,
+        get_workbench_run_manager(request),
+        local_runner_service=runner_service,
+    )
     try:
-        workflow_routes.preflight_runtime_graph(payload.graph, request, task_id=payload.task_id)
-        resolved = service.validate_job_before_evidence(
-            graph=payload.graph,
-            workspace_alias=payload.workspace_alias,
-            binding_ref=payload.binding_ref,
-            manager=get_workbench_run_manager(request),
-        )
-        handle = claim_run(
-            project_root,
-            run_id=payload.run_id,
-            workflow_id=workflow_id,
-            task_id=payload.task_id,
-        )
-        graph_path = workflow_routes.prepare_runtime_graph(
-            payload.graph,
-            handle.run_dir,
-            request,
-            task_id=payload.task_id,
-        )
-        manager = get_workbench_run_manager(request)
-        submit_result = await manager.submit(
-            WorkbenchRunJob(
-                graph_path=graph_path,
-                run_dir=handle.run_dir,
-                workflow_id=workflow_id,
+        return await service.submit_runner_job(
+            RunnerJobSubmissionRequest(
+                graph=payload.graph,
+                job_id=payload.job_id,
+                run_id=payload.run_id,
                 task_id=payload.task_id,
-                workspace=None if resolved["binding_path"] else resolved["workspace"],
-                binding_path=resolved["binding_path"],
+                workspace_alias=payload.workspace_alias,
+                binding_ref=payload.binding_ref,
                 input_payload=payload.input,
-                service_factory=lambda: WorkflowAppService(project_root=project_root),
             )
         )
-        remember_workbench_task_run(project_root, payload.task_id, handle.run_id)
-        return service.write_job_receipt(
-            job_id=job_id,
-            status=str(submit_result.get("status") or "queued"),
-            workspace_alias=payload.workspace_alias,
-            run_id=handle.run_id,
-            task_id=payload.task_id,
-            workflow_id=workflow_id,
-        )
-    except RunnerCapabilityError as exc:
-        receipt = service.write_job_receipt(
-            job_id=job_id,
-            status="rejected",
-            workspace_alias=payload.workspace_alias,
-            task_id=payload.task_id,
-            workflow_id=workflow_id,
-            rejection=exc.to_payload(),
-        )
-        raise HTTPException(
-            status_code=400,
-            detail={**exc.to_payload(), "job": receipt},
-        ) from exc
-    except AccError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RunnerSubmissionRejected as exc:
+        raise HTTPException(status_code=400, detail=exc.detail) from exc
+    except SubmissionError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
 @router.get("/jobs/{job_id}")
@@ -220,28 +183,6 @@ def runner_artifact_preview(artifact_id: str, request: Request) -> dict[str, Any
 
 def service_for(request: Request) -> LocalRunnerService:
     return LocalRunnerService(get_project_root(request))
-
-
-def remember_workbench_task_run(project_root: Path, task_id: str | None, run_id: str) -> None:
-    """Best-effort index update for Workbench-owned runner submissions.
-
-    The runner API also accepts ``task_id`` as loose metadata for non-Workbench
-    callers. Missing or invalid Workbench task records must not turn a valid
-    runner submission into a failed request after the run has been queued.
-    """
-
-    if not task_id:
-        return
-    try:
-        WorkbenchTaskService(project_root).update(
-            task_id,
-            {
-                "active_run_id": None,
-                "latest_run_id": run_id,
-            },
-        )
-    except AccError:
-        return
 
 
 def require_debug_auth_if_needed(request: Request, local_debug: bool) -> None:

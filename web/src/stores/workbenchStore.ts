@@ -17,6 +17,8 @@ import type {
   TaskWorkspaceView,
   WorkbenchChromeState,
   WorkbenchTask,
+  WorkbenchTaskStorePayload,
+  WorkbenchTaskSummary,
   WorkspaceCanvasModel,
 } from '../types/workbench';
 
@@ -32,6 +34,7 @@ export type {
 };
 
 type CanvasUpdater = WorkspaceCanvasModel | ((prev: WorkspaceCanvasModel) => WorkspaceCanvasModel);
+type TaskUpdater = WorkbenchTask | ((prev: WorkbenchTask) => WorkbenchTask);
 
 export type ActiveTaskMeta = Pick<
   WorkbenchTask,
@@ -64,6 +67,8 @@ export interface WorkbenchStoreState {
   // --- task actions ---
   hydrateTasks: (tasks: WorkbenchTask[], activeTaskId?: string) => void;
   setTasks: (tasks: WorkbenchTask[], activeTaskId?: string) => void;
+  updateTask: (taskId: string, updater: TaskUpdater) => void;
+  updateActiveTask: (updater: TaskUpdater) => void;
   upsertTask: (task: WorkbenchTask) => void;
   deleteTask: (taskId: string) => void;
   updateCanvas: (taskId: string, updater: CanvasUpdater) => void;
@@ -180,6 +185,70 @@ export const useWorkbenchStore = create<WorkbenchStoreState>((set) => ({
         state,
       );
     }),
+  updateTask: (taskId, updater) =>
+    set((state) => {
+      const task = state.tasksById[taskId];
+      if (!task) {
+        return {};
+      }
+      const nextTask = typeof updater === 'function' ? updater(task) : updater;
+      if (nextTask === task) {
+        return {};
+      }
+      const nextCanvas = stripRuntimeStateFromCanvas(nextTask.canvas);
+      const canvasChanged = nextCanvas !== task.canvas;
+      return {
+        tasksById: {
+          ...state.tasksById,
+          [taskId]: {
+            ...nextTask,
+            taskId,
+            title: nextCanvas.name,
+            canvas: nextCanvas,
+          },
+        },
+        ...(canvasChanged
+          ? {
+              canvasRevisionsByTaskId: {
+                ...state.canvasRevisionsByTaskId,
+                [taskId]: (state.canvasRevisionsByTaskId[taskId] ?? 0) + 1,
+              },
+            }
+          : {}),
+      };
+    }),
+  updateActiveTask: (updater) =>
+    set((state) => {
+      const task = state.tasksById[state.activeTaskId];
+      if (!task) {
+        return {};
+      }
+      const nextTask = typeof updater === 'function' ? updater(task) : updater;
+      if (nextTask === task) {
+        return {};
+      }
+      const nextCanvas = stripRuntimeStateFromCanvas(nextTask.canvas);
+      const canvasChanged = nextCanvas !== task.canvas;
+      return {
+        tasksById: {
+          ...state.tasksById,
+          [state.activeTaskId]: {
+            ...nextTask,
+            taskId: state.activeTaskId,
+            title: nextCanvas.name,
+            canvas: nextCanvas,
+          },
+        },
+        ...(canvasChanged
+          ? {
+              canvasRevisionsByTaskId: {
+                ...state.canvasRevisionsByTaskId,
+                [state.activeTaskId]: (state.canvasRevisionsByTaskId[state.activeTaskId] ?? 0) + 1,
+              },
+            }
+          : {}),
+      };
+    }),
   deleteTask: (taskId) =>
     set((state) => {
       const nextTasks = state.taskOrder
@@ -264,6 +333,59 @@ export function selectActiveTask(state: WorkbenchStoreState): WorkbenchTask | un
   return state.tasksById[state.activeTaskId];
 }
 
+let cachedTaskSummaryOrder: string[] | null = null;
+let cachedTaskSummaryObjects = new Map<string, WorkbenchTaskSummary>();
+let cachedTaskSummaryArray: WorkbenchTaskSummary[] = [];
+
+function summaryForTask(task: WorkbenchTask): WorkbenchTaskSummary {
+  const previous = cachedTaskSummaryObjects.get(task.taskId);
+  if (
+    previous &&
+    previous.title === task.title &&
+    previous.status === task.status &&
+    previous.activeRunId === task.activeRunId &&
+    previous.latestRunId === task.latestRunId
+  ) {
+    return previous;
+  }
+  return {
+    taskId: task.taskId,
+    title: task.title,
+    status: task.status,
+    activeRunId: task.activeRunId,
+    latestRunId: task.latestRunId,
+  };
+}
+
+export function selectTaskSummaries(state: WorkbenchStoreState): WorkbenchTaskSummary[] {
+  let changed =
+    !cachedTaskSummaryOrder ||
+    cachedTaskSummaryOrder.length !== state.taskOrder.length ||
+    cachedTaskSummaryOrder.some((taskId, index) => taskId !== state.taskOrder[index]);
+  const nextObjects = new Map<string, WorkbenchTaskSummary>();
+  const nextArray: WorkbenchTaskSummary[] = [];
+  state.taskOrder.forEach((taskId, index) => {
+    const task = state.tasksById[taskId];
+    if (!task) {
+      changed = true;
+      return;
+    }
+    const summary = summaryForTask(task);
+    nextObjects.set(taskId, summary);
+    nextArray.push(summary);
+    if (cachedTaskSummaryArray[index] !== summary) {
+      changed = true;
+    }
+  });
+  cachedTaskSummaryObjects = nextObjects;
+  cachedTaskSummaryOrder = [...state.taskOrder];
+  if (!changed) {
+    return cachedTaskSummaryArray;
+  }
+  cachedTaskSummaryArray = nextArray;
+  return cachedTaskSummaryArray;
+}
+
 export function selectActiveTaskMeta(state: WorkbenchStoreState): ActiveTaskMeta | undefined {
   const task = selectActiveTask(state);
   if (!task) {
@@ -289,4 +411,22 @@ export function selectActiveSelection(state: WorkbenchStoreState): CanvasSelecti
 
 export function selectCanvasRevision(state: WorkbenchStoreState, taskId: string): number {
   return state.canvasRevisionsByTaskId[taskId] ?? 0;
+}
+
+export function selectActiveCanvasRevision(state: WorkbenchStoreState): number {
+  return selectCanvasRevision(state, state.activeTaskId);
+}
+
+export function selectActiveFocusedWorkflowId(state: WorkbenchStoreState): string | null {
+  return state.focusedWorkflowIdByTaskId[state.activeTaskId] || null;
+}
+
+export function selectTaskStorePayload(state: WorkbenchStoreState): WorkbenchTaskStorePayload {
+  return {
+    version: 1 as const,
+    activeTaskId: state.activeTaskId,
+    tasks: state.taskOrder
+      .map((taskId) => state.tasksById[taskId])
+      .filter((task): task is WorkbenchTask => Boolean(task)),
+  };
 }

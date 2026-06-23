@@ -126,7 +126,9 @@ class RunEventProjectionService:
             sequence += 1
         agent_event_log = self.resolve_agent_turn_event_log(identity.node_dir)
         if agent_event_log is not None:
-            for event_index, event in enumerate(read_jsonl_tolerant(agent_event_log, limit=limit), start=1):
+            for event_index, event in enumerate(
+                read_jsonl_tolerant(agent_event_log, limit=limit), start=1
+            ):
                 projected = self.project_agent_event(
                     event,
                     identity,
@@ -190,7 +192,11 @@ class RunEventProjectionService:
         runtime = load_json_tolerant(node_dir / "runtime.json")
         session_dir = self._resolve_agent_session_dir(node_dir, runtime)
         turn_id = runtime.get("turn_id")
-        if session_dir is None or not isinstance(turn_id, str) or not is_safe_path_component(turn_id):
+        if (
+            session_dir is None
+            or not isinstance(turn_id, str)
+            or not is_safe_path_component(turn_id)
+        ):
             return node_log_path
         turn_log_path = session_dir / "turns" / turn_id / f"{stream}.log"
         if turn_log_path.exists() and turn_log_path.is_file():
@@ -201,7 +207,11 @@ class RunEventProjectionService:
         runtime = load_json_tolerant(node_dir / "runtime.json")
         session_dir = self._resolve_agent_session_dir(node_dir, runtime)
         turn_id = runtime.get("turn_id")
-        if session_dir is None or not isinstance(turn_id, str) or not is_safe_path_component(turn_id):
+        if (
+            session_dir is None
+            or not isinstance(turn_id, str)
+            or not is_safe_path_component(turn_id)
+        ):
             return None
         event_log = session_dir / "turns" / turn_id / "events.jsonl"
         return event_log if event_log.exists() and event_log.is_file() else None
@@ -373,7 +383,9 @@ class RunEventProjectionService:
         return NodeRunSummary(
             node_id=node_dir.name,
             callable_id=str(callable_id or "unknown"),
-            session_id=runtime.get("session_id") if isinstance(runtime.get("session_id"), str) else None,
+            session_id=runtime.get("session_id")
+            if isinstance(runtime.get("session_id"), str)
+            else None,
             status=status,
             run_dir=str(node_dir.resolve()),
             input_path=existing_file_path(node_dir / "agent_payload.json")
@@ -392,7 +404,10 @@ class RunEventProjectionService:
         status = "not_run"
         for event in events:
             event_type = str(event.get("type") or event.get("event") or "")
-            if event_type == "node_started" or event_type in {"input_materialized", "inbox_materialized"}:
+            if event_type == "node_started" or event_type in {
+                "input_materialized",
+                "inbox_materialized",
+            }:
                 status = "running"
             elif event_type == "node_completed":
                 status = "success"
@@ -505,7 +520,9 @@ def read_jsonl_tolerant(path: Path, limit: int = 200) -> list[dict[str, Any]]:
     return list(events)
 
 
-def read_jsonl_since_offset(path: Path, offset: int, limit: int = 200) -> tuple[list[dict[str, Any]], int]:
+def read_jsonl_since_offset(
+    path: Path, offset: int, limit: int = 200
+) -> tuple[list[dict[str, Any]], int]:
     if not path.exists():
         return [], max(0, offset)
     size = path.stat().st_size
@@ -562,7 +579,10 @@ def annotate_nested_event(
 def event_sort_key(event: dict[str, Any]) -> tuple[str, int]:
     timestamp = event.get("timestamp")
     event_seq = event.get("event_seq")
-    return (timestamp if isinstance(timestamp, str) else "", event_seq if isinstance(event_seq, int) else 0)
+    return (
+        timestamp if isinstance(timestamp, str) else "",
+        event_seq if isinstance(event_seq, int) else 0,
+    )
 
 
 def parse_jsonl_event(line: str, line_number: int) -> dict[str, Any] | None:

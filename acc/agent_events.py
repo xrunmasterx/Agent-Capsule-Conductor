@@ -21,6 +21,8 @@ AGENT_EVENT_TYPES = frozenset(
         "agent_approval_requested",
         "agent_usage",
         "agent_output_draft",
+        "agent_output_repaired",
+        "agent_output_contract_issue",
         "agent_output_published",
         "agent_turn_completed",
         "agent_turn_failed",
@@ -164,6 +166,20 @@ def _projection_policy(event_type: str, payload: dict[str, Any]) -> dict[str, An
     if event_type == "agent_output_draft":
         visibility = "folded" if payload.get("proposal_ready") is True else "technical"
         return {"visibility": visibility, "category": "proposal", "display_kind": "artifact_link"}
+    if event_type == "agent_output_repaired":
+        return {
+            "visibility": "primary",
+            "category": "contract",
+            "severity": "warning",
+            "display_kind": "status_pill",
+        }
+    if event_type == "agent_output_contract_issue":
+        return {
+            "visibility": "primary",
+            "category": "contract",
+            "severity": "warning",
+            "display_kind": "error_message",
+        }
     if event_type == "agent_output_published":
         return {"visibility": "folded", "category": "artifact", "display_kind": "artifact_link"}
     if event_type == "agent_turn_completed":
@@ -238,7 +254,11 @@ def _looks_like_json_frame(value: str) -> bool:
     if not isinstance(payload, dict):
         return False
     method = _string_value(payload.get("method"))
-    return method.startswith("item/") or method.startswith("turn/") or payload.get("jsonrpc") == "2.0"
+    return (
+        method.startswith("item/")
+        or method.startswith("turn/")
+        or payload.get("jsonrpc") == "2.0"
+    )
 
 
 def _supported_projection(value: Any) -> bool:

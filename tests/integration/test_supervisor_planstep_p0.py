@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from acc.app.runtime.dispatch_gate import dispatch_ready_supervisor_plan_steps
+from acc.app.runtime.continuation import continue_persisted_run
 from acc.app.runtime.orchestrator import run_core_v2_workflow_path
 from acc.app.supervisor import (
     materialize_supervisor_plan_steps,
@@ -64,6 +64,16 @@ def test_supervisor_plan_p0_writes_decision_and_steps_without_worker_execution(
     assert steps["worker_task"].input_snapshot_refs == (
         "supervisor_plans/plan1/intents/c1.json",
     )
+    assert steps["worker_task"].metadata["typed_input_refs"] == [
+        {
+            "kind": "supervisor_intent_snapshot",
+            "source": "supervisor",
+            "path": "supervisor_plans/plan1/intents/c1.json",
+            "payload_key": "input_payload",
+            "correlation_id": "c1",
+        }
+    ]
+    assert "supervisor_plans/plan1/intents/c1.json" in decisions[-1].input_evidence_refs
     assert decisions[-1].kind == "supervisor_plan"
     assert (run_dir / "supervisor_plans" / "plan1.json").exists()
     assert (run_dir / "supervisor_plans" / "plan1" / "intents" / "c1.json").exists()
@@ -118,15 +128,23 @@ def test_supervisor_plan_p1_dispatches_dynamic_step_through_core_v2_path(
         run_plan=run_plan,
     )
 
-    result = asyncio.run(dispatch_ready_supervisor_plan_steps(run_dir))
+    result = asyncio.run(continue_persisted_run(run_dir, reason="supervisor"))
 
     output = json.loads((run_dir / "nodes" / "dynamic_worker" / "output.json").read_text())
+    binding_manifest = json.loads(
+        (run_dir / "nodes" / "dynamic_worker" / "binding_manifest.json").read_text()
+    )
     steps = {step.node_id: step for step in load_plan_steps(run_dir).value}
     dispatches = load_dispatches(run_dir).value
     assert result["status"] == "success"
     assert result["dispatched_step_ids"] == ["step_dynamic_worker"]
     assert output["status"] == "success"
     assert output["input"] == {"task": "do work"}
+    assert binding_manifest["bindings"][0]["source_kind"] == "snapshot_input"
+    assert (
+        binding_manifest["bindings"][0]["snapshot_input_ref"]["kind"]
+        == "supervisor_intent_snapshot"
+    )
     assert steps["dynamic_worker"].status == "success"
     assert dispatches[-1].status == "completed"
     assert (run_dir / "nodes" / "dynamic_worker" / "artifact_bundle.json").exists()
@@ -154,7 +172,7 @@ def test_supervisor_plan_p1_worker_failure_writes_normal_failure_ledger(
         run_plan=run_plan,
     )
 
-    result = asyncio.run(dispatch_ready_supervisor_plan_steps(run_dir))
+    result = asyncio.run(continue_persisted_run(run_dir, reason="supervisor"))
 
     steps = {step.node_id: step for step in load_plan_steps(run_dir).value}
     dispatches = load_dispatches(run_dir).value

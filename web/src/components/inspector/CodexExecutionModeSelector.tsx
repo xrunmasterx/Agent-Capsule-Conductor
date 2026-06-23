@@ -15,9 +15,9 @@ export function CodexExecutionModeSelector({ value, onChange }: CodexExecutionMo
         onChange={(event) => onChange(normalizedCodexExecutionMode(event.currentTarget.value))}
         aria-label="Codex 执行模式"
       >
-        <option value="default">默认安全模式（read-only sandbox）</option>
-        <option value="local_readonly_no_sandbox">本地只读无沙箱（高风险）</option>
-        <option value="danger_full_access">危险全权权限（高风险）</option>
+        <option value="default">默认本地全权限（推荐）</option>
+        <option value="local_readonly_no_sandbox">只读无沙箱（仅代码阅读场景）</option>
+        <option value="danger_full_access">显式危险全权限（调试/特殊任务）</option>
       </select>
       {value === 'local_readonly_no_sandbox' ? (
         <p className="notice compact-notice">

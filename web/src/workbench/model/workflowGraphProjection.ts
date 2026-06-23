@@ -421,7 +421,7 @@ function internalNodeInput(node: InternalNodeView): Record<string, unknown> {
 }
 
 export function workflowInvocationPreview(workflow: WorkflowContainerModel): Record<string, unknown> {
-  const input = workflow.sourceInput || {};
+  const input = workflowRuntimeInput(workflow);
   const userPrompt = promptFromInvocationInput(input);
   const codexMode = normalizedCodexExecutionMode(workflow.codexExecutionMode);
   return {
@@ -432,6 +432,13 @@ export function workflowInvocationPreview(workflow: WorkflowContainerModel): Rec
     workflow_call_output_bindings: workflow.sourceKind === 'workflow' ? [] : undefined,
     invocation_policy: codexInvocationPolicyForMode(codexMode),
     metadata: invocationMetadata(workflowInvocationLabel(workflow), codexMode, workflow.emptyInputPolicy),
+  };
+}
+
+function workflowRuntimeInput(workflow: WorkflowContainerModel): Record<string, unknown> {
+  return {
+    ...(workflow.staticInput || {}),
+    ...(workflow.sourceInput || {}),
   };
 }
 
@@ -463,7 +470,12 @@ function workflowToGraphNode(workflow: WorkflowContainerModel): WorkflowGraphNod
       },
       kind: workflow.sourceKind,
       label: workflowInvocationLabel(workflow),
-      input: workflow.sourceInput || (workflow.internalNodes[0] ? internalNodeInput(workflow.internalNodes[0]) : {}),
+      input:
+        Object.keys(workflowRuntimeInput(workflow)).length > 0
+          ? workflowRuntimeInput(workflow)
+          : workflow.internalNodes[0]
+            ? internalNodeInput(workflow.internalNodes[0])
+            : {},
       input_mapping: workflow.sourceInputMapping || {},
       cwd_policy: workflow.relativeCwd ? 'relative_subdir' : 'inherit_environment',
       relative_cwd: workflow.relativeCwd,
@@ -493,7 +505,7 @@ function workflowToGraphNode(workflow: WorkflowContainerModel): WorkflowGraphNod
       kind: 'workflow',
       workflow_ref: workflowRef,
       label: workflowInvocationLabel(workflow),
-      input: workflow.sourceInput || {},
+      input: workflowRuntimeInput(workflow),
       input_mapping: workflow.sourceInputMapping || {},
       cwd_policy: workflow.relativeCwd ? 'relative_subdir' : 'inherit_environment',
       relative_cwd: workflow.relativeCwd,
@@ -543,6 +555,17 @@ function workflowToGraphNode(workflow: WorkflowContainerModel): WorkflowGraphNod
 function codexInvocationPolicyForMode(
   mode: CodexExecutionMode,
 ): WorkflowGraphNode['invocation_policy'] | undefined {
+  const fullLocalPolicy = {
+    permission_profile: {
+      workspace_access: 'writes_workspace' as const,
+      network: true,
+      shell: true,
+      dangerous: true,
+    },
+  };
+  if (mode === 'default') {
+    return fullLocalPolicy;
+  }
   if (mode === 'local_readonly_no_sandbox') {
     return {
       permission_profile: {
@@ -554,14 +577,7 @@ function codexInvocationPolicyForMode(
     };
   }
   if (mode === 'danger_full_access') {
-    return {
-      permission_profile: {
-        workspace_access: 'writes_workspace',
-        network: true,
-        shell: true,
-        dangerous: true,
-      },
-    };
+    return fullLocalPolicy;
   }
   return undefined;
 }

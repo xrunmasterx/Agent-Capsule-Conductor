@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -9,6 +10,7 @@ from typing import Any
 from uuid import uuid4
 
 from acc.app.run_lifecycle import resume_waiting_run
+from acc.app.runtime.continuation import continue_persisted_run
 from acc.models import AccError, CallableRef, RecoveryLevel, WakeupReason, WakeupRequest
 from acc.session import utc_now_iso
 from acc.store import load_json, write_json
@@ -162,11 +164,24 @@ def claim_next_human_wakeup_for_resume(run_dir: Path) -> dict[str, Any] | None:
     if not isinstance(interaction_id, str) or not interaction_id:
         raise AccError("Human wakeup requires payload.interaction_id")
     resume = resume_waiting_run(run_dir, reason="human", interaction_id=interaction_id)
-    return {
+    dispatch = None
+    if (run_dir / "behavior_snapshot" / "workflow_function_template.json").exists():
+        dispatch = asyncio.run(
+            continue_persisted_run(
+                run_dir,
+                reason="human_wakeup",
+                interaction_id=interaction_id,
+                target_node_id=request.target_node_id,
+            )
+        )
+    payload: dict[str, Any] = {
         "request_id": request.request_id,
         "reason": request.reason,
         "resume": resume.as_payload(),
     }
+    if dispatch is not None:
+        payload["dispatch"] = dispatch
+    return payload
 
 
 def _claim_next_ready_by_reason(run_dir: Path, reason: WakeupReason) -> WakeupRequest | None:

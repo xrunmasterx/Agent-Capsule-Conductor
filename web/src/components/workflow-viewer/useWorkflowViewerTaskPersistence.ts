@@ -24,7 +24,7 @@ import { stripRuntimeStateFromCanvas } from './runState';
 export type WorkflowViewerTaskPersistenceOptions = {
   durableTasksReady: boolean;
   activeTaskId: string;
-  tasks: WorkbenchTask[];
+  tasks?: WorkbenchTask[];
   currentTask?: WorkbenchTask;
   canvas: WorkspaceCanvasModel;
   selection: CanvasSelection;
@@ -41,7 +41,7 @@ export type WorkflowViewerTaskPersistenceOptions = {
 export function useWorkflowViewerTaskPersistence({
   durableTasksReady,
   activeTaskId,
-  tasks,
+  tasks: _tasks,
   currentTask,
   canvas,
   selection,
@@ -85,7 +85,6 @@ export function useWorkflowViewerTaskPersistence({
   useTaskPersistence({
     durableTasksReady,
     activeTaskId,
-    tasks,
     saveLocalTaskStore,
     snapshotPublishKey: `${activeTaskId}:${currentAuthoringCanvasHash}:${selectionKey(selection)}`,
     publishCurrentSnapshot: publishCurrentTaskSnapshot,

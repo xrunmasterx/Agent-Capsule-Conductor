@@ -1,6 +1,14 @@
-import { useCallback, useMemo, type SetStateAction } from 'react';
+import { useCallback, type SetStateAction } from 'react';
 
-import { useWorkbenchStore } from '../stores/workbenchStore';
+import {
+  selectActiveCanvas,
+  selectActiveCanvasRevision,
+  selectActiveFocusedWorkflowId,
+  selectActiveSelection,
+  selectActiveTask,
+  selectTaskSummaries,
+  useWorkbenchStore,
+} from '../stores/workbenchStore';
 import type {
   BottomDockMode,
   CanvasSelection,
@@ -9,12 +17,15 @@ import type {
   TaskWorkspaceView,
   WorkbenchChromeState,
   WorkbenchTask,
+  WorkbenchTaskSummary,
   WorkspaceCanvasModel,
 } from '../types/workbench';
 import { normalizeCanvasEdges } from '../workbench/model/canvasEdgeOps';
 
 export type WorkbenchTaskStoreBindings = {
-  tasks: WorkbenchTask[];
+  taskSummaries: WorkbenchTaskSummary[];
+  currentTask?: WorkbenchTask;
+  canvas?: WorkspaceCanvasModel;
   activeTaskId: string;
   canvasRevision: number;
   setActiveTaskId: (id: string) => void;
@@ -33,6 +44,8 @@ export type WorkbenchTaskStoreBindings = {
   selection: CanvasSelection;
   focusedWorkflowId: string | null;
   setTasks: (next: SetStateAction<WorkbenchTask[]>) => void;
+  updateTask: (taskId: string, next: SetStateAction<WorkbenchTask>) => void;
+  updateActiveTask: (next: SetStateAction<WorkbenchTask>) => void;
   setCanvas: (next: SetStateAction<WorkspaceCanvasModel>) => void;
   setSelection: (next: SetStateAction<CanvasSelection>) => void;
   setFocusedWorkflowId: (next: SetStateAction<string | null>) => void;
@@ -50,19 +63,16 @@ function currentTasks(): WorkbenchTask[] {
 }
 
 export function useWorkbenchTaskStoreBindings(): WorkbenchTaskStoreBindings {
-  const taskOrder = useWorkbenchStore((state) => state.taskOrder);
-  const tasksById = useWorkbenchStore((state) => state.tasksById);
-  const tasks = useMemo(
-    () => taskOrder.map((taskId) => tasksById[taskId]).filter((task): task is WorkbenchTask => Boolean(task)),
-    [taskOrder, tasksById],
-  );
+  const taskSummaries = useWorkbenchStore(selectTaskSummaries);
+  const currentTask = useWorkbenchStore(selectActiveTask);
+  const canvas = useWorkbenchStore(selectActiveCanvas);
   const activeTaskId = useWorkbenchStore((state) => state.activeTaskId);
-  const canvasRevision = useWorkbenchStore(
-    (state) => state.canvasRevisionsByTaskId[state.activeTaskId] ?? 0,
-  );
+  const canvasRevision = useWorkbenchStore(selectActiveCanvasRevision);
   const setActiveTaskId = useWorkbenchStore((state) => state.setActiveTaskId);
   const setStoreTasks = useWorkbenchStore((state) => state.setTasks);
   const setStoreCanvas = useWorkbenchStore((state) => state.updateCanvas);
+  const updateStoreTask = useWorkbenchStore((state) => state.updateTask);
+  const updateStoreActiveTask = useWorkbenchStore((state) => state.updateActiveTask);
   const storeSetSelection = useWorkbenchStore((state) => state.setSelection);
   const storeSetFocusedWorkflowId = useWorkbenchStore((state) => state.setFocusedWorkflowId);
   const connectionMode = useWorkbenchStore((state) => state.connectionMode);
@@ -77,15 +87,30 @@ export function useWorkbenchTaskStoreBindings(): WorkbenchTaskStoreBindings {
   const setBottomDockMode = useWorkbenchStore((state) => state.setBottomDockMode);
   const nodeDetailOpen = useWorkbenchStore((state) => state.nodeDetailOpen);
   const setNodeDetailOpen = useWorkbenchStore((state) => state.setNodeDetailOpen);
-  const selection = useWorkbenchStore((state) =>
-    state.selectionsByTaskId[state.activeTaskId] || { type: 'task_canvas', taskId: state.activeTaskId },
-  );
-  const focusedWorkflowId = useWorkbenchStore((state) => state.focusedWorkflowIdByTaskId[state.activeTaskId] || null);
+  const selection = useWorkbenchStore(selectActiveSelection);
+  const focusedWorkflowId = useWorkbenchStore(selectActiveFocusedWorkflowId);
 
   const setTasks = useCallback((next: SetStateAction<WorkbenchTask[]>) => {
     const state = useWorkbenchStore.getState();
     setStoreTasks(resolveSetState(currentTasks(), next), state.activeTaskId);
   }, [setStoreTasks]);
+
+  const updateTask = useCallback((taskId: string, next: SetStateAction<WorkbenchTask>) => {
+    const task = useWorkbenchStore.getState().tasksById[taskId];
+    if (!task) {
+      return;
+    }
+    updateStoreTask(taskId, resolveSetState(task, next));
+  }, [updateStoreTask]);
+
+  const updateActiveTask = useCallback((next: SetStateAction<WorkbenchTask>) => {
+    const state = useWorkbenchStore.getState();
+    const task = state.tasksById[state.activeTaskId];
+    if (!task) {
+      return;
+    }
+    updateStoreActiveTask(resolveSetState(task, next));
+  }, [updateStoreActiveTask]);
 
   const setCanvas = useCallback((next: SetStateAction<WorkspaceCanvasModel>) => {
     const state = useWorkbenchStore.getState();
@@ -110,7 +135,9 @@ export function useWorkbenchTaskStoreBindings(): WorkbenchTaskStoreBindings {
   }, [storeSetFocusedWorkflowId]);
 
   return {
-    tasks,
+    taskSummaries,
+    currentTask,
+    canvas,
     activeTaskId,
     canvasRevision,
     setActiveTaskId,
@@ -129,6 +156,8 @@ export function useWorkbenchTaskStoreBindings(): WorkbenchTaskStoreBindings {
     selection,
     focusedWorkflowId,
     setTasks,
+    updateTask,
+    updateActiveTask,
     setCanvas,
     setSelection,
     setFocusedWorkflowId,

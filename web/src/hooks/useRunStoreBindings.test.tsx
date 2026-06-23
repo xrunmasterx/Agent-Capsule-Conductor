@@ -1,9 +1,18 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
-import { useRunStore, type RunProjection } from '../stores/runStore';
+import {
+  useRunStore,
+  type RunProjection,
+} from '../stores/runStore';
 import type { RuntimeConfig, WorkbenchLiveEvent } from '../types';
-import { useRunStoreBindings } from './useRunStoreBindings';
+import {
+  useRunLiveEvents,
+  useRunLogsForRun,
+  useRunProjection,
+  useRunStoreActions,
+  useRuntimeConfig,
+} from './useRunStoreBindings';
 
 function resetStore(): void {
   act(() => {
@@ -55,41 +64,59 @@ function runtimeConfig(): RuntimeConfig {
   };
 }
 
-describe('useRunStoreBindings', () => {
+describe('useRunStoreBindings selected slices', () => {
   beforeEach(resetStore);
   afterEach(resetStore);
 
-  test('projects run store state and setters', () => {
-    const { result } = renderHook(() => useRunStoreBindings());
+  test('exposes action binding plus selected run slices', () => {
+    const { result } = renderHook(() => ({
+      actions: useRunStoreActions(),
+      runtimeConfig: useRuntimeConfig(),
+      run: useRunProjection('run_1'),
+      logs: useRunLogsForRun('run_1'),
+      events: useRunLiveEvents('run_1'),
+    }));
 
     act(() => {
-      result.current.setRunsById({ run_1: run('run_1') });
-      result.current.setRunLogsById({ run_1: { node_1: { stdout: 'out', stderr: '', stdoutOffset: 3, stderrOffset: 0 } } });
-      result.current.setRunLiveEventsById({ run_1: [liveEvent('run_1')] });
-      result.current.setRuntimeConfig(runtimeConfig());
+      result.current.actions.upsertRun(run('run_1'));
+      result.current.actions.setRunLogs('run_1', 'node_1', () => ({
+        stdout: 'out',
+        stderr: '',
+        stdoutOffset: 3,
+        stderrOffset: 0,
+      }));
+      result.current.actions.appendLiveEvents('run_1', [liveEvent('run_1')]);
+      result.current.actions.setRuntimeConfig(runtimeConfig());
     });
 
-    expect(result.current.runsById.run_1?.runId).toBe('run_1');
-    expect(result.current.runLogsById.run_1.node_1.stdout).toBe('out');
-    expect(result.current.runLiveEventsById.run_1).toHaveLength(1);
+    expect(result.current.run?.runId).toBe('run_1');
+    expect(result.current.logs.node_1.stdout).toBe('out');
+    expect(result.current.events).toHaveLength(1);
     expect(result.current.runtimeConfig?.run_mode).toBe('hermetic');
   });
 
-  test('preserves store updater semantics', () => {
-    const { result } = renderHook(() => useRunStoreBindings());
+  test('unrelated run updates do not change selected run fallback references', () => {
+    const { result } = renderHook(() => ({
+      run: useRunProjection('run_1'),
+      logs: useRunLogsForRun('run_1'),
+      events: useRunLiveEvents('run_1'),
+    }));
+    const initialLogs = result.current.logs;
+    const initialEvents = result.current.events;
 
     act(() => {
-      result.current.setRunsById({ run_1: run('run_1') });
-      result.current.setRunsById((current) => ({ ...current, run_2: run('run_2', 'task_2') }));
-      result.current.setRunLogsById((current) => ({
-        ...current,
-        run_2: { node_2: { stdout: 'second', stderr: '', stdoutOffset: 6, stderrOffset: 0 } },
+      useRunStore.getState().upsertRun(run('run_2', 'task_2'));
+      useRunStore.getState().appendLiveEvents('run_2', [liveEvent('run_2')]);
+      useRunStore.getState().setRunLogs('run_2', 'node_2', () => ({
+        stdout: 'second',
+        stderr: '',
+        stdoutOffset: 6,
+        stderrOffset: 0,
       }));
-      result.current.setRunLiveEventsById((current) => ({ ...current, run_2: [liveEvent('run_2')] }));
     });
 
-    expect(Object.keys(result.current.runsById)).toEqual(['run_1', 'run_2']);
-    expect(result.current.runLogsById.run_2.node_2.stdoutOffset).toBe(6);
-    expect(result.current.runLiveEventsById.run_2[0].run_id).toBe('run_2');
+    expect(result.current.run).toBeUndefined();
+    expect(result.current.logs).toBe(initialLogs);
+    expect(result.current.events).toBe(initialEvents);
   });
 });

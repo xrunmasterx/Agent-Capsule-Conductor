@@ -25,6 +25,8 @@ export type NodeRunSummary = {
   adapter?: string | null;
   runtime?: Record<string, unknown> | null;
   binding_manifest?: Record<string, unknown> | null;
+  binding_summary?: Record<string, unknown> | null;
+  node_inspector?: Record<string, unknown> | null;
   binding_resolved?: Array<Record<string, unknown>>;
   steps?: Array<{
     event_id?: string;
@@ -619,8 +621,6 @@ export type DecisionInboxAction = {
     | 'rerun_node'
     | 'rerun_from'
     | 'fork'
-    | 'validate_patch'
-    | 'dry_run_patch'
     | 'validate_graphops_proposal'
     | 'dry_run_graphops_proposal';
   method: 'GET' | 'POST';
@@ -654,16 +654,9 @@ export type DecisionInboxItem = {
     summary?: string;
   };
   graphops?: {
-    patch_id?: string;
-    patch_path?: string;
-    target_type?: string;
-    target_path?: string;
     operation_count: number;
     apply_requires_human_approval: true;
-    apply_status?: 'not_implemented';
-    dry_run_only?: boolean;
-    governance_mode?: 'proposal_dry_run_only' | 'persistence_proposal';
-    semantic_status?: 'valid' | 'invalid';
+    governance_mode?: 'persistence_proposal';
     proposal_id?: string;
     proposal_path?: string;
     target_paths?: string[];

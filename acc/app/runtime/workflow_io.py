@@ -90,10 +90,12 @@ def write_core_v2_run_summary(
     if run_dir.parent.name == "runs":
         write_json(run_dir.parent / "index.json", rebuild_run_index(run_dir.parent).model_dump())
         from acc.storage_refresh import request_storage_index_refresh
+        from acc.storage_refs import make_run_ref
 
         request_storage_index_refresh(
             run_dir.parent.parent,
             reason="workflow_summary_updated",
+            object_ref=make_run_ref(run_id),
         )
 
 

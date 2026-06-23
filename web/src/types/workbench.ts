@@ -112,6 +112,7 @@ export type WorkflowContainerModel = {
   workflowBodyKind?: 'inline_container' | 'external_ref';
   callableId?: string;
   codexExecutionMode?: CodexExecutionMode;
+  staticInput?: Record<string, unknown>;
   sourceInput?: Record<string, unknown>;
   sourceInputMapping?: Record<string, unknown>;
   control?: WorkflowGraphNode['control'];
@@ -459,6 +460,11 @@ export type WorkbenchTask = {
   activeRunId?: string;
   latestRunId?: string;
 };
+
+export type WorkbenchTaskSummary = Pick<
+  WorkbenchTask,
+  'taskId' | 'title' | 'status' | 'activeRunId' | 'latestRunId'
+>;
 
 export type WorkbenchTaskStorePayload = {
   version: 1;

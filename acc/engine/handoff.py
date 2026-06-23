@@ -3,6 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from acc.engine._ref_utils import (
+    callable_ref_key as _callable_ref_key,
+)
+from acc.engine._ref_utils import (
+    callable_ref_payload as _callable_ref_payload,
+)
 from acc.models import (
     AccError,
     CallableRef,
@@ -12,10 +18,6 @@ from acc.models import (
     PlanStep,
     RunPlan,
     WorkflowFunctionTemplate,
-)
-from acc.engine._ref_utils import (
-    callable_ref_key as _callable_ref_key,
-    callable_ref_payload as _callable_ref_payload,
 )
 
 
@@ -193,6 +195,17 @@ def _new_session_step(
     ):
         raise AccError(f"Handoff PlanStep id already exists: {plan_step_id}")
     input_refs = (request.payload_ref,) if request.payload_ref else ()
+    typed_input_refs = []
+    if request.payload_ref:
+        typed_input_refs.append(
+            {
+                "kind": "handoff_payload_snapshot",
+                "source": "handoff",
+                "path": request.payload_ref,
+                "payload_key": "input_payload",
+                "handoff_id": request.handoff_id,
+            }
+        )
     return PlanStep(
         plan_step_id=plan_step_id,
         run_plan_id=run_plan.run_plan_id,
@@ -207,7 +220,11 @@ def _new_session_step(
         decision_id=decision_id,
         created_at=timestamp,
         updated_at=timestamp,
-        metadata={"handoff_id": request.handoff_id, "handoff_mode": request.mode},
+        metadata={
+            "handoff_id": request.handoff_id,
+            "handoff_mode": request.mode,
+            "typed_input_refs": typed_input_refs,
+        },
     )
 
 

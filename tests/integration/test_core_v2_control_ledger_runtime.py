@@ -6,12 +6,11 @@ from pathlib import Path
 
 import pytest
 
-import acc.app.runtime.orchestrator as _orchestrator_module
-import acc.app.runtime.executor as _executor_module
+import acc.app.runtime.invocation_port as _invocation_port_module
 import acc.ledger_writer as _ledger_writer_module
-from acc.app.runtime.orchestrator import run_core_v2_workflow_path
 from acc.app.human_gate_service import answer_human_gate
 from acc.app.interactions import list_interactions
+from acc.app.runtime.orchestrator import run_core_v2_workflow_path
 from acc.models import CORE_V2_SCHEMA_VERSION
 from acc.store.control_ledger import (
     load_decisions,
@@ -129,14 +128,14 @@ def test_ready_queue_does_not_wait_for_unrelated_slow_branch(
         },
     )
 
-    async def fake_callable(*args, **kwargs):
-        _template, node, _payload, *_rest = args
-        _ = kwargs
+    async def fake_invoke(self, envelope):
+        _ = self
+        node = envelope.node
         if node.id == "slow_b":
             await asyncio.sleep(0.05)
         return {"status": "success", "producer_node_id": node.id}
 
-    monkeypatch.setattr(_executor_module, "execute_core_v2_callable", fake_callable)
+    monkeypatch.setattr(_invocation_port_module.CallableInvocationPort, "invoke", fake_invoke)
 
     record = asyncio.run(run_core_v2_workflow_path(workflow_path, tmp_path / "run"))
     events = read_jsonl(tmp_path / "run" / "events.jsonl")
@@ -199,9 +198,26 @@ def test_ready_queue_respects_workflow_max_concurrency(
             "version": "0.1.0",
             "policies": {"max_concurrency": 2},
             "nodes": [
-                {"id": "one", "callable_ref": {"kind": "tool_class", "id": "fake_producer"}},
-                {"id": "two", "callable_ref": {"kind": "tool_class", "id": "fake_producer"}},
-                {"id": "three", "callable_ref": {"kind": "tool_class", "id": "fake_producer"}},
+                {
+                    "id": "one",
+                    "callable_ref": {"kind": "tool_class", "id": "fake_producer"},
+                    "ports": {"outputs": {"main": {"type": "json"}}},
+                },
+                {
+                    "id": "two",
+                    "callable_ref": {"kind": "tool_class", "id": "fake_producer"},
+                    "ports": {"outputs": {"main": {"type": "json"}}},
+                },
+                {
+                    "id": "three",
+                    "callable_ref": {"kind": "tool_class", "id": "fake_producer"},
+                    "ports": {"outputs": {"main": {"type": "json"}}},
+                },
+            ],
+            "workflow_output_bindings": [
+                {"source": {"node": "one", "port": "main"}, "target_port": "one"},
+                {"source": {"node": "two", "port": "main"}, "target_port": "two"},
+                {"source": {"node": "three", "port": "main"}, "target_port": "three"},
             ],
         },
     )
@@ -209,10 +225,10 @@ def test_ready_queue_respects_workflow_max_concurrency(
     peak = 0
     lock = asyncio.Lock()
 
-    async def fake_callable(*args, **kwargs):
+    async def fake_invoke(self, envelope):
         nonlocal active, peak
-        _template, node, _payload, *_rest = args
-        _ = kwargs
+        _ = self
+        node = envelope.node
         async with lock:
             active += 1
             peak = max(peak, active)
@@ -221,12 +237,39 @@ def test_ready_queue_respects_workflow_max_concurrency(
             active -= 1
         return {"status": "success", "producer_node_id": node.id}
 
-    monkeypatch.setattr(_executor_module, "execute_core_v2_callable", fake_callable)
+    monkeypatch.setattr(_invocation_port_module.CallableInvocationPort, "invoke", fake_invoke)
 
     record = asyncio.run(run_core_v2_workflow_path(workflow_path, tmp_path / "run"))
 
     assert record.status == "success"
     assert peak == 2
+    for node_id in ("one", "two", "three"):
+        workflow_output = json.loads(
+            (tmp_path / "run" / "workflow_outputs" / node_id / "output.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        result_manifest = json.loads(
+            (
+                tmp_path
+                / "run"
+                / "result_store"
+                / "__workflow_outputs"
+                / f"{node_id}.json"
+            ).read_text(encoding="utf-8")
+        )
+        result_store_output = json.loads(
+            (
+                tmp_path
+                / "run"
+                / "result_store"
+                / "__workflow_outputs"
+                / f"{node_id}.bin"
+            ).read_text(encoding="utf-8")
+        )
+        assert workflow_output["producer_node_id"] == node_id
+        assert result_manifest["node_id"] == "__workflow_outputs"
+        assert result_store_output["producer_node_id"] == node_id
 
 
 def test_empty_input_policy_block_fails_before_callable(
@@ -251,20 +294,23 @@ def test_empty_input_policy_block_fails_before_callable(
     )
     called = False
 
-    async def fake_callable(*args, **kwargs):
+    async def fake_invoke(self, envelope):
         nonlocal called
-        _ = args, kwargs
+        _ = self, envelope
         called = True
         return {"status": "success"}
 
-    monkeypatch.setattr(_executor_module, "execute_core_v2_callable", fake_callable)
+    monkeypatch.setattr(_invocation_port_module.CallableInvocationPort, "invoke", fake_invoke)
 
     record = asyncio.run(run_core_v2_workflow_path(workflow_path, tmp_path / "run"))
 
     assert record.status == "failed"
     assert called is False
     assert json.loads((tmp_path / "run" / "nodes" / "identify" / "input.json").read_text()) == {}
-    assert "requires runtime input" in (tmp_path / "run" / "nodes" / "identify" / "stderr.txt").read_text()
+    assert (
+        "requires runtime input"
+        in (tmp_path / "run" / "nodes" / "identify" / "stderr.txt").read_text()
+    )
     assert not (tmp_path / "run" / "nodes" / "identify" / "output.json").exists()
 
 
@@ -354,7 +400,9 @@ def test_ledger_failure_after_node_success_marks_run_crashed_not_node_failed(
             raise OSError("audit sink unavailable")
         real_append(run_dir, transition)
 
-    monkeypatch.setattr(_ledger_writer_module, "append_plan_step_transition", fail_on_success_transition)
+    monkeypatch.setattr(
+        _ledger_writer_module, "append_plan_step_transition", fail_on_success_transition
+    )
 
     record = asyncio.run(run_core_v2_workflow_path(workflow_path, tmp_path / "run"))
     session = json.loads(
@@ -483,9 +531,7 @@ def write_human_gate_workflow(path: Path) -> None:
 
 def read_jsonl(path: Path) -> list[dict[str, object]]:
     return [
-        json.loads(line)
-        for line in path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
+        json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
     ]
 
 

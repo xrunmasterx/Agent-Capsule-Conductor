@@ -7,15 +7,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from acc.app.workflow_normalization import (
-    MainDataEdgePolicy,
-    aggregate_normalization_summaries,
-    normalize_workflow_payload_contracts,
-)
 from acc.app.workbench_boundary_transfer import (
     expand_boundary_transfer_bindings,
     first_error_message,
     normalize_boundary_transfer_metadata,
+)
+from acc.app.workflow_normalization import (
+    MainDataEdgePolicy,
+    aggregate_normalization_summaries,
+    normalize_workflow_payload_contracts,
 )
 from acc.callable_registry import CallableRegistry
 from acc.callable_runner import normalize_output_schema_for_structured_output
@@ -430,7 +430,9 @@ def edge_is_workbench_data_edge(edge: dict[str, Any], source: Any, target: Any) 
 
 
 def endpoint_has_explicit_port(value: Any) -> bool:
-    return isinstance(value, dict) and any(key in value for key in ("portId", "port", "input", "output"))
+    return isinstance(value, dict) and any(
+        key in value for key in ("portId", "port", "input", "output")
+    )
 
 
 def codex_execution_mode_index(
@@ -829,6 +831,8 @@ def internal_ui_node_to_workbench_node(node: dict[str, Any]) -> dict[str, Any]:
     if codex_mode:
         result["metadata"] = {"codex_execution_mode": codex_mode}
         result["invocation_policy"] = codex_invocation_policy_for_mode(codex_mode)
+    elif result["callable_ref"]["kind"] in {"agent_class", "tool_class"}:
+        result["invocation_policy"] = full_local_codex_invocation_policy()
     output_schema = node.get("outputSchema") or node.get("output_schema")
     if isinstance(output_schema, dict):
         result["output_schema"] = normalize_output_schema_for_structured_output(output_schema)
@@ -876,6 +880,17 @@ def codex_invocation_policy_for_mode(mode: str) -> dict[str, Any]:
             }
         }
     return {}
+
+
+def full_local_codex_invocation_policy() -> dict[str, Any]:
+    return {
+        "permission_profile": {
+            "workspace_access": "writes_workspace",
+            "network": True,
+            "shell": True,
+            "dangerous": True,
+        }
+    }
 
 
 def normalize_ui_ports(value: Any) -> list[dict[str, Any]]:
@@ -1168,6 +1183,16 @@ def workbench_node_to_core_v2_node(
     ):
         if key in node:
             canonical[key] = node[key]
+    if (
+        callable_ref["kind"] in {"agent_class", "tool_class"}
+        and "invocation_policy" not in canonical
+    ):
+        codex_mode = codex_execution_mode_from_ui_node(node)
+        canonical["invocation_policy"] = (
+            codex_invocation_policy_for_mode(codex_mode)
+            if codex_mode
+            else full_local_codex_invocation_policy()
+        )
     if isinstance(output_schema, dict):
         canonical["output_schema"] = output_schema
         refresh_schema_derived_output_ports(canonical)

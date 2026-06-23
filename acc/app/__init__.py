@@ -14,11 +14,11 @@ from acc.app.core_v2_loader import (
 from acc.app.inspect import workflow_inspect_payload
 from acc.app.workflow_refs import WorkflowCatalog
 from acc.callable_registry import CallableRegistry
-from acc.models import CORE_V2_SCHEMA_VERSION, AccError, WorkflowFunctionTemplate
 from acc.engine.workflow_validation import (
     build_workflow_dry_run_report,
     validate_callable_workflow_function_report,
 )
+from acc.models import CORE_V2_SCHEMA_VERSION, AccError, WorkflowFunctionTemplate
 from acc.runtime.policy import (
     external_agent_execution_enabled as external_agent_execution_enabled,
 )
@@ -67,8 +67,9 @@ class WorkflowAppService:
         callable_registry: CallableRegistry | None = None,
         project_root: Path | None = None,
     ) -> None:
-        if callable_registry is None and project_root is not None:
-            callable_registry = CallableRegistry.from_project_root(project_root)
+        self.project_root = project_root.resolve() if project_root is not None else None
+        if callable_registry is None and self.project_root is not None:
+            callable_registry = CallableRegistry.from_project_root(self.project_root)
         self.callable_registry = resolve_callable_registry(
             callable_registry=callable_registry,
             registry=registry,
@@ -289,6 +290,7 @@ async def run_clean_workflow_template(
         call_depth,
         node_executor,
     )
+    from acc.app.runtime.context import build_execution_context
     from acc.app.runtime.orchestrator import run_core_v2_workflow_path
 
     resolved_workspace = workspace
@@ -298,6 +300,15 @@ async def run_clean_workflow_template(
         resolved_workspace = binding.workspace_root
         resolved_binding_path = binding.binding_path
 
+    resolved_callable_registry = resolve_callable_registry(
+        callable_registry=callable_registry,
+        registry=registry,
+    )
+    execution_context = build_execution_context(
+        workflow_path=workflow_path,
+        run_dir=run_dir,
+        callable_registry=resolved_callable_registry,
+    )
     record = await run_core_v2_workflow_path(
         workflow_path,
         run_dir,
@@ -306,10 +317,8 @@ async def run_clean_workflow_template(
         binding_path=resolved_binding_path,
         ephemeral=workspace is None and binding_path is None,
         should_cancel=should_cancel,
-        callable_registry=resolve_callable_registry(
-            callable_registry=callable_registry,
-            registry=registry,
-        ),
+        callable_registry=resolved_callable_registry,
+        execution_context=execution_context,
     )
     return {
         "status": record.status,

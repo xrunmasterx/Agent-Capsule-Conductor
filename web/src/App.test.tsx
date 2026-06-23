@@ -477,31 +477,6 @@ const routes: Record<string, unknown> = {
       },
     ],
   },
-  'POST /api/graphops/validate': {
-    status: 'valid',
-    patch_id: 'patch_add_review_node',
-    target_type: 'workflow',
-    target_path: 'examples/workflows/control_plane_demo.graph.json',
-    operations: 3,
-    apply_requires_human_approval: true,
-    apply_status: 'not_implemented',
-    dry_run_only: true,
-    governance_mode: 'proposal_dry_run_only',
-    semantic_diff: { status: 'valid', added_nodes: ['review'], added_edges: ['a->review'] },
-  },
-  'POST /api/graphops/dry-run': {
-    status: 'dry_run',
-    patch_id: 'patch_add_review_node',
-    target_type: 'workflow',
-    target_path: 'examples/workflows/control_plane_demo.graph.json',
-    mutated: false,
-    apply_requires_human_approval: true,
-    apply_status: 'not_implemented',
-    dry_run_only: true,
-    governance_mode: 'proposal_dry_run_only',
-    operations: [{ op: 'add_node', description: 'Would add node review using callable critical-review.claude' }],
-    semantic_diff: { status: 'valid', added_nodes: ['review'], added_edges: ['a->review'] },
-  },
   'POST /api/debugger/runs/ui_acceptance_fake/replay': {
     run_dir: 'runs/ui_acceptance_fake',
     status: 'success',
@@ -1434,7 +1409,7 @@ describe('Agent Callable Workbench editable UI', () => {
     );
     expect(canvas).toHaveTextContent('main');
     expect(canvas).toHaveTextContent(demoInternalCallableId);
-    expect(canvas).toHaveTextContent('workflows/demo/core_v2/fundamentals');
+    expect(canvas).toHaveTextContent('workflows/Fundamentals_Workflow');
   });
 
   test('Primary navigation shows readable Chinese icon labels', async () => {
@@ -3510,11 +3485,12 @@ describe('Agent Callable Workbench editable UI', () => {
       .at(-1);
     expect(saveCall).toBeTruthy();
     const savedPayload = JSON.parse(String(saveCall?.[1]?.body));
-    expect(savedPayload.graph.nodes).toHaveLength(7);
-    expect(savedPayload.graph.nodes.some((node: { id?: string }) => node.id === 'Market_Context_Agent')).toBe(true);
-    expect(savedPayload.graph.nodes.some((node: { id?: string }) => node.id === 'Target_Profile_Agent')).toBe(true);
-    expect(savedPayload.graph.nodes.some((node: { id?: string }) => node.id === 'Research_Brief_Agent')).toBe(false);
-    expect(savedPayload.graph.nodes.some((node: { id?: string }) => node.id === 'Source_Data_Workflow')).toBe(false);
+    expect(savedPayload.graph.nodes).toHaveLength(8);
+    expect(savedPayload.graph.nodes.some((node: { id?: string }) => node.id === 'Research_Brief_Agent')).toBe(true);
+    expect(savedPayload.graph.nodes.some((node: { id?: string }) => node.id === 'Source_Data_Workflow')).toBe(true);
+    expect(savedPayload.graph.nodes.some((node: { id?: string }) => node.id === 'Coverage_Model_Workflow')).toBe(true);
+    expect(savedPayload.graph.nodes.some((node: { id?: string }) => node.id === 'Market_Context_Agent')).toBe(false);
+    expect(savedPayload.graph.nodes.some((node: { id?: string }) => node.id === 'Target_Profile_Agent')).toBe(false);
     expect(savedPayload.graph.nodes.some((node: { kind?: string }) => node.kind === 'agent_session')).toBe(true);
     expect(savedPayload.graph.nodes.some((node: { kind?: string }) => node.kind === 'workflow')).toBe(true);
     expect(savedPayload.graph.nodes.every((node: { input_ports?: unknown[] }) => (node.input_ports || []).length > 0)).toBe(
@@ -3527,39 +3503,74 @@ describe('Agent Callable Workbench editable UI', () => {
     expect(savedPayload.graph.data_edges).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          from: { node: 'Market_Context_Agent', port: 'main' },
-          to: { node: 'Target_Profile_Agent', port: 'context' },
+          from: { node: 'Research_Brief_Agent', port: 'target_profile' },
+          to: { node: 'Source_Data_Workflow', port: 'target' },
         }),
         expect.objectContaining({
-          from: { node: 'Target_Profile_Agent', port: 'main' },
+          from: { node: 'Research_Brief_Agent', port: 'target_profile' },
           to: { node: demoWorkflowNodeId, port: 'target' },
         }),
         expect.objectContaining({
-          from: { node: 'Market_Context_Agent', port: 'main' },
-          to: { node: demoWorkflowNodeId, port: 'context' },
+          from: { node: 'Source_Data_Workflow', port: 'evidence_pack' },
+          to: { node: 'Coverage_Model_Workflow', port: 'evidence_pack' },
         }),
         expect.objectContaining({
-          from: { node: 'Target_Profile_Agent', port: 'constraints' },
+          from: { node: 'Coverage_Model_Workflow', port: 'model_input_pack' },
+          to: { node: demoWorkflowNodeId, port: 'model_input_pack' },
+        }),
+        expect.objectContaining({
+          from: { node: 'Coverage_Model_Workflow', port: 'coverage_scorecard' },
+          to: { node: demoWorkflowNodeId, port: 'coverage_scorecard' },
+        }),
+        expect.objectContaining({
+          from: { node: 'Research_Brief_Agent', port: 'constraints' },
           to: { node: 'Valuation_Workflow', port: 'constraints' },
         }),
         expect.objectContaining({
-          from: { node: 'Market_Context_Agent', port: 'watchlist' },
+          from: { node: 'Coverage_Model_Workflow', port: 'model_input_pack' },
+          to: { node: 'Valuation_Workflow', port: 'model_input_pack' },
+        }),
+        expect.objectContaining({
+          from: { node: 'Coverage_Model_Workflow', port: 'evidence_pack' },
+          to: { node: 'Risk_Catalyst_Workflow', port: 'evidence_pack' },
+        }),
+        expect.objectContaining({
+          from: { node: 'Research_Brief_Agent', port: 'watchlist_seed' },
           to: { node: 'Risk_Catalyst_Workflow', port: 'watchlist' },
         }),
         expect.objectContaining({
-          from: { node: demoWorkflowNodeId, port: 'main' },
+          from: { node: demoWorkflowNodeId, port: 'fundamentals_handoff' },
           to: { node: 'Report_Workflow', port: 'fundamentals' },
         }),
         expect.objectContaining({
-          from: { node: 'Report_Workflow', port: 'main' },
+          from: { node: 'Report_Workflow', port: 'report' },
           to: { node: 'Final_Review_Agent', port: 'report' },
+        }),
+        expect.objectContaining({
+          from: { node: 'Valuation_Workflow', port: 'price_guidance' },
+          to: { node: 'Report_Workflow', port: 'price_guidance' },
+        }),
+        expect.objectContaining({
+          from: { node: 'Report_Workflow', port: 'claim_to_evidence_map' },
+          to: { node: 'Final_Review_Agent', port: 'claim_to_evidence_map' },
         }),
       ]),
     );
     expect(savedPayload.graph.data_edges).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          from: { node: 'Valuation_Workflow', port: 'scenario_table' },
+          from: { node: 'Valuation_Workflow', port: 'main' },
+          to: { node: 'Report_Workflow', port: 'valuation' },
+        }),
+        expect.objectContaining({
+          from: { node: 'Risk_Catalyst_Workflow', port: 'main' },
+          to: { node: 'Report_Workflow', port: 'risk' },
+        }),
+        expect.objectContaining({
+          from: { node: 'Source_Data_Workflow', port: 'registry_bundle' },
+        }),
+        expect.objectContaining({
+          from: { node: 'Source_Data_Workflow', port: 'source_register' },
         }),
       ]),
     );
@@ -3572,6 +3583,7 @@ describe('Agent Callable Workbench editable UI', () => {
     expect(evidenceMapper.inputPorts).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: 'evidence_pack' }),
+        expect.objectContaining({ id: 'price_guidance' }),
       ]),
     );
     const valuationWorkflow = savedPayload.graph.nodes.find(
@@ -3580,20 +3592,32 @@ describe('Agent Callable Workbench editable UI', () => {
     const valuationSynthesis = valuationWorkflow.ui.internal_nodes.find(
       (node: { id?: string }) => node.id === 'valuation_synthesis_agent',
     );
-    expect(valuationSynthesis.outputSchema.required).toEqual(
-      expect.arrayContaining(['valuation_range', 'risk_reward']),
+    expect(valuationWorkflow.output_ports).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'valuation_model' }),
+        expect.objectContaining({ id: 'price_guidance' }),
+      ]),
+    );
+    expect(valuationSynthesis.outputSchema.properties.outputs.required).toEqual(
+      expect.arrayContaining(['valuation_model', 'fair_value_range', 'price_guidance']),
+    );
+    const riskWorkflow = savedPayload.graph.nodes.find(
+      (node: { id?: string }) => node.id === 'Risk_Catalyst_Workflow',
+    );
+    expect(riskWorkflow.output_ports).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 'risk_matrix' })]),
     );
     const reportCompiler = reportWorkflow.ui.internal_nodes.find(
       (node: { id?: string }) => node.id === 'report_compiler_agent',
     );
-    expect(reportCompiler.outputSchema.required).toEqual(
-      expect.arrayContaining(['report_sections', 'evidence_map']),
+    expect(reportCompiler.outputSchema.properties.outputs.required).toEqual(
+      expect.arrayContaining(['investment_thesis', 'report', 'appendix', 'claim_to_evidence_map']),
     );
     expect(reportWorkflow.ui.internal_edges).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          from: { node: 'thesis_writer_agent', port: 'main' },
-          to: { node: 'report_compiler_agent', port: 'thesis' },
+          from: { node: 'investment_thesis_agent', port: 'investment_thesis' },
+          to: { node: 'report_compiler_agent', port: 'investment_thesis' },
         }),
       ]),
     );
@@ -3614,15 +3638,15 @@ describe('Agent Callable Workbench editable UI', () => {
     const rootControl = canvas.edges.find(
       (edge: any) =>
         edge.kind === 'control' &&
-        edge.source.workflowId === 'Market_Context_Agent' &&
-        edge.target.workflowId === 'Target_Profile_Agent',
+        edge.source.workflowId === 'Research_Brief_Agent' &&
+        edge.target.workflowId === 'Source_Data_Workflow',
     );
     const fundamentalsWorkflow = canvas.workflows.find((workflow: any) => workflow.id === demoWorkflowNodeId);
     const internalControl = fundamentalsWorkflow.internalEdges.find(
       (edge: any) =>
         edge.kind === 'control' &&
-        edge.source.workflowId === 'fundamentals_synthesis_agent' &&
-        edge.target.workflowId === 'fundamentals_evidence_agent',
+        edge.source.workflowId === 'business_model_agent' &&
+        edge.target.workflowId === 'fundamentals_synthesis_agent',
     );
 
     expect(controlEdgeMainTransferMode(canvas, null, rootControl).label).toBe('仅控制顺序');
@@ -3944,7 +3968,7 @@ describe('Agent Callable Workbench editable UI', () => {
     expect(researchFlow.position).toBeTruthy();
     expect(dropped.position.x + 260).toBeLessThanOrEqual(900);
     expect(JSON.stringify(researchFlow.ui.internal_nodes)).toContain('Wide Tool');
-    expect(getComputedStyle(await screen.findByLabelText('基本面工作流 internal nodes')).overflow).not.toBe(
+    expect(getComputedStyle(await screen.findByLabelText('Fundamentals Workflow internal nodes')).overflow).not.toBe(
       'auto',
     );
   });
@@ -3979,8 +4003,8 @@ describe('Agent Callable Workbench editable UI', () => {
     expect(researchFlow.ui.internal_edges).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          from: { node: 'business_model_agent', port: 'main' },
-          to: { node: 'fundamentals_synthesis_agent', port: 'business' },
+          from: { node: 'business_model_agent', port: 'business_model_handoff' },
+          to: { node: 'fundamentals_synthesis_agent', port: 'business_model' },
         }),
       ]),
     );
@@ -3989,9 +4013,9 @@ describe('Agent Callable Workbench editable UI', () => {
     );
     expect(researchSynthesis.inputPorts).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ id: 'business' }),
-        expect.objectContaining({ id: 'financials' }),
-        expect.objectContaining({ id: 'industry' }),
+        expect.objectContaining({ id: 'business_model' }),
+        expect.objectContaining({ id: 'financial_quality_scorecard' }),
+        expect.objectContaining({ id: 'segment_economics_table' }),
       ]),
     );
   });
@@ -4260,14 +4284,16 @@ describe('Agent Callable Workbench editable UI', () => {
     expect(runCall).toBeTruthy();
     const savedPayload = JSON.parse(String(saveCall?.[1]?.body));
     const runPayload = JSON.parse(String(runCall?.[1]?.body));
-    expect(savedPayload.graph.nodes).toHaveLength(7);
-    expect(savedPayload.graph.nodes.some((node: { id?: string }) => node.id === 'Market_Context_Agent')).toBe(true);
-    expect(savedPayload.graph.nodes.some((node: { id?: string }) => node.id === 'Target_Profile_Agent')).toBe(true);
-    expect(savedPayload.graph.nodes.some((node: { id?: string }) => node.id === 'Source_Data_Workflow')).toBe(false);
+    expect(savedPayload.graph.nodes).toHaveLength(8);
+    expect(savedPayload.graph.nodes.some((node: { id?: string }) => node.id === 'Research_Brief_Agent')).toBe(true);
+    expect(savedPayload.graph.nodes.some((node: { id?: string }) => node.id === 'Source_Data_Workflow')).toBe(true);
+    expect(savedPayload.graph.nodes.some((node: { id?: string }) => node.id === 'Coverage_Model_Workflow')).toBe(true);
+    expect(savedPayload.graph.nodes.some((node: { id?: string }) => node.id === 'Market_Context_Agent')).toBe(false);
+    expect(savedPayload.graph.nodes.some((node: { id?: string }) => node.id === 'Target_Profile_Agent')).toBe(false);
     expect(savedPayload.graph.data_edges).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          from: { node: 'Report_Workflow', port: 'main' },
+          from: { node: 'Report_Workflow', port: 'report' },
           to: { node: 'Final_Review_Agent', port: 'report' },
         }),
       ]),
@@ -4427,7 +4453,7 @@ describe('Agent Callable Workbench editable UI', () => {
     expect(screen.queryByRole('button', { name: /Fork/i })).not.toBeInTheDocument();
   });
 
-  test('Control Plane renders GraphOps safety flow', async () => {
+  test('Control Plane renders GraphOps proposal guidance after legacy patch retirement', async () => {
     const originalSearch = window.location.search;
     Object.defineProperty(window, 'location', {
       value: { ...window.location, search: '?dev=true' },
@@ -4437,13 +4463,12 @@ describe('Agent Callable Workbench editable UI', () => {
     render(<App />);
 
     await user.click(await screen.findByRole('button', { name: /\u63a7\u5236\u5e73\u9762/i }));
-    await user.click(await screen.findByRole('button', { name: /\u6821\u9a8c patch/i }));
-    await user.click(await screen.findByRole('button', { name: /dry-run patch/i }));
 
-    expect(await screen.findByLabelText('graphops.dry-run.json')).toHaveTextContent(
-      'not_implemented',
-    );
-    expect(screen.getByText(/proposal \/ validate \/ dry-run only/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/Legacy patch validate \/ dry-run routes have retired/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /\u6821\u9a8c patch/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /dry-run patch/i })).not.toBeInTheDocument();
 
     Object.defineProperty(window, 'location', {
       value: { ...window.location, search: originalSearch },

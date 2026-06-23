@@ -33,16 +33,25 @@ from acc.store.control_ledger import (
 
 
 def test_run_status_classification_keeps_waiting_and_resuming_non_terminal() -> None:
-    assert frozenset({"success", "failed", "cancelled", "crashed"}) == TERMINAL_RUN_STATUSES
+    assert (
+        frozenset({"success", "failed", "cancelled", "crashed", "timeout"})
+        == TERMINAL_RUN_STATUSES
+    )
     assert (
         frozenset({"waiting_interaction", "waiting_handoff", "waiting_timer"})
         == WAITING_RUN_STATUSES
     )
     assert "resuming" in ACTIVE_RUN_STATUSES
     assert "waiting_interaction" in ACTIVE_RUN_STATUSES
+    assert "waiting_handoff" in ACTIVE_RUN_STATUSES
+    assert "waiting_timer" in ACTIVE_RUN_STATUSES
+    assert "timeout" not in ACTIVE_RUN_STATUSES
     assert "waiting_interaction" not in TERMINAL_RUN_STATUSES
     assert is_active_run_status("waiting_interaction")
+    assert is_active_run_status("waiting_handoff")
+    assert is_active_run_status("waiting_timer")
     assert is_active_run_status("resuming")
+    assert is_terminal_run_status("timeout")
     assert not is_terminal_run_status("waiting_interaction")
     assert not is_terminal_run_status("resuming")
     assert not is_restart_interrupted_run_status("waiting_interaction")

@@ -94,10 +94,7 @@ def run_decision_items(project_root: Path, *, limit: int) -> list[dict[str, Any]
 
 
 def graphops_decision_items(project_root: Path, *, limit: int) -> list[dict[str, Any]]:
-    items = graphops_v3_decision_items(project_root, limit=limit)
-    if len(items) < limit:
-        items.extend(graphops_v2_example_decision_items(project_root, limit=limit - len(items)))
-    return items[:limit]
+    return graphops_v3_decision_items(project_root, limit=limit)
 
 
 def graphops_v3_decision_items(project_root: Path, *, limit: int) -> list[dict[str, Any]]:
@@ -175,69 +172,6 @@ def graphops_v3_decision_items(project_root: Path, *, limit: int) -> list[dict[s
                         "kind": "dry_run_graphops_proposal",
                         "method": "POST",
                         "url": f"/api/graphops/proposals/{proposal_id}/dry-run",
-                        "destructive": False,
-                    },
-                ],
-            }
-        )
-    return items
-
-
-def graphops_v2_example_decision_items(project_root: Path, *, limit: int) -> list[dict[str, Any]]:
-    graphops_root = project_root / "examples" / "graphops"
-    if not graphops_root.exists():
-        return []
-    items: list[dict[str, Any]] = []
-    for patch_path in sorted(graphops_root.glob("*.json")):
-        if len(items) >= limit:
-            break
-        try:
-            patch = load_json(patch_path)
-        except AccError:
-            continue
-        if not isinstance(patch, dict):
-            continue
-        operations = patch.get("operations") if isinstance(patch.get("operations"), list) else []
-        rel_path = relative_project_path(project_root, patch_path)
-        patch_id = str(patch.get("patch_id") or patch_path.stem)
-        items.append(
-            {
-                "id": f"graphops:{patch_id}",
-                "kind": "graphops_proposal",
-                "status": "open",
-                "severity": "medium",
-                "title": f"GraphOps 提案: {patch_id}",
-                "summary": str(patch.get("rationale") or "待验证的 workflow/callable patch。"),
-                "graphops": {
-                    "patch_id": patch_id,
-                    "patch_path": rel_path,
-                    "target_type": str(patch.get("target_type") or ""),
-                    "target_path": str(patch.get("target_path") or ""),
-                    "operation_count": len(operations),
-                },
-                "evidence": [
-                    {
-                        "label": "Patch",
-                        "kind": "graphops_dry_run",
-                        "path": rel_path,
-                        "url": "/api/graphops/dry-run",
-                    }
-                ],
-                "actions": [
-                    {
-                        "id": "validate_patch",
-                        "label": "Validate",
-                        "kind": "validate_patch",
-                        "method": "POST",
-                        "url": "/api/graphops/validate",
-                        "destructive": False,
-                    },
-                    {
-                        "id": "dry_run_patch",
-                        "label": "Dry-run",
-                        "kind": "dry_run_patch",
-                        "method": "POST",
-                        "url": "/api/graphops/dry-run",
                         "destructive": False,
                     },
                 ],

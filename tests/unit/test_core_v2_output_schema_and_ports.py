@@ -92,9 +92,7 @@ def test_structured_output_schema_errors_reports_unfixable_schema() -> None:
         "properties": {"summary": {"type": "array", "items": "bad"}},
     }
 
-    errors = structured_output_schema_errors(
-        normalize_output_schema_for_structured_output(schema)
-    )
+    errors = structured_output_schema_errors(normalize_output_schema_for_structured_output(schema))
 
     assert errors
     assert errors[0]["code"] == "output_schema_invalid"
@@ -429,9 +427,7 @@ def test_optional_workflow_call_output_does_not_satisfy_required_downstream_main
             "downstream": NodeInvocationSpec(
                 id="downstream",
                 callable_ref=CallableRef(kind="agent_class", id="downstream.codex"),
-                input_ports={
-                    "main": PortContract(id="main", direction="input", required=True)
-                },
+                input_ports={"main": PortContract(id="main", direction="input", required=True)},
                 output_ports={"main": PortContract(id="main", direction="output")},
             ),
         },
@@ -449,7 +445,72 @@ def test_optional_workflow_call_output_does_not_satisfy_required_downstream_main
     )
 
 
-def test_workflow_output_binding_source_port_must_exist() -> None:
+def test_strict_explicit_dataflow_required_input_ignores_control_main_source() -> None:
+    template = WorkflowFunctionTemplate(
+        id="flow",
+        version="0.1.0",
+        node_invocations={
+            "producer": NodeInvocationSpec(
+                id="producer",
+                callable_ref=CallableRef(kind="agent_class", id="producer.codex"),
+                output_ports={"main": PortContract(id="main", direction="output")},
+            ),
+            "consumer": NodeInvocationSpec(
+                id="consumer",
+                callable_ref=CallableRef(kind="agent_class", id="consumer.codex"),
+                input_ports={"main": PortContract(id="main", direction="input", required=True)},
+            ),
+        },
+        control_edges=[ControlEdge(source="producer", target="consumer")],
+        data_edges=[],
+        policies={"dataflow": "strict"},
+    )
+
+    issues = collect_callable_validation_issues(template)
+    unbound = [issue for issue in issues if issue.code == "unbound_input_port"]
+
+    assert len(unbound) == 1
+    assert unbound[0].node_id == "consumer"
+    assert unbound[0].port == "main"
+    assert unbound[0].metadata == {
+        "input_port": {"node": "consumer", "port": "main"},
+        "available_sources": [],
+    }
+
+
+def test_strict_explicit_dataflow_suppresses_control_data_compat_warning() -> None:
+    template = WorkflowFunctionTemplate(
+        id="flow",
+        version="0.1.0",
+        node_invocations={
+            "producer": NodeInvocationSpec(
+                id="producer",
+                callable_ref=CallableRef(kind="agent_class", id="producer.codex"),
+                output_ports={"main": PortContract(id="main", direction="output")},
+            ),
+            "consumer": NodeInvocationSpec(
+                id="consumer",
+                callable_ref=CallableRef(kind="agent_class", id="consumer.codex"),
+                input_ports={"main": PortContract(id="main", direction="input", required=True)},
+            ),
+        },
+        control_edges=[ControlEdge(source="producer", target="consumer")],
+        data_edges=[
+            DataEdge(
+                source=DataEndpoint(node="producer", port="main"),
+                target=DataEndpoint(node="consumer", port="main"),
+            )
+        ],
+        policies={"dataflow": "strict"},
+    )
+
+    issues = collect_callable_validation_issues(template)
+
+    assert not [issue for issue in issues if issue.code == "control_main_suppressed_by_data_edge"]
+    assert not [issue for issue in issues if issue.code == "unbound_input_port"]
+
+
+
     template = WorkflowFunctionTemplate(
         id="flow",
         version="0.1.0",
@@ -517,8 +578,7 @@ def test_workflow_output_port_allows_multiple_source_nodes() -> None:
     assert not [
         issue
         for issue in issues
-        if issue.code
-        in {"unbound_workflow_output", "duplicate_workflow_output_source"}
+        if issue.code in {"unbound_workflow_output", "duplicate_workflow_output_source"}
     ]
 
 
@@ -574,9 +634,7 @@ def test_required_main_input_can_be_satisfied_by_control_main_default() -> None:
             "target": NodeInvocationSpec(
                 id="target",
                 callable_ref=CallableRef(kind="agent_class", id="target.codex"),
-                input_ports={
-                    "main": PortContract(id="main", direction="input", required=True)
-                },
+                input_ports={"main": PortContract(id="main", direction="input", required=True)},
             ),
         },
         control_edges=[ControlEdge(source="source", target="target")],
@@ -632,7 +690,9 @@ def test_control_main_does_not_satisfy_required_main_when_same_pair_has_data_edg
     assert not [
         issue
         for issue in issues
-        if issue.code == "unbound_input_port" and issue.node_id == "target" and issue.port == "detail"
+        if issue.code == "unbound_input_port"
+        and issue.node_id == "target"
+        and issue.port == "detail"
     ]
     assert any(
         issue.code == "control_main_suppressed_by_data_edge"

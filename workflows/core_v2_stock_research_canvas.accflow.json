@@ -1,44 +1,1951 @@
 {
+  "schema_version": "acc.core.v2",
+  "id": "core_v2_stock_research_canvas",
+  "version": "0.1.0",
+  "name": "Core v2 股市调研分析示例",
+  "description": "???????????????????????????????????",
+  "nodes": [
+    {
+      "id": "Research_Brief_Agent",
+      "callable_ref": {
+        "kind": "agent_class",
+        "id": "stock-research-analyst.codex"
+      },
+      "ports": {
+        "inputs": {
+          "main": {
+            "type": "artifact",
+            "required": false,
+            "cardinality": "one"
+          }
+        },
+        "outputs": {
+          "main": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "target_profile": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "research_scope": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "constraints": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "watchlist_seed": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "handoff_summary": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "data_gaps": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "many"
+          },
+          "quality_gate": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          }
+        }
+      },
+      "overrides": {
+        "static_input": {
+          "target": {
+            "ticker": "01810.HK",
+            "company_name": "Xiaomi Corporation",
+            "exchange": "HKEX",
+            "asset_type": "ordinary_share",
+            "research_scope": "single_stock_deep_research"
+          },
+          "research_preferences": {
+            "output_language": "zh-CN",
+            "as_of_date_policy": "use runtime date and cite retrieval times"
+          }
+        }
+      },
+      "prompt_policy": {
+        "user_prompt": "Normalize the stock request into target_profile, research_scope, constraints, and watchlist_seed. Do not recommend. Preserve ticker/name, market, currency assumptions, as_of_date policy, and explicit research questions. Put uncertain identity fields in data_gaps."
+      },
+      "metadata": {
+        "ui_label": "研究任务澄清",
+        "label": "研究任务澄清",
+        "workbench_kind": "agent_session"
+      },
+      "invocation_policy": {
+        "permission_profile": {
+          "workspace_access": "writes_workspace",
+          "network": true,
+          "shell": true,
+          "dangerous": true
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "status",
+          "summary",
+          "as_of_date",
+          "data_gaps",
+          "quality",
+          "quality_gate",
+          "outputs"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "success",
+              "partial",
+              "blocked",
+              "failed"
+            ]
+          },
+          "summary": {
+            "type": "string"
+          },
+          "as_of_date": {
+            "type": "string"
+          },
+          "handoff_summary": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "data_gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "quality_gate": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "quality": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "target_profile": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "research_scope": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "constraints": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "watchlist_seed": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "outputs": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "target_profile",
+              "research_scope",
+              "constraints",
+              "watchlist_seed",
+              "handoff_summary",
+              "data_gaps",
+              "quality_gate"
+            ],
+            "properties": {
+              "target_profile": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "research_scope": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "constraints": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "watchlist_seed": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "handoff_summary": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "data_gaps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "quality_gate": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      },
+      "workflow_call_output_bindings": []
+    },
+    {
+      "id": "Source_Data_Workflow",
+      "callable_ref": {
+        "kind": "workflow_function",
+        "id": "core_v2_stock_research_canvas__Source_Data_Workflow.accflow.json"
+      },
+      "ports": {
+        "inputs": {
+          "target": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          }
+        },
+        "outputs": {
+          "handoff_summary": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "evidence_pack": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "blocking_gaps": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "data_gaps": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "quality_gate": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          }
+        }
+      },
+      "overrides": {
+        "static_input": {}
+      },
+      "prompt_policy": {
+        "user_prompt": "Parallel public-data collection workflow. Produce a complete evidence_pack plus only blocking gaps and quality gate; do not pass raw process logs downstream."
+      },
+      "metadata": {
+        "ui_label": "Source Data Registry Workflow",
+        "label": "Source Data Registry Workflow",
+        "workbench_kind": "workflow"
+      },
+      "workflow_call_output_bindings": [
+        {
+          "workflow_output": "handoff_summary",
+          "parent_port": "handoff_summary",
+          "required": true
+        },
+        {
+          "workflow_output": "evidence_pack",
+          "parent_port": "evidence_pack",
+          "required": true
+        },
+        {
+          "workflow_output": "blocking_gaps",
+          "parent_port": "blocking_gaps",
+          "required": true
+        },
+        {
+          "workflow_output": "data_gaps",
+          "parent_port": "data_gaps",
+          "required": true
+        },
+        {
+          "workflow_output": "quality_gate",
+          "parent_port": "quality_gate",
+          "required": true
+        }
+      ],
+      "invocation_policy": {
+        "permission_profile": {
+          "workspace_access": "writes_workspace",
+          "network": true,
+          "shell": true,
+          "dangerous": true
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "status",
+          "summary",
+          "as_of_date",
+          "data_gaps",
+          "quality",
+          "quality_gate",
+          "outputs"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "success",
+              "partial",
+              "blocked",
+              "failed"
+            ]
+          },
+          "summary": {
+            "type": "string"
+          },
+          "as_of_date": {
+            "type": "string"
+          },
+          "handoff_summary": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "data_gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "quality_gate": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "quality": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "outputs": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "handoff_summary",
+              "data_gaps",
+              "quality_gate"
+            ],
+            "properties": {
+              "handoff_summary": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "data_gaps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "quality_gate": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "Coverage_Model_Workflow",
+      "callable_ref": {
+        "kind": "workflow_function",
+        "id": "core_v2_stock_research_canvas__Coverage_Model_Workflow.accflow.json"
+      },
+      "ports": {
+        "inputs": {
+          "target": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "evidence_pack": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "blocking_gaps": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "source_quality_gate": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "constraints": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          }
+        },
+        "outputs": {
+          "coverage_scorecard": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "model_input_pack": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "blocking_gaps": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "evidence_pack": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "data_gaps": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "quality_gate": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          }
+        }
+      },
+      "overrides": {
+        "static_input": {}
+      },
+      "prompt_policy": {
+        "user_prompt": "Coverage gate and model-input builder. Decide whether evidence is sufficient and build the model_input_pack used downstream."
+      },
+      "metadata": {
+        "ui_label": "Coverage and Model Input Workflow",
+        "label": "Coverage and Model Input Workflow",
+        "workbench_kind": "workflow"
+      },
+      "workflow_call_output_bindings": [
+        {
+          "workflow_output": "coverage_scorecard",
+          "parent_port": "coverage_scorecard",
+          "required": true
+        },
+        {
+          "workflow_output": "model_input_pack",
+          "parent_port": "model_input_pack",
+          "required": true
+        },
+        {
+          "workflow_output": "blocking_gaps",
+          "parent_port": "blocking_gaps",
+          "required": true
+        },
+        {
+          "workflow_output": "evidence_pack",
+          "parent_port": "evidence_pack",
+          "required": true
+        },
+        {
+          "workflow_output": "data_gaps",
+          "parent_port": "data_gaps",
+          "required": true
+        },
+        {
+          "workflow_output": "quality_gate",
+          "parent_port": "quality_gate",
+          "required": true
+        }
+      ],
+      "invocation_policy": {
+        "permission_profile": {
+          "workspace_access": "writes_workspace",
+          "network": true,
+          "shell": true,
+          "dangerous": true
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "status",
+          "summary",
+          "as_of_date",
+          "data_gaps",
+          "quality",
+          "quality_gate",
+          "outputs"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "success",
+              "partial",
+              "blocked",
+              "failed"
+            ]
+          },
+          "summary": {
+            "type": "string"
+          },
+          "as_of_date": {
+            "type": "string"
+          },
+          "handoff_summary": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "data_gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "quality_gate": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "quality": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "coverage_scorecard": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "model_input_pack": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "blocking_gaps": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "outputs": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "coverage_scorecard",
+              "model_input_pack",
+              "blocking_gaps",
+              "data_gaps",
+              "quality_gate"
+            ],
+            "properties": {
+              "coverage_scorecard": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "model_input_pack": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "blocking_gaps": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "data_gaps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "quality_gate": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "Fundamentals_Workflow",
+      "callable_ref": {
+        "kind": "workflow_function",
+        "id": "core_v2_stock_research_canvas__Fundamentals_Workflow.accflow.json"
+      },
+      "ports": {
+        "inputs": {
+          "target": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "evidence_pack": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "model_input_pack": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "coverage_scorecard": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          }
+        },
+        "outputs": {
+          "main": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "fundamentals_handoff": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "evidence_pack": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "financial_quality_scorecard": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "segment_economics_table": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "competitive_position_matrix": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "data_gaps": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "many"
+          },
+          "quality_gate": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          }
+        }
+      },
+      "overrides": {
+        "static_input": {}
+      },
+      "prompt_policy": {
+        "user_prompt": "Domain analysis workflow for business model, financial quality, segment economics, and industry position based on evidence_pack and model_input_pack."
+      },
+      "metadata": {
+        "ui_label": "Fundamentals Workflow",
+        "label": "Fundamentals Workflow",
+        "workbench_kind": "workflow"
+      },
+      "workflow_call_output_bindings": [
+        {
+          "workflow_output": "fundamentals_handoff",
+          "parent_port": "fundamentals_handoff",
+          "required": false
+        },
+        {
+          "workflow_output": "evidence_pack",
+          "parent_port": "evidence_pack",
+          "required": false
+        },
+        {
+          "workflow_output": "financial_quality_scorecard",
+          "parent_port": "financial_quality_scorecard",
+          "required": false
+        },
+        {
+          "workflow_output": "segment_economics_table",
+          "parent_port": "segment_economics_table",
+          "required": false
+        },
+        {
+          "workflow_output": "competitive_position_matrix",
+          "parent_port": "competitive_position_matrix",
+          "required": false
+        },
+        {
+          "workflow_output": "evidence_pack",
+          "parent_port": "evidence_pack",
+          "required": false
+        },
+        {
+          "workflow_output": "data_gaps",
+          "parent_port": "data_gaps",
+          "required": false
+        },
+        {
+          "workflow_output": "quality_gate",
+          "parent_port": "quality_gate",
+          "required": false
+        }
+      ],
+      "invocation_policy": {
+        "permission_profile": {
+          "workspace_access": "writes_workspace",
+          "network": true,
+          "shell": true,
+          "dangerous": true
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "status",
+          "summary",
+          "as_of_date",
+          "data_gaps",
+          "quality",
+          "quality_gate",
+          "outputs"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "success",
+              "partial",
+              "blocked",
+              "failed"
+            ]
+          },
+          "summary": {
+            "type": "string"
+          },
+          "as_of_date": {
+            "type": "string"
+          },
+          "handoff_summary": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "data_gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "quality_gate": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "quality": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "fundamentals_handoff": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "evidence_pack": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "financial_quality_scorecard": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "segment_economics_table": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "competitive_position_matrix": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "outputs": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "fundamentals_handoff",
+              "evidence_pack",
+              "financial_quality_scorecard",
+              "segment_economics_table",
+              "competitive_position_matrix",
+              "data_gaps",
+              "quality_gate"
+            ],
+            "properties": {
+              "fundamentals_handoff": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "evidence_pack": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "financial_quality_scorecard": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "segment_economics_table": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "competitive_position_matrix": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "data_gaps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "quality_gate": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "Valuation_Workflow",
+      "callable_ref": {
+        "kind": "workflow_function",
+        "id": "core_v2_stock_research_canvas__Valuation_Workflow.accflow.json"
+      },
+      "ports": {
+        "inputs": {
+          "constraints": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "fundamentals": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "evidence_pack": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "model_input_pack": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "coverage_scorecard": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          }
+        },
+        "outputs": {
+          "main": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "valuation_model": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "fair_value_range": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "price_guidance": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "valuation_handoff": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "scenario_table": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "sensitivity_table": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "data_gaps": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "many"
+          },
+          "quality_gate": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          }
+        }
+      },
+      "overrides": {
+        "static_input": {}
+      },
+      "prompt_policy": {
+        "user_prompt": "Sequential valuation workflow: operating forecast, comparables, DCF/SOTP, scenario sensitivity, and auditable price guidance."
+      },
+      "metadata": {
+        "ui_label": "Valuation Workflow",
+        "label": "Valuation Workflow",
+        "workbench_kind": "workflow"
+      },
+      "workflow_call_output_bindings": [
+        {
+          "workflow_output": "valuation_model",
+          "parent_port": "valuation_model",
+          "required": false
+        },
+        {
+          "workflow_output": "fair_value_range",
+          "parent_port": "fair_value_range",
+          "required": false
+        },
+        {
+          "workflow_output": "price_guidance",
+          "parent_port": "price_guidance",
+          "required": false
+        },
+        {
+          "workflow_output": "valuation_handoff",
+          "parent_port": "valuation_handoff",
+          "required": false
+        },
+        {
+          "workflow_output": "scenario_table",
+          "parent_port": "scenario_table",
+          "required": false
+        },
+        {
+          "workflow_output": "sensitivity_table",
+          "parent_port": "sensitivity_table",
+          "required": false
+        },
+        {
+          "workflow_output": "data_gaps",
+          "parent_port": "data_gaps",
+          "required": false
+        },
+        {
+          "workflow_output": "quality_gate",
+          "parent_port": "quality_gate",
+          "required": false
+        }
+      ],
+      "invocation_policy": {
+        "permission_profile": {
+          "workspace_access": "writes_workspace",
+          "network": true,
+          "shell": true,
+          "dangerous": true
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "status",
+          "summary",
+          "as_of_date",
+          "data_gaps",
+          "quality",
+          "quality_gate",
+          "outputs"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "success",
+              "partial",
+              "blocked",
+              "failed"
+            ]
+          },
+          "summary": {
+            "type": "string"
+          },
+          "as_of_date": {
+            "type": "string"
+          },
+          "handoff_summary": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "data_gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "quality_gate": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "quality": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "valuation_model": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "fair_value_range": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "price_guidance": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "valuation_handoff": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "scenario_table": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "sensitivity_table": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "outputs": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "valuation_model",
+              "fair_value_range",
+              "price_guidance",
+              "valuation_handoff",
+              "scenario_table",
+              "sensitivity_table",
+              "data_gaps",
+              "quality_gate"
+            ],
+            "properties": {
+              "valuation_model": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "fair_value_range": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "price_guidance": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "valuation_handoff": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "scenario_table": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "sensitivity_table": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "data_gaps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "quality_gate": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "Risk_Catalyst_Workflow",
+      "callable_ref": {
+        "kind": "workflow_function",
+        "id": "core_v2_stock_research_canvas__Risk_Catalyst_Workflow.accflow.json"
+      },
+      "ports": {
+        "inputs": {
+          "fundamentals": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "evidence_pack": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "model_input_pack": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "coverage_scorecard": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "watchlist": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          }
+        },
+        "outputs": {
+          "main": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "risk_matrix": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "risk_handoff": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "catalyst_calendar": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "monitoring_triggers": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "watchlist_verified": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "many"
+          },
+          "watchlist_unverified": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "many"
+          },
+          "data_gaps": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "many"
+          },
+          "quality_gate": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          }
+        }
+      },
+      "overrides": {
+        "static_input": {}
+      },
+      "prompt_policy": {
+        "user_prompt": "Risk and catalyst workflow that separates verified evidence, monitoring triggers, and unverified watchlist items."
+      },
+      "metadata": {
+        "ui_label": "Risk and Catalyst Workflow",
+        "label": "Risk and Catalyst Workflow",
+        "workbench_kind": "workflow"
+      },
+      "workflow_call_output_bindings": [
+        {
+          "workflow_output": "risk_matrix",
+          "parent_port": "risk_matrix",
+          "required": false
+        },
+        {
+          "workflow_output": "risk_handoff",
+          "parent_port": "risk_handoff",
+          "required": false
+        },
+        {
+          "workflow_output": "catalyst_calendar",
+          "parent_port": "catalyst_calendar",
+          "required": false
+        },
+        {
+          "workflow_output": "monitoring_triggers",
+          "parent_port": "monitoring_triggers",
+          "required": false
+        },
+        {
+          "workflow_output": "watchlist_verified",
+          "parent_port": "watchlist_verified",
+          "required": false
+        },
+        {
+          "workflow_output": "watchlist_unverified",
+          "parent_port": "watchlist_unverified",
+          "required": false
+        },
+        {
+          "workflow_output": "data_gaps",
+          "parent_port": "data_gaps",
+          "required": false
+        },
+        {
+          "workflow_output": "quality_gate",
+          "parent_port": "quality_gate",
+          "required": false
+        }
+      ],
+      "invocation_policy": {
+        "permission_profile": {
+          "workspace_access": "writes_workspace",
+          "network": true,
+          "shell": true,
+          "dangerous": true
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "status",
+          "summary",
+          "as_of_date",
+          "data_gaps",
+          "quality",
+          "quality_gate",
+          "outputs"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "success",
+              "partial",
+              "blocked",
+              "failed"
+            ]
+          },
+          "summary": {
+            "type": "string"
+          },
+          "as_of_date": {
+            "type": "string"
+          },
+          "handoff_summary": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "data_gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "quality_gate": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "quality": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "risk_matrix": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "risk_handoff": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "catalyst_calendar": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "monitoring_triggers": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "watchlist_verified": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "watchlist_unverified": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "outputs": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "risk_matrix",
+              "risk_handoff",
+              "catalyst_calendar",
+              "monitoring_triggers",
+              "watchlist_verified",
+              "watchlist_unverified",
+              "data_gaps",
+              "quality_gate"
+            ],
+            "properties": {
+              "risk_matrix": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "risk_handoff": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "catalyst_calendar": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "monitoring_triggers": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "watchlist_verified": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "watchlist_unverified": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "data_gaps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "quality_gate": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "Report_Workflow",
+      "callable_ref": {
+        "kind": "workflow_function",
+        "id": "core_v2_stock_research_canvas__Report_Workflow.accflow.json"
+      },
+      "ports": {
+        "inputs": {
+          "evidence_pack": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "model_input_pack": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "coverage_scorecard": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "fundamentals": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "valuation": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "price_guidance": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "fair_value_range": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "risk_matrix": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "catalyst_calendar": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "monitoring_triggers": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "watchlist_verified": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "watchlist_unverified": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          }
+        },
+        "outputs": {
+          "main": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "investment_thesis": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "report": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "decision_summary": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "appendix": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "claim_to_evidence_map": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "data_gaps": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "many"
+          },
+          "quality_gate": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          }
+        }
+      },
+      "overrides": {
+        "static_input": {}
+      },
+      "prompt_policy": {
+        "user_prompt": "Report workflow that compiles thesis, claim-to-evidence map, decision summary, appendix, and evidence-aware price guidance status."
+      },
+      "metadata": {
+        "ui_label": "Report Workflow",
+        "label": "Report Workflow",
+        "workbench_kind": "workflow"
+      },
+      "workflow_call_output_bindings": [
+        {
+          "workflow_output": "investment_thesis",
+          "parent_port": "investment_thesis",
+          "required": false
+        },
+        {
+          "workflow_output": "report",
+          "parent_port": "report",
+          "required": false
+        },
+        {
+          "workflow_output": "decision_summary",
+          "parent_port": "decision_summary",
+          "required": false
+        },
+        {
+          "workflow_output": "appendix",
+          "parent_port": "appendix",
+          "required": false
+        },
+        {
+          "workflow_output": "claim_to_evidence_map",
+          "parent_port": "claim_to_evidence_map",
+          "required": false
+        },
+        {
+          "workflow_output": "data_gaps",
+          "parent_port": "data_gaps",
+          "required": false
+        },
+        {
+          "workflow_output": "quality_gate",
+          "parent_port": "quality_gate",
+          "required": false
+        }
+      ],
+      "invocation_policy": {
+        "permission_profile": {
+          "workspace_access": "writes_workspace",
+          "network": true,
+          "shell": true,
+          "dangerous": true
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "status",
+          "summary",
+          "as_of_date",
+          "data_gaps",
+          "quality",
+          "quality_gate",
+          "outputs"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "success",
+              "partial",
+              "blocked",
+              "failed"
+            ]
+          },
+          "summary": {
+            "type": "string"
+          },
+          "as_of_date": {
+            "type": "string"
+          },
+          "handoff_summary": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "data_gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "quality_gate": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "quality": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "investment_thesis": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "report": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "decision_summary": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "appendix": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "claim_to_evidence_map": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "outputs": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "investment_thesis",
+              "report",
+              "decision_summary",
+              "appendix",
+              "claim_to_evidence_map",
+              "data_gaps",
+              "quality_gate"
+            ],
+            "properties": {
+              "investment_thesis": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "report": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "decision_summary": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "appendix": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "claim_to_evidence_map": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "data_gaps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "quality_gate": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "Final_Review_Agent",
+      "callable_ref": {
+        "kind": "agent_class",
+        "id": "stock-publication-reviewer.codex"
+      },
+      "ports": {
+        "inputs": {
+          "report": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "claim_to_evidence_map": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "price_guidance": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "risk_matrix": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "monitoring_triggers": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "watchlist_verified": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "watchlist_unverified": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "evidence_appendix": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "decision_summary": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "coverage_scorecard": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          }
+        },
+        "outputs": {
+          "main": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "readiness": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "required_followups": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "many"
+          },
+          "action_items": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "many"
+          },
+          "data_gaps": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "many"
+          },
+          "quality_gate": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "publication_readiness": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          }
+        }
+      },
+      "overrides": {
+        "static_input": {}
+      },
+      "prompt_policy": {
+        "user_prompt": "Review report, claim_to_evidence_map, price_guidance, risk outputs, evidence_pack, and appendix. Do not add facts or new research. Return publication readiness, unsupported claims, required followups, and action_items only."
+      },
+      "metadata": {
+        "ui_label": "最终证据复核",
+        "label": "最终证据复核",
+        "workbench_kind": "agent_session"
+      },
+      "invocation_policy": {
+        "permission_profile": {
+          "workspace_access": "writes_workspace",
+          "network": true,
+          "shell": true,
+          "dangerous": true
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "status",
+          "summary",
+          "as_of_date",
+          "data_gaps",
+          "quality",
+          "quality_gate",
+          "outputs"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "success",
+              "partial",
+              "blocked",
+              "failed"
+            ]
+          },
+          "summary": {
+            "type": "string"
+          },
+          "as_of_date": {
+            "type": "string"
+          },
+          "handoff_summary": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "data_gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "quality_gate": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "quality": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "readiness": {
+            "type": "string"
+          },
+          "required_followups": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "action_items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "publication_readiness": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "outputs": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "readiness",
+              "required_followups",
+              "action_items",
+              "data_gaps",
+              "quality_gate",
+              "publication_readiness"
+            ],
+            "properties": {
+              "readiness": {
+                "type": "string"
+              },
+              "required_followups": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "action_items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "data_gaps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "quality_gate": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "publication_readiness": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      },
+      "workflow_call_output_bindings": []
+    }
+  ],
   "control_edges": [
     {
-      "context": "none",
       "from": "Research_Brief_Agent",
-      "to": "Source_Data_Workflow"
+      "to": "Source_Data_Workflow",
+      "context": "none"
     },
     {
-      "context": "none",
       "from": "Source_Data_Workflow",
-      "to": "Fundamentals_Workflow"
+      "to": "Coverage_Model_Workflow",
+      "context": "none"
     },
     {
-      "context": "none",
+      "from": "Coverage_Model_Workflow",
+      "to": "Fundamentals_Workflow",
+      "context": "none"
+    },
+    {
       "from": "Fundamentals_Workflow",
-      "to": "Valuation_Workflow"
+      "to": "Valuation_Workflow",
+      "context": "none"
     },
     {
-      "context": "none",
       "from": "Fundamentals_Workflow",
-      "to": "Risk_Catalyst_Workflow"
+      "to": "Risk_Catalyst_Workflow",
+      "context": "none"
     },
     {
-      "context": "none",
       "from": "Valuation_Workflow",
-      "to": "Report_Workflow"
+      "to": "Report_Workflow",
+      "context": "none"
     },
     {
-      "context": "none",
       "from": "Risk_Catalyst_Workflow",
-      "to": "Report_Workflow"
+      "to": "Report_Workflow",
+      "context": "none"
     },
     {
-      "context": "none",
       "from": "Report_Workflow",
-      "to": "Final_Review_Agent"
+      "to": "Final_Review_Agent",
+      "context": "none"
     }
   ],
   "data_edges": [
     {
-      "materialization": "copy",
       "source": {
         "node": "Research_Brief_Agent",
         "port": "target_profile"
@@ -46,10 +1953,43 @@
       "target": {
         "node": "Source_Data_Workflow",
         "port": "target"
-      }
+      },
+      "materialization": "copy"
     },
     {
-      "materialization": "copy",
+      "source": {
+        "node": "Research_Brief_Agent",
+        "port": "target_profile"
+      },
+      "target": {
+        "node": "Coverage_Model_Workflow",
+        "port": "target"
+      },
+      "materialization": "copy"
+    },
+    {
+      "source": {
+        "node": "Research_Brief_Agent",
+        "port": "constraints"
+      },
+      "target": {
+        "node": "Coverage_Model_Workflow",
+        "port": "constraints"
+      },
+      "materialization": "copy"
+    },
+    {
+      "source": {
+        "node": "Source_Data_Workflow",
+        "port": "evidence_pack"
+      },
+      "target": {
+        "node": "Coverage_Model_Workflow",
+        "port": "evidence_pack"
+      },
+      "materialization": "copy"
+    },
+    {
       "source": {
         "node": "Research_Brief_Agent",
         "port": "target_profile"
@@ -57,65 +1997,142 @@
       "target": {
         "node": "Fundamentals_Workflow",
         "port": "target"
-      }
+      },
+      "materialization": "copy"
     },
     {
-      "materialization": "copy",
       "source": {
-        "node": "Source_Data_Workflow",
-        "port": "verified_data_pack"
+        "node": "Coverage_Model_Workflow",
+        "port": "evidence_pack"
       },
       "target": {
         "node": "Fundamentals_Workflow",
-        "port": "verified_data"
-      }
+        "port": "evidence_pack"
+      },
+      "materialization": "copy"
     },
     {
-      "materialization": "copy",
+      "source": {
+        "node": "Coverage_Model_Workflow",
+        "port": "model_input_pack"
+      },
+      "target": {
+        "node": "Fundamentals_Workflow",
+        "port": "model_input_pack"
+      },
+      "materialization": "copy"
+    },
+    {
+      "source": {
+        "node": "Coverage_Model_Workflow",
+        "port": "coverage_scorecard"
+      },
+      "target": {
+        "node": "Fundamentals_Workflow",
+        "port": "coverage_scorecard"
+      },
+      "materialization": "copy"
+    },
+    {
+      "source": {
+        "node": "Research_Brief_Agent",
+        "port": "constraints"
+      },
+      "target": {
+        "node": "Valuation_Workflow",
+        "port": "constraints"
+      },
+      "materialization": "copy"
+    },
+    {
       "source": {
         "node": "Fundamentals_Workflow",
-        "port": "main"
+        "port": "fundamentals_handoff"
       },
       "target": {
         "node": "Valuation_Workflow",
         "port": "fundamentals"
-      }
+      },
+      "materialization": "copy"
     },
     {
-      "materialization": "copy",
       "source": {
-        "node": "Research_Brief_Agent",
-        "port": "constraints"
+        "node": "Coverage_Model_Workflow",
+        "port": "evidence_pack"
       },
       "target": {
         "node": "Valuation_Workflow",
-        "port": "constraints"
-      }
+        "port": "evidence_pack"
+      },
+      "materialization": "copy"
     },
     {
-      "materialization": "copy",
       "source": {
-        "node": "Source_Data_Workflow",
-        "port": "verified_data_pack"
+        "node": "Coverage_Model_Workflow",
+        "port": "model_input_pack"
       },
       "target": {
         "node": "Valuation_Workflow",
-        "port": "verified_data"
-      }
+        "port": "model_input_pack"
+      },
+      "materialization": "copy"
     },
     {
-      "materialization": "copy",
+      "source": {
+        "node": "Coverage_Model_Workflow",
+        "port": "coverage_scorecard"
+      },
+      "target": {
+        "node": "Valuation_Workflow",
+        "port": "coverage_scorecard"
+      },
+      "materialization": "copy"
+    },
+    {
       "source": {
         "node": "Fundamentals_Workflow",
-        "port": "main"
+        "port": "fundamentals_handoff"
       },
       "target": {
         "node": "Risk_Catalyst_Workflow",
         "port": "fundamentals"
-      }
+      },
+      "materialization": "copy"
     },
     {
-      "materialization": "copy",
+      "source": {
+        "node": "Coverage_Model_Workflow",
+        "port": "evidence_pack"
+      },
+      "target": {
+        "node": "Risk_Catalyst_Workflow",
+        "port": "evidence_pack"
+      },
+      "materialization": "copy"
+    },
+    {
+      "source": {
+        "node": "Coverage_Model_Workflow",
+        "port": "model_input_pack"
+      },
+      "target": {
+        "node": "Risk_Catalyst_Workflow",
+        "port": "model_input_pack"
+      },
+      "materialization": "copy"
+    },
+    {
+      "source": {
+        "node": "Coverage_Model_Workflow",
+        "port": "coverage_scorecard"
+      },
+      "target": {
+        "node": "Risk_Catalyst_Workflow",
+        "port": "coverage_scorecard"
+      },
+      "materialization": "copy"
+    },
+    {
       "source": {
         "node": "Research_Brief_Agent",
         "port": "watchlist_seed"
@@ -123,32 +2140,54 @@
       "target": {
         "node": "Risk_Catalyst_Workflow",
         "port": "watchlist"
-      }
+      },
+      "materialization": "copy"
     },
     {
-      "materialization": "copy",
       "source": {
-        "node": "Source_Data_Workflow",
-        "port": "verified_data_pack"
+        "node": "Coverage_Model_Workflow",
+        "port": "evidence_pack"
       },
       "target": {
-        "node": "Risk_Catalyst_Workflow",
-        "port": "verified_data"
-      }
+        "node": "Report_Workflow",
+        "port": "evidence_pack"
+      },
+      "materialization": "copy"
     },
     {
-      "materialization": "copy",
+      "source": {
+        "node": "Coverage_Model_Workflow",
+        "port": "model_input_pack"
+      },
+      "target": {
+        "node": "Report_Workflow",
+        "port": "model_input_pack"
+      },
+      "materialization": "copy"
+    },
+    {
+      "source": {
+        "node": "Coverage_Model_Workflow",
+        "port": "coverage_scorecard"
+      },
+      "target": {
+        "node": "Report_Workflow",
+        "port": "coverage_scorecard"
+      },
+      "materialization": "copy"
+    },
+    {
       "source": {
         "node": "Fundamentals_Workflow",
-        "port": "main"
+        "port": "fundamentals_handoff"
       },
       "target": {
         "node": "Report_Workflow",
         "port": "fundamentals"
-      }
+      },
+      "materialization": "copy"
     },
     {
-      "materialization": "copy",
       "source": {
         "node": "Fundamentals_Workflow",
         "port": "evidence_pack"
@@ -156,54 +2195,98 @@
       "target": {
         "node": "Report_Workflow",
         "port": "evidence_pack"
-      }
+      },
+      "materialization": "copy"
     },
     {
-      "materialization": "copy",
       "source": {
         "node": "Valuation_Workflow",
-        "port": "main"
+        "port": "valuation_model"
       },
       "target": {
         "node": "Report_Workflow",
         "port": "valuation"
-      }
+      },
+      "materialization": "copy"
     },
     {
-      "materialization": "copy",
+      "source": {
+        "node": "Valuation_Workflow",
+        "port": "price_guidance"
+      },
+      "target": {
+        "node": "Report_Workflow",
+        "port": "price_guidance"
+      },
+      "materialization": "copy"
+    },
+    {
+      "source": {
+        "node": "Valuation_Workflow",
+        "port": "fair_value_range"
+      },
+      "target": {
+        "node": "Report_Workflow",
+        "port": "fair_value_range"
+      },
+      "materialization": "copy"
+    },
+    {
       "source": {
         "node": "Risk_Catalyst_Workflow",
-        "port": "main"
+        "port": "risk_matrix"
       },
       "target": {
         "node": "Report_Workflow",
-        "port": "risk"
-      }
+        "port": "risk_matrix"
+      },
+      "materialization": "copy"
     },
     {
-      "materialization": "copy",
       "source": {
-        "node": "Source_Data_Workflow",
-        "port": "verified_data_pack"
+        "node": "Risk_Catalyst_Workflow",
+        "port": "catalyst_calendar"
       },
       "target": {
         "node": "Report_Workflow",
-        "port": "verified_data"
-      }
+        "port": "catalyst_calendar"
+      },
+      "materialization": "copy"
     },
     {
-      "materialization": "copy",
       "source": {
-        "node": "Source_Data_Workflow",
-        "port": "source_register"
+        "node": "Risk_Catalyst_Workflow",
+        "port": "monitoring_triggers"
       },
       "target": {
         "node": "Report_Workflow",
-        "port": "source_register"
-      }
+        "port": "monitoring_triggers"
+      },
+      "materialization": "copy"
     },
     {
-      "materialization": "copy",
+      "source": {
+        "node": "Risk_Catalyst_Workflow",
+        "port": "watchlist_verified"
+      },
+      "target": {
+        "node": "Report_Workflow",
+        "port": "watchlist_verified"
+      },
+      "materialization": "copy"
+    },
+    {
+      "source": {
+        "node": "Risk_Catalyst_Workflow",
+        "port": "watchlist_unverified"
+      },
+      "target": {
+        "node": "Report_Workflow",
+        "port": "watchlist_unverified"
+      },
+      "materialization": "copy"
+    },
+    {
       "source": {
         "node": "Report_Workflow",
         "port": "report"
@@ -211,32 +2294,21 @@
       "target": {
         "node": "Final_Review_Agent",
         "port": "report"
-      }
+      },
+      "materialization": "copy"
     },
     {
-      "materialization": "copy",
       "source": {
-        "node": "Valuation_Workflow",
-        "port": "main"
+        "node": "Report_Workflow",
+        "port": "claim_to_evidence_map"
       },
       "target": {
         "node": "Final_Review_Agent",
-        "port": "valuation"
-      }
-    },
-    {
-      "materialization": "copy",
-      "source": {
-        "node": "Risk_Catalyst_Workflow",
-        "port": "watchlist"
+        "port": "claim_to_evidence_map"
       },
-      "target": {
-        "node": "Final_Review_Agent",
-        "port": "risk_watchlist"
-      }
+      "materialization": "copy"
     },
     {
-      "materialization": "copy",
       "source": {
         "node": "Report_Workflow",
         "port": "appendix"
@@ -244,675 +2316,331 @@
       "target": {
         "node": "Final_Review_Agent",
         "port": "evidence_appendix"
-      }
+      },
+      "materialization": "copy"
+    },
+    {
+      "source": {
+        "node": "Report_Workflow",
+        "port": "decision_summary"
+      },
+      "target": {
+        "node": "Final_Review_Agent",
+        "port": "decision_summary"
+      },
+      "materialization": "copy"
+    },
+    {
+      "source": {
+        "node": "Valuation_Workflow",
+        "port": "price_guidance"
+      },
+      "target": {
+        "node": "Final_Review_Agent",
+        "port": "price_guidance"
+      },
+      "materialization": "copy"
+    },
+    {
+      "source": {
+        "node": "Risk_Catalyst_Workflow",
+        "port": "risk_matrix"
+      },
+      "target": {
+        "node": "Final_Review_Agent",
+        "port": "risk_matrix"
+      },
+      "materialization": "copy"
+    },
+    {
+      "source": {
+        "node": "Risk_Catalyst_Workflow",
+        "port": "monitoring_triggers"
+      },
+      "target": {
+        "node": "Final_Review_Agent",
+        "port": "monitoring_triggers"
+      },
+      "materialization": "copy"
+    },
+    {
+      "source": {
+        "node": "Risk_Catalyst_Workflow",
+        "port": "watchlist_verified"
+      },
+      "target": {
+        "node": "Final_Review_Agent",
+        "port": "watchlist_verified"
+      },
+      "materialization": "copy"
+    },
+    {
+      "source": {
+        "node": "Risk_Catalyst_Workflow",
+        "port": "watchlist_unverified"
+      },
+      "target": {
+        "node": "Final_Review_Agent",
+        "port": "watchlist_unverified"
+      },
+      "materialization": "copy"
+    },
+    {
+      "source": {
+        "node": "Coverage_Model_Workflow",
+        "port": "coverage_scorecard"
+      },
+      "target": {
+        "node": "Final_Review_Agent",
+        "port": "coverage_scorecard"
+      },
+      "materialization": "copy"
+    },
+    {
+      "source": {
+        "node": "Source_Data_Workflow",
+        "port": "blocking_gaps"
+      },
+      "target": {
+        "node": "Coverage_Model_Workflow",
+        "port": "blocking_gaps"
+      },
+      "materialization": "copy"
+    },
+    {
+      "source": {
+        "node": "Source_Data_Workflow",
+        "port": "quality_gate"
+      },
+      "target": {
+        "node": "Coverage_Model_Workflow",
+        "port": "source_quality_gate"
+      },
+      "materialization": "copy"
     }
   ],
-  "description": "Graph-first workspace canvas generated by ACC Workbench.",
-  "exposed_outputs": {
-    "action_items": {
-      "cardinality": "one",
-      "required": true,
-      "type": "artifact"
-    },
-    "main": {
-      "cardinality": "one",
-      "required": true,
-      "type": "artifact"
-    },
-    "review": {
-      "cardinality": "one",
-      "required": true,
-      "type": "artifact"
-    },
-    "source_register": {
-      "cardinality": "one",
-      "required": true,
-      "type": "artifact"
-    },
-    "valuation": {
-      "cardinality": "one",
-      "required": true,
-      "type": "artifact"
-    }
-  },
-  "id": "core_v2_stock_research_canvas",
   "metadata": {
-    "canonical_format": "accflow",
-    "directory_display_only": true,
     "layout": "workspace-canvas",
-    "root_workflow_id": "Final_Review_Agent",
+    "root_workflow_id": "core_v2_stock_research_canvas",
+    "canonical_format": "accflow",
+    "workbench_draft": true,
     "ui_layout": {
       "layout": "workspace-canvas",
+      "root_workflow_id": "core_v2_stock_research_canvas",
       "nodes": [
         {
           "id": "Research_Brief_Agent",
-          "label": "研究简报确认",
           "position": {
             "x": 0.0,
-            "y": 911.25
-          }
+            "y": 820.0
+          },
+          "label": "研究任务澄清"
         },
         {
           "id": "Source_Data_Workflow",
-          "label": "公开数据核验工作流",
           "position": {
-            "x": 406.0,
-            "y": 926.5
-          }
+            "x": 430.0,
+            "y": 760.0
+          },
+          "label": "Source Data Registry Workflow"
+        },
+        {
+          "id": "Coverage_Model_Workflow",
+          "position": {
+            "x": 1580.0,
+            "y": 760.0
+          },
+          "label": "Coverage and Model Input Workflow"
         },
         {
           "id": "Fundamentals_Workflow",
-          "label": "基本面工作流",
           "position": {
-            "x": 1327.0,
-            "y": 450.0
-          }
+            "x": 2680.0,
+            "y": 760.0
+          },
+          "label": "Fundamentals Workflow"
         },
         {
           "id": "Valuation_Workflow",
-          "label": "估值与情景工作流",
           "position": {
-            "x": 2596.0,
-            "y": 0.0
-          }
+            "x": 4070.0,
+            "y": 500.0
+          },
+          "label": "Valuation Workflow"
         },
         {
           "id": "Risk_Catalyst_Workflow",
-          "label": "风险与催化剂工作流",
           "position": {
-            "x": 2596.0,
-            "y": 1342.5
-          }
+            "x": 4070.0,
+            "y": 1140.0
+          },
+          "label": "Risk and Catalyst Workflow"
         },
         {
           "id": "Report_Workflow",
-          "label": "报告生成工作流",
           "position": {
-            "x": 3517.0,
-            "y": 587.75
-          }
+            "x": 5340.0,
+            "y": 820.0
+          },
+          "label": "Report Workflow"
         },
         {
           "id": "Final_Review_Agent",
-          "label": "最终发布评审",
           "position": {
-            "x": 4786.0,
-            "y": 2083.5
-          }
+            "x": 6760.0,
+            "y": 820.0
+          },
+          "label": "最终证据复核"
         }
-      ],
-      "root_workflow_id": "Final_Review_Agent"
-    },
-    "workbench_draft": true
+      ]
+    }
   },
-  "name": "Core v2 股市调研分析示例",
-  "nodes": [
+  "exposed_outputs": {
+    "main": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "review": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "action_items": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "model_input_pack": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "coverage_scorecard": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "valuation_model": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "price_guidance": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "decision_summary": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "claim_to_evidence_map": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "evidence_pack": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    }
+  },
+  "workflow_output_bindings": [
     {
-      "callable_ref": {
-        "id": "stock-research-analyst.codex",
-        "kind": "agent_class"
+      "source": {
+        "node": "Report_Workflow",
+        "port": "report"
       },
-      "id": "Research_Brief_Agent",
-      "metadata": {
-        "label": "研究简报确认",
-        "ui_label": "研究简报确认",
-        "workbench_kind": "agent_session"
-      },
-      "output_schema": {
-        "additionalProperties": false,
-        "properties": {
-          "constraints": {
-            "description": "研究范围、数据边界和下游限制条件",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "research_scope": {
-            "description": "本次单股深研的范围边界",
-            "type": "string"
-          },
-          "status": {
-            "description": "success 或 failed",
-            "type": "string"
-          },
-          "summary": {
-            "description": "面向下游节点的简明结论",
-            "type": "string"
-          },
-          "target_profile": {
-            "additionalProperties": true,
-            "description": "ticker、公司名称、业务边界和研究对象定义",
-            "type": "object"
-          },
-          "watchlist_seed": {
-            "description": "后续风险与催化剂 workflow 需要持续关注的事项",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "status",
-          "summary",
-          "target_profile",
-          "research_scope",
-          "constraints",
-          "watchlist_seed"
-        ],
-        "type": "object"
-      },
-      "overrides": {
-        "static_input": {
-          "research_preferences": {
-            "focus": [
-              "AI accelerators",
-              "data center revenue",
-              "gross margin quality",
-              "valuation sensitivity",
-              "supply chain and regulatory risks"
-            ],
-            "output_language": "zh-CN"
-          },
-          "target": {
-            "asset_type": "common_stock",
-            "company_name": "NVIDIA Corporation",
-            "exchange": "NASDAQ",
-            "research_scope": "single_stock_deep_research",
-            "ticker": "NVDA"
-          }
-        }
-      },
-      "ports": {
-        "inputs": {
-          "main": {
-            "cardinality": "one",
-            "required": false,
-            "type": "artifact"
-          }
-        },
-        "outputs": {
-          "constraints": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          },
-          "main": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          },
-          "research_scope": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          },
-          "target_profile": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          },
-          "watchlist_seed": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          }
-        }
-      },
-      "prompt_policy": {
-        "user_prompt": "请对 NVIDIA Corporation（ticker: NVDA，NASDAQ）进行单股深度调研分析。研究目标是形成可验证、可追踪的投资研究报告，覆盖业务模式、财务质量、行业位置、估值情景、主要风险、潜在催化剂和最终一致性评审。"
-      }
+      "target_port": "main",
+      "materialization": "copy",
+      "required": true
     },
     {
-      "callable_ref": {
-        "id": "core_v2_stock_research_canvas__Source_Data_Workflow.accflow.json",
-        "kind": "workflow_function"
+      "source": {
+        "node": "Final_Review_Agent",
+        "port": "main"
       },
-      "id": "Source_Data_Workflow",
-      "metadata": {
-        "label": "公开数据核验工作流",
-        "ui_label": "公开数据核验工作流",
-        "workbench_kind": "workflow"
-      },
-      "overrides": {
-        "static_input": {}
-      },
-      "ports": {
-        "inputs": {
-          "target": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          }
-        },
-        "outputs": {
-          "data_gaps": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          },
-          "source_register": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          },
-          "verified_data_pack": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          }
-        }
-      },
-      "prompt_policy": {
-        "user_prompt": "公开数据核验工作流 workflow container"
-      },
-      "workflow_call_output_bindings": [
-        {
-          "parent_port": "verified_data_pack",
-          "required": false,
-          "workflow_output": "verified_data_pack"
-        },
-        {
-          "parent_port": "source_register",
-          "required": false,
-          "workflow_output": "source_register"
-        },
-        {
-          "parent_port": "data_gaps",
-          "required": false,
-          "workflow_output": "data_gaps"
-        }
-      ]
+      "target_port": "review",
+      "materialization": "copy",
+      "required": true
     },
     {
-      "callable_ref": {
-        "id": "core_v2_stock_research_canvas__Fundamentals_Workflow.accflow.json",
-        "kind": "workflow_function"
+      "source": {
+        "node": "Final_Review_Agent",
+        "port": "action_items"
       },
-      "id": "Fundamentals_Workflow",
-      "metadata": {
-        "label": "基本面工作流",
-        "ui_label": "基本面工作流",
-        "workbench_kind": "workflow"
-      },
-      "overrides": {
-        "static_input": {}
-      },
-      "ports": {
-        "inputs": {
-          "target": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          },
-          "verified_data": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          }
-        },
-        "outputs": {
-          "evidence_pack": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          },
-          "main": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          }
-        }
-      },
-      "prompt_policy": {
-        "user_prompt": "基本面工作流 workflow container"
-      },
-      "workflow_call_output_bindings": [
-        {
-          "parent_port": "main",
-          "required": false,
-          "workflow_output": "main"
-        },
-        {
-          "parent_port": "evidence_pack",
-          "required": false,
-          "workflow_output": "evidence_pack"
-        }
-      ]
+      "target_port": "action_items",
+      "materialization": "copy",
+      "required": true
     },
     {
-      "callable_ref": {
-        "id": "core_v2_stock_research_canvas__Valuation_Workflow.accflow.json",
-        "kind": "workflow_function"
+      "source": {
+        "node": "Coverage_Model_Workflow",
+        "port": "evidence_pack"
       },
-      "id": "Valuation_Workflow",
-      "metadata": {
-        "label": "估值与情景工作流",
-        "ui_label": "估值与情景工作流",
-        "workbench_kind": "workflow"
-      },
-      "overrides": {
-        "static_input": {}
-      },
-      "ports": {
-        "inputs": {
-          "constraints": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          },
-          "fundamentals": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          },
-          "verified_data": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          }
-        },
-        "outputs": {
-          "main": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          }
-        }
-      },
-      "prompt_policy": {
-        "user_prompt": "估值与情景工作流 workflow container"
-      },
-      "workflow_call_output_bindings": [
-        {
-          "parent_port": "main",
-          "required": false,
-          "workflow_output": "main"
-        }
-      ]
+      "target_port": "evidence_pack",
+      "materialization": "copy",
+      "required": true
     },
     {
-      "callable_ref": {
-        "id": "core_v2_stock_research_canvas__Risk_Catalyst_Workflow.accflow.json",
-        "kind": "workflow_function"
+      "source": {
+        "node": "Coverage_Model_Workflow",
+        "port": "model_input_pack"
       },
-      "id": "Risk_Catalyst_Workflow",
-      "metadata": {
-        "label": "风险与催化剂工作流",
-        "ui_label": "风险与催化剂工作流",
-        "workbench_kind": "workflow"
-      },
-      "overrides": {
-        "static_input": {}
-      },
-      "ports": {
-        "inputs": {
-          "fundamentals": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          },
-          "verified_data": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          },
-          "watchlist": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          }
-        },
-        "outputs": {
-          "main": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          },
-          "watchlist": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          }
-        }
-      },
-      "prompt_policy": {
-        "user_prompt": "风险与催化剂工作流 workflow container"
-      },
-      "workflow_call_output_bindings": [
-        {
-          "parent_port": "main",
-          "required": false,
-          "workflow_output": "main"
-        },
-        {
-          "parent_port": "watchlist",
-          "required": false,
-          "workflow_output": "watchlist"
-        }
-      ]
+      "target_port": "model_input_pack",
+      "materialization": "copy",
+      "required": true
     },
     {
-      "callable_ref": {
-        "id": "core_v2_stock_research_canvas__Report_Workflow.accflow.json",
-        "kind": "workflow_function"
+      "source": {
+        "node": "Coverage_Model_Workflow",
+        "port": "coverage_scorecard"
       },
-      "id": "Report_Workflow",
-      "metadata": {
-        "label": "报告生成工作流",
-        "ui_label": "报告生成工作流",
-        "workbench_kind": "workflow"
-      },
-      "overrides": {
-        "static_input": {}
-      },
-      "ports": {
-        "inputs": {
-          "evidence_pack": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          },
-          "fundamentals": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          },
-          "risk": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          },
-          "source_register": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          },
-          "valuation": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          },
-          "verified_data": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          }
-        },
-        "outputs": {
-          "appendix": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          },
-          "report": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          }
-        }
-      },
-      "prompt_policy": {
-        "user_prompt": "报告生成工作流 workflow container"
-      },
-      "workflow_call_output_bindings": [
-        {
-          "parent_port": "report",
-          "required": false,
-          "workflow_output": "report"
-        },
-        {
-          "parent_port": "appendix",
-          "required": false,
-          "workflow_output": "appendix"
-        }
-      ]
+      "target_port": "coverage_scorecard",
+      "materialization": "copy",
+      "required": true
     },
     {
-      "callable_ref": {
-        "id": "stock-publication-reviewer.codex",
-        "kind": "agent_class"
+      "source": {
+        "node": "Valuation_Workflow",
+        "port": "valuation_model"
       },
-      "id": "Final_Review_Agent",
-      "metadata": {
-        "label": "最终发布评审",
-        "ui_label": "最终发布评审",
-        "workbench_kind": "agent_session"
+      "target_port": "valuation_model",
+      "materialization": "copy",
+      "required": true
+    },
+    {
+      "source": {
+        "node": "Valuation_Workflow",
+        "port": "price_guidance"
       },
-      "output_schema": {
-        "additionalProperties": false,
-        "properties": {
-          "action_items": {
-            "description": "发布前后需要执行的行动项",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "readiness": {
-            "description": "报告是否可发布，以及原因",
-            "type": "string"
-          },
-          "required_followups": {
-            "description": "发布前仍需补充的检查项",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "status": {
-            "description": "success 或 failed",
-            "type": "string"
-          },
-          "summary": {
-            "description": "面向下游节点的简明结论",
-            "type": "string"
-          }
-        },
-        "required": [
-          "status",
-          "summary",
-          "readiness",
-          "required_followups"
-        ],
-        "type": "object"
+      "target_port": "price_guidance",
+      "materialization": "copy",
+      "required": true
+    },
+    {
+      "source": {
+        "node": "Report_Workflow",
+        "port": "decision_summary"
       },
-      "overrides": {
-        "static_input": {}
+      "target_port": "decision_summary",
+      "materialization": "copy",
+      "required": true
+    },
+    {
+      "source": {
+        "node": "Report_Workflow",
+        "port": "claim_to_evidence_map"
       },
-      "ports": {
-        "inputs": {
-          "evidence_appendix": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          },
-          "report": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          },
-          "risk_watchlist": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          },
-          "valuation": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          }
-        },
-        "outputs": {
-          "action_items": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          },
-          "main": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          }
-        }
-      },
-      "prompt_policy": {
-        "user_prompt": "接收多个 workflow 输出，检查报告、估值、风险和证据链是否一致。"
-      }
+      "target_port": "claim_to_evidence_map",
+      "materialization": "copy",
+      "required": true
     }
   ],
   "policies": {
     "failure_mode": "fail_fast",
     "max_concurrency": 8
-  },
-  "schema_version": "acc.core.v2",
-  "version": "0.4.0",
-  "workflow_output_bindings": [
-    {
-      "materialization": "copy",
-      "required": true,
-      "source": {
-        "node": "Report_Workflow",
-        "port": "report"
-      },
-      "target_port": "main"
-    },
-    {
-      "materialization": "copy",
-      "required": true,
-      "source": {
-        "node": "Final_Review_Agent",
-        "port": "main"
-      },
-      "target_port": "review"
-    },
-    {
-      "materialization": "copy",
-      "required": true,
-      "source": {
-        "node": "Final_Review_Agent",
-        "port": "action_items"
-      },
-      "target_port": "action_items"
-    },
-    {
-      "materialization": "copy",
-      "required": true,
-      "source": {
-        "node": "Source_Data_Workflow",
-        "port": "source_register"
-      },
-      "target_port": "source_register"
-    },
-    {
-      "materialization": "copy",
-      "required": true,
-      "source": {
-        "node": "Valuation_Workflow",
-        "port": "main"
-      },
-      "target_port": "valuation"
-    }
-  ]
+  }
 }

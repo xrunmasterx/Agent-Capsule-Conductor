@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 from pathlib import Path
 
 from acc.storage_index import StorageIndex, rebuild_storage_index
+from acc.storage_refs import make_run_ref
 from acc.utils import safe_path_size_bytes
 
 
@@ -97,3 +99,48 @@ def test_storage_index_consistency_issues_tolerates_bad_run_row(
     issues = StorageIndex(tmp_path).consistency_issues()
 
     assert issues == []
+
+
+def test_storage_index_upserts_single_run_without_rebuild_inventory(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    run_dir = tmp_path / "runs" / "run_a"
+    run_dir.mkdir(parents=True)
+    (run_dir / "run_summary.json").write_text(
+        json.dumps(
+            {
+                "run_id": "run_a",
+                "status": "success",
+                "run_dir": str(run_dir.resolve()),
+                "node_count": 0,
+                "nodes": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    index = StorageIndex(tmp_path)
+    calls: list[Path] = []
+
+    def forbidden_inventory(root: Path):
+        calls.append(root)
+        raise AssertionError("full inventory rebuild should not run")
+
+    monkeypatch.setattr("acc.storage_index.build_inventory_rows", forbidden_inventory)
+
+    assert index.upsert_object(make_run_ref("run_a")) is True
+    assert calls == []
+    with sqlite3.connect(tmp_path / ".acc" / "index.sqlite") as conn:
+        row = conn.execute("SELECT object_ref, object_kind FROM objects").fetchone()
+    assert row == ("run:v1:run_a", "run")
+
+
+def test_storage_index_deletes_single_object_without_inventory(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "run_a"
+    run_dir.mkdir(parents=True)
+    rebuild_storage_index(tmp_path)
+
+    assert StorageIndex(tmp_path).delete_object(make_run_ref("run_a")) is True
+    with sqlite3.connect(tmp_path / ".acc" / "index.sqlite") as conn:
+        rows = conn.execute("SELECT object_ref FROM objects").fetchall()
+    assert rows == []

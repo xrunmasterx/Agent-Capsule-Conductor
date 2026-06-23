@@ -8,7 +8,6 @@ from typing import Any
 from uuid import uuid4
 
 from acc.app.authoring import AuthoringSessionService
-from acc.graphops import GraphOpsService
 from acc.app.workbench_snapshots import WorkbenchCanvasSnapshotService
 from acc.control_plane import (
     list_callables_payload,
@@ -19,6 +18,7 @@ from acc.control_plane import (
     show_workflow_payload,
     validate_callable_id,
 )
+from acc.graphops import GraphOpsService
 from acc.mcp_server.audit import new_request_id, write_mcp_audit
 from acc.mcp_server.schemas import McpToolResult, tool_result
 from acc.utils import AccError

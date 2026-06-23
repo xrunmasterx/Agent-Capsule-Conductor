@@ -14,6 +14,7 @@ from acc.storage_refs import (
     make_run_ref,
     make_session_ref,
     make_task_ref,
+    parse_object_ref,
 )
 from acc.utils import AccError, load_json, log_stderr, safe_path_size_bytes
 
@@ -123,6 +124,59 @@ class StorageIndex:
                 )
         return issues
 
+    def upsert_object(self, object_ref: str) -> bool:
+        """Refresh a single indexed object row without rebuilding the repository index."""
+        row = build_object_row(self.project_root, object_ref)
+        self.acc_root.mkdir(parents=True, exist_ok=True)
+        conn = self._connect()
+        try:
+            ensure_schema(conn)
+            with conn:
+                if row is None:
+                    conn.execute("DELETE FROM objects WHERE object_ref = ?", (object_ref,))
+                    return False
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO objects (
+                      object_ref, legacy_ref, object_kind, object_id, owner_ref, path, state,
+                      created_at, updated_at, ended_at, size_bytes, digest, pinned, exported,
+                      retention_class, local_only, lease_state, indexed_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    row_to_sql(row),
+                )
+                conn.execute(
+                    "INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)",
+                    ("schema_version", SQLITE_SCHEMA_VERSION),
+                )
+                conn.execute(
+                    "INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)",
+                    ("incremental_updated_at", utc_now_iso()),
+                )
+            return True
+        finally:
+            conn.close()
+
+    def delete_object(self, object_ref: str) -> bool:
+        """Delete a single indexed object row without scanning repository evidence."""
+        self.acc_root.mkdir(parents=True, exist_ok=True)
+        conn = self._connect()
+        try:
+            ensure_schema(conn)
+            with conn:
+                cursor = conn.execute("DELETE FROM objects WHERE object_ref = ?", (object_ref,))
+                conn.execute(
+                    "INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)",
+                    ("schema_version", SQLITE_SCHEMA_VERSION),
+                )
+                conn.execute(
+                    "INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)",
+                    ("incremental_updated_at", utc_now_iso()),
+                )
+            return cursor.rowcount > 0
+        finally:
+            conn.close()
+
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
@@ -139,6 +193,30 @@ def rebuild_storage_index_best_effort(project_root: Path) -> dict[str, Any] | No
     except Exception as exc:  # noqa: BLE001 - storage index is a projection
         log_stderr(f"storage index rebuild skipped: {exc}")
         return None
+
+
+def upsert_storage_index_object(project_root: Path, object_ref: str) -> bool:
+    return StorageIndex(project_root).upsert_object(object_ref)
+
+
+def delete_storage_index_object(project_root: Path, object_ref: str) -> bool:
+    return StorageIndex(project_root).delete_object(object_ref)
+
+
+def build_object_row(project_root: Path, object_ref: str) -> StorageObjectRow | None:
+    project_root = project_root.resolve()
+    try:
+        object_kind, object_id = parse_object_ref(object_ref)
+    except AccError:
+        return None
+    producers = OBJECT_ROW_PRODUCERS_BY_KIND.get(object_kind)
+    if not producers:
+        return None
+    for producer in producers:
+        for row in producer(project_root):
+            if row.object_ref == object_ref:
+                return row
+    return None
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
@@ -183,18 +261,8 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
 def build_inventory_rows(project_root: Path) -> list[StorageObjectRow]:
     project_root = project_root.resolve()
     rows: list[StorageObjectRow] = []
-    producers = (
-        iter_run_rows,
-        iter_task_rows,
-        iter_session_rows,
-        iter_artifact_rows,
-        iter_canvas_snapshot_rows,
-        iter_graphops_rows,
-        iter_runtime_spec_rows,
-        iter_trash_rows,
-        iter_tombstone_rows,
-        iter_gc_manifest_rows,
-        iter_runner_job_rows,
+    producers = tuple(
+        producer for producers in OBJECT_ROW_PRODUCERS_BY_KIND.values() for producer in producers
     )
     for producer in producers:
         try:
@@ -240,7 +308,9 @@ def iter_run_rows(project_root: Path) -> list[StorageObjectRow]:
                     ended_at=summary.ended_at if summary is not None else None,
                     size_bytes=storage_index_path_size_bytes(run_dir),
                     pinned=bool(retention.get("pinned")) if isinstance(retention, dict) else False,
-                    exported=bool(retention.get("exported")) if isinstance(retention, dict) else False,
+                    exported=bool(retention.get("exported"))
+                    if isinstance(retention, dict)
+                    else False,
                     retention_class=(
                         str(retention.get("retention_class") or "normal")
                         if isinstance(retention, dict)
@@ -268,11 +338,7 @@ def iter_task_rows(project_root: Path) -> list[StorageObjectRow]:
             else task_dir.name
         )
         retention = load_optional_json(task_dir / "retention.json")
-        state = (
-            str(payload.get("status") or "active")
-            if isinstance(payload, dict)
-            else "unknown"
-        )
+        state = str(payload.get("status") or "active") if isinstance(payload, dict) else "unknown"
         rows.append(
             StorageObjectRow(
                 object_ref=make_task_ref(task_id),
@@ -322,9 +388,7 @@ def iter_session_rows(project_root: Path) -> list[StorageObjectRow]:
                 elif payload.get("bound_run_id"):
                     owner_ref = make_run_ref(str(payload["bound_run_id"]))
             state = (
-                str(payload.get("status") or "unknown")
-                if isinstance(payload, dict)
-                else "unknown"
+                str(payload.get("status") or "unknown") if isinstance(payload, dict) else "unknown"
             )
             rows.append(
                 StorageObjectRow(
@@ -429,11 +493,7 @@ def iter_graphops_rows(project_root: Path) -> list[StorageObjectRow]:
             if isinstance(payload, dict)
             else proposal_dir.name
         )
-        state = (
-            str(payload.get("status") or "unknown")
-            if isinstance(payload, dict)
-            else "unknown"
-        )
+        state = str(payload.get("status") or "unknown") if isinstance(payload, dict) else "unknown"
         rows.append(
             StorageObjectRow(
                 object_ref=make_object_ref("graphops_proposal", proposal_id),
@@ -505,9 +565,7 @@ def iter_tombstone_rows(project_root: Path) -> list[StorageObjectRow]:
     for path in sorted(paths):
         payload = load_optional_json(path)
         object_ref = (
-            str(payload.get("object_ref") or path.stem)
-            if isinstance(payload, dict)
-            else path.stem
+            str(payload.get("object_ref") or path.stem) if isinstance(payload, dict) else path.stem
         )
         object_id = object_ref.replace(":", "_")
         rows.append(
@@ -583,6 +641,21 @@ def iter_runner_job_rows(project_root: Path) -> list[StorageObjectRow]:
             )
         )
     return rows
+
+
+OBJECT_ROW_PRODUCERS_BY_KIND = {
+    "run": (iter_run_rows,),
+    "task": (iter_task_rows,),
+    "session": (iter_session_rows,),
+    "artifact": (iter_artifact_rows,),
+    "canvas_snapshot": (iter_canvas_snapshot_rows,),
+    "graphops_proposal": (iter_graphops_rows,),
+    "runtime_workflow_spec": (iter_runtime_spec_rows,),
+    "trash_entry": (iter_trash_rows,),
+    "tombstone": (iter_tombstone_rows,),
+    "gc_manifest": (iter_gc_manifest_rows,),
+    "runner_job": (iter_runner_job_rows,),
+}
 
 
 def row_to_sql(row: StorageObjectRow) -> tuple[Any, ...]:

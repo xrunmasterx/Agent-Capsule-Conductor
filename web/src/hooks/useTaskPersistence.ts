@@ -12,6 +12,7 @@ import {
   normalizeWorkbenchAuthoringState,
   taskStorePayloadFromSerialized,
 } from '../workbench/model/taskModel';
+import { selectTaskStorePayload, useWorkbenchStore } from '../stores/workbenchStore';
 import { TASK_STORE_KEY } from '../workbench/constants';
 import type {
   WorkbenchTask,
@@ -27,7 +28,7 @@ import type { LoadWorkbenchTaskCanvas, SaveWorkbenchTaskCanvas } from './useWork
 export type UseTaskPersistenceOptions = {
   durableTasksReady: boolean;
   activeTaskId: string;
-  tasks: WorkbenchTask[];
+  tasks?: WorkbenchTask[];
   saveLocalTaskStore: (payload: WorkbenchTaskStorePayload) => void;
   snapshotPublishKey: string;
   publishCurrentSnapshot: () => Promise<void>;
@@ -80,9 +81,23 @@ export function useTaskPersistence({
 
   useEffect(() => {
     if (!durableTasksReady) {
-      return;
+      return undefined;
     }
-    saveLocalTaskStore({ version: 1, activeTaskId, tasks });
+    saveLocalTaskStore(tasks ? { version: 1, activeTaskId, tasks } : selectTaskStorePayload(useWorkbenchStore.getState()));
+    if (tasks) {
+      return undefined;
+    }
+    const unsubscribe = useWorkbenchStore.subscribe((state, previous) => {
+      if (
+        state.activeTaskId === previous.activeTaskId &&
+        state.taskOrder === previous.taskOrder &&
+        state.tasksById === previous.tasksById
+      ) {
+        return;
+      }
+      saveLocalTaskStore(selectTaskStorePayload(state));
+    });
+    return unsubscribe;
   }, [activeTaskId, durableTasksReady, saveLocalTaskStore, tasks]);
 
   useEffect(() => {

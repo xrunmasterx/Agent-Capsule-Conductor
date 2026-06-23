@@ -71,7 +71,7 @@ def answer_human_gate(
                 decision_id=decision.decision_id,
             )
             payload["resume"] = resume.as_payload()
-            dispatch = _dispatch_approved_gate_if_possible(run_dir, interaction_id)
+            dispatch = _continue_approved_gate_if_possible(run_dir, interaction_id)
             if dispatch is not None:
                 payload["dispatch"] = dispatch
         else:
@@ -130,15 +130,19 @@ def _try_load_run_status(run_dir: Path) -> str | None:
         return None
 
 
-def _dispatch_approved_gate_if_possible(
+def _continue_approved_gate_if_possible(
     run_dir: Path,
     interaction_id: str,
 ) -> dict[str, Any] | None:
     snapshot = run_dir / "behavior_snapshot" / "workflow_function_template.json"
     if not snapshot.exists():
         return None
-    from acc.app.runtime.dispatch_gate import resume_approved_human_gate_dispatch
+    from acc.app.runtime.continuation import continue_persisted_run
 
     return asyncio.run(
-        resume_approved_human_gate_dispatch(run_dir, interaction_id=interaction_id)
+        continue_persisted_run(
+            run_dir,
+            reason="human",
+            interaction_id=interaction_id,
+        )
     )

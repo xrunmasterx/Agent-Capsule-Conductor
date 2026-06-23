@@ -4,13 +4,7 @@
 
 import { Trash2 } from 'lucide-react';
 
-export type WorkbenchTaskSummary = {
-  taskId: string;
-  title: string;
-  status: string;
-  activeRunId?: string;
-  latestRunId?: string;
-};
+import type { WorkbenchTaskSummary } from '../../types/workbench';
 
 export function TaskRail({
   tasks,

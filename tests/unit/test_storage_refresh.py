@@ -37,14 +37,18 @@ def test_request_storage_index_refresh_writes_dirty_marker_and_request(
     assert marker["generation"] == requests[-1]["generation"]
 
 
-def test_request_storage_index_refresh_truncates_request_log(
+def test_request_storage_index_refresh_retains_pending_request_log(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
     monkeypatch.setattr("acc.storage_refresh.REQUEST_LOG_MAX_LINES", 3)
 
     for index in range(5):
-        request_storage_index_refresh(tmp_path, reason=f"unit_test_{index}")
+        request_storage_index_refresh(
+            tmp_path,
+            reason=f"unit_test_{index}",
+            object_ref=f"run:v1:run_{index}",
+        )
 
     requests = [
         json.loads(line)
@@ -54,25 +58,54 @@ def test_request_storage_index_refresh_truncates_request_log(
     ]
 
     assert [item["reason"] for item in requests] == [
+        "unit_test_0",
+        "unit_test_1",
         "unit_test_2",
         "unit_test_3",
         "unit_test_4",
     ]
 
 
-def test_refresh_once_rebuilds_index_and_clears_dirty_marker(tmp_path: Path) -> None:
-    (tmp_path / "runs" / "run_a").mkdir(parents=True)
-    request_storage_index_refresh(tmp_path, reason="unit_test")
+def test_refresh_once_incrementally_upserts_object_and_clears_dirty_marker(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    run_dir = tmp_path / "runs" / "run_a"
+    run_dir.mkdir(parents=True)
+    (run_dir / "run_summary.json").write_text(
+        json.dumps(
+            {
+                "run_id": "run_a",
+                "status": "success",
+                "run_dir": str(run_dir.resolve()),
+                "node_count": 0,
+                "nodes": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    rebuild_calls: list[Path] = []
+
+    def forbidden_rebuild(root: Path) -> dict[str, object] | None:
+        rebuild_calls.append(root)
+        return None
+
+    monkeypatch.setattr("acc.storage_refresh.rebuild_storage_index_best_effort", forbidden_rebuild)
+    request_storage_index_refresh(tmp_path, reason="unit_test", object_ref="run:v1:run_a")
     service = StorageIndexRefreshService(tmp_path)
 
     assert asyncio.run(service.refresh_once()) is True
 
+    assert rebuild_calls == []
     assert not (tmp_path / REFRESH_DIR / DIRTY_FILENAME).exists()
     assert (tmp_path / ".acc" / "index.sqlite").exists()
 
 
-def test_refresh_once_keeps_dirty_marker_on_failure(tmp_path: Path, monkeypatch) -> None:
-    request_storage_index_refresh(tmp_path, reason="unit_test")
+def test_refresh_once_keeps_dirty_marker_on_repair_rebuild_failure(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    request_storage_index_refresh(tmp_path, reason="repair_rebuild")
     monkeypatch.setattr("acc.storage_refresh.rebuild_storage_index_best_effort", lambda root: None)
     service = StorageIndexRefreshService(tmp_path)
 
@@ -81,11 +114,28 @@ def test_refresh_once_keeps_dirty_marker_on_failure(tmp_path: Path, monkeypatch)
     assert (tmp_path / REFRESH_DIR / DIRTY_FILENAME).exists()
 
 
+def test_refresh_once_keeps_dirty_marker_when_incremental_upsert_fails(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    def failing_upsert(root: Path, object_ref: str) -> bool:
+        raise RuntimeError(f"boom: {object_ref}")
+
+    monkeypatch.setattr("acc.storage_refresh.upsert_storage_index_object", failing_upsert)
+    request_storage_index_refresh(tmp_path, reason="unit_test", object_ref="run:v1:run_a")
+    service = StorageIndexRefreshService(tmp_path)
+
+    assert asyncio.run(service.refresh_once()) is False
+
+    assert (tmp_path / REFRESH_DIR / DIRTY_FILENAME).exists()
+    assert (tmp_path / REFRESH_DIR / REQUESTS_FILENAME).exists()
+
+
 def test_refresh_once_keeps_new_dirty_marker_written_during_rebuild(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    request_storage_index_refresh(tmp_path, reason="before_rebuild")
+    request_storage_index_refresh(tmp_path, reason="repair_rebuild")
 
     def rebuild(root: Path) -> dict[str, object]:
         request_storage_index_refresh(root, reason="during_rebuild")
@@ -115,8 +165,8 @@ def test_refresh_service_debounces_multiple_triggers(tmp_path: Path, monkeypatch
         service = StorageIndexRefreshService(tmp_path, debounce_seconds=0.01, poll_seconds=60)
         await service.start()
         try:
-            for index in range(5):
-                service.trigger(reason=f"trigger_{index}")
+            for _index in range(5):
+                service.trigger(reason="repair_rebuild")
             for _ in range(50):
                 if len(calls) == 1 and not service.dirty_path.exists():
                     return
@@ -146,7 +196,7 @@ def test_direct_refresh_request_wakes_registered_service(
         service = StorageIndexRefreshService(tmp_path, debounce_seconds=0.01, poll_seconds=60)
         await service.start()
         try:
-            request_storage_index_refresh(tmp_path, reason="direct_request")
+            request_storage_index_refresh(tmp_path, reason="repair_rebuild")
             for _ in range(50):
                 if calls and not service.dirty_path.exists():
                     return

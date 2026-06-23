@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import asyncio
 import json
-import os
 import sys
 
 from acc.adapters.base import (
@@ -13,8 +11,9 @@ from acc.adapters.base import (
     write_jsonl,
 )
 from acc.adapters.capabilities import default_adapter_capabilities
+from acc.adapters.process_harness import AdapterProcessHarness, AdapterProcessSpec
 from acc.models import AccError, AgentCapabilities
-from acc.storage import write_bytes_atomic, write_text_atomic
+from acc.storage import write_text_atomic
 
 
 class GenericCliAdapter:
@@ -26,8 +25,7 @@ class GenericCliAdapter:
             return self._failed(request, "generic_cli runtime has no command")
 
         command = [resolve_command(request.command), *request.args_base]
-        env = os.environ.copy()
-        env.update(request.env)
+        env = dict(request.env)
         env.update(
             {
                 "ACC_INPUT_PATH": str(request.run_dir / "input.json"),
@@ -41,23 +39,18 @@ class GenericCliAdapter:
         )
         env.update(build_shared_acc_env(request))
 
-        prompt_bytes = request.prompt_path.read_bytes()
-        try:
-            process = await asyncio.create_subprocess_exec(
-                *command,
+        outcome = await AdapterProcessHarness().run(
+            AdapterProcessSpec(
+                command=command,
                 cwd=request.workspace_dir,
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+                stdin=request.prompt_path.read_bytes(),
                 env=env,
+                timeout_seconds=request.timeout_seconds,
+                stdout_log_path=request.stdout_log_path,
+                stderr_log_path=request.stderr_log_path,
             )
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(input=prompt_bytes),
-                timeout=request.timeout_seconds,
-            )
-        except TimeoutError:
-            process.kill()
-            await process.wait()
+        )
+        if outcome.timed_out:
             write_text_atomic(request.stderr_log_path, "Adapter timed out\n")
             write_event(request, {"event": "timeout", "command": command})
             return AgentRunResult(
@@ -70,29 +63,27 @@ class GenericCliAdapter:
                 error="timeout",
             )
 
-        write_bytes_atomic(request.stdout_log_path, stdout)
-        write_bytes_atomic(request.stderr_log_path, stderr)
         write_event(
             request,
-            {"event": "process_exit", "command": command, "exit_code": process.returncode},
+            {"event": "process_exit", "command": command, "exit_code": outcome.returncode},
         )
 
-        if process.returncode != 0:
+        if outcome.returncode != 0:
             return AgentRunResult(
                 status="failed",
                 summary="Generic CLI adapter failed",
                 output_json_path=None,
                 event_log_path=request.events_log_path,
                 artifacts_dir=request.artifacts_dir,
-                exit_code=process.returncode,
-                error=stderr.decode(errors="replace").strip() or "non-zero exit",
+                exit_code=outcome.returncode,
+                error=outcome.stderr.decode(errors="replace").strip() or "non-zero exit",
             )
 
         if not request.output_json_path.exists():
-            maybe_write_json_stdout(stdout, request.output_json_path)
+            maybe_write_json_stdout(outcome.stdout, request.output_json_path)
 
         if not request.output_json_path.exists():
-            return self._failed(request, "Adapter did not produce output.json", process.returncode)
+            return self._failed(request, "Adapter did not produce output.json", outcome.returncode)
 
         return AgentRunResult(
             status="success",
@@ -100,7 +91,7 @@ class GenericCliAdapter:
             output_json_path=request.output_json_path,
             event_log_path=request.events_log_path,
             artifacts_dir=request.artifacts_dir,
-            exit_code=process.returncode,
+            exit_code=outcome.returncode,
         )
 
     @staticmethod

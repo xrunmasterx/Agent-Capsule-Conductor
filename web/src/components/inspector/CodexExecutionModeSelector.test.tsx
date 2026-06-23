@@ -11,9 +11,9 @@ describe('CodexExecutionModeSelector', () => {
 
     const selector = screen.getByLabelText('Codex 执行模式');
     expect(selector).toHaveValue('default');
-    expect(screen.getByRole('option', { name: '默认安全模式（read-only sandbox）' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: '本地只读无沙箱（高风险）' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: '危险全权权限（高风险）' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '默认本地全权限（推荐）' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '只读无沙箱（仅代码阅读场景）' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '显式危险全权限（调试/特殊任务）' })).toBeInTheDocument();
 
     fireEvent.change(selector, { target: { value: 'danger_full_access' } });
 

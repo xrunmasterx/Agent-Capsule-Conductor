@@ -1,494 +1,1729 @@
 {
-  "control_edges": [
+  "schema_version": "acc.core.v2",
+  "id": "core_v2_stock_research_canvas__Risk_Catalyst_Workflow",
+  "version": "0.1.0",
+  "name": "Risk and Catalyst Workflow",
+  "description": "Child workflow compiled from Workbench container Risk_Catalyst_Workflow.",
+  "nodes": [
     {
-      "context": "none",
-      "from": "macro_risk_agent",
-      "to": "risk_synthesis_agent"
+      "id": "macro_risk_agent",
+      "callable_ref": {
+        "kind": "agent_class",
+        "id": "stock-research-analyst.codex"
+      },
+      "ports": {
+        "inputs": {
+          "fundamentals": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "evidence_pack": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "model_input_pack": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "coverage_scorecard": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "watchlist": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          }
+        },
+        "outputs": {
+          "main": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "risk_handoff": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "data_gaps": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "quality_gate": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          }
+        }
+      },
+      "overrides": {
+        "static_input": {}
+      },
+      "prompt_policy": {
+        "user_prompt": "Analyze macro, rates, FX, regulatory, and policy risks using only verified registry evidence. Separate current risks from speculative watch items."
+      },
+      "metadata": {
+        "label": "宏观政策风险",
+        "ui_label": "宏观政策风险",
+        "workbench_kind": "agent_session"
+      },
+      "invocation_policy": {
+        "permission_profile": {
+          "workspace_access": "writes_workspace",
+          "network": true,
+          "shell": true,
+          "dangerous": true
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "status",
+          "summary",
+          "as_of_date",
+          "data_gaps",
+          "quality",
+          "quality_gate",
+          "outputs"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "success",
+              "partial",
+              "blocked",
+              "failed"
+            ]
+          },
+          "summary": {
+            "type": "string"
+          },
+          "as_of_date": {
+            "type": "string"
+          },
+          "handoff_summary": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "evidence_pack": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "sources",
+              "metrics",
+              "claims"
+            ],
+            "properties": {
+              "sources": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "source_id",
+                    "title",
+                    "url",
+                    "source_type"
+                  ],
+                  "properties": {
+                    "source_id": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "source_type": {
+                      "type": "string"
+                    },
+                    "retrieved_at": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "metrics": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "metric_id",
+                    "name",
+                    "period",
+                    "value",
+                    "unit",
+                    "source_ids"
+                  ],
+                  "properties": {
+                    "metric_id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "period": {
+                      "type": "string"
+                    },
+                    "value": {},
+                    "unit": {
+                      "type": "string"
+                    },
+                    "currency": {
+                      "type": "string"
+                    },
+                    "source_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              },
+              "claims": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "claim_id",
+                    "statement",
+                    "source_ids",
+                    "metric_ids"
+                  ],
+                  "properties": {
+                    "claim_id": {
+                      "type": "string"
+                    },
+                    "statement": {
+                      "type": "string"
+                    },
+                    "source_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "metric_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "confidence": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "blocking_gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "data_gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "quality_gate": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "quality": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "outputs": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "main",
+              "risk_handoff",
+              "data_gaps",
+              "quality_gate"
+            ],
+            "properties": {
+              "main": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "risk_handoff": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "data_gaps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "quality_gate": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          },
+          "main": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "risk_handoff": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      }
     },
     {
-      "context": "none",
-      "from": "company_risk_agent",
-      "to": "risk_synthesis_agent"
+      "id": "company_risk_agent",
+      "callable_ref": {
+        "kind": "agent_class",
+        "id": "stock-research-analyst.codex"
+      },
+      "ports": {
+        "inputs": {
+          "fundamentals": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "evidence_pack": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "model_input_pack": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "coverage_scorecard": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "watchlist": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          }
+        },
+        "outputs": {
+          "main": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "risk_handoff": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "data_gaps": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "quality_gate": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          }
+        }
+      },
+      "overrides": {
+        "static_input": {}
+      },
+      "prompt_policy": {
+        "user_prompt": "Analyze company-specific execution, product, supply chain, governance, balance sheet, and margin risks with source-bound evidence."
+      },
+      "metadata": {
+        "label": "公司经营风险",
+        "ui_label": "公司经营风险",
+        "workbench_kind": "agent_session"
+      },
+      "invocation_policy": {
+        "permission_profile": {
+          "workspace_access": "writes_workspace",
+          "network": true,
+          "shell": true,
+          "dangerous": true
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "status",
+          "summary",
+          "as_of_date",
+          "data_gaps",
+          "quality",
+          "quality_gate",
+          "outputs"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "success",
+              "partial",
+              "blocked",
+              "failed"
+            ]
+          },
+          "summary": {
+            "type": "string"
+          },
+          "as_of_date": {
+            "type": "string"
+          },
+          "handoff_summary": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "evidence_pack": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "sources",
+              "metrics",
+              "claims"
+            ],
+            "properties": {
+              "sources": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "source_id",
+                    "title",
+                    "url",
+                    "source_type"
+                  ],
+                  "properties": {
+                    "source_id": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "source_type": {
+                      "type": "string"
+                    },
+                    "retrieved_at": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "metrics": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "metric_id",
+                    "name",
+                    "period",
+                    "value",
+                    "unit",
+                    "source_ids"
+                  ],
+                  "properties": {
+                    "metric_id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "period": {
+                      "type": "string"
+                    },
+                    "value": {},
+                    "unit": {
+                      "type": "string"
+                    },
+                    "currency": {
+                      "type": "string"
+                    },
+                    "source_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              },
+              "claims": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "claim_id",
+                    "statement",
+                    "source_ids",
+                    "metric_ids"
+                  ],
+                  "properties": {
+                    "claim_id": {
+                      "type": "string"
+                    },
+                    "statement": {
+                      "type": "string"
+                    },
+                    "source_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "metric_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "confidence": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "blocking_gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "data_gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "quality_gate": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "quality": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "outputs": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "main",
+              "risk_handoff",
+              "data_gaps",
+              "quality_gate"
+            ],
+            "properties": {
+              "main": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "risk_handoff": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "data_gaps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "quality_gate": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          },
+          "main": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "risk_handoff": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      }
     },
     {
-      "context": "none",
-      "from": "catalyst_agent",
-      "to": "risk_synthesis_agent"
+      "id": "catalyst_agent",
+      "callable_ref": {
+        "kind": "agent_class",
+        "id": "stock-research-analyst.codex"
+      },
+      "ports": {
+        "inputs": {
+          "fundamentals": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "evidence_pack": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "model_input_pack": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "coverage_scorecard": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "watchlist": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          }
+        },
+        "outputs": {
+          "main": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "catalyst_calendar": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "monitoring_triggers": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "watchlist_verified": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "watchlist_unverified": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "data_gaps": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "quality_gate": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          }
+        }
+      },
+      "overrides": {
+        "static_input": {}
+      },
+      "prompt_policy": {
+        "user_prompt": "Build a catalyst calendar and monitoring triggers. Split verified watchlist items from unverified items and cite source_id/claim_id for verified items."
+      },
+      "metadata": {
+        "label": "催化剂日历",
+        "ui_label": "催化剂日历",
+        "workbench_kind": "agent_session"
+      },
+      "invocation_policy": {
+        "permission_profile": {
+          "workspace_access": "writes_workspace",
+          "network": true,
+          "shell": true,
+          "dangerous": true
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "status",
+          "summary",
+          "as_of_date",
+          "data_gaps",
+          "quality",
+          "quality_gate",
+          "outputs"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "success",
+              "partial",
+              "blocked",
+              "failed"
+            ]
+          },
+          "summary": {
+            "type": "string"
+          },
+          "as_of_date": {
+            "type": "string"
+          },
+          "handoff_summary": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "evidence_pack": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "sources",
+              "metrics",
+              "claims"
+            ],
+            "properties": {
+              "sources": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "source_id",
+                    "title",
+                    "url",
+                    "source_type"
+                  ],
+                  "properties": {
+                    "source_id": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "source_type": {
+                      "type": "string"
+                    },
+                    "retrieved_at": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "metrics": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "metric_id",
+                    "name",
+                    "period",
+                    "value",
+                    "unit",
+                    "source_ids"
+                  ],
+                  "properties": {
+                    "metric_id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "period": {
+                      "type": "string"
+                    },
+                    "value": {},
+                    "unit": {
+                      "type": "string"
+                    },
+                    "currency": {
+                      "type": "string"
+                    },
+                    "source_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              },
+              "claims": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "claim_id",
+                    "statement",
+                    "source_ids",
+                    "metric_ids"
+                  ],
+                  "properties": {
+                    "claim_id": {
+                      "type": "string"
+                    },
+                    "statement": {
+                      "type": "string"
+                    },
+                    "source_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "metric_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "confidence": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "blocking_gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "data_gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "quality_gate": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "quality": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "outputs": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "main",
+              "catalyst_calendar",
+              "monitoring_triggers",
+              "watchlist_verified",
+              "watchlist_unverified",
+              "data_gaps",
+              "quality_gate"
+            ],
+            "properties": {
+              "main": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "catalyst_calendar": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "monitoring_triggers": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "watchlist_verified": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "watchlist_unverified": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "data_gaps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "quality_gate": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          },
+          "main": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "catalyst_calendar": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "monitoring_triggers": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "watchlist_verified": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "watchlist_unverified": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "risk_synthesis_agent",
+      "callable_ref": {
+        "kind": "agent_class",
+        "id": "stock-research-synthesis.codex"
+      },
+      "ports": {
+        "inputs": {
+          "macro": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "company": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "catalysts": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "monitoring_triggers": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "watchlist_verified": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "watchlist_unverified": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "coverage_scorecard": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          }
+        },
+        "outputs": {
+          "main": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "risk_matrix": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "risk_handoff": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "catalyst_calendar": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "monitoring_triggers": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "watchlist_verified": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "watchlist_unverified": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "data_gaps": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          },
+          "quality_gate": {
+            "type": "artifact",
+            "required": true,
+            "cardinality": "one"
+          }
+        }
+      },
+      "overrides": {
+        "static_input": {}
+      },
+      "prompt_policy": {
+        "user_prompt": "Synthesize risks and catalysts into a risk_matrix, catalyst_calendar, monitoring_triggers, and verified/unverified watchlists. Do not convert unverified watch items into conclusions."
+      },
+      "metadata": {
+        "label": "风险催化综合",
+        "ui_label": "风险催化综合",
+        "workbench_kind": "agent_session"
+      },
+      "invocation_policy": {
+        "permission_profile": {
+          "workspace_access": "writes_workspace",
+          "network": true,
+          "shell": true,
+          "dangerous": true
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "status",
+          "summary",
+          "as_of_date",
+          "data_gaps",
+          "quality",
+          "quality_gate",
+          "outputs"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "success",
+              "partial",
+              "blocked",
+              "failed"
+            ]
+          },
+          "summary": {
+            "type": "string"
+          },
+          "as_of_date": {
+            "type": "string"
+          },
+          "handoff_summary": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "evidence_pack": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "sources",
+              "metrics",
+              "claims"
+            ],
+            "properties": {
+              "sources": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "source_id",
+                    "title",
+                    "url",
+                    "source_type"
+                  ],
+                  "properties": {
+                    "source_id": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "source_type": {
+                      "type": "string"
+                    },
+                    "retrieved_at": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "metrics": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "metric_id",
+                    "name",
+                    "period",
+                    "value",
+                    "unit",
+                    "source_ids"
+                  ],
+                  "properties": {
+                    "metric_id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "period": {
+                      "type": "string"
+                    },
+                    "value": {},
+                    "unit": {
+                      "type": "string"
+                    },
+                    "currency": {
+                      "type": "string"
+                    },
+                    "source_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              },
+              "claims": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "claim_id",
+                    "statement",
+                    "source_ids",
+                    "metric_ids"
+                  ],
+                  "properties": {
+                    "claim_id": {
+                      "type": "string"
+                    },
+                    "statement": {
+                      "type": "string"
+                    },
+                    "source_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "metric_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "confidence": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "blocking_gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "data_gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "quality_gate": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "quality": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "outputs": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "main",
+              "risk_matrix",
+              "risk_handoff",
+              "catalyst_calendar",
+              "monitoring_triggers",
+              "watchlist_verified",
+              "watchlist_unverified",
+              "data_gaps",
+              "quality_gate"
+            ],
+            "properties": {
+              "main": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "risk_matrix": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "risk_handoff": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "catalyst_calendar": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "monitoring_triggers": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "watchlist_verified": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "watchlist_unverified": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "data_gaps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "quality_gate": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          },
+          "main": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "risk_matrix": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "risk_handoff": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "catalyst_calendar": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "monitoring_triggers": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "watchlist_verified": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "watchlist_unverified": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        }
+      }
     }
   ],
-  "data_edges": [],
-  "description": "Child workflow compiled from Workbench container Risk_Catalyst_Workflow.",
-  "exposed_inputs": {
-    "fundamentals": {
-      "cardinality": "one",
-      "required": true,
-      "type": "artifact"
+  "control_edges": [
+    {
+      "from": "macro_risk_agent",
+      "to": "risk_synthesis_agent",
+      "context": "none"
     },
-    "verified_data": {
-      "cardinality": "one",
-      "required": true,
-      "type": "artifact"
+    {
+      "from": "company_risk_agent",
+      "to": "risk_synthesis_agent",
+      "context": "none"
     },
-    "watchlist": {
-      "cardinality": "one",
-      "required": true,
-      "type": "artifact"
+    {
+      "from": "catalyst_agent",
+      "to": "risk_synthesis_agent",
+      "context": "none"
     }
-  },
-  "exposed_outputs": {
-    "main": {
-      "cardinality": "one",
-      "required": true,
-      "type": "artifact"
+  ],
+  "data_edges": [
+    {
+      "source": {
+        "node": "macro_risk_agent",
+        "port": "risk_handoff"
+      },
+      "target": {
+        "node": "risk_synthesis_agent",
+        "port": "macro"
+      },
+      "materialization": "copy"
     },
-    "watchlist": {
-      "cardinality": "one",
-      "required": true,
-      "type": "artifact"
+    {
+      "source": {
+        "node": "company_risk_agent",
+        "port": "risk_handoff"
+      },
+      "target": {
+        "node": "risk_synthesis_agent",
+        "port": "company"
+      },
+      "materialization": "copy"
+    },
+    {
+      "source": {
+        "node": "catalyst_agent",
+        "port": "catalyst_calendar"
+      },
+      "target": {
+        "node": "risk_synthesis_agent",
+        "port": "catalysts"
+      },
+      "materialization": "copy"
+    },
+    {
+      "source": {
+        "node": "catalyst_agent",
+        "port": "monitoring_triggers"
+      },
+      "target": {
+        "node": "risk_synthesis_agent",
+        "port": "monitoring_triggers"
+      },
+      "materialization": "copy"
+    },
+    {
+      "source": {
+        "node": "catalyst_agent",
+        "port": "watchlist_verified"
+      },
+      "target": {
+        "node": "risk_synthesis_agent",
+        "port": "watchlist_verified"
+      },
+      "materialization": "copy"
+    },
+    {
+      "source": {
+        "node": "catalyst_agent",
+        "port": "watchlist_unverified"
+      },
+      "target": {
+        "node": "risk_synthesis_agent",
+        "port": "watchlist_unverified"
+      },
+      "materialization": "copy"
     }
-  },
-  "id": "core_v2_stock_research_canvas__Risk_Catalyst_Workflow",
+  ],
   "metadata": {
     "canonical_format": "accflow",
-    "compiled_child_path": "core_v2_stock_research_canvas__Risk_Catalyst_Workflow.accflow.json",
     "compiled_from_workbench_container": "Risk_Catalyst_Workflow",
+    "compiled_child_path": "core_v2_stock_research_canvas__Risk_Catalyst_Workflow.accflow.json",
+    "workbench_draft": true,
     "ui_layout": {
       "layout": null,
+      "root_workflow_id": null,
       "nodes": [
         {
           "id": "macro_risk_agent",
-          "label": "宏观与监管风险",
           "position": {
-            "x": 137,
-            "y": 146
-          }
+            "x": 120.0,
+            "y": 120.0
+          },
+          "label": "宏观政策风险"
         },
         {
           "id": "company_risk_agent",
-          "label": "公司特有风险",
           "position": {
-            "x": 137,
-            "y": 332
-          }
+            "x": 390.0,
+            "y": 120.0
+          },
+          "label": "公司经营风险"
         },
         {
           "id": "catalyst_agent",
-          "label": "催化剂扫描",
           "position": {
-            "x": 137,
-            "y": 518
-          }
+            "x": 660.0,
+            "y": 120.0
+          },
+          "label": "催化剂日历"
         },
         {
           "id": "risk_synthesis_agent",
-          "label": "风险催化剂汇总",
           "position": {
-            "x": 485,
-            "y": 332
-          }
+            "x": 390.0,
+            "y": 390.0
+          },
+          "label": "风险催化综合"
         }
-      ],
-      "root_workflow_id": null
-    },
-    "workbench_draft": true
+      ]
+    }
   },
-  "name": "风险与催化剂工作流",
-  "nodes": [
+  "exposed_inputs": {
+    "fundamentals": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "evidence_pack": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "model_input_pack": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "coverage_scorecard": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "watchlist": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    }
+  },
+  "exposed_outputs": {
+    "risk_matrix": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "risk_handoff": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "catalyst_calendar": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "monitoring_triggers": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "watchlist_verified": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "watchlist_unverified": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "data_gaps": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    },
+    "quality_gate": {
+      "type": "artifact",
+      "required": true,
+      "cardinality": "one"
+    }
+  },
+  "workflow_input_bindings": [
     {
-      "callable_ref": {
-        "id": "stock-research-analyst.codex",
-        "kind": "agent_class"
+      "source_port": "fundamentals",
+      "target": {
+        "node": "macro_risk_agent",
+        "port": "fundamentals"
       },
-      "id": "macro_risk_agent",
-      "metadata": {
-        "label": "宏观与监管风险",
-        "ui_label": "宏观与监管风险",
-        "workbench_kind": "agent_session"
-      },
-      "output_schema": {
-        "additionalProperties": false,
-        "properties": {
-          "risks": {
-            "description": "风险项",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "severity_notes": {
-            "description": "风险严重程度或触发条件",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "status": {
-            "description": "success 或 failed",
-            "type": "string"
-          },
-          "summary": {
-            "description": "面向下游节点的简明结论",
-            "type": "string"
-          }
-        },
-        "required": [
-          "status",
-          "summary",
-          "risks"
-        ],
-        "type": "object"
-      },
-      "overrides": {
-        "static_input": {}
-      },
-      "ports": {
-        "inputs": {
-          "fundamentals": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          },
-          "verified_data": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          }
-        },
-        "outputs": {
-          "main": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          }
-        }
-      },
-      "prompt_policy": {
-        "user_prompt": "并行识别利率、监管、汇率、政策和周期风险。"
-      }
+      "materialization": "copy",
+      "required": false
     },
     {
-      "callable_ref": {
-        "id": "stock-research-analyst.codex",
-        "kind": "agent_class"
+      "source_port": "evidence_pack",
+      "target": {
+        "node": "macro_risk_agent",
+        "port": "evidence_pack"
       },
-      "id": "company_risk_agent",
-      "metadata": {
-        "label": "公司特有风险",
-        "ui_label": "公司特有风险",
-        "workbench_kind": "agent_session"
-      },
-      "output_schema": {
-        "additionalProperties": false,
-        "properties": {
-          "risks": {
-            "description": "风险项",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "severity_notes": {
-            "description": "风险严重程度或触发条件",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "status": {
-            "description": "success 或 failed",
-            "type": "string"
-          },
-          "summary": {
-            "description": "面向下游节点的简明结论",
-            "type": "string"
-          }
-        },
-        "required": [
-          "status",
-          "summary",
-          "risks"
-        ],
-        "type": "object"
-      },
-      "overrides": {
-        "static_input": {}
-      },
-      "ports": {
-        "inputs": {
-          "fundamentals": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          },
-          "verified_data": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          }
-        },
-        "outputs": {
-          "main": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          }
-        }
-      },
-      "prompt_policy": {
-        "user_prompt": "并行识别竞争、执行、客户集中度、管理层和资本配置风险。"
-      }
+      "materialization": "copy",
+      "required": false
     },
     {
-      "callable_ref": {
-        "id": "stock-research-analyst.codex",
-        "kind": "agent_class"
+      "source_port": "model_input_pack",
+      "target": {
+        "node": "macro_risk_agent",
+        "port": "model_input_pack"
       },
-      "id": "catalyst_agent",
-      "metadata": {
-        "label": "催化剂扫描",
-        "ui_label": "催化剂扫描",
-        "workbench_kind": "agent_session"
-      },
-      "output_schema": {
-        "additionalProperties": false,
-        "properties": {
-          "negative_catalysts": {
-            "description": "负向催化剂",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "positive_catalysts": {
-            "description": "正向催化剂",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "status": {
-            "description": "success 或 failed",
-            "type": "string"
-          },
-          "summary": {
-            "description": "面向下游节点的简明结论",
-            "type": "string"
-          },
-          "watchlist": {
-            "description": "需要持续跟踪的事件",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "status",
-          "summary",
-          "positive_catalysts",
-          "negative_catalysts"
-        ],
-        "type": "object"
-      },
-      "overrides": {
-        "static_input": {}
-      },
-      "ports": {
-        "inputs": {
-          "fundamentals": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          },
-          "verified_data": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          },
-          "watchlist": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          }
-        },
-        "outputs": {
-          "main": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          }
-        }
-      },
-      "prompt_policy": {
-        "user_prompt": "并行识别未来 6-12 个月可能改变预期的正负催化剂。"
-      }
+      "materialization": "copy",
+      "required": false
     },
     {
-      "callable_ref": {
-        "id": "stock-research-synthesis.codex",
-        "kind": "agent_class"
+      "source_port": "coverage_scorecard",
+      "target": {
+        "node": "macro_risk_agent",
+        "port": "coverage_scorecard"
       },
-      "id": "risk_synthesis_agent",
-      "metadata": {
-        "label": "风险催化剂汇总",
-        "ui_label": "风险催化剂汇总",
-        "workbench_kind": "agent_session"
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "watchlist",
+      "target": {
+        "node": "macro_risk_agent",
+        "port": "watchlist"
       },
-      "output_schema": {
-        "additionalProperties": false,
-        "properties": {
-          "catalyst_watchlist": {
-            "description": "催化剂跟踪清单",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "mitigation_notes": {
-            "description": "风险缓释或验证方式",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "risk_matrix": {
-            "description": "整合后的风险矩阵",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "status": {
-            "description": "success 或 failed",
-            "type": "string"
-          },
-          "summary": {
-            "description": "面向下游节点的简明结论",
-            "type": "string"
-          }
-        },
-        "required": [
-          "status",
-          "summary",
-          "risk_matrix",
-          "catalyst_watchlist"
-        ],
-        "type": "object"
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "fundamentals",
+      "target": {
+        "node": "company_risk_agent",
+        "port": "fundamentals"
       },
-      "overrides": {
-        "static_input": {}
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "evidence_pack",
+      "target": {
+        "node": "company_risk_agent",
+        "port": "evidence_pack"
       },
-      "ports": {
-        "inputs": {
-          "main": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact",
-            "description": "三路风险与催化剂分析聚合"
-          }
-        },
-        "outputs": {
-          "main": {
-            "cardinality": "one",
-            "required": true,
-            "type": "artifact"
-          }
-        }
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "model_input_pack",
+      "target": {
+        "node": "company_risk_agent",
+        "port": "model_input_pack"
       },
-      "prompt_policy": {
-        "user_prompt": "从 main 控制聚合输入中汇总风险与催化剂，形成最终报告需要的风险矩阵。"
-      }
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "coverage_scorecard",
+      "target": {
+        "node": "company_risk_agent",
+        "port": "coverage_scorecard"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "watchlist",
+      "target": {
+        "node": "company_risk_agent",
+        "port": "watchlist"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "fundamentals",
+      "target": {
+        "node": "catalyst_agent",
+        "port": "fundamentals"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "evidence_pack",
+      "target": {
+        "node": "catalyst_agent",
+        "port": "evidence_pack"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "model_input_pack",
+      "target": {
+        "node": "catalyst_agent",
+        "port": "model_input_pack"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "coverage_scorecard",
+      "target": {
+        "node": "catalyst_agent",
+        "port": "coverage_scorecard"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "watchlist",
+      "target": {
+        "node": "catalyst_agent",
+        "port": "watchlist"
+      },
+      "materialization": "copy",
+      "required": false
+    },
+    {
+      "source_port": "coverage_scorecard",
+      "target": {
+        "node": "risk_synthesis_agent",
+        "port": "coverage_scorecard"
+      },
+      "materialization": "copy",
+      "required": false
+    }
+  ],
+  "workflow_output_bindings": [
+    {
+      "source": {
+        "node": "risk_synthesis_agent",
+        "port": "risk_matrix"
+      },
+      "target_port": "risk_matrix",
+      "materialization": "copy",
+      "required": true
+    },
+    {
+      "source": {
+        "node": "risk_synthesis_agent",
+        "port": "risk_handoff"
+      },
+      "target_port": "risk_handoff",
+      "materialization": "copy",
+      "required": true
+    },
+    {
+      "source": {
+        "node": "risk_synthesis_agent",
+        "port": "catalyst_calendar"
+      },
+      "target_port": "catalyst_calendar",
+      "materialization": "copy",
+      "required": true
+    },
+    {
+      "source": {
+        "node": "risk_synthesis_agent",
+        "port": "monitoring_triggers"
+      },
+      "target_port": "monitoring_triggers",
+      "materialization": "copy",
+      "required": true
+    },
+    {
+      "source": {
+        "node": "risk_synthesis_agent",
+        "port": "watchlist_verified"
+      },
+      "target_port": "watchlist_verified",
+      "materialization": "copy",
+      "required": true
+    },
+    {
+      "source": {
+        "node": "risk_synthesis_agent",
+        "port": "watchlist_unverified"
+      },
+      "target_port": "watchlist_unverified",
+      "materialization": "copy",
+      "required": true
+    },
+    {
+      "source": {
+        "node": "risk_synthesis_agent",
+        "port": "data_gaps"
+      },
+      "target_port": "data_gaps",
+      "materialization": "copy",
+      "required": true
+    },
+    {
+      "source": {
+        "node": "risk_synthesis_agent",
+        "port": "quality_gate"
+      },
+      "target_port": "quality_gate",
+      "materialization": "copy",
+      "required": true
     }
   ],
   "policies": {
     "failure_mode": "fail_fast",
     "max_concurrency": 8
-  },
-  "schema_version": "acc.core.v2",
-  "version": "0.1.0",
-  "workflow_input_bindings": [
-    {
-      "materialization": "copy",
-      "required": false,
-      "source_port": "fundamentals",
-      "target": {
-        "node": "macro_risk_agent",
-        "port": "fundamentals"
-      }
-    },
-    {
-      "materialization": "copy",
-      "required": false,
-      "source_port": "verified_data",
-      "target": {
-        "node": "macro_risk_agent",
-        "port": "verified_data"
-      }
-    },
-    {
-      "materialization": "copy",
-      "required": false,
-      "source_port": "fundamentals",
-      "target": {
-        "node": "company_risk_agent",
-        "port": "fundamentals"
-      }
-    },
-    {
-      "materialization": "copy",
-      "required": false,
-      "source_port": "verified_data",
-      "target": {
-        "node": "company_risk_agent",
-        "port": "verified_data"
-      }
-    },
-    {
-      "materialization": "copy",
-      "required": false,
-      "source_port": "fundamentals",
-      "target": {
-        "node": "catalyst_agent",
-        "port": "fundamentals"
-      }
-    },
-    {
-      "materialization": "copy",
-      "required": false,
-      "source_port": "watchlist",
-      "target": {
-        "node": "catalyst_agent",
-        "port": "watchlist"
-      }
-    },
-    {
-      "materialization": "copy",
-      "required": false,
-      "source_port": "verified_data",
-      "target": {
-        "node": "catalyst_agent",
-        "port": "verified_data"
-      }
-    }
-  ],
-  "workflow_output_bindings": [
-    {
-      "materialization": "copy",
-      "required": true,
-      "source": {
-        "node": "risk_synthesis_agent",
-        "port": "main"
-      },
-      "target_port": "main"
-    },
-    {
-      "materialization": "copy",
-      "required": true,
-      "source": {
-        "node": "catalyst_agent",
-        "port": "main"
-      },
-      "target_port": "watchlist"
-    }
-  ]
+  }
 }

@@ -20,12 +20,15 @@ import {
   useRunRestorationLoader,
   type RunRestorationPayload,
 } from './useRunRestorationLoader';
+import { useRunProjection } from './useRunStoreBindings';
+import { useRunStore } from '../stores/runStore';
+import { useWorkbenchStore } from '../stores/workbenchStore';
 
 export type UseRunRestorationActionsOptions = {
   currentTask: WorkbenchTask | undefined;
-  runsById: Record<string, RunProjection>;
-  setRunsById: Dispatch<SetStateAction<Record<string, RunProjection>>>;
-  setTasks: Dispatch<SetStateAction<WorkbenchTask[]>>;
+  runsById?: Record<string, RunProjection>;
+  setRunsById?: Dispatch<SetStateAction<Record<string, RunProjection>>>;
+  setTasks?: Dispatch<SetStateAction<WorkbenchTask[]>>;
 };
 
 export type UseRunRestorationActionsResult = {
@@ -40,7 +43,11 @@ export function useRunRestorationActions({
   setTasks,
 }: UseRunRestorationActionsOptions): UseRunRestorationActionsResult {
   const restorationRunId = currentTask?.activeRunId || currentTask?.latestRunId || null;
-  const shouldRestoreRun = Boolean(restorationRunId && !runsById[restorationRunId]?.run);
+  const restorationProjection = useRunProjection(restorationRunId);
+  const shouldRestoreRun = Boolean(
+    restorationRunId &&
+    !(setRunsById ? runsById?.[restorationRunId]?.run : restorationProjection?.run),
+  );
 
   const handleRunRestorationLoaded = useCallback(
     ({ runId, summary, stateSnapshot, events }: RunRestorationPayload) => {
@@ -62,46 +69,73 @@ export function useRunRestorationActions({
         scope: 'task',
         targetId: taskGraph.id,
       });
-      setRunsById((current) => ({
-        ...current,
-        [runId]: {
-          runId,
-          taskId: currentTask.taskId,
-          status: normalizeTaskRunStatus(restoredRun.status),
-          scope: 'task',
-          targetId: taskGraph.id,
-          graph: taskGraph,
-          runDir: summary.run_dir,
-          summary,
-          run: liveRun,
-          events: events || [],
-          overlay,
-          pollState: 'idle',
-        },
+      if (setRunsById) {
+        setRunsById((current) => ({
+          ...current,
+          [runId]: {
+            runId,
+            taskId: currentTask.taskId,
+            status: normalizeTaskRunStatus(restoredRun.status),
+            scope: 'task',
+            targetId: taskGraph.id,
+            graph: taskGraph,
+            runDir: summary.run_dir,
+            summary,
+            run: liveRun,
+            events: events || [],
+            overlay,
+            pollState: 'idle',
+          },
+        }));
+        setTasks?.((current) =>
+          current.map((task) =>
+            task.taskId === currentTask.taskId
+              ? {
+                  ...task,
+                  status: taskStatusFromRunStatus(restoredRun.status),
+                  latestRunId: runId,
+                  activeRunId: isActiveRunStatus(restoredRun.status) ? runId : undefined,
+                }
+              : task,
+          ),
+        );
+        return;
+      }
+      useRunStore.getState().upsertRun({
+        runId,
+        taskId: currentTask.taskId,
+        status: normalizeTaskRunStatus(restoredRun.status),
+        scope: 'task',
+        targetId: taskGraph.id,
+        graph: taskGraph,
+        runDir: summary.run_dir,
+        summary,
+        run: liveRun,
+        events: events || [],
+        overlay,
+        pollState: 'idle',
+      });
+      useWorkbenchStore.getState().updateTask(currentTask.taskId, (task) => ({
+        ...task,
+        status: taskStatusFromRunStatus(restoredRun.status),
+        latestRunId: runId,
+        activeRunId: isActiveRunStatus(restoredRun.status) ? runId : undefined,
       }));
-      setTasks((current) =>
-        current.map((task) =>
-          task.taskId === currentTask.taskId
-            ? {
-                ...task,
-                status: taskStatusFromRunStatus(restoredRun.status),
-                latestRunId: runId,
-                activeRunId: isActiveRunStatus(restoredRun.status) ? runId : undefined,
-              }
-            : task,
-        ),
-      );
     },
     [currentTask, setRunsById, setTasks],
   );
 
   const handleRunRestorationFailed = useCallback(
     (runId: string) => {
-      setRunsById((current) => {
-        const next = { ...current };
-        delete next[runId];
-        return next;
-      });
+      if (setRunsById) {
+        setRunsById((current) => {
+          const next = { ...current };
+          delete next[runId];
+          return next;
+        });
+        return;
+      }
+      useRunStore.getState().removeRun(runId);
     },
     [setRunsById],
   );

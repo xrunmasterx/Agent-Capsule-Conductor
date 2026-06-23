@@ -2,6 +2,12 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+## Current audit status (2026-06-22)
+
+Status: **mostly complete; manual verification still open**. Code-level hook changes and focused automated verification are implemented, but Task 3 Step 3 remains unchecked: manual Workbench Network-panel confirmation that a `runId` does not accumulate multiple submitted-run polling chains after re-submission or error. Keep this plan open until that manual evidence is recorded.
+
+See `docs/superpowers/plans/STATUS.md` for the cross-plan audit summary.
+
 **Goal:** Stop the immediate Workbench disconnect/request-storm failure mode by making submitted-run polling single-owner per run and preventing run EventSource errors from permanently closing live updates.
 
 **Architecture:** Keep this as a narrow frontend containment change. Polling remains the durable fallback, but a hook instance owns at most one timer chain per `runId` and errors stop the failing chain instead of rescheduling forever. Run SSE remains browser-owned so native EventSource reconnect can recover transient transport failures.

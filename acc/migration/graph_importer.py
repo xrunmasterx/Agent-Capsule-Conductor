@@ -4,8 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from acc.models import CORE_V2_SCHEMA_VERSION, AccError
 from acc.hermetic_callables import HERMETIC_AGENT_CLASS_IDS, HERMETIC_TOOL_CLASS_IDS
+from acc.models import CORE_V2_SCHEMA_VERSION, AccError
 
 
 def accflow_path_from_legacy_graph_path(path: Path) -> Path:

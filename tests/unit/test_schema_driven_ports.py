@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+from acc.app.workbench_tasks import strip_canvas_runtime_state
 from acc.engine.schema_ports import (
     effective_output_ports,
     project_output_port_metadata,
     schema_declares_output_port,
 )
 from acc.engine.workflow_validation import collect_callable_validation_issues
-from acc.app.workbench_tasks import strip_canvas_runtime_state
 from acc.models import (
     CallableRef,
     ControlEdge,
@@ -110,7 +110,11 @@ def test_workbench_canvas_strip_preserves_inline_workflow_authoring_projection()
                             }
                         ],
                         "internal_edges": [
-                            {"id": "input_writer", "from": "New_Workflow__workflow_inputs", "to": "writer"}
+                            {
+                                "id": "input_writer",
+                                "from": "New_Workflow__workflow_inputs",
+                                "to": "writer",
+                            }
                         ],
                     },
                 }

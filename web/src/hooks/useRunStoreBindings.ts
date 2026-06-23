@@ -1,55 +1,58 @@
-import { useRunStore, type NodeLiveLogs, type RunProjection } from '../stores/runStore';
+import {
+  selectRun,
+  selectRunLiveEventsForRun,
+  selectRunLogsForRun,
+  selectRunOverlay,
+  useRunStore,
+  type NodeLiveLogs,
+  type RunProjection,
+} from '../stores/runStore';
 import type { RuntimeConfig, WorkbenchLiveEvent } from '../types';
 
-export type RunStoreBindings = {
-  runsById: Record<string, RunProjection>;
-  setRunsById: (
-    updater: Record<string, RunProjection> | ((current: Record<string, RunProjection>) => Record<string, RunProjection>),
-  ) => void;
-  runLogsById: Record<string, Record<string, NodeLiveLogs>>;
-  setRunLogsById: (
-    updater:
-      | Record<string, Record<string, NodeLiveLogs>>
-      | ((current: Record<string, Record<string, NodeLiveLogs>>) => Record<string, Record<string, NodeLiveLogs>>),
-  ) => void;
-  runLiveEventsById: Record<string, WorkbenchLiveEvent[]>;
-  setRunLiveEventsById: (
-    updater:
-      | Record<string, WorkbenchLiveEvent[]>
-      | ((current: Record<string, WorkbenchLiveEvent[]>) => Record<string, WorkbenchLiveEvent[]>),
-  ) => void;
-  runtimeConfig: RuntimeConfig | null;
+export type RunStoreActions = {
+  updateRun: (runId: string, updater: (current: RunProjection) => RunProjection) => void;
+  upsertRun: (run: RunProjection) => void;
+  patchRun: (runId: string, patch: Partial<RunProjection>) => void;
+  removeRun: (runId: string) => void;
+  setRunLogs: (runId: string, nodeKey: string, updater: (prev: NodeLiveLogs) => NodeLiveLogs) => void;
+  appendLiveEvents: (runId: string, events: WorkbenchLiveEvent[], limit?: number) => void;
   setRuntimeConfig: (config: RuntimeConfig | null) => void;
 };
 
-export function useRunStoreBindings(): RunStoreBindings {
-  const runsById = useRunStore((state) => state.runsById);
-  const setRunsById = useRunStore((state) => state.setRunsById);
-  const runLogsById = useRunStore((state) => state.runLogsById);
-  const setRunLogsById = useRunStore((state) => state.setRunLogsById);
-  const runLiveEventsById = useRunStore((state) => state.liveEventsByRunId);
-  const setRunLiveEventsById = useRunStore((state) => state.setLiveEventsByRunId);
-  const runtimeConfig = useRunStore((state) => state.runtimeConfig);
+export function useRunStoreActions(): RunStoreActions {
+  const updateRun = useRunStore((state) => state.updateRun);
+  const upsertRun = useRunStore((state) => state.upsertRun);
+  const patchRun = useRunStore((state) => state.patchRun);
+  const removeRun = useRunStore((state) => state.removeRun);
+  const setRunLogs = useRunStore((state) => state.setRunLogs);
+  const appendLiveEvents = useRunStore((state) => state.appendLiveEvents);
   const setRuntimeConfig = useRunStore((state) => state.setRuntimeConfig);
 
   return {
-    runsById,
-    setRunsById,
-    runLogsById,
-    setRunLogsById,
-    runLiveEventsById,
-    setRunLiveEventsById,
-    runtimeConfig,
+    updateRun,
+    upsertRun,
+    patchRun,
+    removeRun,
+    setRunLogs,
+    appendLiveEvents,
     setRuntimeConfig,
   };
 }
 
+export function useRuntimeConfig(): RuntimeConfig | null {
+  return useRunStore((state) => state.runtimeConfig);
+}
+
 export function useRunProjection(runId: string | null): RunProjection | undefined {
-  return useRunStore((state) => (runId ? state.runsById[runId] : undefined));
+  return useRunStore((state) => selectRun(state, runId));
 }
 
 export function useRunOverlay(runId: string | null): RunProjection['overlay'] | null {
-  return useRunStore((state) => (runId ? state.runsById[runId]?.overlay || null : null));
+  return useRunStore((state) => selectRunOverlay(state, runId));
+}
+
+export function useRunLogsForRun(runId: string | null): Readonly<Record<string, NodeLiveLogs>> {
+  return useRunStore((state) => selectRunLogsForRun(state, runId));
 }
 
 export function useNodeLiveLogs(runId: string | null, nodeKey: string | null): NodeLiveLogs | undefined {
@@ -64,9 +67,9 @@ export function useNodeLiveLogs(runId: string | null, nodeKey: string | null): N
 export function useRunLiveEvents(
   runId: string | null,
   filter?: (event: WorkbenchLiveEvent) => boolean,
-): WorkbenchLiveEvent[] {
+): readonly WorkbenchLiveEvent[] {
   return useRunStore((state) => {
-    const events = runId ? state.liveEventsByRunId[runId] || [] : [];
+    const events = selectRunLiveEventsForRun(state, runId);
     return filter ? events.filter(filter) : events;
   });
 }

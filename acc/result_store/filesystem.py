@@ -21,7 +21,6 @@ import json
 from dataclasses import asdict
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
-from acc.storage import write_bytes_atomic, write_text_atomic
 from acc.result_store.types import (
     ArtifactBundle,
     NodeId,
@@ -29,6 +28,7 @@ from acc.result_store.types import (
     PortId,
     RunId,
 )
+from acc.storage import write_bytes_atomic, write_text_atomic
 
 __all__ = ["FilesystemResultStore"]
 

@@ -1,17 +1,37 @@
 id: stock-data-collector.codex
 version: 0.1.0
 runtime: codex_app_server
-default_prompt: |
-  You are a reusable ACC public-market data collection agent for single-stock research.
-  Use only public sources requested by the invocation prompt, such as company investor relations,
-  SEC filings, earnings releases, earnings transcripts, market data pages, and reputable news.
-  Return structured, source-traceable facts. Separate verified facts from unavailable data.
-  Do not provide investment advice; downstream analyst and report agents will interpret the data.
+default_prompt: 'You are a reusable ACC public-market evidence collection agent for single-stock research.
+
+
+  Collect verified public data; do not write an investment thesis. Use network and shell tools when available to inspect company
+  IR, exchange announcements, financial reports, earnings releases, public market data, reputable news, and public industry
+  sources requested by the invocation prompt.
+
+
+  Return JSON with status, summary, as_of_date, data_gaps, quality, quality_gate, and an outputs object. Preserve full evidence
+  evidence_pack with sources, metrics, claims, conflicts, blocking_gaps, quality_gate, and handoff_summary.
+  Every source must have source_id. Every numeric datapoint must have metric_id, period, unit, currency when relevant, as_of_date,
+  and source_ids. Every factual judgment must have claim_id and cite source_id or metric_id.
+
+
+  Use stable namespaced ids such as src:{node}:{short_key}, met:{node}:{metric}:{period}, clm:{node}:{topic}:{ordinal}. Do
+  not reuse S1/M1/C1 style ids across nodes. Missing or unverifiable data belongs in blocking_gaps/data_gaps, never in
+  claims. Also populate outputs.<port_name> for every declared output port so downstream workflow edges receive structured
+  artifacts.
+
+
+  evidence_pack is the only primary downstream evidence payload: include only high-quality, source-bound, metric-bound items.
+  Keep workflow process notes, unverified material, broad landing pages, and unbound claims out of evidence_pack; put them
+  in blocking_gaps or data_gaps. Return outputs.<port_name> for declared ports and preserve source_id, metric_id, and claim_id
+  inside evidence_pack.
+
+  '
 default_permissions:
-  workspace_access: read_only
+  workspace_access: writes_workspace
   network: true
-  shell: false
-  dangerous: false
+  shell: true
+  dangerous: true
   timeout_seconds: 900
 input_ports:
   main:
@@ -25,26 +45,235 @@ artifact_contract:
   output_schema:
     type: object
     additionalProperties: true
-    required: [status, summary]
+    required:
+    - status
+    - summary
+    - as_of_date
+    - data_gaps
+    - quality
+    - quality_gate
+    - outputs
     properties:
       status:
         type: string
+        enum:
+        - success
+        - partial
+        - blocked
+        - failed
       summary:
         type: string
-      facts:
+      as_of_date:
+        type: string
+      handoff_summary:
+        type: object
+        additionalProperties: true
+      evidence_pack:
+        type: object
+        additionalProperties: true
+        required:
+        - sources
+        - metrics
+        - claims
+        properties:
+          sources:
+            type: array
+            items:
+              type: object
+              additionalProperties: true
+              required:
+              - source_id
+              - title
+              - url
+              - source_type
+              properties:
+                source_id:
+                  type: string
+                title:
+                  type: string
+                url:
+                  type: string
+                source_type:
+                  type: string
+                retrieved_at:
+                  type: string
+          metrics:
+            type: array
+            items:
+              type: object
+              additionalProperties: true
+              required:
+              - metric_id
+              - name
+              - period
+              - value
+              - unit
+              - source_ids
+              properties:
+                metric_id:
+                  type: string
+                name:
+                  type: string
+                period:
+                  type: string
+                value: {}
+                unit:
+                  type: string
+                currency:
+                  type: string
+                source_ids:
+                  type: array
+                  items:
+                    type: string
+          claims:
+            type: array
+            items:
+              type: object
+              additionalProperties: true
+              required:
+              - claim_id
+              - statement
+              - source_ids
+              - metric_ids
+              properties:
+                claim_id:
+                  type: string
+                statement:
+                  type: string
+                source_ids:
+                  type: array
+                  items:
+                    type: string
+                metric_ids:
+                  type: array
+                  items:
+                    type: string
+                confidence:
+                  type: string
+      blocking_gaps:
         type: array
         items:
-          type: string
-      sources:
-        type: array
-        items:
-          type: string
+          type: object
+          additionalProperties: true
       data_gaps:
         type: array
         items:
-          type: string
-      as_of_date:
-        type: string
+          type: object
+          additionalProperties: true
+      quality_gate:
+        type: object
+        additionalProperties: true
+      quality:
+        type: object
+        additionalProperties: true
+      outputs:
+        type: object
+        additionalProperties: true
+        required:
+        - handoff_summary
+        - evidence_pack
+        - blocking_gaps
+        - data_gaps
+        - quality_gate
+        properties:
+          handoff_summary:
+            type: object
+            additionalProperties: true
+          evidence_pack:
+            type: object
+            additionalProperties: true
+            required:
+            - sources
+            - metrics
+            - claims
+            properties:
+              sources:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+                  required:
+                  - source_id
+                  - title
+                  - url
+                  - source_type
+                  properties:
+                    source_id:
+                      type: string
+                    title:
+                      type: string
+                    url:
+                      type: string
+                    source_type:
+                      type: string
+                    retrieved_at:
+                      type: string
+              metrics:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+                  required:
+                  - metric_id
+                  - name
+                  - period
+                  - value
+                  - unit
+                  - source_ids
+                  properties:
+                    metric_id:
+                      type: string
+                    name:
+                      type: string
+                    period:
+                      type: string
+                    value: {}
+                    unit:
+                      type: string
+                    currency:
+                      type: string
+                    source_ids:
+                      type: array
+                      items:
+                        type: string
+              claims:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+                  required:
+                  - claim_id
+                  - statement
+                  - source_ids
+                  - metric_ids
+                  properties:
+                    claim_id:
+                      type: string
+                    statement:
+                      type: string
+                    source_ids:
+                      type: array
+                      items:
+                        type: string
+                    metric_ids:
+                      type: array
+                      items:
+                        type: string
+                    confidence:
+                      type: string
+          blocking_gaps:
+            type: array
+            items:
+              type: object
+              additionalProperties: true
+          data_gaps:
+            type: array
+            items:
+              type: object
+              additionalProperties: true
+          quality_gate:
+            type: object
+            additionalProperties: true
 metadata:
   name: 股市公开数据采集员
   description: Reusable real Codex agent for collecting public single-stock research data.

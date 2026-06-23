@@ -12,13 +12,13 @@ from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
 from acc.adapters.base import AgentAdapter, AgentRunRequest
 from acc.adapters.codex_cli import CodexCliAdapter, build_codex_command
 from acc.adapters.generic_cli import GenericCliAdapter
+from acc.callable_registry import CallableAsset
 from acc.constants import (
     CODEX_DANGER_FULL_ACCESS,
     CODEX_EXECUTION_MODE_METADATA_KEY,
     CODEX_EXECUTION_MODES,
     CODEX_LOCAL_READONLY_NO_SANDBOX,
 )
-from acc.callable_registry import CallableAsset
 from acc.models import (
     AccError,
     AgentClassTemplate,
@@ -183,9 +183,7 @@ class AgentAdapterDispatcher:
         if runtime == "codex_cli":
             return CodexCliAdapter()
         if runtime == "codex_app_server":
-            raise AccError(
-                "codex_app_server is a streaming runtime; use AgentTurnService instead"
-            )
+            raise AccError("codex_app_server is a streaming runtime; use AgentTurnService instead")
         if runtime == "generic_cli":
             return GenericCliAdapter()
         raise AccError(f"Unsupported production agent runtime {runtime!r}")
@@ -617,7 +615,9 @@ def synthesize_schema_value(
     property_name: str | None,
 ) -> Any:
     if not isinstance(schema, dict):
-        return default_value_for_schema_name(property_name, defaults, node_id, callable_id, input_payload)
+        return default_value_for_schema_name(
+            property_name, defaults, node_id, callable_id, input_payload
+        )
 
     if "const" in schema:
         return copy.deepcopy(schema["const"])
@@ -641,7 +641,10 @@ def synthesize_schema_value(
 
     schema_type = schema.get("type")
     if isinstance(schema_type, list):
-        schema_type = next((item for item in schema_type if item != "null"), schema_type[0] if schema_type else None)
+        schema_type = next(
+            (item for item in schema_type if item != "null"),
+            schema_type[0] if schema_type else None,
+        )
 
     if schema_type == "object" or isinstance(schema.get("properties"), dict):
         properties = schema.get("properties")
@@ -667,8 +670,12 @@ def synthesize_schema_value(
     if schema_type == "boolean":
         return False
     if schema_type == "string":
-        return default_value_for_schema_name(property_name, defaults, node_id, callable_id, input_payload)
-    return default_value_for_schema_name(property_name, defaults, node_id, callable_id, input_payload)
+        return default_value_for_schema_name(
+            property_name, defaults, node_id, callable_id, input_payload
+        )
+    return default_value_for_schema_name(
+        property_name, defaults, node_id, callable_id, input_payload
+    )
 
 
 def default_value_for_schema_name(
@@ -707,9 +714,7 @@ def normalize_output_schema_for_structured_output(schema: dict[str, Any]) -> dic
 def strip_none_mapping_values(value: Any) -> Any:
     if isinstance(value, dict):
         return {
-            key: strip_none_mapping_values(item)
-            for key, item in value.items()
-            if item is not None
+            key: strip_none_mapping_values(item) for key, item in value.items() if item is not None
         }
     if isinstance(value, list):
         return [strip_none_mapping_values(item) for item in value]
@@ -719,9 +724,7 @@ def strip_none_mapping_values(value: Any) -> Any:
 def add_object_schema_guards(value: Any) -> None:
     if isinstance(value, dict):
         schema_type = value.get("type")
-        if schema_type == "object" or (
-            isinstance(schema_type, list) and "object" in schema_type
-        ):
+        if schema_type == "object" or (isinstance(schema_type, list) and "object" in schema_type):
             value.setdefault("additionalProperties", False)
         for item in value.values():
             add_object_schema_guards(item)

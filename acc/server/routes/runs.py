@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import asyncio
 import json
-import time
 from collections import deque
 from pathlib import Path
 from typing import Any
@@ -18,11 +16,7 @@ from acc.app.control_projection import (
     load_plan_steps_projection,
     load_run_plan_projection,
 )
-from acc.app.run_events import (
-    RunEventProjectionService,
-    read_jsonl_since_offset,
-    read_jsonl_tail_with_offset,
-)
+from acc.app.run_events import RunEventProjectionService
 from acc.app.run_projection import build_node_run_projection
 from acc.control_plane import SecretLikePathError, reject_secret_like_path
 from acc.result_store.filesystem import FilesystemResultStore
@@ -34,13 +28,8 @@ from acc.server.context import (
     is_relative_to,
     relative_project_path,
 )
-from acc.server.live_events import (
-    live_event_from_agent_event,
-    live_event_from_node_log,
-    sse_event,
-)
+from acc.server.live_events import LiveEventProjectionService
 from acc.server.run_projection import RunProjection
-from acc.session import utc_now_iso
 from acc.storage import validate_run_id
 from acc.storage_refs import make_node_artifact_ref
 from acc.utils import AccError
@@ -53,7 +42,6 @@ STREAM_INITIAL_BYTE_BUDGET = 1024 * 1024
 STREAM_NODE_LOG_TAIL_BYTES = 16 * 1024
 STREAM_NODE_LOG_LIVE_BYTES = 64 * 1024
 STREAM_AGENT_EVENT_TAIL_LIMIT = 200
-TERMINAL_RUN_STATUSES = {"success", "failed", "cancelled", "crashed"}
 
 
 @router.get("")
@@ -173,7 +161,9 @@ def read_run_evidence(run_id: str, path: str, request: Request) -> dict[str, Any
     try:
         content = evidence_path.read_text(encoding="utf-8")
     except UnicodeDecodeError as exc:
-        raise HTTPException(status_code=415, detail=f"Run evidence is not UTF-8 text: {path}") from exc
+        raise HTTPException(
+            status_code=415, detail=f"Run evidence is not UTF-8 text: {path}"
+        ) from exc
     except OSError as exc:
         raise HTTPException(status_code=404, detail=f"Run evidence not readable: {path}") from exc
     return {
@@ -228,7 +218,9 @@ def get_node_events(
     run_dir = resolve_run_dir_or_404(run_id, request)
     validate_path_component(node_id, "node_id")
     if node_run_dir:
-        node_dir = resolve_run_evidence_path(node_run_dir, project_root=project_root, run_dir=run_dir)
+        node_dir = resolve_run_evidence_path(
+            node_run_dir, project_root=project_root, run_dir=run_dir
+        )
         if not node_dir.is_dir() or node_dir.name != node_id:
             raise HTTPException(status_code=400, detail="node_run_dir does not match node_id")
     else:
@@ -278,203 +270,20 @@ async def stream_run(
     tail_events: int = Query(STREAM_AGENT_EVENT_TAIL_LIMIT, ge=0, le=1000),
 ) -> StreamingResponse:
     run_dir = resolve_run_dir_or_404(run_id, request)
-    event_projection = RunEventProjectionService(run_dir)
-    history_mode = history if isinstance(history, str) else "none"
-    after_seq_value = after_seq if isinstance(after_seq, int) else 0
-    tail_bytes_value = tail_bytes if isinstance(tail_bytes, int) else STREAM_NODE_LOG_TAIL_BYTES
-    tail_events_value = tail_events if isinstance(tail_events, int) else STREAM_AGENT_EVENT_TAIL_LIMIT
+    service = LiveEventProjectionService(
+        run_dir,
+        history=history if isinstance(history, str) else "none",
+        tail_bytes=tail_bytes if isinstance(tail_bytes, int) else STREAM_NODE_LOG_TAIL_BYTES,
+        tail_events=tail_events if isinstance(tail_events, int) else STREAM_AGENT_EVENT_TAIL_LIMIT,
+        heartbeat_seconds=STREAM_HEARTBEAT_INTERVAL_SECONDS,
+    )
 
     async def event_source():
-        offsets: dict[tuple[str, str], int] = {}
-        agent_event_offsets: dict[str, int] = {}
-        agent_event_sequences: dict[str, int] = {}
-        sequence = 0
-        last_emit_monotonic = time.monotonic()
-        initial_frames = 0
-        initial_bytes = 0
-        budget_exhausted = False
-
-        def terminal_summary() -> dict[str, Any] | None:
-            summary_path = run_dir / "run_summary.json"
-            if not summary_path.exists():
-                return None
-            try:
-                summary = json.loads(summary_path.read_text(encoding="utf-8"))
-            except json.JSONDecodeError:
-                return None
-            if isinstance(summary, dict) and summary.get("status") in TERMINAL_RUN_STATUSES:
-                return summary
-            return None
-
-        def log_path_size(node_identity, stream_name: str) -> int:
-            log_path = event_projection.resolve_effective_log(node_identity.node_dir, stream_name)
-            return log_path.stat().st_size if log_path.exists() and log_path.is_file() else 0
-
-        def emit_initial_frame(event_name: str, payload: dict[str, Any]) -> str | None:
-            nonlocal initial_frames, initial_bytes, budget_exhausted
-            if budget_exhausted:
-                return None
-            frame = sse_event(event_name, payload)
-            frame_bytes = len(frame.encode("utf-8", errors="replace"))
-            if (
-                initial_frames + 1 > STREAM_INITIAL_FRAME_BUDGET
-                or initial_bytes + frame_bytes > STREAM_INITIAL_BYTE_BUDGET
-            ):
-                budget_exhausted = True
-                diagnostic = {
-                    "type": "stream_budget_exhausted",
-                    "run_id": run_id,
-                    "history": history_mode,
-                    "frames": initial_frames,
-                    "bytes": initial_bytes,
-                    "frame_budget": STREAM_INITIAL_FRAME_BUDGET,
-                    "byte_budget": STREAM_INITIAL_BYTE_BUDGET,
-                }
-                return sse_event("stream_budget_exhausted", diagnostic)
-            initial_frames += 1
-            initial_bytes += frame_bytes
-            return frame
-
-        summary = terminal_summary()
-        if history_mode == "none" and summary is not None:
-            payload = {"type": "summary", "run_id": run_id, "summary": summary}
-            yield sse_event("summary", payload)
-            return
-
-        node_identities = event_projection.iter_node_identities()
-        bounded_tail_bytes = min(tail_bytes_value, STREAM_NODE_LOG_TAIL_BYTES)
-        bounded_tail_events = min(tail_events_value, STREAM_AGENT_EVENT_TAIL_LIMIT)
-
-        for node_identity in node_identities:
-            for stream_name in ("stdout", "stderr"):
-                key = (node_identity.node_run_dir, stream_name)
-                size = log_path_size(node_identity, stream_name)
-                if history_mode == "none":
-                    offsets[key] = size
-                    continue
-                replay_offset = 0 if history_mode == "full" else max(0, size - bounded_tail_bytes)
-                replay_limit = (
-                    STREAM_NODE_LOG_TAIL_BYTES
-                    if history_mode == "full"
-                    else bounded_tail_bytes
-                )
-                if replay_limit <= 0:
-                    offsets[key] = size
-                    continue
-                payload = event_projection.read_node_log_delta_from_identity(
-                    node_identity,
-                    stream_name,
-                    offset=replay_offset,
-                    limit=max(1, replay_limit),
-                )
-                offsets[key] = size
-                if payload["text"]:
-                    payload["timestamp"] = utc_now_iso()
-                    frame = emit_initial_frame("node_log_delta", payload)
-                    if frame is not None:
-                        yield frame
-
-            agent_event_log = event_projection.resolve_agent_turn_event_log(node_identity.node_dir)
-            if agent_event_log is None:
-                continue
-            agent_event_key = str(agent_event_log)
-            if history_mode == "none":
-                agent_event_offsets[agent_event_key] = agent_event_log.stat().st_size
-                agent_event_sequences[agent_event_key] = 0
-                continue
-            if history_mode == "tail":
-                events, next_offset = read_jsonl_tail_with_offset(
-                    agent_event_log,
-                    limit=bounded_tail_events,
-                )
-            else:
-                events, next_offset = read_jsonl_since_offset(
-                    agent_event_log,
-                    0,
-                    limit=bounded_tail_events,
-                )
-            for event_index, agent_event in enumerate(events, start=1):
-                payload = event_projection.project_agent_event(
-                    agent_event,
-                    node_identity,
-                    fallback_event_seq=event_index,
-                )
-                frame = emit_initial_frame("agent_event", payload)
-                if frame is not None:
-                    yield frame
-            agent_event_offsets[agent_event_key] = agent_event_log.stat().st_size
-            agent_event_sequences[agent_event_key] = len(events)
-
-        if summary is not None:
-            payload = {"type": "summary", "run_id": run_id, "summary": summary}
-            yield sse_event("summary", payload)
-            return
-
-        while not await request.is_disconnected():
-            for node_identity in event_projection.iter_node_identities():
-                for stream_name in ("stdout", "stderr"):
-                    key = (node_identity.node_run_dir, stream_name)
-                    payload = event_projection.read_node_log_delta_from_identity(
-                        node_identity,
-                        stream_name,
-                        offset=offsets.get(key, 0),
-                        limit=STREAM_NODE_LOG_LIVE_BYTES,
-                    )
-                    offsets[key] = int(payload["next_offset"])
-                    if payload["text"]:
-                        payload["timestamp"] = utc_now_iso()
-                        yield sse_event("node_log_delta", payload)
-                        last_emit_monotonic = time.monotonic()
-                        sequence += 1
-                        live_event = live_event_from_node_log(payload, sequence)
-                        if sequence > after_seq_value:
-                            yield sse_event("live_event", live_event)
-                            last_emit_monotonic = time.monotonic()
-
-                agent_event_log = event_projection.resolve_agent_turn_event_log(
-                    node_identity.node_dir
-                )
-                if agent_event_log is not None:
-                    agent_event_key = str(agent_event_log)
-                    events, next_offset = read_jsonl_since_offset(
-                        agent_event_log,
-                        agent_event_offsets.get(agent_event_key, 0),
-                        limit=STREAM_AGENT_EVENT_BATCH_LIMIT,
-                    )
-                    next_event_sequence = agent_event_sequences.get(agent_event_key, 0)
-                    for event_index, agent_event in enumerate(
-                        events,
-                        start=next_event_sequence + 1,
-                    ):
-                        payload = event_projection.project_agent_event(
-                            agent_event,
-                            node_identity,
-                            fallback_event_seq=event_index,
-                        )
-                        data = json.dumps(payload, ensure_ascii=False)
-                        yield f"event: agent_event\ndata: {data}\n\n"
-                        last_emit_monotonic = time.monotonic()
-                        sequence += 1
-                        live_event = live_event_from_agent_event(
-                            payload,
-                            sequence,
-                            source="run_node",
-                        )
-                        if sequence > after_seq_value:
-                            yield sse_event("live_event", live_event)
-                            last_emit_monotonic = time.monotonic()
-                    agent_event_offsets[agent_event_key] = next_offset
-                    agent_event_sequences[agent_event_key] = next_event_sequence + len(events)
-
-            summary = terminal_summary()
-            if summary is not None:
-                payload = {"type": "summary", "run_id": run_id, "summary": summary}
-                yield sse_event("summary", payload)
-                break
-            if time.monotonic() - last_emit_monotonic >= STREAM_HEARTBEAT_INTERVAL_SECONDS:
-                yield ": heartbeat\n\n"
-                last_emit_monotonic = time.monotonic()
-            await asyncio.sleep(0.5)
+        async for frame in service.stream_sse(
+            request,
+            after_seq=after_seq if isinstance(after_seq, int) else 0,
+        ):
+            yield frame
 
     return StreamingResponse(event_source(), media_type="text/event-stream")
 
@@ -608,7 +417,9 @@ def resolve_run_evidence_path(path: str, *, project_root: Path, run_dir: Path) -
     if not path:
         raise HTTPException(status_code=400, detail="Evidence path is required")
     candidate = Path(path)
-    resolved = candidate.resolve() if candidate.is_absolute() else (project_root / candidate).resolve()
+    resolved = (
+        candidate.resolve() if candidate.is_absolute() else (project_root / candidate).resolve()
+    )
     if not is_relative_to(resolved, run_dir):
         raise HTTPException(
             status_code=403,

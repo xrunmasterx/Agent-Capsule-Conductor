@@ -26,22 +26,28 @@ from acc.app.workbench_adapter import (
 )
 from acc.app.workbench_snapshots import WorkbenchCanvasSnapshotService
 from acc.app.workflow_refs import WorkflowCatalog, WorkflowRefMode, rewrite_workflow_function_refs
+from acc.app.workflow_submission import (
+    SubmissionError,
+    WorkflowGraphSubmissionRequest,
+    WorkflowSubmissionService,
+)
 from acc.callable_registry import CallableRegistry
+from acc.runner import LocalRunnerService, RunnerCapabilityError
 from acc.server.context import (
     configured_project_dir,
     get_project_root,
     get_workbench_run_manager,
     relative_project_path,
 )
-from acc.server.run_manager import WorkbenchRunJob
-from acc.runner import LocalRunnerService, RunnerCapabilityError
 from acc.storage import (
     RunHandle,
     claim_run,
     generate_run_id,
     parse_legacy_run_dir,
-    resolve_run_dir as storage_run_dir,
     validate_run_id,
+)
+from acc.storage import (
+    resolve_run_dir as storage_run_dir,
 )
 from acc.utils import AccError, load_json
 
@@ -155,7 +161,9 @@ def run_graph_endpoint(payload: WorkflowRunGraphRequest, request: Request) -> di
         workflow_id=str(payload.graph.get("id") or ""),
         task_id=payload.task_id,
     )
-    graph_path = prepare_runtime_graph(payload.graph, handle.run_dir, request, task_id=payload.task_id)
+    graph_path = prepare_runtime_graph(
+        payload.graph, handle.run_dir, request, task_id=payload.task_id
+    )
     try:
         result = WorkflowAppService(project_root=project_root).run_sync(
             graph_path,
@@ -175,39 +183,23 @@ async def submit_run_graph_endpoint(
     request: Request,
 ) -> dict[str, Any]:
     project_root = get_project_root(request)
-    run_id = select_run_id_for_payload(payload)
-    run_dir = storage_run_dir(project_root, run_id)
-    prepared = compile_runtime_graph(payload.graph, run_dir, request, task_id=payload.task_id)
-    manager = get_workbench_run_manager(request)
-    resolved = resolve_runner_environment_before_evidence(
-        project_root,
-        payload,
-        request,
-        graph=payload.graph,
-        manager=manager,
-    )
-    handle = claim_selected_run(
-        project_root,
-        run_id,
-        workflow_id=prepared.workflow_id,
-        task_id=payload.task_id,
-    )
-    graph_path = write_prepared_runtime_graph(prepared, handle.run_dir, request)
+    service = WorkflowSubmissionService(project_root, get_workbench_run_manager(request))
     try:
-        return await manager.submit(
-            WorkbenchRunJob(
-                graph_path=graph_path,
-                run_dir=handle.run_dir,
-                workflow_id=prepared.workflow_id,
-                task_id=payload.task_id,
-                workspace=resolved["workspace"],
-                binding_path=resolved["binding_path"],
+        return await service.submit_workflow_graph(
+            WorkflowGraphSubmissionRequest(
+                graph=payload.graph,
+                run_id=payload.run_id,
+                run_dir=payload.run_dir,
+                binding_path=payload.binding_path,
+                binding_ref=payload.binding_ref,
+                workspace=payload.workspace,
+                workspace_alias=payload.workspace_alias,
                 input_payload=payload.input,
-                service_factory=lambda: WorkflowAppService(project_root=project_root),
+                task_id=payload.task_id,
             )
         )
-    except AccError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except SubmissionError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
 def prepare_runtime_graph(
@@ -298,7 +290,9 @@ def preflight_runtime_graph(
     if not workflow_id:
         raise HTTPException(status_code=400, detail="Workflow graph id is required")
     workflows_dir = configured_project_dir(project_root, "ACC_WORKFLOWS_DIR", "workflows")
-    source_path = project_root / "runs" / "_workflow_function_specs" / "_preflight" / "root.accflow.json"
+    source_path = (
+        project_root / "runs" / "_workflow_function_specs" / "_preflight" / "root.accflow.json"
+    )
     bundle = graph_bundle_for_accflow_save(
         graph,
         source_path=source_path,

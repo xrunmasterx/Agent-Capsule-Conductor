@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import shutil
@@ -15,8 +14,10 @@ from acc.adapters.base import (
     write_jsonl,
 )
 from acc.adapters.capabilities import default_adapter_capabilities
+from acc.adapters.process_harness import AdapterProcessHarness, AdapterProcessSpec
+from acc.adapters.process_utils import append_bytes
 from acc.models import AccError, AgentCapabilities
-from acc.storage import append_bytes_locked, write_bytes_atomic, write_text_atomic
+from acc.storage import write_text_atomic
 
 
 class CodexCliAdapter:
@@ -31,75 +32,51 @@ class CodexCliAdapter:
             return failed(request, "danger-full-access requires allow_dangerous=true")
 
         command = build_codex_command(request)
-        env = os.environ.copy()
-        env.update(request.env)
+        env = dict(request.env)
         if "CODEX_HOME" not in request.env:
             env["CODEX_HOME"] = str(prepare_isolated_codex_home(request))
         env.update(build_shared_acc_env(request))
-        prompt_bytes = request.prompt_path.read_bytes()
 
         try:
-            process = await asyncio.create_subprocess_exec(
-                *command,
-                cwd=request.workspace_dir,
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env=env,
+            outcome = await AdapterProcessHarness().run(
+                AdapterProcessSpec(
+                    command=command,
+                    cwd=request.workspace_dir,
+                    stdin=request.prompt_path.read_bytes(),
+                    env=env,
+                    timeout_seconds=request.timeout_seconds,
+                    stdout_log_path=request.stdout_log_path,
+                    stderr_log_path=request.stderr_log_path,
+                    cancel_path=request.cancel_path,
+                    stream_output=True,
+                )
             )
-            if (
-                getattr(process, "stdin", None) is None
-                or getattr(process, "stdout", None) is None
-                or getattr(process, "stderr", None) is None
-            ):
-                stdout, stderr = await asyncio.wait_for(
-                    process.communicate(input=prompt_bytes),
-                    timeout=request.timeout_seconds,
-                )
-                write_bytes_atomic(request.stdout_log_path, stdout)
-                write_bytes_atomic(request.stderr_log_path, stderr)
-            else:
-                stdout, stderr, cancelled = await asyncio.wait_for(
-                    stream_process(process, prompt_bytes, request),
-                    timeout=request.timeout_seconds,
-                )
-                if cancelled:
-                    write_jsonl(
-                        request.events_log_path,
-                        {
-                            "type": "adapter_event",
-                            "runtime": "codex_cli",
-                            "command": redact_command(command),
-                            "exit_code": process.returncode,
-                            "cancelled": True,
-                        },
-                    )
-                    return AgentRunResult(
-                        status="cancelled",
-                        summary="Codex CLI cancelled",
-                        output_json_path=None,
-                        event_log_path=request.events_log_path,
-                        artifacts_dir=request.artifacts_dir,
-                        exit_code=process.returncode,
-                        error="cancelled",
-                    )
+        except FileNotFoundError:
+            return failed(request, "codex executable not found", None)
+
+        if outcome.cancelled:
             write_jsonl(
                 request.events_log_path,
                 {
                     "type": "adapter_event",
                     "runtime": "codex_cli",
                     "command": redact_command(command),
-                    "stdout_bytes": len(stdout),
-                    "stderr_bytes": len(stderr),
-                    "exit_code": process.returncode,
+                    "exit_code": outcome.returncode,
+                    "cancelled": True,
                 },
             )
-        except FileNotFoundError:
-            return failed(request, "codex executable not found", None)
-        except TimeoutError:
-            await terminate_process_tree(process)
-            timeout_message = b"Codex CLI timed out\n"
-            append_bytes(request.stderr_log_path, timeout_message)
+            return AgentRunResult(
+                status="cancelled",
+                summary="Codex CLI cancelled",
+                output_json_path=None,
+                event_log_path=request.events_log_path,
+                artifacts_dir=request.artifacts_dir,
+                exit_code=outcome.returncode,
+                error="cancelled",
+            )
+
+        if outcome.timed_out:
+            append_bytes(request.stderr_log_path, b"Codex CLI timed out\n")
             timeout_event = {"type": "timeout", "command": command}
             salvage_summary = timeout_salvage_output(request)
             if salvage_summary is not None:
@@ -111,7 +88,7 @@ class CodexCliAdapter:
                     output_json_path=request.output_json_path,
                     event_log_path=request.events_log_path,
                     artifacts_dir=request.artifacts_dir,
-                    exit_code=process.returncode,
+                    exit_code=outcome.returncode,
                 )
             write_jsonl(request.events_log_path, timeout_event)
             return AgentRunResult(
@@ -123,14 +100,26 @@ class CodexCliAdapter:
                 error="timeout",
             )
 
-        if process.returncode != 0:
+        write_jsonl(
+            request.events_log_path,
+            {
+                "type": "adapter_event",
+                "runtime": "codex_cli",
+                "command": redact_command(command),
+                "stdout_bytes": len(outcome.stdout),
+                "stderr_bytes": len(outcome.stderr),
+                "exit_code": outcome.returncode,
+            },
+        )
+
+        if outcome.returncode != 0:
             return failed(
                 request,
-                codex_failure_message(stdout, stderr),
-                process.returncode,
+                codex_failure_message(outcome.stdout, outcome.stderr),
+                outcome.returncode,
             )
         if not request.output_json_path.exists():
-            return failed(request, "Codex CLI did not produce output.json", process.returncode)
+            return failed(request, "Codex CLI did not produce output.json", outcome.returncode)
 
         return AgentRunResult(
             status="success",
@@ -138,7 +127,7 @@ class CodexCliAdapter:
             output_json_path=request.output_json_path,
             event_log_path=request.events_log_path,
             artifacts_dir=request.artifacts_dir,
-            exit_code=process.returncode,
+            exit_code=outcome.returncode,
         )
 
     async def resume(self, request: ResumeRequest) -> AgentRunResult:
@@ -325,69 +314,3 @@ def failed(
         exit_code=exit_code,
         error=error,
     )
-
-
-async def stream_process(
-    process,
-    prompt_bytes: bytes,
-    request: AgentRunRequest,
-) -> tuple[bytes, bytes, bool]:
-    process.stdin.write(prompt_bytes)
-    await process.stdin.drain()
-    process.stdin.close()
-
-    stdout_task = asyncio.create_task(capture_stream(process.stdout, request.stdout_log_path))
-    stderr_task = asyncio.create_task(capture_stream(process.stderr, request.stderr_log_path))
-    cancelled = False
-    while True:
-        if request.cancel_path is not None and request.cancel_path.exists():
-            cancelled = True
-            append_bytes(request.stderr_log_path, b"Codex CLI cancellation requested\n")
-            await terminate_process_tree(process)
-            break
-        try:
-            await asyncio.wait_for(process.wait(), timeout=0.25)
-            break
-        except TimeoutError:
-            continue
-    stdout, stderr = await asyncio.gather(stdout_task, stderr_task)
-    return stdout, stderr, cancelled
-
-
-async def capture_stream(stream, primary_path) -> bytes:
-    chunks: list[bytes] = []
-    while True:
-        chunk = await stream.read(4096)
-        if not chunk:
-            break
-        chunks.append(chunk)
-        append_bytes(primary_path, chunk)
-    return b"".join(chunks)
-
-
-def append_bytes(path, payload: bytes) -> None:
-    append_bytes_locked(path, payload)
-
-
-async def terminate_process_tree(process) -> None:
-    pid = getattr(process, "pid", None)
-    if os.name == "nt" and isinstance(pid, int):
-        try:
-            killer = await asyncio.create_subprocess_exec(
-                "taskkill",
-                "/PID",
-                str(pid),
-                "/T",
-                "/F",
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            await asyncio.wait_for(killer.wait(), timeout=5)
-        except (OSError, TimeoutError):
-            process.kill()
-    else:
-        process.kill()
-    try:
-        await asyncio.wait_for(process.wait(), timeout=5)
-    except TimeoutError:
-        return

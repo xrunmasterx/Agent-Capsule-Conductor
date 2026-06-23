@@ -13,6 +13,8 @@ from uuid import uuid4
 from acc import __version__
 from acc.audit import write_audit_event
 from acc.callable_registry import CallableAsset, CallableRegistry
+from acc.callable_runner import permission_profile_for_codex_execution_mode
+from acc.constants import CODEX_EXECUTION_MODE_METADATA_KEY, CODEX_EXECUTION_MODES
 from acc.control_plane import (
     ArtifactNotFoundError,
     ArtifactPolicyDeniedError,
@@ -124,11 +126,7 @@ class LocalRunnerService:
             "max_queued_runs": configured_max_queued_runs(),
             "supports_graphops_apply": True,
             "supports_artifact_preview": True,
-            "permission_policy": {
-                "network": "ask",
-                "shell": "ask",
-                "dangerous": "deny_by_default",
-            },
+            "permission_policy": runner_permission_policy(),
             "workspace_aliases": [
                 alias["alias"] for alias in workspaces["aliases"] if alias.get("allowed") is True
             ],
@@ -587,27 +585,81 @@ def callable_requirements(
             asset = registry.resolve_class_id(callable_id)
         except AccError:
             continue
-        requirements.append(requirement_from_asset(asset, node_id=str(node.get("id") or "")))
+        requirements.append(requirement_from_asset(asset, node=node))
     return requirements
 
 
-def requirement_from_asset(asset: CallableAsset, *, node_id: str) -> dict[str, Any]:
+def requirement_from_asset(asset: CallableAsset, *, node: dict[str, Any]) -> dict[str, Any]:
     template = asset.template
     if isinstance(template, AgentClassTemplate):
         runtime = template.runtime
-        permission = template.default_permissions
+        permission = effective_requirement_permission(template.default_permissions, node)
     elif isinstance(template, ToolClassTemplate):
         runtime = template.runner
-        permission = template.default_permissions
+        permission = effective_requirement_permission(template.default_permissions, node)
     else:
         runtime = "unknown"
         permission = None
     return {
-        "node_id": node_id,
+        "node_id": str(node.get("id") or ""),
         "callable_id": template.id,
         "runtime": runtime,
         "permission_profile": permission,
     }
+
+
+def effective_requirement_permission(
+    default_permissions: PermissionProfile,
+    node: dict[str, Any],
+) -> PermissionProfile:
+    profile = node_permission_profile(node) or default_permissions
+    codex_mode = codex_execution_mode_from_node(node)
+    if codex_mode is not None:
+        return permission_profile_for_codex_execution_mode(codex_mode, profile)
+    return profile
+
+
+def node_permission_profile(node: dict[str, Any]) -> PermissionProfile | None:
+    for key in ("invocation_policy", "overrides", "runtime_policy"):
+        container = node.get(key)
+        if not isinstance(container, dict):
+            continue
+        profile = permission_profile_from_mapping(container.get("permission_profile"))
+        if profile is not None:
+            return profile
+    return None
+
+
+def permission_profile_from_mapping(value: Any) -> PermissionProfile | None:
+    if not isinstance(value, dict):
+        return None
+    allowed_env = value.get("allowed_env")
+    return PermissionProfile(
+        workspace_access=str(value.get("workspace_access") or "read_only"),
+        network=bool(value.get("network", False)),
+        shell=bool(value.get("shell", False)),
+        dangerous=bool(value.get("dangerous", False)),
+        env_policy=str(value.get("env_policy") or "acc_whitelist"),
+        allowed_env=[str(item) for item in allowed_env] if isinstance(allowed_env, list) else [],
+        timeout_seconds=(
+            int(value["timeout_seconds"])
+            if isinstance(value.get("timeout_seconds"), int)
+            else None
+        ),
+    )
+
+
+def codex_execution_mode_from_node(node: dict[str, Any]) -> str | None:
+    metadata = node.get("metadata")
+    values = [
+        node.get("codexExecutionMode"),
+        node.get("codex_execution_mode"),
+        metadata.get(CODEX_EXECUTION_MODE_METADATA_KEY) if isinstance(metadata, dict) else None,
+    ]
+    for value in values:
+        if isinstance(value, str) and value in CODEX_EXECUTION_MODES:
+            return value
+    return None
 
 
 def public_requirement_details(requirement: dict[str, Any]) -> dict[str, Any]:
@@ -624,11 +676,28 @@ def permission_decision(permission: Any) -> dict[str, Any]:
     reasons = permission_reasons(permission)
     if not reasons:
         return {"state": "allowed", "reasons": []}
-    if permission.dangerous:
-        return {"state": "denied", "reasons": reasons}
-    if security_mode() in PRODUCT_SECURITY_MODES:
+    mode = security_mode()
+    if mode in PRODUCT_SECURITY_MODES:
+        if permission.dangerous:
+            return {"state": "denied", "reasons": reasons}
         return {"state": "requires_local_approval", "reasons": reasons}
-    return {"state": "allowed", "reasons": reasons, "mode": security_mode()}
+    return {"state": "allowed", "reasons": reasons, "mode": mode}
+
+
+def runner_permission_policy() -> dict[str, str]:
+    if security_mode() in PRODUCT_SECURITY_MODES:
+        return {
+            "network": "ask",
+            "shell": "ask",
+            "dangerous": "deny_by_default",
+            "workspace_write": "ask",
+        }
+    return {
+        "network": "allow",
+        "shell": "allow",
+        "dangerous": "allow",
+        "workspace_write": "allow",
+    }
 
 
 def permission_reasons(permission: PermissionProfile) -> list[str]:

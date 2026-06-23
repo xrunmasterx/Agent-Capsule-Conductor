@@ -1,39 +1,43 @@
 # Agent Callable Conductor
 
-Agent Callable Conductor (`acc`) is a local-first workflow runtime and Workbench for wrapping mature
-external agents or local tools as reusable callable assets.
+Agent Callable Conductor (`acc`) is a local-first workflow runtime and Workbench for wrapping mature external agents and local tools as reusable callable assets.
 
-ACC does not implement a new LLM reasoning/tool loop. Codex CLI, Claude Code, Cursor, Gemini, or a
-generic local command owns its internal behavior. ACC owns the execution boundary: callable
-definitions, runtime invocations, ports, inbox/outbox materialization, manifests, events, artifacts,
-and human-governed workflow edits.
+ACC does not implement a new LLM reasoning loop. Codex CLI, Claude Code, Cursor, Gemini, other external agents, and local tools own their internal behavior. ACC owns orchestration boundaries: callable definitions, invocations, control decisions, explicit data movement, evidence, artifacts, projections, and governed workflow edits.
 
-## Current Architecture
+## Architecture Authority
 
-The active model is Core v2 and callable-first:
+Start here before architecture-sensitive work:
+
+```text
+AGENTS.md
+docs/architecture/00-constitution.md
+docs/architecture/01-core-object-model.md
+docs/architecture/02-runtime-kernel.md
+docs/architecture/03-control-modes.md
+docs/architecture/04-data-plane-and-evidence.md
+docs/architecture/05-api-ui-boundaries.md
+docs/architecture/06-graphops-governance.md
+docs/architecture/07-compatibility-and-migration.md
+docs/architecture/08-architecture-proof-obligations.md
+```
+
+Archived documents under `docs/historical/` are historical context only.
+
+## Current Architecture Summary
+
+Core v2 is callable-first:
 
 ```text
 AgentClassTemplate / ToolClassTemplate / WorkflowFunctionTemplate
   -> NodeInvocationSpec
+  -> ExecutionPlan
   -> FunctionInvocation
   -> ScopeFrame
   -> SessionInstance or child FunctionInvocation
-  -> events, manifests, inboxes, outboxes, artifacts
+  -> events, results, inboxes, outboxes, artifacts
 ```
 
-Pre-Core-v2 workflow graphs and YAML assets are not product runtime inputs. They are migration input
-only through `acc workflow import-graph` or `acc migrate graph`, and active workflow templates are
-stored as canonical `.accflow.json` files with `callable_ref` nodes.
-
-Read the current contract before making architecture changes:
-
-```text
-AGENTS.md
-docs/README.md
-docs/CURRENT_ARCHITECTURE.md
-docs/concepts/FIRST_PRINCIPLES_ANALYSIS.md
-docs/concepts/GRAPHOPS_CONTROL_PLANE.md
-```
+Templates are reusable and stateless. Runtime identity and evidence are run-scoped. Data movement is explicit through ports, bindings, inbox/outbox materialization, result refs, and artifacts.
 
 ## Install
 
@@ -53,138 +57,48 @@ npm install
 
 ## Core CLI Commands
 
-List and inspect reusable callable resources:
-
 ```bash
 uv run acc callable list
-uv run acc callable show fake-agent.generic
-```
-
-Run a deterministic workflow:
-
-```bash
 uv run acc workflow validate examples/workflows/callable_main_function_demo.accflow.json --json
-uv run acc workflow run examples/workflows/callable_main_function_demo.accflow.json \
-  --run-dir runs/acceptance_callable_main \
-  --emit-json
+uv run acc workflow run examples/workflows/callable_main_function_demo.accflow.json --run-dir runs/acceptance_callable_main --emit-json
 ```
 
-When `--emit-json` is used, stdout must be exactly one JSON object. Runtime logs go to stderr or
-files.
-
-Import a pre-Core-v2 graph into the canonical format:
-
-```bash
-uv run acc workflow import-graph tests/fixtures/legacy/demo_two_node.graph.json
-```
+When `--emit-json` is used, stdout must contain exactly one JSON object. Runtime logs go to stderr or files.
 
 ## Local Workbench Server
-
-Start the API server:
 
 ```bash
 uv run acc server --host 127.0.0.1 --port 8765
 ```
 
-Useful endpoints:
-
-```text
-GET  /api/health
-GET  /api/version
-GET  /api/callables
-GET  /api/callables/{callable_id}
-GET  /api/runs
-GET  /api/runs/{run_id}
-GET  /api/runs/{run_id}/events
-POST /api/runs/{run_id}/cancel
-GET  /api/workflows
-POST /api/workflows
-PUT  /api/workflows/{workflow_id}
-POST /api/workflows/run-graph
-POST /api/workflows/run-graph/submit
-GET  /api/artifacts/read?path=...
-```
-
-`POST /api/workflows/run-graph` is the synchronous Workbench compatibility path. The Workbench uses
-`POST /api/workflows/run-graph/submit`, then polls run summaries/events by `run_id`.
-
-The server is a thin FastAPI layer over app/store/runtime services. It does not add a database, and
-artifact reads are constrained by path-safety checks.
-
-## Visual Workbench
-
-Run the frontend in a second shell:
+Workbench frontend:
 
 ```bash
 cd web
 npm run dev
 ```
 
-Open:
-
-```text
-http://127.0.0.1:5173
-```
-
-The Workbench is graph-first and Chinese-first. It can create local tasks, edit task canvases, insert
-resource-library agent/tool/workflow classes as invocation nodes, save workflows, submit async runs,
-and inspect real node input/output/artifact evidence.
-
-Important boundary:
-
-- Resource-library Agent/Tool definitions own class-level settings such as system prompts.
-- Task canvas nodes are invocation instances and should only store invocation-scoped prompt/input
-  and bindings.
-- UI task state is a usability projection. Run directories, summaries, events, and artifacts remain
-  the runtime evidence source of truth.
-
-## GraphOps
-
-GraphOps is the controlled interface for workflow/callable edits. LLMs may propose patches, but
-persistent mutation requires validation, dry-run evidence, and explicit human approval.
-
-```bash
-uv run acc graphops validate-patch examples/graphops/add-review-node.patch.json
-uv run acc graphops apply-patch examples/graphops/add-review-node.patch.json --dry-run
-```
-
-Real apply is rejected unless both `--apply` and `--human-approved` are present.
+Open `http://127.0.0.1:5173`.
 
 ## Tests
 
-Default tests are hermetic: they do not require real Codex, Claude, Cursor, Gemini, Hermes,
-Conductor, network, browser cloud services, or paid credentials.
+Full local quality gate:
 
-Backend checks:
+```bash
+uv run python scripts/quality_gate.py
+```
+
+Backend:
 
 ```bash
 uv run pytest -q
 uv run ruff check .
 ```
 
-Frontend checks:
+Frontend:
 
 ```bash
 cd web
 npm run test -- --run
 npm run build
-```
-
-Machine-readable CLI checks must prove stdout contains one JSON object and no logs when JSON emit
-flags are used.
-
-## Runtime Evidence
-
-Core v2 workflow runs write callable evidence such as:
-
-```text
-function_invocation_manifest.json
-scope_frame_manifest.json
-workflow_run_manifest.json
-workflow_summary.json
-nodes/<node_id>/session_instance_manifest.json
-nodes/<workflow_node>/workflow_call_manifest.json
-nodes/<node_id>/input.json
-nodes/<node_id>/output.json
-events.jsonl
 ```

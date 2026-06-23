@@ -129,7 +129,14 @@ def test_run_state_includes_recursive_nested_node_snapshot(client, project_root)
     fallback_node_dir = workflow_c_nested / "nodes" / "fallback_agent"
     agent_1_dir = workflow_a_nested / "nodes" / "agent_1"
     agent_2_dir = workflow_b_nested / "nodes" / "agent_2"
-    for path in [workflow_a_dir, workflow_b_dir, workflow_c_dir, fallback_node_dir, agent_1_dir, agent_2_dir]:
+    for path in [
+        workflow_a_dir,
+        workflow_b_dir,
+        workflow_c_dir,
+        fallback_node_dir,
+        agent_1_dir,
+        agent_2_dir,
+    ]:
         path.mkdir(parents=True, exist_ok=True)
     (fallback_node_dir / "output.json").write_text(json.dumps({"ok": True}), encoding="utf-8")
     (fallback_node_dir / "runtime.json").write_text(
@@ -137,7 +144,9 @@ def test_run_state_includes_recursive_nested_node_snapshot(client, project_root)
         encoding="utf-8",
     )
     (run_dir / "events.jsonl").write_text(
-        json.dumps({"type": "node_completed", "node_id": "workflow_c", "timestamp": "2026-06-05T00:00:04Z"})
+        json.dumps(
+            {"type": "node_completed", "node_id": "workflow_c", "timestamp": "2026-06-05T00:00:04Z"}
+        )
         + "\n",
         encoding="utf-8",
     )
@@ -172,7 +181,9 @@ def test_run_state_includes_recursive_nested_node_snapshot(client, project_root)
     nodes = {node.get("ui_node_id") or node["node_id"]: node for node in response.json()["nodes"]}
     assert nodes["workflow_a"]["status"] == "success"
     assert nodes["workflow_a__internal__agent_1"]["status"] == "success"
-    assert nodes["workflow_a__internal__workflow_b"]["node_run_dir"] == str(workflow_b_dir.resolve())
+    assert nodes["workflow_a__internal__workflow_b"]["node_run_dir"] == str(
+        workflow_b_dir.resolve()
+    )
     assert nodes["workflow_a__internal__workflow_b__internal__agent_2"]["status"] == "success"
     assert nodes["workflow_c__internal__fallback_agent"]["status"] == "success"
     assert nodes["workflow_c__internal__fallback_agent"]["callable_id"] == "fallback-agent.generic"
@@ -227,6 +238,15 @@ def test_run_state_includes_nested_node_binding_manifest_and_output_preview(
     writer = nodes["workflow_parent__internal__writer"]
     assert writer["binding_manifest"]["bindings"][0]["binding_kind"] == "workflow_input"
     assert writer["binding_manifest"]["inputs"] == ["main"]
+    assert writer["binding_summary"] == {
+        "schema_version": "acc.projection.binding_summary.v1",
+        "input_count": 1,
+        "binding_count": 1,
+        "inputs": ["main"],
+        "source_kinds": {"workflow_input": 1},
+    }
+    assert writer["node_inspector"]["schema_version"] == "acc.projection.node_inspector.v1"
+    assert writer["node_inspector"]["binding_summary"]["binding_count"] == 1
     assert writer["output_preview"]["summary"] == "writer received workflow input"
 
 
@@ -332,8 +352,10 @@ def test_get_node_uses_agent_turn_log_projection(client, project_root) -> None:
     assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["log_excerpt"] == "agent log line\n"
-    assert payload["log_ref"].replace("\\", "/").endswith(
-        "runs/_agent_sessions/agent_log_projection_run/agent/turns/turn_1/stdout.log"
+    assert (
+        payload["log_ref"]
+        .replace("\\", "/")
+        .endswith("runs/_agent_sessions/agent_log_projection_run/agent/turns/turn_1/stdout.log")
     )
 
 
@@ -388,7 +410,9 @@ def test_run_stream_emits_agent_session_events(client, project_root) -> None:
     assert "streamed" in text
 
 
-def test_run_stream_history_none_on_terminal_run_emits_summary_without_history(client, project_root) -> None:
+def test_run_stream_history_none_on_terminal_run_emits_summary_without_history(
+    client, project_root
+) -> None:
     run_dir = project_root / "runs" / "terminal_stream_run"
     node_dir = run_dir / "nodes" / "agent"
     session_dir = project_root / "runs" / "_agent_sessions" / "terminal_stream_run" / "agent"
@@ -401,7 +425,9 @@ def test_run_stream_history_none_on_terminal_run_emits_summary_without_history(c
     )
     (node_dir / "stdout.log").write_text("historical stdout\n", encoding="utf-8")
     (turn_dir / "events.jsonl").write_text(
-        json.dumps({"event_id": "agent_evt_1", "type": "agent_message", "payload": {"content": "old"}})
+        json.dumps(
+            {"event_id": "agent_evt_1", "type": "agent_message", "payload": {"content": "old"}}
+        )
         + "\n",
         encoding="utf-8",
     )

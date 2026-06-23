@@ -4,6 +4,7 @@ import pytest
 
 from acc.models import (
     CORE_V2_SCHEMA_VERSION,
+    AccError,
     ArtifactContract,
     CallableRef,
     ControlEdge,
@@ -21,7 +22,6 @@ from acc.validation import (
     validate_core_v2_execution_plan,
     validate_core_v2_workflow_function_template,
 )
-from acc.models import AccError
 
 
 def valid_template() -> WorkflowFunctionTemplate:

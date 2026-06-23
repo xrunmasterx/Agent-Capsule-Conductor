@@ -6,7 +6,7 @@
 
 export { WorkbenchShell } from './WorkbenchShell';
 export { TopBar } from './TopBar';
-export { TaskRail, type WorkbenchTaskSummary } from './TaskRail';
+export { TaskRail } from './TaskRail';
 export { TaskWorkspaceSwitcher, type TaskWorkspaceView } from './TaskWorkspaceSwitcher';
 export { TaskOverviewPage } from './TaskOverviewPage';
 export { SaveWorkflowDialog, type SaveWorkflowDialogState } from './SaveWorkflowDialog';

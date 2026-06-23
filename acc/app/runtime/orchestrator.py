@@ -11,12 +11,14 @@ from typing import Any
 
 from acc.app.core_v2_loader import load_workflow_function_template
 from acc.app.run_lifecycle import is_terminal_run_status
+from acc.app.runtime.context import ExecutionContext, build_execution_context
+from acc.app.runtime.repository import RunRepository
+from acc.app.runtime.scheduler import run_ready_queue_execution
 from acc.callable_registry import CallableRegistry
 from acc.engine import compile_execution_plan
 from acc.engine.control_ledger import build_fixed_run_plan
 from acc.ledger_writer import ControlLedgerAuditError, FixedRunControlLedgerWriter
 from acc.models import (
-    AccError,
     ExecutionPlan,
     FunctionInvocation,
     RunRecord,
@@ -24,19 +26,7 @@ from acc.models import (
     WorkflowFunctionTemplate,
 )
 from acc.result_store.filesystem import FilesystemResultStore
-from acc.runtime.io import (
-    append_event,
-    function_invocation_payload,
-    run_record_payload,
-    scope_frame_payload,
-)
-from acc.serialization import workflow_function_template_to_dict
 from acc.session import utc_now_iso
-from acc.storage import prepare_runtime_run_dir, write_text_atomic
-from acc.store import write_json
-
-from acc.app.runtime.scheduler import run_ready_queue_execution
-from acc.app.runtime.workflow_io import write_core_v2_run_summary, write_workflow_outputs
 
 FIXED_CONTROL_POLICY_ID = "fixed_control_policy"
 
@@ -54,10 +44,17 @@ async def run_core_v2_workflow_path(
     parent_scope_frame_id: str | None = None,
     call_depth: int = 0,
     should_cancel: Callable[[], bool] | None = None,
+    execution_context: ExecutionContext | None = None,
 ) -> RunRecord:
     """Load a workflow template and execute it to completion."""
     template = load_workflow_function_template(workflow_path)
     workflow_input = dict(input_payload or {})
+    context = execution_context or build_execution_context(
+        workflow_path=workflow_path,
+        run_dir=run_dir,
+        callable_registry=callable_registry,
+    )
+    resolved_callable_registry = callable_registry or context.project.callable_registry
     workspace_root = (workspace or run_dir).resolve()
     is_ephemeral = (workspace is None and binding_path is None) if ephemeral is None else ephemeral
     plan = compile_execution_plan(template, workflow_input=workflow_input)
@@ -91,8 +88,9 @@ async def run_core_v2_workflow_path(
         invocation,
         scope,
         plan,
-        callable_registry=callable_registry,
+        callable_registry=resolved_callable_registry,
         should_cancel=should_cancel,
+        execution_context=context.with_run_dir(run_dir),
     )
 
 
@@ -104,30 +102,25 @@ async def run_workflow_function_invocation(
     *,
     callable_registry: CallableRegistry | None = None,
     should_cancel: Callable[[], bool] | None = None,
+    execution_context: ExecutionContext | None = None,
 ) -> RunRecord:
     """Set up run directory, execute the DAG scheduler, and finalize the run."""
     run_dir = scope.environment_root
-    project_root = _project_root_for_canonical_run_dir(run_dir)
-    prepare_runtime_run_dir(run_dir, project_root=project_root)
-    for path in (
-        run_dir,
-        scope.inbox_root,
-        scope.outbox_root,
-        scope.artifact_root,
-        scope.behavior_snapshot_path,
-        run_dir / "failures",
-    ):
-        path.mkdir(parents=True, exist_ok=True)
+    context = execution_context or build_execution_context(
+        workflow_path=template.source_path,
+        run_dir=run_dir,
+        callable_registry=callable_registry,
+    )
+    project_root = context.project.project_root
+    resolved_callable_registry = callable_registry or context.project.callable_registry
+    run_repository = RunRepository(run_dir, project_root=project_root)
+    run_repository.prepare(scope)
 
-    event_log_path = run_dir / "events.jsonl"
-    write_text_atomic(event_log_path, "")
+    event_log_path = run_repository.event_log_path
     result_store = FilesystemResultStore(run_dir.parent)
-    invocation_path = run_dir / "function_invocation.json"
-    scope_path = run_dir / "scope_frame.json"
-    template_snapshot_path = scope.behavior_snapshot_path / "workflow_function_template.json"
-    write_json(invocation_path, function_invocation_payload(invocation))
-    write_json(scope_path, scope_frame_payload(scope))
-    write_json(template_snapshot_path, workflow_function_template_to_dict(template))
+    invocation_path = run_repository.write_invocation(invocation)
+    scope_path = run_repository.write_scope(scope)
+    template_snapshot_path = run_repository.write_template_snapshot(template)
 
     started_at = utc_now_iso()
     run_record = RunRecord(
@@ -139,17 +132,15 @@ async def run_workflow_function_invocation(
         result_store_root=run_dir / "result_store",
         started_at=started_at,
     )
-    write_json(run_dir / "run_record.json", run_record_payload(run_record))
-    write_core_v2_run_summary(
-        run_dir,
+    run_repository.write_run_record(run_record)
+    run_repository.write_run_summary(
         template,
         invocation.run_id,
         "running",
         started_at=started_at,
     )
-    append_event(event_log_path, invocation.run_id, "workflow_started")
+    run_repository.append_event(invocation.run_id, "workflow_started")
 
-    outputs: dict[tuple[str, str], Any] = {}
     terminal_status = "success"
     try:
         run_plan, plan_steps = build_fixed_run_plan(
@@ -171,36 +162,35 @@ async def run_workflow_function_invocation(
             invocation_path=invocation_path,
             scope_path=scope_path,
         )
-        terminal_status = await run_ready_queue_execution(
+        workflow_result = await run_ready_queue_execution(
             template,
             invocation,
             scope,
             plan,
             result_store,
-            outputs,
             event_log_path,
-            callable_registry,
+            resolved_callable_registry,
             control_ledger,
             should_cancel=should_cancel,
+            execution_context=context,
         )
+        terminal_status = workflow_result.status
         if terminal_status == "success":
-            write_workflow_outputs(
+            run_repository.write_workflow_outputs(
                 template,
                 invocation.run_id,
-                run_dir,
                 result_store,
-                outputs,
+                workflow_result.outputs,
             )
-            append_event(event_log_path, invocation.run_id, "workflow_completed")
+            run_repository.append_event(invocation.run_id, "workflow_completed")
         elif terminal_status == "failed":
-            append_event(
-                event_log_path,
+            run_repository.append_event(
                 invocation.run_id,
                 "workflow_failed",
                 payload={"error": "one or more control branches failed"},
             )
         elif terminal_status == "waiting_interaction":
-            append_event(event_log_path, invocation.run_id, "workflow_waiting")
+            run_repository.append_event(invocation.run_id, "workflow_waiting")
         if terminal_status in {"success", "failed", "cancelled"}:
             run_plan_status = (
                 "completed" if terminal_status == "success" else terminal_status
@@ -209,8 +199,7 @@ async def run_workflow_function_invocation(
                 control_ledger.finalize_run_plan(run_plan_status)
     except Exception as exc:
         terminal_status = "crashed" if isinstance(exc, ControlLedgerAuditError) else "failed"
-        append_event(
-            event_log_path,
+        run_repository.append_event(
             invocation.run_id,
             "workflow_crashed" if terminal_status == "crashed" else "workflow_failed",
             payload={"error": str(exc)},
@@ -227,7 +216,7 @@ async def run_workflow_function_invocation(
         started_at=started_at,
         ended_at=ended_at,
     )
-    write_json(run_dir / "run_record.json", run_record_payload(final_record))
+    run_repository.write_run_record(final_record)
     final_invocation = FunctionInvocation(
         **{
             **invocation.__dict__,
@@ -235,9 +224,8 @@ async def run_workflow_function_invocation(
             "ended_at": ended_at,
         }
     )
-    write_json(invocation_path, function_invocation_payload(final_invocation))
-    write_core_v2_run_summary(
-        run_dir,
+    run_repository.write_invocation(final_invocation)
+    run_repository.write_run_summary(
         template,
         invocation.run_id,
         terminal_status,
@@ -245,10 +233,3 @@ async def run_workflow_function_invocation(
         ended_at=ended_at,
     )
     return final_record
-
-
-def _project_root_for_canonical_run_dir(run_dir: Path) -> Path | None:
-    resolved = run_dir.resolve()
-    if resolved.parent.name != "runs":
-        return None
-    return resolved.parent.parent

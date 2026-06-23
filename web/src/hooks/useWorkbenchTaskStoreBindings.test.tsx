@@ -38,7 +38,7 @@ describe('useWorkbenchTaskStoreBindings', () => {
     const { result } = renderHook(() => useWorkbenchTaskStoreBindings());
 
     expect(result.current.activeTaskId).toBe('task_b');
-    expect(result.current.tasks.map((item) => item.taskId)).toEqual(['task_a', 'task_b']);
+    expect(result.current.taskSummaries.map((item) => item.taskId)).toEqual(['task_a', 'task_b']);
     expect(result.current.selection).toEqual({ type: 'task_canvas', taskId: 'task_b' });
     expect(result.current.focusedWorkflowId).toBeNull();
   });
@@ -54,7 +54,7 @@ describe('useWorkbenchTaskStoreBindings', () => {
       result.current.setTasks((current) => [...current, task('task_c', 'Task C')]);
     });
 
-    expect(result.current.tasks.map((item) => item.taskId)).toEqual(['task_b', 'task_c']);
+    expect(result.current.taskSummaries.map((item) => item.taskId)).toEqual(['task_b', 'task_c']);
     expect(result.current.activeTaskId).toBe('task_b');
   });
 
@@ -80,29 +80,23 @@ describe('useWorkbenchTaskStoreBindings', () => {
     expect(state.canvasRevisionsByTaskId.task_b).toBe(0);
   });
 
-  test('updates selection and focused workflow in the active task partition', () => {
-    const workflowSelection: CanvasSelection = { type: 'workflow', id: 'workflow_a' };
-    const internalSelection: CanvasSelection = { type: 'internal', workflowId: 'workflow_b', nodeId: 'node_b' };
+  test('keeps task summaries stable when inactive canvas payload changes without summary fields', () => {
+    const tasks = [task('task_a', 'Task A'), task('task_b', 'Task B')];
     act(() => {
-      useWorkbenchStore.getState().hydrateTasks([task('task_a', 'Task A'), task('task_b', 'Task B')], 'task_a');
+      useWorkbenchStore.getState().hydrateTasks(tasks, 'task_a');
     });
     const { result } = renderHook(() => useWorkbenchTaskStoreBindings());
+    const initialSummaries = result.current.taskSummaries;
+    const initialCurrentTask = result.current.currentTask;
 
     act(() => {
-      result.current.setSelection(workflowSelection);
-      result.current.setFocusedWorkflowId('workflow_a');
-      result.current.setActiveTaskId('task_b');
+      useWorkbenchStore.getState().updateCanvas('task_b', (canvas) => ({
+        ...canvas,
+        edges: [controlEdge('edge_b')],
+      }));
     });
 
-    act(() => {
-      result.current.setSelection(internalSelection);
-      result.current.setFocusedWorkflowId((current) => current || 'workflow_b');
-    });
-
-    const state = useWorkbenchStore.getState();
-    expect(state.selectionsByTaskId.task_a).toEqual(workflowSelection);
-    expect(state.focusedWorkflowIdByTaskId.task_a).toBe('workflow_a');
-    expect(state.selectionsByTaskId.task_b).toEqual(internalSelection);
-    expect(state.focusedWorkflowIdByTaskId.task_b).toBe('workflow_b');
+    expect(result.current.taskSummaries).toBe(initialSummaries);
+    expect(result.current.currentTask).toBe(initialCurrentTask);
   });
 });

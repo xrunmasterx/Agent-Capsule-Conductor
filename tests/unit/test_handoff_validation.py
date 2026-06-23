@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from acc.engine.handoff import compile_handoff_to_plan_step
 from acc.models import (
     AccError,
     CallableRef,
@@ -13,7 +14,6 @@ from acc.models import (
     RunPlan,
     WorkflowFunctionTemplate,
 )
-from acc.engine.handoff import compile_handoff_to_plan_step
 
 
 def test_handoff_new_session_compiles_decision_and_dynamic_step() -> None:
@@ -49,6 +49,16 @@ def test_handoff_new_session_compiles_decision_and_dynamic_step() -> None:
     assert compilation.new_step.status == "ready"
     assert compilation.new_step.depends_on == ("step_source",)
     assert compilation.new_step.input_snapshot_refs == ("handoffs/h1/payload.json",)
+    assert compilation.new_step.metadata["typed_input_refs"] == [
+        {
+            "kind": "handoff_payload_snapshot",
+            "source": "handoff",
+            "path": "handoffs/h1/payload.json",
+            "payload_key": "input_payload",
+            "handoff_id": "h1",
+        }
+    ]
+    assert "handoffs/h1/payload.json" in compilation.decision.input_evidence_refs
 
 
 def test_handoff_route_only_selects_existing_outgoing_step() -> None:
